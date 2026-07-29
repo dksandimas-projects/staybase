@@ -224071,6 +224071,192 @@ async function handleListTestRuns(req, res) {
     return res.status(500).json({ success: false, error: "Unable to list test runs." });
   }
 }
+var REFRESH_MODES = ["sanitized-snapshot", "config-only"];
+var stagingRefreshSchema = external_exports.object({
+  export: external_exports.object({
+    bookings: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
+    storeOrders: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
+    members: external_exports.array(external_exports.record(external_exports.any())).optional().default([])
+  }).strict(),
+  options: external_exports.object({
+    mode: external_exports.enum(REFRESH_MODES).optional().default("sanitized-snapshot"),
+    snapshotNote: external_exports.string().trim().max(280).optional().default("")
+  }).strict().optional().default({ mode: "sanitized-snapshot", snapshotNote: "" })
+}).strict();
+function syntheticFromSource(sourceValue, salt, prefix, domain) {
+  if (sourceValue === null || sourceValue === void 0) return "";
+  const normalized = String(sourceValue).trim().toLowerCase();
+  if (!normalized) return "";
+  const h3 = import_node_crypto.default.createHash("sha256").update(`${salt}:${domain}:${normalized}`).digest("hex").slice(0, 8);
+  return `${prefix}-${h3}@${domain}`;
+}
+function sanitizeBookingExport(booking, salt) {
+  const guestEmail = String(booking.guestEmail || "");
+  const guestName = String(booking.guestName || "");
+  const guestPhone = String(booking.guestPhone || "");
+  const sourceEmail = guestEmail.trim().toLowerCase();
+  const sanitized = {
+    ...booking,
+    guestName: syntheticFromSource(guestName, salt, "Guest", "guests.invalid"),
+    guestEmail: sourceEmail ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid") : "",
+    guestPhone: guestPhone ? syntheticFromSource(guestPhone, salt, "+63900000", "phones.invalid") : "",
+    address: "[REDACTED \u2014 sanitized for staging]",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    // Government ID + signature + payment proof URLs removed — the
+    // R05 file-sanitization follow-up will replace with synthetic
+    // fixtures. For now, scrub the URLs so the operator can't
+    // accidentally click through to the production file.
+    guestIdUrl: "",
+    guestIdPhotoUrl: "",
+    paymentProofUrl: "",
+    signatureUrl: "",
+    // Booking doc keeps its original id so payments/charges
+    // subcollections can be walked in step 4. bookingRef is
+    // preserved so the staff can still reference it by the
+    // confirmation number; createdAt/updatedAt preserved; status
+    // + financial fields preserved (operational signal).
+    notes: "",
+    internalNotes: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "\u2026",
+      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+  if (Array.isArray(sanitized.addedCharges)) {
+    sanitized.addedCharges = sanitized.addedCharges.map((c2) => ({
+      ...c2,
+      description: "[REDACTED]",
+      notes: ""
+    }));
+  }
+  if (Array.isArray(sanitized.payments)) {
+    sanitized.payments = sanitized.payments.map((p) => ({
+      ...p,
+      transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
+      notes: ""
+    }));
+  }
+  return sanitized;
+}
+function sanitizeStoreOrderExport(order, salt) {
+  return {
+    ...order,
+    guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
+    guestEmail: order.guestEmail ? syntheticFromSource(String(order.guestEmail).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
+    guestPhone: order.guestPhone ? syntheticFromSource(String(order.guestPhone), salt, "+63900000", "phones.invalid") : "",
+    paymentProofUrl: "",
+    notes: "",
+    internalNotes: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "\u2026",
+      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+}
+function sanitizeMemberExport(member, salt) {
+  return {
+    ...member,
+    fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
+    // The member's email is the SAME identity as a guest who booked
+    // with that email — use the "guest" prefix for the email so the
+    // synthetic value matches the booking's synthetic email. The
+    // member's full name is a separate identity (a person has one
+    // email but may have multiple display names over time), so it
+    // uses its own "Member" prefix for `fullName`.
+    email: member.email ? syntheticFromSource(String(member.email).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
+    phone: member.phone ? syntheticFromSource(String(member.phone), salt, "+63900000", "phones.invalid") : "",
+    photoUrl: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "\u2026",
+      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+}
+async function handleStagingRefreshPreview(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can refresh staging from production." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging refresh is only available on staging projects. The current project is not on the staging allowlist."
+    });
+  }
+  const parsed = stagingRefreshSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid production export (bookings, storeOrders, members) and options."
+    });
+  }
+  const { export: exportPayload, options } = parsed.data;
+  const mode = options.mode;
+  const salt = import_node_crypto.default.randomBytes(16).toString("hex");
+  const snapshotId = `refresh-${Date.now()}-${import_node_crypto.default.randomBytes(4).toString("hex")}`;
+  const sourceCounts = {
+    bookings: exportPayload.bookings.length,
+    storeOrders: exportPayload.storeOrders.length,
+    members: exportPayload.members.length
+  };
+  try {
+    const sanitizedBookings = mode === "sanitized-snapshot" ? exportPayload.bookings.map((b3) => sanitizeBookingExport(b3, salt)) : exportPayload.bookings;
+    const sanitizedStoreOrders = mode === "sanitized-snapshot" ? exportPayload.storeOrders.map((o2) => sanitizeStoreOrderExport(o2, salt)) : exportPayload.storeOrders;
+    const sanitizedMembers = mode === "sanitized-snapshot" ? exportPayload.members.map((m2) => sanitizeMemberExport(m2, salt)) : exportPayload.members;
+    const sanitizedCounts = {
+      bookings: sanitizedBookings.length,
+      storeOrders: sanitizedStoreOrders.length,
+      members: sanitizedMembers.length
+    };
+    const sourceHash = import_node_crypto.default.createHash("sha256").update(JSON.stringify(exportPayload)).digest("hex");
+    await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).set({
+      projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
+      mode,
+      createdAt: /* @__PURE__ */ new Date(),
+      createdBy: staff.email || staff.uid || "",
+      sourceCounts,
+      sanitizedCounts,
+      sourceHash,
+      saltPrefix: salt.slice(0, 8),
+      snapshotNote: options.snapshotNote,
+      status: "complete"
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        mode,
+        projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
+        sourceCounts,
+        sanitizedCounts,
+        sanitized: {
+          bookings: sanitizedBookings,
+          storeOrders: sanitizedStoreOrders,
+          members: sanitizedMembers
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Staging refresh preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to generate sanitized staging refresh."
+    });
+  }
+}
 
 // server/lib/rate-breakdown.ts
 function nonNegativeFinite(value) {
@@ -230961,6 +231147,20 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleStagingResetExecute(req, res);
+  }
+  if (domain === "test-runs" && action === "staging-refresh-preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-preview:${ip}`, 3, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many refresh requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can refresh staging from production." });
+    }
+    req.staff = authResult;
+    return await handleStagingRefreshPreview(req, res);
   }
   return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
 }
