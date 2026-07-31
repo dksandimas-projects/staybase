@@ -153,7 +153,7 @@ describe("Walk-in modal scrollability (regression for plan/bugs/walkin-booking-m
     // bottom. The `form="walkin-form"` attribute on each button keeps
     // the submit wired up.
     const walkinModal = bookingsPage.match(
-      /<Modal[\s\S]*?title="Create Walk-in Booking"[\s\S]*?<\/Modal>/
+      /<Modal[\s\S]*?title="Create New Booking"[\s\S]*?<\/Modal>/
     );
     expect(walkinModal, "expected to find the walk-in Modal block").not.toBeNull();
     expect(walkinModal?.[0]).toMatch(/footer=\{/);

@@ -196,6 +196,11 @@ export function ReportsPage() {
     members,
     staff,
     corporateInquiries,
+    // Per NBS-08 (2026-07-31): the acquisition chart reads the
+    // configured booking sources list, not a hardcoded array. An
+    // unconfigured source (a new "agoda" / "OTA" entry) would
+    // otherwise be silently dropped from the chart — the bug.
+    bookingSources: configuredBookingSources,
     currentUser
   } = useAdmin();
   const { isMobile } = useBreakpoint();
@@ -873,24 +878,44 @@ export function ReportsPage() {
   }, [rangePayments, uncollectedAddToBill]);
 
   // ── Acquisition / booking sources (Performance) ──
+  // Per NBS-08 (2026-07-31): the slice list and label map are
+  // derived from the configured `bookingSources` list. A booking
+  // with a source that is NOT in the configured list still gets a
+  // slice (it surfaces as "Unconfigured: <raw-key>") so the
+  // acquisition chart can never silently drop a booking — that
+  // was the bug. Phone + Facebook are now separate slices per
+  // CVQ-09 (the previous map collapsed them into "Social Media /
+  // Phone" which destroyed the breakdown).
   const bookingSources = useMemo(() => {
-    const labelMap: Record<string, string> = {
-      online: "Online Booking",
-      "walk-in": "Walk-in Desk",
-      corporate: "Corporate Codes",
-      phone: "Social Media / Phone",
-      facebook: "Social Media / Phone"
-    };
-    const sources = ["online", "walk-in", "corporate", "phone", "facebook"];
+    const configured = (configuredBookingSources || [])
+      .filter((s: any) => s.isEnabled)
+      .map((s: any) => ({ source: s.source, label: s.label }));
+    // Append an "Unconfigured" bucket for any source the database
+    // holds that isn't in the configured list. This makes the
+    // silent-drop class of bug loud — the admin sees the orphan
+    // slice and either adds the source to Settings or fixes the
+    // data.
+    const unconfigured = new Set<string>();
+    occupancyBookings.forEach((b: any) => {
+      if (b.source && !configured.some((c: any) => c.source === b.source)) {
+        unconfigured.add(b.source);
+      }
+    });
+    const sources = [
+      ...configured,
+      ...Array.from(unconfigured).map((s) => ({ source: s, label: `Unconfigured: ${s}` }))
+    ];
     const counts: Record<string, number> = {};
-    sources.forEach(s => { counts[s] = 0; });
-    occupancyBookings.forEach(b => {
-      if (counts[b.source] !== undefined) counts[b.source] += 1;
+    sources.forEach((s) => { counts[s.source] = 0; });
+    occupancyBookings.forEach((b: any) => {
+      if (typeof b.source === "string" && counts[b.source] !== undefined) {
+        counts[b.source] += 1;
+      }
     });
     return sources
-      .map((s, i) => ({ name: labelMap[s], count: counts[s], color: chartColors[i % chartColors.length] }))
-      .filter(s => s.count > 0);
-  }, [occupancyBookings, chartColors]);
+      .map((s, i) => ({ name: s.label, count: counts[s.source], color: chartColors[i % chartColors.length] }))
+      .filter((s) => s.count > 0);
+  }, [occupancyBookings, configuredBookingSources, chartColors]);
 
   // ── Occupancy by room type (Performance) ──
   const roomTypeOccupancy = useMemo(() => {

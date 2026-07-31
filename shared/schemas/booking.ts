@@ -49,6 +49,13 @@ export const WalkinBookingSchema = z.object({
   hasBreakfast: z.boolean(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: z.string().trim().min(1).max(80),
+  // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
+  // every existing caller keeps working with no migration. The
+  // server validates the submitted value against the configured list
+  // (`settings/hotelConfig.bookingSources[]`) and derives `notes` from
+  // it — a phone / Agoda / Facebook booking no longer ships with a
+  // note claiming it was created at the desk.
+  source: z.string().trim().min(1).max(80).optional().default("walk-in"),
   status: z.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
   totalPriceOverride: z.coerce.number().finite().min(0).max(1_000_000).optional(),
   discountType: z.enum(["", "senior", "pwd"]).optional().default(""),

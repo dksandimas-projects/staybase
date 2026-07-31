@@ -11,6 +11,7 @@ import {
 import {
   ACTIVE_BOOKING_STATUSES,
   CreateRoomInput,
+  DEFAULT_BOOKING_SOURCES,
   DEFAULT_CORPORATE_PERKS,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_ROOM_TYPES,
@@ -19,6 +20,7 @@ import {
   Notification,
   type NotificationType,
   PaymentMethodConfig,
+  PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
   StoreConfig,
   bustPublicSiteContentCache,
@@ -26,6 +28,8 @@ import {
   normalizeSeasonalRateOverrides,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   type BookingRateBreakdown,
+  type BookingSourceConfig,
+  type ProtectedBookingSource,
   type ProtectedPaymentMethod,
   type RoomBlock,
   type RoomTypeEntry,
@@ -187,7 +191,11 @@ export interface Booking {
   // link carries this token (not the raw email) in the
   // URL. See `shared/types/index.ts`.
   lookupToken: string;
-  source: "online" | "walk-in" | "phone" | "facebook" | "corporate";
+  // Per NBS-03 (2026-07-31): widened from the historical union to
+  // `string` so configured entries (e.g. "agoda" per CVQ-08) flow
+  // through without a schema change. Mirrors the shared
+  // `BookingSource` type — the duplicate inline definition is gone.
+  source: string;
   notes: string;
   memberId: string | null;
   memberDiscountPct?: number;
@@ -631,6 +639,16 @@ export interface AdminContextType {
   updatePaymentMethod: (method: string, updates: Partial<PaymentMethodConfig>) => Promise<void>;
   reorderPaymentMethods: (next: PaymentMethodConfig[]) => Promise<void>;
   deletePaymentMethod: (method: string) => Promise<void>;
+  // Per NBS-04 (2026-07-31): booking sources are admin-editable in
+  // Settings. See `plan/features/SETTINGS.md §Booking Sources` for
+  // the UX spec. Same shape as payment methods (add / update / delete
+  // / reorder) with delete-protection for system-assigned sources
+  // (`online` / `walk-in` / `corporate` per NBS-05).
+  bookingSources: BookingSourceConfig[];
+  addBookingSource: (config: BookingSourceConfig) => Promise<void>;
+  updateBookingSource: (source: string, updates: Partial<Omit<BookingSourceConfig, "source">>) => Promise<void>;
+  reorderBookingSources: (next: BookingSourceConfig[]) => Promise<void>;
+  deleteBookingSource: (source: string) => Promise<void>;
   uploadPaymentMethodQr: (
     method: string,
     file: File
@@ -3823,7 +3841,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     { method: "add-to-bill", label: "Add to Room Bill", accountName: "", accountNumber: "", qrUrl: "", isEnabled: false, showInStore: true, showInCorporate: false }
   ]);
 
+  // Per NBS-04 (2026-07-31): booking sources are admin-editable in
+  // Settings. The seed list is `DEFAULT_BOOKING_SOURCES` (the existing
+  // 5 + "agoda" per CVQ-08). `online` / `walk-in` / `corporate` are
+  // system-assigned (`selectableAtFrontDesk: false`) and never appear
+  // in the New Booking modal's source selector. The first-time loader
+  // mirrors the paymentMethods pattern: a one-time backfill appends
+  // any missing seed entries to the persisted list and re-writes the
+  // array (idempotent, gated by a `useRef`).
+  const [bookingSources, setBookingSources] = useState<BookingSourceConfig[]>(() => DEFAULT_BOOKING_SOURCES);
+
   const hasMigratedPaymentMethodsRef = useRef(false);
+  const hasMigratedBookingSourcesRef = useRef(false);
 
   const normalizePaymentMethodConfig = (entry: any): PaymentMethodConfig => {
     const method = typeof entry?.method === "string" ? entry.method.trim() : "";
@@ -3998,6 +4027,90 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     setPaymentMethods((next as any[]).map(normalizePaymentMethodConfig));
     void updateSettings("hotelConfig", { paymentMethods: next });
   }, [hotelConfig, currentUser, updateSettings]);
+
+  // Per NBS-04 (2026-07-31): booking sources backfill. On first admin
+  // load, if `settings/hotelConfig.bookingSources[]` is missing or
+  // shorter than the seed list, append the missing seed entries and
+  // re-write the array. Idempotent, gated by a `useRef` so it runs
+  // at most once per session. Does NOT downgrade entries an admin
+  // already removed — append-only.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (hasMigratedBookingSourcesRef.current) return;
+    const raw = (hotelConfig as Record<string, unknown>) || {};
+    const persisted = raw.bookingSources;
+    if (!Array.isArray(persisted)) return; // wait for the Firestore snapshot
+    const missing = DEFAULT_BOOKING_SOURCES.filter(
+      (seed) => !persisted.some((p: unknown) => typeof (p as { source?: unknown })?.source === "string" && (p as { source: string }).source === seed.source)
+    );
+    if (missing.length === 0) {
+      hasMigratedBookingSourcesRef.current = true;
+      return;
+    }
+    const next = [...persisted, ...missing];
+    hasMigratedBookingSourcesRef.current = true;
+    setBookingSources(next.map((entry: any) => normalizeBookingSourceConfig(entry)));
+    void updateSettings("hotelConfig", { bookingSources: next });
+  }, [hotelConfig, currentUser, updateSettings]);
+
+  const normalizeBookingSourceConfig = (entry: any): BookingSourceConfig => {
+    const source = typeof entry?.source === "string" ? entry.source.trim() : "";
+    const label = typeof entry?.label === "string" && entry.label.trim() ? entry.label.trim() : source;
+    const isEnabled = typeof entry?.isEnabled === "boolean" ? entry.isEnabled : true;
+    const selectableAtFrontDesk = typeof entry?.selectableAtFrontDesk === "boolean"
+      ? entry.selectableAtFrontDesk
+      : !PROTECTED_BOOKING_SOURCES.includes(source as ProtectedBookingSource);
+    return { source, label, isEnabled, selectableAtFrontDesk };
+  };
+
+  const persistBookingSources = async (next: BookingSourceConfig[]) => {
+    setBookingSources(next);
+    await updateSettings("hotelConfig", {
+      bookingSources: next,
+      updatedAt: serverTimestamp()
+    });
+  };
+
+  const addBookingSource = async (config: BookingSourceConfig) => {
+    const normalized = normalizeBookingSourceConfig(config);
+    if (bookingSources.some((s) => s.source === normalized.source)) {
+      throw new Error(`A booking source with key "${normalized.source}" already exists.`);
+    }
+    await persistBookingSources([...bookingSources, normalized]);
+  };
+
+  const updateBookingSource = async (source: string, updates: Partial<Omit<BookingSourceConfig, "source">>) => {
+    const next = bookingSources.map((s) =>
+      s.source === source ? { ...s, ...updates, source: s.source } : s
+    );
+    await persistBookingSources(next);
+  };
+
+  const reorderBookingSources = async (next: BookingSourceConfig[]) => {
+    // Same shape as `reorderPaymentMethods` — caller passes the new
+    // full array in the desired order; we just persist. The Settings
+    // UI is responsible for enforcing the "up arrow disabled on first
+    // row, down arrow disabled on last row" rule.
+    await persistBookingSources(next);
+  };
+
+  const deleteBookingSource = async (source: string) => {
+    // Per NBS-05: protected sources cannot be deleted. `online` /
+    // `walk-in` / `corporate` are written by server code paths and
+    // deleting any of them breaks booking creation outright.
+    if (PROTECTED_BOOKING_SOURCES.includes(source as ProtectedBookingSource)) {
+      throw new Error(`"${source}" is a protected booking source and cannot be deleted.`);
+    }
+    // Also block deletion if any booking uses the source (second
+    // line of defense, same posture as `deletePaymentMethod`).
+    const attached = bookings.filter((b) => b.source === source);
+    if (attached.length > 0) {
+      throw new Error(
+        `${attached.length} booking${attached.length === 1 ? "" : "s"} reference this source. Reassign or close those bookings first.`
+      );
+    }
+    await persistBookingSources(bookingSources.filter((s) => s.source !== source));
+  };
 
   const persistPaymentMethods = async (next: PaymentMethodConfig[]) => {
     const sanitized = next.map((method) => {
@@ -4865,6 +4978,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         deletePaymentMethod,
         uploadPaymentMethodQr,
         resetPaymentMethodQr,
+        bookingSources,
+        addBookingSource,
+        updateBookingSource,
+        reorderBookingSources,
+        deleteBookingSource,
         staff,
         createStaff,
         disableStaff,

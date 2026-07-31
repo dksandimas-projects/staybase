@@ -221160,6 +221160,13 @@ var WalkinBookingSchema = external_exports.object({
   hasBreakfast: external_exports.boolean(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: external_exports.string().trim().min(1).max(80),
+  // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
+  // every existing caller keeps working with no migration. The
+  // server validates the submitted value against the configured list
+  // (`settings/hotelConfig.bookingSources[]`) and derives `notes` from
+  // it — a phone / Agoda / Facebook booking no longer ships with a
+  // note claiming it was created at the desk.
+  source: external_exports.string().trim().min(1).max(80).optional().default("walk-in"),
   status: external_exports.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
   totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
   discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
@@ -224412,6 +224419,20 @@ function isExpectedBookingUploadPath(path, bookingId, folder) {
 function sumLedgerAmounts(snapshot) {
   return snapshot.docs.reduce((sum, docSnap) => sum + Number(docSnap.data()?.amount || 0), 0);
 }
+function deriveSourceNote(source) {
+  switch (source) {
+    case "walk-in":
+      return "Created on-site at Front Desk.";
+    case "phone":
+      return "Booked via phone call.";
+    case "facebook":
+      return "Booked via Facebook / Messenger.";
+    case "agoda":
+      return "Booked via Agoda (OTA).";
+    default:
+      return `Booked via ${source}.`;
+  }
+}
 function sumBilledAddToBillOrders(snapshot) {
   return snapshot.docs.reduce((sum, docSnap) => {
     const order = docSnap.data() || {};
@@ -225233,6 +225254,14 @@ async function handleCreateWalkin(req, res) {
     hasBreakfast,
     guestDetails,
     paymentMethod,
+    // Per NBS-02 (2026-07-31): the source is now selected by the
+    // desk from the configured list. The schema defaults to
+    // "walk-in" so every existing caller keeps working; the handler
+    // then validates against the configured list and derives the
+    // booking `notes` field from it so a phone / Agoda / Facebook
+    // booking no longer ships with a note claiming it was created at
+    // the desk.
+    source: requestedSource,
     status,
     totalPriceOverride,
     discountType: requestedDiscountType,
@@ -225325,6 +225354,12 @@ async function handleCreateWalkin(req, res) {
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
+      const bookingSourcesArr = Array.isArray(hotelConfig.bookingSources) ? hotelConfig.bookingSources : [];
+      const validSourceKeys = bookingSourcesArr.map((s4) => s4 && typeof s4.source === "string" ? s4.source.trim() : "").filter((s4) => s4.length > 0);
+      const resolvedSource = validSourceKeys.includes(requestedSource) ? requestedSource : "walk-in";
+      if (resolvedSource !== requestedSource) {
+        console.warn(`[handleCreateWalkinBooking] unknown source "${requestedSource}" \u2014 falling back to "walk-in"`);
+      }
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
@@ -225471,8 +225506,12 @@ async function handleCreateWalkin(req, res) {
         // (not `""`) so the canonical "absent" value is
         // consistent with the online flow.
         paymentProofUrl: null,
-        source: "walk-in",
-        notes: "Created on-site at Front Desk.",
+        // Per NBS-02 (2026-07-31): source is now selected by the
+        // desk from the configured list; the note is derived from
+        // it so a phone / Agoda / Facebook booking no longer ships
+        // with a note claiming it was created at the desk.
+        source: resolvedSource,
+        notes: deriveSourceNote(resolvedSource),
         handledBy: req.staff.uid || "staff",
         memberId: null,
         pointsRedeemed: 0,
