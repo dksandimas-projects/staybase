@@ -79,7 +79,7 @@ export function RatesPage() {
     hotelConfig,
     breakfastConfig,
     updateSettings,
-    updateRoomType,
+    saveRoomTypes,
     roomTypes,
     currentUser,
     ratesLoading
@@ -136,7 +136,7 @@ export function RatesPage() {
   // Local pricing state per room type — the source of truth now lives on
   // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
   // §W3.6`), so the local state is just the in-flight form buffer that
-  // is flushed via `updateRoomType` on save.
+  // is flushed via a single batched `saveRoomTypes` write on save.
   const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>({});
   const [dirtyRateFields, setDirtyRateFields] = useState<Set<string>>(() => new Set());
   const [roomRates, setRoomRates] = useState<Record<string, string>>({});
@@ -701,23 +701,28 @@ export function RatesPage() {
   };
 
   // Save room prices changes — per W3.6 the rate matrix lives on the
-  // room type, so we flush one `updateRoomType` per type rather than
-  // batching across rooms of that type.
+  // room type, so we compute the full next array ONCE and write it
+  // ONCE. The previous implementation fired N concurrent
+  // `updateRoomType` calls; each one read the same render-time
+  // `roomTypes` snapshot, wrote the whole array back via
+  // `setDoc(..., { merge: true })`, and lost all but the last write
+  // (merge of an array field replaces it wholesale). That is RTS-01.
   const [isSavingRates, setIsSavingRates] = useState(false);
   const handleSaveRates = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingRates(true);
     try {
-      const updates = roomTypes.map(t => {
+      const nextRoomTypes = roomTypes.map(t => {
         const next = prices[t.value];
-        if (!next) return Promise.resolve();
-        return updateRoomType(t.value, {
+        if (!next) return t;
+        return {
+          ...t,
           pricePerNight: next.base,
           weekendRate: next.weekend,
           corporateRate: next.corporate
-        });
+        };
       });
-      await Promise.all(updates);
+      await saveRoomTypes(nextRoomTypes);
       setDirtyRateFields(new Set());
       toast.success("Rates saved", "Rate matrix updated for all room types.");
     } catch (err) {
