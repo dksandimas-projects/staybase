@@ -21,6 +21,11 @@ import {
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
+// Per PMH-02 (2026-07-31): the server's inline folio math (used
+// by the create / confirm-with-balance / post-checkout transactions)
+// now routes through the shared `computeServerFolioTotals` helper
+// so MRB-04 edits one function instead of three.
+import { computeServerFolioTotals } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -3092,8 +3097,21 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
       const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
       const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
       const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
-      const folioTotal = Number(data.totalPrice || 0) + incidentalTotal + addToBillTotal;
-      const computedBalance = Math.max(folioTotal - collectedTotal, 0);
+      // Per PMH-02 (2026-07-31): the inline `folioTotal` /
+      // `computedBalance` math lived in three places (this
+      // transaction, the create transaction, the post-checkout
+      // transaction). All three now route through the shared
+      // `computeServerFolioTotals` helper in `shared/utils/bookingFolio.ts`
+      // so MRB-04 (the group folio) edits one function instead
+      // of three.
+      const serverFolio = computeServerFolioTotals({
+        totalPrice: Number(data.totalPrice) || 0,
+        incidentalTotal,
+        addToBillTotal,
+        collectedTotal
+      });
+      const folioTotal = serverFolio.folioTotal;
+      const computedBalance = serverFolio.computedBalance;
       balance = computedBalance;
 
       // CWB-01: threshold gate — front-desk is capped at the

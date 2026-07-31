@@ -221397,6 +221397,17 @@ function getManilaDateInfo(timezone = "Asia/Manila") {
   };
 }
 
+// ../shared/utils/bookingFolio.ts
+function computeServerFolioTotals(input) {
+  const totalPrice = Number(input.totalPrice) || 0;
+  const incidentalTotal = Number(input.incidentalTotal) || 0;
+  const addToBillTotal = Number(input.addToBillTotal) || 0;
+  const collectedTotal = Number(input.collectedTotal) || 0;
+  const folioTotal = totalPrice + incidentalTotal + addToBillTotal;
+  const computedBalance = Math.max(folioTotal - collectedTotal, 0);
+  return { folioTotal, computedBalance };
+}
+
 // ../shared/utils/checkin.ts
 var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
 var REQUIRED_REGISTRATION_FIELDS = [
@@ -226479,8 +226490,14 @@ async function handleConfirmBookingWithBalance(req, res) {
       const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
       const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
       const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
-      const folioTotal = Number(data.totalPrice || 0) + incidentalTotal + addToBillTotal;
-      const computedBalance = Math.max(folioTotal - collectedTotal, 0);
+      const serverFolio = computeServerFolioTotals({
+        totalPrice: Number(data.totalPrice) || 0,
+        incidentalTotal,
+        addToBillTotal,
+        collectedTotal
+      });
+      const folioTotal = serverFolio.folioTotal;
+      const computedBalance = serverFolio.computedBalance;
       balance = computedBalance;
       if (computedBalance > txThreshold && staffRole !== "admin") {
         needsAdminApproval = true;

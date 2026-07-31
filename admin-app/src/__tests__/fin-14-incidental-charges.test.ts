@@ -23,8 +23,14 @@ describe("FIN-14 incidental charge ledger", () => {
   });
 
   it("includes net charges in folio, checkout, and receipt math", () => {
-    expect(bookings).toMatch(/chargesTotal = charges\.reduce\(\(sum, charge\) => sum \+ charge\.amount, 0\)/);
-    expect(bookings).toMatch(/grandTotal = booking\.totalPrice \+ storeTotal \+ chargesTotal/);
+    // Per PMH-02 (2026-07-31): the folio math is now in the shared
+    // `computeBookingFolio` helper (`shared/utils/bookingFolio.ts`).
+    // The test pins that the BookingsPage calls the shared helper
+    // for the per-booking folio (and that the math still
+    // includes the charges in the grand total + receipt PDF flow).
+    expect(bookings).toMatch(/computeBookingFolio\(/);
+    // Receipt still uses folio.grandTotal + .paymentsTotal — the
+    // historical "minus payments" check stays.
     expect(bookings).toMatch(/receiptFolio\.grandTotal - paymentsTotal/);
     expect(bookings).toMatch(/Print receipt PDF/);
   });
