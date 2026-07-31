@@ -1,5 +1,6 @@
 import type { BookingRateBreakdown } from "../types";
 import { calculateBreakfastAddOn } from "./bookingAddOns";
+import { calculatePercentDiscount } from "./bookingDiscounts";
 
 export interface PriceInput {
   ratePerNight: number;
@@ -38,10 +39,13 @@ export function calculateBookingTotal(input: PriceInput) {
   // 1. Senior/PWD discount (input.discountPct) — applied first to subtotal
   // 2. Voucher discount (input.voucherDiscount) — flat/percent reduction next
   // 3. Spark Rewards member discount (input.memberDiscountPct) — applied last on the post-discount amount
-  const seniorPwdDiscount = subtotal * ((input.discountPct ?? 0) / 100);
+  // Per DSC (2026-07-31): the two percentage steps now route through the shared
+  // `calculatePercentDiscount` helper. pricing.ts historically returned the raw
+  // (unrounded) product — the helper preserves that. Byte-equivalent output.
+  const seniorPwdDiscount = calculatePercentDiscount(subtotal, input.discountPct ?? 0);
   const afterSeniorPwd = subtotal - seniorPwdDiscount;
   const afterVoucher = afterSeniorPwd - (input.voucherDiscount ?? 0);
-  const memberDiscount = afterVoucher * ((input.memberDiscountPct ?? 0) / 100);
+  const memberDiscount = calculatePercentDiscount(afterVoucher, input.memberDiscountPct ?? 0);
   const total = afterVoucher - memberDiscount;
 
   return Math.max(total, 0);

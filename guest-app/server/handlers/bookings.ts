@@ -6,6 +6,8 @@ import { writeNotification } from "../lib/notifications";
 import {
   calculateSeasonalAwareRoomBreakdown,
   calculateVoucherDiscount,
+  calculatePercentDiscount,
+  calculateVoucherBase,
   getCheckInReadiness,
   normalizeSeasonalRateOverrides,
   toDateOrNull,
@@ -1027,8 +1029,13 @@ export async function handleCreateBooking(req: any, res: any) {
 
           if (isValid) {
             appliedVoucherCode = formattedCode;
-            const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
-            const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+            // Per DSC (2026-07-31): the percentage step and the clamped
+            // `subtotal − senior` subtraction now route through the shared
+            // `calculatePercentDiscount` + `calculateVoucherBase` helpers.
+            // Byte-equivalent output: same `Math.round` wrap, same
+            // `Math.max(..., 0)` clamp.
+            const seniorPwdDiscountForVoucher = Math.round(calculatePercentDiscount(subtotal, discountPct));
+            const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscountForVoucher);
             voucherDiscount = Math.round(calculateVoucherDiscount({
               discountType: vData.discountType === "percent" ? "percent" : "flat",
               discountValue: Number(vData.discountValue) || 0
@@ -1077,10 +1084,16 @@ export async function handleCreateBooking(req: any, res: any) {
       //   1. Senior/PWD on subtotal
       //   2. Voucher (flat or percent) on post–Senior/PWD subtotal
       //   3. Member discount (percent) on post-voucher subtotal
-      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      // Per DSC (2026-07-31): the two percentage steps now route through
+      // the shared `calculatePercentDiscount` helper. The afterVoucher
+      // step here is intentionally NOT clamped (the surrounding
+      // `Math.max(afterVoucher - memberDiscount, 0)` is the only clamp),
+      // so the inline `afterSeniorPwd - voucherDiscount` stays verbatim.
+      // Byte-equivalent output.
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
       const afterSeniorPwd = subtotal - seniorPwdDiscount;
       const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
+      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       if (!Number.isFinite(totalPrice)) {
         throw new Error("Invalid booking total.");
@@ -1640,8 +1653,12 @@ export async function handleCreateWalkin(req: any, res: any) {
       const pricingSubtotal = totalPriceOverride !== undefined && totalPriceOverride !== null
         ? Number(totalPriceOverride)
         : subtotal;
-      const seniorPwdDiscount = Math.round(pricingSubtotal * (discountPct / 100));
-      const voucherBase = Math.max(pricingSubtotal - seniorPwdDiscount, 0);
+      // Per DSC (2026-07-31): the percentage step and the clamped
+      // `subtotal − senior` subtraction now route through the shared
+      // `calculatePercentDiscount` + `calculateVoucherBase` helpers.
+      // Byte-equivalent output: same `Math.round` wrap, same clamp.
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(pricingSubtotal, discountPct));
+      const voucherBase = calculateVoucherBase(pricingSubtotal, seniorPwdDiscount);
       let voucherCode = "";
       let voucherDiscount = 0;
       let voucherUsageUpdate: { ref: any; data: any } | null = null;
@@ -1898,8 +1915,12 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
 
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
-      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
-      const voucherBase = Math.max(subtotal - seniorPwdDiscount, 0);
+      // Per DSC (2026-07-31): the percentage step and the clamped
+      // `subtotal − senior` subtraction now route through the shared
+      // `calculatePercentDiscount` + `calculateVoucherBase` helpers.
+      // Byte-equivalent output: same `Math.round` wrap, same clamp.
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+      const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
       let voucherDiscount = 0;
       let voucherCode = "";
       let voucherRef: FirebaseFirestore.DocumentReference | null = null;
@@ -1931,9 +1952,13 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
         }, voucherBase));
       }
 
-      const afterVoucher = Math.max(voucherBase - voucherDiscount, 0);
+      // Per DSC (2026-07-31): the post-voucher clamp and the member-step
+      // percentage now route through the shared `calculateVoucherBase` +
+      // `calculatePercentDiscount` helpers. Byte-equivalent output: same
+      // `Math.max(..., 0)` clamp, same `Math.round` wrap.
+      const afterVoucher = calculateVoucherBase(voucherBase, voucherDiscount);
       const memberDiscountPct = Number(booking.memberDiscountPct || 0);
-      const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
       const pointsValue = Number(booking.pointsRedeemedValue || 0);
       const totalPrice = Math.max(afterVoucher - memberDiscount - pointsValue, 0);
       const rateBreakdown = buildRateBreakdown({
@@ -2002,10 +2027,14 @@ export async function handleRejectDiscount(req: any, res: any) {
     // and re-apply the Spark Rewards member discount after removing
     // only the rejected Senior/PWD discount. Stacking remains:
     // subtotal -> voucher -> member discount -> redeemed points.
+    // Per DSC (2026-07-31): the post-voucher clamp and the member-step
+    // percentage now route through the shared `calculateVoucherBase` +
+    // `calculatePercentDiscount` helpers. Byte-equivalent output: same
+    // `Math.max(..., 0)` clamp, same `Math.round` wrap.
     const voucherDiscount = Number(bookingData.voucherDiscount || 0);
-    const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
+    const afterVoucher = calculateVoucherBase(originalTotalPrice, voucherDiscount);
     const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
-    const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+    const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
     const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
     const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue)
       ? Math.max(rawPointsRedeemedValue, 0)
@@ -4154,8 +4183,12 @@ export async function handleRescheduleBooking(req: any, res: any) {
         const voucherDoc = await transaction.get(voucherRef);
         if (voucherDoc.exists) {
           const vData = voucherDoc.data() || {};
-          const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
-          const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+          // Per DSC (2026-07-31): the percentage step and the clamped
+          // `subtotal − senior` subtraction now route through the shared
+          // `calculatePercentDiscount` + `calculateVoucherBase` helpers.
+          // Byte-equivalent output: same `Math.round` wrap, same clamp.
+          const seniorPwdDiscountForVoucher = Math.round(calculatePercentDiscount(subtotal, discountPct));
+          const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscountForVoucher);
           voucherDiscount = Math.round(calculateVoucherDiscount({
             discountType: vData.discountType === "percent" ? "percent" : "flat",
             discountValue: Number(vData.discountValue) || 0
@@ -4178,10 +4211,16 @@ export async function handleRescheduleBooking(req: any, res: any) {
         }
       }
 
-      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      // Per DSC (2026-07-31): the two percentage steps now route through
+      // the shared `calculatePercentDiscount` helper. The afterVoucher
+      // step here is intentionally NOT clamped (the surrounding
+      // `Math.max(afterVoucher - memberDiscount, 0)` is the only clamp),
+      // so the inline `afterSeniorPwd - voucherDiscount` stays verbatim.
+      // Byte-equivalent output.
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
       const afterSeniorPwd = subtotal - seniorPwdDiscount;
       const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
+      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
       const originalTotalPrice = subtotal;

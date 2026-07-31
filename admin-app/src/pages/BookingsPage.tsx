@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -124,14 +124,19 @@ function estimateNewTotalPrice(
   const subtotal = roomTotal + breakfastTotal;
 
   let discountPct = booking.discountPct || 0;
-  const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+  // Per DSC (2026-07-31): the inline `subtotal × (pct/100)` and
+  // `Math.max(subtotal − deduction, 0)` patterns now route through the
+  // shared `calculatePercentDiscount` + `calculateVoucherBase` helpers.
+  // Byte-equivalent output: the helper returns the same raw product, and
+  // the caller's `Math.round` wrap is preserved.
+  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
   const afterSeniorPwd = subtotal - seniorPwdDiscount;
 
   let voucherDiscount = 0;
   if (booking.voucherCode) {
     const voucherData = vouchers.find(v => v.code === booking.voucherCode);
     if (voucherData) {
-      const vBase = Math.max(subtotal - seniorPwdDiscount, 0);
+      const vBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
       voucherDiscount = Math.round(calculateVoucherDiscount({
         discountType: voucherData.discountType === "percent" ? "percent" : "flat",
         discountValue: Number(voucherData.discountValue) || 0
@@ -147,7 +152,7 @@ function estimateNewTotalPrice(
   if (booking.memberId && rewardsConfig?.memberDiscountEnabled !== false) {
     memberDiscountPct = Number(rewardsConfig?.memberDiscountPct) || 0;
   }
-  const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
   const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
   const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
 
@@ -2027,7 +2032,10 @@ export function BookingsPage() {
               ? "PWD Discount"
               : "Discount";
           const storedDiscountBase = b.originalTotalPrice ?? subtotal;
-          const discountAmount = Math.max(0, Math.round(storedDiscountBase * (b.discountPct / 100)));
+          // Per DSC (2026-07-31): the percentage step routes through the shared
+          // `calculatePercentDiscount` helper. Byte-equivalent output: same
+          // product, same `Math.round` wrap, same `Math.max(0, …)` clamp.
+          const discountAmount = Math.max(0, Math.round(calculatePercentDiscount(storedDiscountBase, b.discountPct)));
           drawAmountRow(`${discountLabel} (${b.discountPct}%)`, `-${formatAmount(discountAmount)}`, { muted: true });
         }
 
@@ -2037,9 +2045,18 @@ export function BookingsPage() {
 
         if (b.memberDiscountPct && b.memberDiscountPct > 0) {
           const discountBase = b.originalTotalPrice ?? subtotal;
-          const seniorPwdAmount = b.discountPct ? Math.round(discountBase * (b.discountPct / 100)) : 0;
-          const memberBase = Math.max(discountBase - seniorPwdAmount - (b.voucherDiscount || 0), 0);
-          const memberDiscountAmount = Math.max(0, Math.round(memberBase * (b.memberDiscountPct / 100)));
+          // Per DSC (2026-07-31): both the senior step and the member-base
+          // subtraction now route through the shared helpers. The historical
+          // pattern was `Math.max(discountBase − seniorPwdAmount − voucher, 0)`
+          // — a single clamped subtraction of two deductions. The refactor
+          // composes two `calculateVoucherBase` calls (byte-equivalent: a
+          // clamped subtraction followed by another clamped subtraction on
+          // the clamped result is the same as one clamped subtraction of
+          // both deductions).
+          const seniorPwdAmount = b.discountPct ? Math.round(calculatePercentDiscount(discountBase, b.discountPct)) : 0;
+          const afterSenior = calculateVoucherBase(discountBase, seniorPwdAmount);
+          const memberBase = calculateVoucherBase(afterSenior, b.voucherDiscount || 0);
+          const memberDiscountAmount = Math.max(0, Math.round(calculatePercentDiscount(memberBase, b.memberDiscountPct)));
           drawAmountRow(`Member Discount (${b.memberDiscountPct}%)`, `-${formatAmount(memberDiscountAmount)}`, { muted: true });
         }
 

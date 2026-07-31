@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculateBreakfastAddOn } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -714,6 +714,10 @@ export function ReportsPage() {
       // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
       // numNights` now routes through the shared
       // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+      // Per DSC (2026-07-31): the discount percentage steps and the
+      // clamped `afterSenior − voucher` subtraction now route through
+      // the shared `calculatePercentDiscount` + `calculateVoucherBase`
+      // helpers. Same product, same round, same clamp, same gates.
       const breakfastTotal = calculateBreakfastAddOn({
         hasBreakfast: b.hasBreakfast,
         breakfastRate: b.breakfastRate,
@@ -723,14 +727,14 @@ export function ReportsPage() {
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
-      const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+      const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
       const afterSenior = subtotal - seniorDiscount;
 
       const vchDiscount = b.voucherDiscount || 0;
-      const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+      const afterVoucher = calculateVoucherBase(afterSenior, vchDiscount);
 
       const memDiscountPct = b.memberDiscountPct || 0;
-      const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+      const memDiscount = memDiscountPct > 0 ? Math.round(calculatePercentDiscount(afterVoucher, memDiscountPct)) : 0;
 
       const ptsRedeemedVal = b.pointsRedeemedValue || 0;
 
@@ -1432,6 +1436,10 @@ export function ReportsPage() {
       // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
       // numNights` now routes through the shared
       // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+      // Per DSC (2026-07-31): the discount percentage steps and the
+      // clamped `afterSenior − voucher` subtraction now route through
+      // the shared `calculatePercentDiscount` + `calculateVoucherBase`
+      // helpers. Same product, same round, same clamp, same gates.
       const breakfastTotal = calculateBreakfastAddOn({
         hasBreakfast: b.hasBreakfast,
         breakfastRate: b.breakfastRate,
@@ -1441,14 +1449,14 @@ export function ReportsPage() {
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
-      const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+      const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
       const afterSenior = subtotal - seniorDiscount;
 
       const vchDiscount = b.voucherDiscount || 0;
-      const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+      const afterVoucher = calculateVoucherBase(afterSenior, vchDiscount);
 
       const memDiscountPct = b.memberDiscountPct || 0;
-      const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+      const memDiscount = memDiscountPct > 0 ? Math.round(calculatePercentDiscount(afterVoucher, memDiscountPct)) : 0;
 
       const ptsRedeemedVal = b.pointsRedeemedValue || 0;
 
@@ -3099,6 +3107,11 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
             // Per EXB-02 (2026-07-31): inline `breakfastRate ×
             // numGuests × numNights` now routes through the shared
             // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+            // Per DSC (2026-07-31): the discount percentage steps and
+            // the clamped `afterSenior − voucher` subtraction now route
+            // through the shared `calculatePercentDiscount` +
+            // `calculateVoucherBase` helpers. Same product, same round,
+            // same clamp, same gates.
             const breakfastTotal = calculateBreakfastAddOn({
               hasBreakfast: b.hasBreakfast,
               breakfastRate: b.breakfastRate,
@@ -3108,14 +3121,14 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
             const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
             const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
-            const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+            const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
             const afterSenior = subtotal - seniorDiscount;
 
             const vchDiscount = b.voucherDiscount || 0;
-            const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+            const afterVoucher = calculateVoucherBase(afterSenior, vchDiscount);
 
             const memDiscountPct = b.memberDiscountPct || 0;
-            const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+            const memDiscount = memDiscountPct > 0 ? Math.round(calculatePercentDiscount(afterVoucher, memDiscountPct)) : 0;
 
             const ptsRedeemedVal = b.pointsRedeemedValue || 0;
             const deductionsVal = seniorDiscount + vchDiscount + memDiscount + ptsRedeemedVal;
