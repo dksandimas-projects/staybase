@@ -15,9 +15,13 @@
 // falls back to `rate × numGuests × nights` — byte-equivalent to today.
 // `breakfastIncludesChildren` defaults to `true` when undefined, matching
 // the historical "children pay the full rate" default so existing
-// bookings without the field render the same total. EXB-01..10 (extra
-// bed) will extend the add-on stack with a third term; the math lives
-// in one place here, so the change is one PR instead of ten.
+// bookings without the field render the same total.
+//
+// Per EXB-01 (2026-07-31): a sibling helper `calculateExtraBedAddOn`
+// for the extra-bed add-on term. The math is
+// `extraBedCount × extraBedRate × numNights` — no `hasBreakfast`-style
+// gate (a count of 0 is the "off" state). Nullish / 0 inputs short-
+// circuit to 0. Same defensive `Number(x) || 0` per operand.
 //
 // Pinned by `shared/__tests__/booking-addons.test.ts`.
 
@@ -94,4 +98,28 @@ export function calculateBreakfastAddOn(input: BreakfastAddOnInput): number {
   }
   if (effectiveOccupancy === 0) return 0;
   return rate * effectiveOccupancy * nights;
+}
+
+// Per EXB-01 (2026-07-31): the extra-bed add-on term. Sibling to
+// `calculateBreakfastAddOn` — same defensive coercion, no
+// `hasBreakfast`-style gate (a count of 0 is the "off" state).
+// The room type owns `maxExtraBeds` + `extraBedRate`; the booking
+// snapshotted `extraBedRate` at create time so a later rate change
+// never rewrites an existing bill. Per-night math
+// (`rate × count × nights`) mirrors the breakfast helper.
+export interface ExtraBedAddOnInput {
+  /** Number of extra beds (0..maxExtraBeds). Nullish / 0 short-circuits to 0. */
+  extraBedCount?: number | null;
+  /** Per-bed-per-night rate. Nullish / 0 short-circuits to 0. */
+  extraBedRate?: number | null;
+  /** Number of nights. Nullish / 0 short-circuits to 0. */
+  numNights?: number | null;
+}
+
+export function calculateExtraBedAddOn(input: ExtraBedAddOnInput): number {
+  const count = Number(input.extraBedCount) || 0;
+  const rate = Number(input.extraBedRate) || 0;
+  const nights = Number(input.numNights) || 0;
+  if (count === 0 || rate === 0 || nights === 0) return 0;
+  return count * rate * nights;
 }

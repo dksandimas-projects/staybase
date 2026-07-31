@@ -37,7 +37,8 @@ import {
   compressImageFile,
   calculatePercentDiscount,
   calculateVoucherBase,
-  calculateBreakfastAddOn
+  calculateBreakfastAddOn,
+  calculateExtraBedAddOn
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 // Per BF-29 (booking-flow audit 2026-06-26): replace the
@@ -186,6 +187,13 @@ export function BookingPage() {
   const [breakfastIncludesChildren, setBreakfastIncludesChildren] = useState(
     breakfastConfig.breakfastIncludesChildrenDefault !== false
   );
+  // Per EXB-01 (2026-07-31): extra-bed count. Defaults to 0 (the
+  // "no extra bed" case). The selector only renders when the
+  // selected room type has `maxExtraBeds > 0` (the spec's "no
+  // separate `allowsExtraBed` boolean" rule). The server
+  // validates against `maxExtraBeds` and snapshots `extraBedRate`
+  // onto the booking doc.
+  const [extraBedCount, setExtraBedCount] = useState(0);
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
   // the server auto-assigns a physical room of that type inside
@@ -408,7 +416,16 @@ export function BookingPage() {
   const effectiveBreakfastOccupancy = numChildren > 0 && !breakfastIncludesChildren
     ? numAdults
     : guests;
-  const subtotal = roomTotal + breakfastTotal;
+  // Per EXB-01 (2026-07-31): the extra-bed add-on term. Reads the
+  // rate from the selected room type; nullish / 0 inputs
+  // short-circuit to 0 via the helper.
+  const extraBedRate = selectedTypeEntry ? Number(selectedTypeEntry.extraBedRate) || 0 : 0;
+  const extraBedTotal = calculateExtraBedAddOn({
+    extraBedCount,
+    extraBedRate,
+    numNights: nights
+  });
+  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
 
   const voucherDiscount = useMemo(() => {
     if (!voucherApplied) return 0;
@@ -648,6 +665,10 @@ export function BookingPage() {
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
     setSelectedRoomType(typeValue);
     setRateChoice(nextRateChoice);
+    // Per EXB-01 (2026-07-31): reset the extra-bed count when the
+    // room type changes — the new type may have a different
+    // `maxExtraBeds` (e.g. switching from Family to Single).
+    setExtraBedCount(0);
     const next = new URLSearchParams(searchParams);
     next.set("roomType", typeValue);
     next.set("checkIn", checkIn);
@@ -856,6 +877,10 @@ export function BookingPage() {
           // `numGuests` (the historical path).
           numAdults,
           numChildren,
+          // Per EXB-01 (2026-07-31): extra-bed count. The server
+          // validates against the room type's `maxExtraBeds` and
+          // snapshots the rate onto the booking doc.
+          extraBedCount,
           guestDetails: {
             firstName: guestDetails.firstName,
             lastName: guestDetails.lastName,
@@ -1141,6 +1166,10 @@ export function BookingPage() {
             numChildren={numChildren}
             breakfastIncludesChildren={breakfastIncludesChildren}
             setBreakfastIncludesChildren={setBreakfastIncludesChildren}
+            // Per EXB-01 (2026-07-31): extra-bed count + rate
+            // thread through to the aside.
+            extraBedCount={extraBedCount}
+            extraBedRate={extraBedRate}
             typeLabel={selectedTypeEntry?.label ?? ""}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
@@ -1619,6 +1648,10 @@ export function BookingPage() {
             numChildren={numChildren}
             breakfastIncludesChildren={breakfastIncludesChildren}
             setBreakfastIncludesChildren={setBreakfastIncludesChildren}
+            // Per EXB-01 (2026-07-31): extra-bed count + rate
+            // thread through to the aside.
+            extraBedCount={extraBedCount}
+            extraBedRate={extraBedRate}
             typeLabel={selectedTypeEntry?.label ?? ""}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
@@ -1774,6 +1807,46 @@ export function BookingPage() {
                   </button>
                 </div>
               </label>
+
+              {/* Per EXB-01 (2026-07-31): the extra-bed selector.
+                  Only renders when the selected room type has
+                  `maxExtraBeds > 0` (per the spec's "no separate
+                  `allowsExtraBed` boolean" rule). The price
+                  impact is shown in the summary panel. */}
+              {selectedTypeEntry && Number(selectedTypeEntry.maxExtraBeds) > 0 ? (
+                <label className="grid gap-2 text-sm font-medium text-gray-700">
+                  Extra bed{Number(selectedTypeEntry.maxExtraBeds) > 1 ? "s" : ""} ({formatPrice(Number(selectedTypeEntry.extraBedRate) || 0)} / bed / night)
+                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                      type="button"
+                      aria-label="Decrease extra bed count"
+                      onClick={() => setExtraBedCount(Math.max(0, extraBedCount - 1))}
+                      disabled={extraBedCount <= 0}
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="flex items-center gap-2 text-sm text-gray-700">
+                      {extraBedCount} extra bed{extraBedCount === 1 ? "" : "s"}
+                      <span className="text-xs text-gray-500">
+                        (up to {selectedTypeEntry.maxExtraBeds} allowed)
+                      </span>
+                    </span>
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                      type="button"
+                      aria-label="Increase extra bed count"
+                      onClick={() => {
+                        const max = Number(selectedTypeEntry.maxExtraBeds) || 0;
+                        setExtraBedCount(Math.min(extraBedCount + 1, max));
+                      }}
+                      disabled={extraBedCount >= Number(selectedTypeEntry.maxExtraBeds)}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </label>
+              ) : null}
 
               <div className="flex gap-3 rounded-lg bg-primary-light p-4 text-sm text-gray-700">
                 <Info size={18} className="mt-0.5 shrink-0 text-primary" />
@@ -2095,6 +2168,10 @@ interface BookingReviewAsideProps {
   numChildren: number;
   breakfastIncludesChildren: boolean;
   setBreakfastIncludesChildren: (value: boolean) => void;
+  // Per EXB-01 (2026-07-31): the extra-bed count + rate, threaded
+  // through so the aside can show the add-on line.
+  extraBedCount: number;
+  extraBedRate: number;
   // Per the room-type booking refactor: the aside shows the chosen
   // type label + (once assigned by the server) the physical room
   // number. Pre-assignment, `assignedRoomNumber` is empty.
@@ -2143,7 +2220,10 @@ function BookingReviewAside({
   numAdults,
   numChildren,
   breakfastIncludesChildren,
-  setBreakfastIncludesChildren
+  setBreakfastIncludesChildren,
+  // Per EXB-01 (2026-07-31).
+  extraBedCount,
+  extraBedRate
 }: BookingReviewAsideProps) {
   const roomTotal = useMemo(() => {
     if (!typeRates || !typeValue) return 0;
@@ -2176,7 +2256,15 @@ function BookingReviewAside({
     numNights: nights,
     breakfastIncludesChildren
   });
-  const subtotal = roomTotal + breakfastTotal;
+  // Per EXB-01 (2026-07-31): the extra-bed add-on term in the
+  // summary panel. Reads the rate from the type entry; nullish
+  // / 0 inputs short-circuit to 0 via the helper.
+  const extraBedTotal = calculateExtraBedAddOn({
+    extraBedCount,
+    extraBedRate: extraBedRate ?? 0,
+    numNights: nights
+  });
+  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
   // Per DSC (2026-07-31): the percentage steps now route through the
   // shared `calculatePercentDiscount` helper. Byte-equivalent output:
   // the helper returns the same raw product, no rounding (this is the

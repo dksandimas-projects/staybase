@@ -221165,6 +221165,13 @@ var WalkinBookingSchema = external_exports.object({
   // `true` is the safe default (matches the historical "children pay
   // the full rate" math).
   breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
+  // absent, the server treats it as 0 (the "no extra bed" case).
+  // Bounded server-side by the room type's `maxExtraBeds` (a
+  // booking with `extraBedCount > maxExtraBeds` is rejected). The
+  // server snapshots the room type's `extraBedRate` onto the
+  // booking doc alongside this field.
+  extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: external_exports.string().trim().min(1).max(80),
   // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
@@ -221433,6 +221440,13 @@ function calculateBreakfastAddOn(input) {
   }
   if (effectiveOccupancy === 0) return 0;
   return rate * effectiveOccupancy * nights;
+}
+function calculateExtraBedAddOn(input) {
+  const count = Number(input.extraBedCount) || 0;
+  const rate = Number(input.extraBedRate) || 0;
+  const nights = Number(input.numNights) || 0;
+  if (count === 0 || rate === 0 || nights === 0) return 0;
+  return count * rate * nights;
 }
 
 // ../shared/utils/bookingDiscounts.ts
@@ -224649,6 +224663,13 @@ var createBookingSchema = external_exports.object({
   // `hasBreakfast`. `true` is the safe default (matches the
   // historical "children pay the full rate" math).
   breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
+  // absent, the server treats it as 0. Bounded server-side by the
+  // room type's `maxExtraBeds` (a booking with
+  // `extraBedCount > maxExtraBeds` is rejected). The server
+  // snapshots the room type's `extraBedRate` onto the booking doc
+  // alongside this field.
+  extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -224699,6 +224720,12 @@ async function handleCreateBooking(req, res) {
     // booking doc means a later policy change never rewrites an
     // existing bill.
     breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
+    // absent, treated as 0. Bounded server-side by the room type's
+    // `maxExtraBeds` (a booking with `extraBedCount > maxExtraBeds`
+    // is rejected with a 400). The server snapshots the room type's
+    // `extraBedRate` onto the booking doc alongside this field.
+    extraBedCount: requestedExtraBedCount,
     guestDetails: rawGuestDetails,
     discountType,
     discountIdPhotoUrl,
@@ -224914,6 +224941,15 @@ async function handleCreateBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
       const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== void 0 ? requestedBreakfastIncludesChildren : breakfastIncludesChildrenDefault;
+      const extraBedCount = Math.max(0, Number(requestedExtraBedCount) || 0);
+      const typeMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
+      const typeExtraBedRate = Math.max(0, Number(typeEntry.extraBedRate) || 0);
+      if (extraBedCount > typeMaxExtraBeds) {
+        throw new Error(
+          `Extra bed count (${extraBedCount}) exceeds the room type's allowance (${typeMaxExtraBeds}).`
+        );
+      }
+      const extraBedRate = extraBedCount > 0 ? typeExtraBedRate : 0;
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
@@ -224999,7 +225035,12 @@ async function handleCreateBooking(req, res) {
         numNights,
         breakfastIncludesChildren
       });
-      const subtotal = roomTotal + breakfastTotal;
+      const extraBedTotal = calculateExtraBedAddOn({
+        extraBedCount,
+        extraBedRate,
+        numNights
+      });
+      const subtotal = roomTotal + breakfastTotal + extraBedTotal;
       let discountPct = 0;
       if (discountType === "senior" || discountType === "pwd") {
         discountPct = 20;
@@ -225172,6 +225213,13 @@ async function handleCreateBooking(req, res) {
         // existing bill. Math consumers (the helper, the receipt
         // PDF, the rate breakdown) read this field.
         breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
+        // Per EXB-01 (2026-07-31): the snapshotted extra-bed
+        // count + rate. `extraBedRate` is the room-type rate
+        // snapshotted at booking time so a later rate change never
+        // rewrites an existing bill. Absent fields normalize to 0
+        // on read.
+        extraBedCount,
+        extraBedRate,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -225340,6 +225388,13 @@ async function handleCreateWalkin(req, res) {
     checkOut,
     guests,
     hasBreakfast,
+    // Per CHD-10: walk-ins are staff-created. The breakfast toggle
+    // is snapshotted from the admin default (no per-booking override
+    // on the walk-in surface).
+    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per EXB-01: extra-bed count. Optional — walk-in defaults to
+    // 0 when absent. Bounded by the room type's `maxExtraBeds`.
+    extraBedCount: requestedExtraBedCount,
     guestDetails,
     paymentMethod,
     // Per NBS-02 (2026-07-31): the source is now selected by the
@@ -225476,6 +225531,15 @@ async function handleCreateWalkin(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
+      const walkinExtraBedCount = Math.max(0, Number(requestedExtraBedCount) || 0);
+      const walkinTypeMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
+      const walkinTypeExtraBedRate = Math.max(0, Number(typeEntry.extraBedRate) || 0);
+      if (walkinExtraBedCount > walkinTypeMaxExtraBeds) {
+        throw new Error(
+          `Extra bed count (${walkinExtraBedCount}) exceeds the room type's allowance (${walkinTypeMaxExtraBeds}).`
+        );
+      }
+      const walkinExtraBedRate = walkinExtraBedCount > 0 ? walkinTypeExtraBedRate : 0;
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
@@ -225493,7 +225557,12 @@ async function handleCreateWalkin(req, res) {
         numNights,
         breakfastIncludesChildren
       });
-      const subtotal = roomTotal + breakfastTotal;
+      const walkinExtraBedTotal = calculateExtraBedAddOn({
+        extraBedCount: walkinExtraBedCount,
+        extraBedRate: walkinExtraBedRate,
+        numNights
+      });
+      const subtotal = roomTotal + breakfastTotal + walkinExtraBedTotal;
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
       const pricingSubtotal = totalPriceOverride !== void 0 && totalPriceOverride !== null ? Number(totalPriceOverride) : subtotal;
@@ -225618,9 +225687,15 @@ async function handleCreateWalkin(req, res) {
         breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
         // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
         // "include children in breakfast" flag. Same shape as
-        // the online-create path; corporate inquiry surfaces
-        // don't expose a per-booking override.
+        // the online-create path; walk-in + corporate inquiry
+        // surfaces don't expose a per-booking override.
         breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
+        // Per EXB-01 (2026-07-31): the snapshotted extra-bed
+        // count + rate for the walk-in (which also covers the
+        // corporate inquiry conversion). Same shape as the
+        // online-create path.
+        extraBedCount: walkinExtraBedCount,
+        extraBedRate: walkinExtraBedRate,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -227281,6 +227356,8 @@ async function handleRescheduleBooking(req, res) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
+      const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
+      const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
       const breakfastTotal = manualNightlyRate === null ? calculateBreakfastAddOn({
         hasBreakfast: booking.hasBreakfast,
         breakfastRate,
@@ -227288,7 +227365,12 @@ async function handleRescheduleBooking(req, res) {
         numNights,
         breakfastIncludesChildren: booking.breakfastIncludesChildren
       }) : 0;
-      const subtotal = roomTotal + breakfastTotal;
+      const extraBedTotal = manualNightlyRate === null ? calculateExtraBedAddOn({
+        extraBedCount: preservedExtraBedCount,
+        extraBedRate: preservedExtraBedRate,
+        numNights
+      }) : 0;
+      const subtotal = roomTotal + breakfastTotal + extraBedTotal;
       let discountPct = 0;
       if (booking.discountType === "senior" || booking.discountType === "pwd") {
         discountPct = 20;

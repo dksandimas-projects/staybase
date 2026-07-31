@@ -289,6 +289,18 @@ export interface Booking {
   breakfastIncludesChildren?: boolean | null;
   breakfastSelections?: Record<string, string>;
   breakfastServed?: Record<string, boolean>;
+  /**
+   * Per EXB-01 (2026-07-31): extra-bed count + snapshotted rate.
+   * `extraBedCount` is the number of extra beds the guest is renting
+   * (0 by default; bounded server-side by the room type's
+   * `maxExtraBeds`). `extraBedRate` is the per-bed-per-night rate
+   * snapshotted from the room type at booking time, so a later rate
+   * change never rewrites an existing bill — same pattern as
+   * `breakfastRate`. Absent fields normalize to 0 on read, the same
+   * permissive pattern used for the #111 surface flags and CHD.
+   */
+  extraBedCount?: number;
+  extraBedRate?: number;
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;

@@ -588,6 +588,11 @@ export interface AdminContextType {
       pricePerNight: number;
       weekendRate: number;
       corporateRate: number;
+      // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+      // `maxExtraBeds` is 0 by default (no separate `allowsExtraBed`
+      // boolean per the spec). Absent fields normalize to 0.
+      maxExtraBeds?: number;
+      extraBedRate?: number;
     }
   ) => Promise<void>;
   updateRoomType: (
@@ -605,6 +610,8 @@ export interface AdminContextType {
         | "pricePerNight"
         | "weekendRate"
         | "corporateRate"
+        | "maxExtraBeds"
+        | "extraBedRate"
       >
     >
   ) => Promise<void>;
@@ -4398,6 +4405,9 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       pricePerNight: number;
       weekendRate: number;
       corporateRate: number;
+      // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+      maxExtraBeds?: number;
+      extraBedRate?: number;
     }
   ) => {
     const newType: RoomTypeEntry = {
@@ -4411,7 +4421,12 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       maxCapacity: Math.max(1, Math.floor(rt.maxCapacity)),
       pricePerNight: Math.max(0, rt.pricePerNight),
       weekendRate: Math.max(0, rt.weekendRate),
-      corporateRate: Math.max(0, rt.corporateRate)
+      corporateRate: Math.max(0, rt.corporateRate),
+      // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+      // `maxExtraBeds` of 0 means the type does not allow extra
+      // beds (no separate `allowsExtraBed` boolean per the spec).
+      maxExtraBeds: Math.max(0, Math.floor(Number(rt.maxExtraBeds) || 0)),
+      extraBedRate: Math.max(0, Number(rt.extraBedRate) || 0)
     };
     const updated = [...roomTypes, newType];
     await saveRoomTypes(updated);
@@ -4432,6 +4447,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         | "pricePerNight"
         | "weekendRate"
         | "corporateRate"
+        | "maxExtraBeds"
+        | "extraBedRate"
       >
     >
   ) => {

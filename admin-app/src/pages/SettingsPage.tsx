@@ -4465,6 +4465,12 @@ export function SettingsPage() {
                     const pricePerNight = parseFloat((form.elements.namedItem("baseRate") as HTMLInputElement).value) || 0;
                     const weekendRate = parseFloat((form.elements.namedItem("weekendRate") as HTMLInputElement).value) || pricePerNight;
                     const corporateRate = parseFloat((form.elements.namedItem("corpRate") as HTMLInputElement).value) || pricePerNight;
+                    // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+                    // `maxExtraBeds` of 0 means the type does not allow
+                    // extra beds (no separate `allowsExtraBed` boolean
+                    // per the spec). Absent fields default to 0.
+                    const maxExtraBeds = parseInt((form.elements.namedItem("maxExtraBeds") as HTMLInputElement).value, 10) || 0;
+                    const extraBedRate = parseFloat((form.elements.namedItem("extraBedRate") as HTMLInputElement).value) || 0;
 
                     if (!value || !label || !shortLabel) return;
                     if (!bedDefinition) {
@@ -4486,12 +4492,15 @@ export function SettingsPage() {
                       maxCapacity,
                       pricePerNight,
                       weekendRate,
-                      corporateRate
+                      corporateRate,
+                      // Per EXB-01 (2026-07-31).
+                      maxExtraBeds,
+                      extraBedRate
                     });
                     form.reset();
                     toast.success(
                       "Room type added",
-                      `${label} (${shortLabel}) — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night.`
+                      `${label} (${shortLabel}) — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night${maxExtraBeds > 0 ? `, +${maxExtraBeds} extra bed${maxExtraBeds === 1 ? "" : "s"} at ${formatPrice(extraBedRate)}/night` : ""}.`
                     );
                   }}
                   className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
@@ -4606,6 +4615,35 @@ export function SettingsPage() {
                         className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                       />
                     </label>
+                    {/* Per EXB-01 (2026-07-31): extra-bed allowance
+                        + rate. The selector appears on the guest
+                        /book page only when `maxExtraBeds > 0`; the
+                        "no separate `allowsExtraBed` boolean" rule
+                        (per the spec) means the count itself is the
+                        gate. Leave at 0 to keep the type's offering
+                        unchanged. */}
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Max extra beds (0 = not offered)
+                      <input
+                        name="maxExtraBeds"
+                        type="number"
+                        min={0}
+                        max={5}
+                        step={1}
+                        defaultValue={0}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Extra bed rate ({config.currencySymbol} / bed / night)
+                      <input
+                        name="extraBedRate"
+                        type="number"
+                        min={0}
+                        defaultValue={0}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
                   </div>
 
                   <p className="text-[10px] leading-relaxed text-gray-500">
@@ -4681,6 +4719,9 @@ export function SettingsPage() {
                   const pricePerNight = parseFloat(get("baseRate")) || 0;
                   const weekendRate = parseFloat(get("weekendRate")) || pricePerNight;
                   const corporateRate = parseFloat(get("corpRate")) || pricePerNight;
+                  // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+                  const maxExtraBeds = parseInt(get("maxExtraBeds"), 10) || 0;
+                  const extraBedRate = parseFloat(get("extraBedRate")) || 0;
 
                   if (!label || !shortLabel || !bedDefinition) {
                     toast.error("Missing required fields", "Label, short label, and bed description are required.");
@@ -4698,7 +4739,10 @@ export function SettingsPage() {
                       maxCapacity,
                       pricePerNight,
                       weekendRate,
-                      corporateRate
+                      corporateRate,
+                      // Per EXB-01 (2026-07-31).
+                      maxExtraBeds,
+                      extraBedRate
                     });
                     toast.success(
                       "Room type updated",
@@ -4816,6 +4860,31 @@ export function SettingsPage() {
                       type="number"
                       min={0}
                       defaultValue={editType.corporateRate}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  {/* Per EXB-01 (2026-07-31): extra-bed allowance
+                      + rate. The selector appears on the guest
+                      /book page only when `maxExtraBeds > 0`. */}
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Max extra beds (0 = not offered)
+                    <input
+                      name="maxExtraBeds"
+                      type="number"
+                      min={0}
+                      max={5}
+                      step={1}
+                      defaultValue={editType.maxExtraBeds ?? 0}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Extra bed rate ({config.currencySymbol} / bed / night)
+                    <input
+                      name="extraBedRate"
+                      type="number"
+                      min={0}
+                      defaultValue={editType.extraBedRate ?? 0}
                       className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                     />
                   </label>
