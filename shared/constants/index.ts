@@ -87,6 +87,15 @@ export type RoomTypeEntry = {
   pricePerNight: number;
   weekendRate: number;
   corporateRate: number;
+  // Per EXB-01 (2026-07-31): extra-bed allowance + rate. `maxExtraBeds`
+  // is 0 when the type does not allow extra beds (the safe default
+  // — no separate `allowsExtraBed` boolean per the spec). `extraBedRate`
+  // is the per-bed-per-night rate. The booking snapshots `extraBedRate`
+  // so a later rate change never rewrites an existing bill. Absent
+  // fields normalize to 0 on read, the same permissive pattern used
+  // for the #111 surface flags and CHD.
+  maxExtraBeds?: number;
+  extraBedRate?: number;
 };
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;

@@ -54,6 +54,13 @@ export const WalkinBookingSchema = z.object({
   // `true` is the safe default (matches the historical "children pay
   // the full rate" math).
   breakfastIncludesChildren: z.boolean().optional(),
+  // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
+  // absent, the server treats it as 0 (the "no extra bed" case).
+  // Bounded server-side by the room type's `maxExtraBeds` (a
+  // booking with `extraBedCount > maxExtraBeds` is rejected). The
+  // server snapshots the room type's `extraBedRate` onto the
+  // booking doc alongside this field.
+  extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: z.string().trim().min(1).max(80),
   // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so

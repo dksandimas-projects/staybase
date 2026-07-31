@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calculateBreakfastAddOn } from "../utils/bookingAddOns";
+import { calculateBreakfastAddOn, calculateExtraBedAddOn } from "../utils/bookingAddOns";
 
 // Per EXB-02 (2026-07-31): characterization tests for the
 // breakfast add-on math. These tests pin the contract that
@@ -328,3 +328,97 @@ describe("calculateBreakfastAddOn — CHD-10 adult/child split (2026-07-31, per 
   });
 });
 
+
+// Per EXB-01 (2026-07-31): the extra-bed add-on term. Sibling
+// to `calculateBreakfastAddOn`. The math is
+// `extraBedCount × extraBedRate × numNights`; no `hasBreakfast`
+// gate (count of 0 is the "off" state).
+describe("calculateExtraBedAddOn (EXB-01, 2026-07-31)", () => {
+  describe("happy path — `count × rate × nights`", () => {
+    it("returns the product for a positive count, rate, and nights", () => {
+      // 1 bed × ₱500 × 2 nights = ₱1000.
+      expect(
+        calculateExtraBedAddOn({
+          extraBedCount: 1,
+          extraBedRate: 500,
+          numNights: 2
+        })
+      ).toBe(1000);
+    });
+
+    it("matches the historical inline pattern byte-equivalently", () => {
+      // Pre-EXB-01 inline was `extraBedCount * extraBedRate * numNights`
+      // (no defensive coercion, no gate). The helper must return the
+      // same value for any input where the inline returned a number.
+      const cases: Array<[number, number, number]> = [
+        [1, 500, 2],
+        [2, 300, 3],
+        [0, 500, 2],
+        [1, 0, 2],
+        [1, 500, 0]
+      ];
+      for (const [count, rate, nights] of cases) {
+        expect(calculateExtraBedAddOn({ extraBedCount: count, extraBedRate: rate, numNights: nights }))
+          .toBe(count * rate * nights);
+      }
+    });
+  });
+
+  describe("defensive coercion — nullish / NaN / 0 inputs", () => {
+    it("returns 0 when count is 0 (the 'no extra bed' case)", () => {
+      expect(calculateExtraBedAddOn({ extraBedCount: 0, extraBedRate: 500, numNights: 3 })).toBe(0);
+    });
+
+    it("returns 0 when rate is 0 (the 'free' case — should not happen with a real rate)", () => {
+      expect(calculateExtraBedAddOn({ extraBedCount: 1, extraBedRate: 0, numNights: 3 })).toBe(0);
+    });
+
+    it("returns 0 when nights is 0", () => {
+      expect(calculateExtraBedAddOn({ extraBedCount: 1, extraBedRate: 500, numNights: 0 })).toBe(0);
+    });
+
+    it("treats nullish count as 0", () => {
+      expect(calculateExtraBedAddOn({ extraBedCount: null as any, extraBedRate: 500, numNights: 3 })).toBe(0);
+      expect(calculateExtraBedAddOn({ extraBedCount: undefined, extraBedRate: 500, numNights: 3 })).toBe(0);
+    });
+
+    it("treats nullish rate as 0", () => {
+      expect(calculateExtraBedAddOn({ extraBedCount: 1, extraBedRate: null as any, numNights: 3 })).toBe(0);
+      expect(calculateExtraBedAddOn({ extraBedCount: 1, extraBedRate: undefined, numNights: 3 })).toBe(0);
+    });
+
+    it("treats nullish nights as 0", () => {
+      expect(calculateExtraBedAddOn({ extraBedCount: 1, extraBedRate: 500, numNights: null as any })).toBe(0);
+      expect(calculateExtraBedAddOn({ extraBedCount: 1, extraBedRate: 500, numNights: undefined })).toBe(0);
+    });
+
+    it("treats NaN inputs as 0", () => {
+      expect(calculateExtraBedAddOn({ extraBedCount: NaN, extraBedRate: 500, numNights: 3 })).toBe(0);
+      expect(calculateExtraBedAddOn({ extraBedCount: 1, extraBedRate: NaN, numNights: 3 })).toBe(0);
+    });
+  });
+
+  describe("realistic chain scenarios", () => {
+    it("matches the server's extra-bed line for a 1-bed, 3-night stay at ₱500/night", () => {
+      // Per the spec (EXB-01 + EXB-04): extra beds are billed per
+      // night at the room-type's `extraBedRate`. 1 bed × ₱500 × 3 = ₱1500.
+      expect(
+        calculateExtraBedAddOn({
+          extraBedCount: 1,
+          extraBedRate: 500,
+          numNights: 3
+        })
+      ).toBe(1500);
+    });
+
+    it("matches the server's extra-bed line for a 2-bed, 2-night stay at ₱300/night", () => {
+      expect(
+        calculateExtraBedAddOn({
+          extraBedCount: 2,
+          extraBedRate: 300,
+          numNights: 2
+        })
+      ).toBe(1200);
+    });
+  });
+});
