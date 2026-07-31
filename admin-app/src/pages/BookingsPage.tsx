@@ -3231,6 +3231,7 @@ export function BookingsPage() {
               totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
+              paymentMethodLabel={selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : ""}
             />
             </div>
 
@@ -3239,7 +3240,7 @@ export function BookingsPage() {
               <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-2.5">
                 <div className="flex items-center gap-2 text-xs">
                   <CreditCard size={14} className="text-gray-400" />
-                  <span className="text-gray-700">{selectedBooking.paymentMethod || "Online payment"}</span>
+                  <span className="text-gray-700">{selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "Online payment"}</span>
                   {selectedBooking.status === "payment-uploaded" && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
                   )}
@@ -3259,7 +3260,7 @@ export function BookingsPage() {
             ) : selectedBooking.paymentMethod !== "pay-at-hotel" && selectedBooking.paymentMethod ? (
               <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-2.5 text-xs text-gray-500">
                 <CreditCard size={14} className="text-gray-400" />
-                {selectedBooking.paymentMethod} — no proof uploaded
+                {getOnsitePaymentMethodLabel(selectedBooking.paymentMethod!)} — no proof uploaded
               </div>
             ) : null}
             </BookingDrawerSectionPanel>
@@ -3634,7 +3635,7 @@ export function BookingsPage() {
                         </button>
                         <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
                           <p className="font-semibold text-gray-900">
-                            Method: {selectedBooking.paymentMethod || "Not specified"}
+                            Method: {selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "Not specified"}
                           </p>
                           {getLatestPaymentReference(selectedBooking) && (
                             <p className="font-semibold text-gray-900">
@@ -4834,15 +4835,20 @@ export function BookingsPage() {
           </div>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Payment Term
+            Payment Method
             <select
               value={walkinPayment}
               onChange={(e) => setWalkinPayment(e.target.value)}
               className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
             >
-              <option value="pay-at-hotel">Pay at Hotel</option>
-              <option value="cash">Cash on Hand</option>
-              <option value="card">Onsite Card Reader</option>
+              {[
+                { method: "pay-at-hotel", label: "Pay at Hotel" },
+                ...onsitePaymentMethodOptions
+              ].map((m: any) => (
+                <option key={m.method} value={m.method}>
+                  {m.label || m.method}
+                </option>
+              ))}
             </select>
           </label>
 

@@ -26,6 +26,12 @@ interface BookingDrawerWorkspaceHeaderProps {
   totalPaid: number;
   balance: number;
   missingCheckInItems: string[];
+  // Per WPM-06 (2026-07-31): the header used to render the raw
+  // `booking.paymentMethod` key (e.g. "gcash" instead of "GCash"). The
+  // parent (BookingsPage) resolves the label via the same
+  // `getOnsitePaymentMethodLabel` helper the four other selectors use
+  // and passes the resolved string down.
+  paymentMethodLabel: string;
 }
 
 const sections: Array<{
@@ -46,7 +52,8 @@ export function BookingDrawerWorkspaceHeader({
   onSectionChange,
   totalPaid,
   balance,
-  missingCheckInItems
+  missingCheckInItems,
+  paymentMethodLabel
 }: BookingDrawerWorkspaceHeaderProps) {
   const needsPaymentReview = booking.status === "payment-uploaded";
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
@@ -116,7 +123,7 @@ export function BookingDrawerWorkspaceHeader({
                 Payment method
               </p>
               <p className="mt-2 truncate text-xs font-bold uppercase text-gray-900">
-                {booking.paymentMethod || "Not specified"}
+                {paymentMethodLabel || "Not specified"}
               </p>
             </div>
             {/*
