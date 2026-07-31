@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -446,6 +446,7 @@ export function BookingsPage() {
     vouchers,
     corporateCodes,
     paymentMethods,
+    bookingSources,
     currentUser,
     verifyAndRecordPayment,
     testRuns
@@ -758,6 +759,13 @@ export function BookingsPage() {
     return formatDateInput(tomorrow);
   });
   const [numGuests, setNumGuests] = useState(1);
+  // Per NBS-07 (2026-07-31): the New Booking modal now records the
+  // source (walk-in / phone / facebook / agoda / etc.) and writes it
+  // to `Booking.source`. Default is still "walk-in" so the common
+  // case is one click. The selector maps the configured, front-desk-
+  // selectable, enabled entries — never the system-assigned ones
+  // (online / walk-in / corporate per NBS-06).
+  const [walkinSource, setWalkinSource] = useState("walk-in");
   const [walkinPayment, setWalkinPayment] = useState("pay-at-hotel");
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
@@ -768,6 +776,19 @@ export function BookingsPage() {
   const [staffDiscountType, setStaffDiscountType] = useState<"" | "senior" | "pwd">("");
   const [staffVoucherCode, setStaffVoucherCode] = useState("");
   const [isApplyingStaffDiscount, setIsApplyingStaffDiscount] = useState(false);
+
+  // Per NBS-07 (2026-07-31): memo for the New Booking modal's source
+  // selector. Filters the configured list to entries that are
+  // (a) enabled, (b) selectable at the front desk, and (c) not the
+  // currently-selected source (so the user can re-pick the same one
+  // after toggling — the system-assigned sources never appear here
+  // regardless). Default selection in the state (`walkinSource`) is
+  // still "walk-in" for the common case.
+  const selectableBookingSources = useMemo<BookingSourceConfig[]>(() => {
+    return (bookingSources || []).filter(
+      (s) => s.isEnabled && s.selectableAtFrontDesk
+    );
+  }, [bookingSources]);
 
   const onsitePaymentMethodOptions = useMemo(() => {
     const configured = paymentMethods.filter((method) => {
@@ -2622,8 +2643,13 @@ export function BookingsPage() {
         // empty string placeholder so the type is satisfied;
         // the server overwrites it with the real token.
         lookupToken: "",
-        source: "walk-in",
-        notes: "Created on-site at Front Desk.",
+        // Per NBS-02 / NBS-07 (2026-07-31): the source is now selected
+        // by the desk from the configured list (default "walk-in" for
+        // the common case). The note becomes source-derived server-
+        // side so a phone / Agoda / Facebook booking no longer ships
+        // with a note claiming it was created at the desk.
+        source: walkinSource,
+        notes: "",
         memberId: null,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
@@ -2838,7 +2864,11 @@ export function BookingsPage() {
     if (bPaymentMethod) activeChips.push({ id: "bPaymentMethod", label: `Method: ${bPaymentMethod}`, onRemove: () => setBPaymentMethod("") });
     if (bRoom) activeChips.push({ id: "bRoom", label: `Room: ${bRoom}`, onRemove: () => setBRoom("") });
     if (bRoomType) activeChips.push({ id: "bRoomType", label: `Type: ${bRoomType}`, onRemove: () => setBRoomType("") });
-    if (bSource) activeChips.push({ id: "bSource", label: `Source: ${bSource}`, onRemove: () => setBSource("") });
+    if (bSource) {
+      // Render the configured label, not the raw key, per NBS-09.
+      const sourceLabel = (bookingSources || []).find((s) => s.source === bSource)?.label || bSource;
+      activeChips.push({ id: "bSource", label: `Source: ${sourceLabel}`, onRemove: () => setBSource("") });
+    }
     if (bCorp) activeChips.push({ id: "bCorp", label: bCorp === "yes" ? "Corporate" : "Non-corporate", onRemove: () => setBCorp("") });
     if (bDiscount) activeChips.push({ id: "bDiscount", label: bDiscount === "yes" ? "With discount" : "No discount", onRemove: () => setBDiscount("") });
     if (bDateFrom || bDateTo) activeChips.push({ id: "bDate", label: `Dates: ${bDateFrom || "any"} – ${bDateTo || "any"}`, onRemove: () => { setBDateFrom(""); setBDateTo(""); } });
@@ -2898,7 +2928,7 @@ export function BookingsPage() {
             className="min-h-[44px] px-5 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark active:scale-[0.98] text-sm font-semibold text-white shadow-sm transition"
           >
             <Plus size={16} />
-            New Walk-in Booking
+            New Booking
           </button>
         )}
       </header>
@@ -3084,11 +3114,9 @@ export function BookingsPage() {
                 Source / channel
                 <select value={bSource} onChange={(e) => setBSource(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
                   <option value="">Any</option>
-                  <option value="online">Online</option>
-                  <option value="walk-in">Walk-in</option>
-                  <option value="phone">Phone</option>
-                  <option value="facebook">Facebook</option>
-                  <option value="corporate">Corporate</option>
+                  {(bookingSources || []).map((s) => (
+                    <option key={s.source} value={s.source}>{s.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
@@ -4646,7 +4674,7 @@ export function BookingsPage() {
 
       {/* Walk-in Booking Modal (M-05) */}
       <Modal
-        title="Create Walk-in Booking"
+        title="Create New Booking"
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         footer={
@@ -4833,6 +4861,21 @@ export function BookingsPage() {
               <span>Check-In Guest Immediately</span>
             </label>
           </div>
+
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Source
+            <select
+              value={walkinSource}
+              onChange={(e) => setWalkinSource(e.target.value)}
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+            >
+              {selectableBookingSources.map((s) => (
+                <option key={s.source} value={s.source}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Payment Method

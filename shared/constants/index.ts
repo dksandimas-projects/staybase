@@ -8,7 +8,48 @@ export const BOOKING_STATUSES = [
   "cancelled"
 ] as const;
 
+// Per NBS (2026-07-31): the booking source list is admin-editable in
+// Settings. `BOOKING_SOURCES` is the historical union used as a Zod
+// `z.enum(...)` source — kept for the type alias `BookingSource`
+// (which is now widened to `string` per NBS-03) and for the seed
+// defaults in `DEFAULT_BOOKING_SOURCES`. New code that needs a
+// configured list should read `settings/hotelConfig.bookingSources[]`
+// via the `bookingSources` slice of `AdminContext`.
+// `selectableAtFrontDesk: false` on a source means the system assigns
+// it (server-derived from the booking path) and the New Booking modal
+// must never offer it — choosing "Online" for a walk-in would corrupt
+// acquisition reporting (per NBS-06).
 export const BOOKING_SOURCES = ["online", "walk-in", "phone", "facebook", "corporate"] as const;
+
+// Per CVQ-08 (2026-07-31): the hotel is planning for Agoda. The seed
+// list adds Agoda as the OTA entry alongside the existing five.
+// `online` / `walk-in` / `corporate` are system-assigned and must
+// never appear in the New Booking modal's source selector.
+export type BookingSourceConfig = {
+  source: string;
+  label: string;
+  isEnabled: boolean;
+  selectableAtFrontDesk: boolean;
+};
+
+export const DEFAULT_BOOKING_SOURCES: BookingSourceConfig[] = [
+  { source: "online", label: "Online Booking", isEnabled: true, selectableAtFrontDesk: false },
+  { source: "walk-in", label: "Walk-in Desk", isEnabled: true, selectableAtFrontDesk: false },
+  { source: "corporate", label: "Corporate Codes", isEnabled: true, selectableAtFrontDesk: false },
+  { source: "phone", label: "Phone Call", isEnabled: true, selectableAtFrontDesk: true },
+  { source: "facebook", label: "Facebook / Messenger", isEnabled: true, selectableAtFrontDesk: true },
+  { source: "agoda", label: "Agoda (OTA)", isEnabled: true, selectableAtFrontDesk: true }
+];
+
+// Per NBS-05 (2026-07-31): bookings store the source *key*, so deleting
+// a source orphans every historical booking that used it. Worse,
+// `online` / `walk-in` / `corporate` are written by server code paths
+// (public booking create, corporate conversion, walk-in create) —
+// deleting any of them breaks booking creation outright. Mirror
+// `PROTECTED_PAYMENT_METHODS`: no delete button, a "Required" pill,
+// and a second-line-of-defense block in the context's delete function.
+export const PROTECTED_BOOKING_SOURCES = ["online", "walk-in", "corporate"] as const;
+export type ProtectedBookingSource = (typeof PROTECTED_BOOKING_SOURCES)[number];
 
 export const ROOM_STATUSES = ["available", "occupied", "blocked"] as const;
 

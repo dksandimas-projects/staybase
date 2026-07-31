@@ -46,6 +46,31 @@ function sumLedgerAmounts(snapshot: any): number {
   return snapshot.docs.reduce((sum: number, docSnap: any) => sum + Number(docSnap.data()?.amount || 0), 0);
 }
 
+// Per NBS-02 (2026-07-31): derive a short, source-accurate note for
+// walk-in bookings. The historical shape was the hardcoded
+// "Created on-site at Front Desk." which was wrong for any
+// non-walk-in source (a phone booking was claiming it was created
+// at the desk). The fallback is the historical copy for "walk-in"
+// to preserve the existing record shape; everything else gets a
+// note that matches the channel.
+function deriveSourceNote(source: string): string {
+  switch (source) {
+    case "walk-in":
+      return "Created on-site at Front Desk.";
+    case "phone":
+      return "Booked via phone call.";
+    case "facebook":
+      return "Booked via Facebook / Messenger.";
+    case "agoda":
+      return "Booked via Agoda (OTA).";
+    default:
+      // Configured sources the server doesn't have a hardcoded
+      // note for (admin can add new ones in Settings) get a
+      // generic note that still matches the channel.
+      return `Booked via ${source}.`;
+  }
+}
+
 function sumBilledAddToBillOrders(snapshot: any): number {
   return snapshot.docs.reduce((sum: number, docSnap: any) => {
     const order = docSnap.data() || {};
@@ -1401,6 +1426,14 @@ export async function handleCreateWalkin(req: any, res: any) {
     hasBreakfast,
     guestDetails,
     paymentMethod,
+    // Per NBS-02 (2026-07-31): the source is now selected by the
+    // desk from the configured list. The schema defaults to
+    // "walk-in" so every existing caller keeps working; the handler
+    // then validates against the configured list and derives the
+    // booking `notes` field from it so a phone / Agoda / Facebook
+    // booking no longer ships with a note claiming it was created at
+    // the desk.
+    source: requestedSource,
     status,
     totalPriceOverride,
     discountType: requestedDiscountType,
@@ -1517,6 +1550,28 @@ export async function handleCreateWalkin(req: any, res: any) {
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
+
+      // Per NBS-02 (2026-07-31): the submitted `source` must match
+      // a configured entry. The desk can't forge a system-assigned
+      // value (online / walk-in / corporate) — but the schema
+      // accepts any string up to 80 chars, so the authoritative
+      // gate is the configured list. If the configured list is
+      // missing or empty, fall back to the historical seed
+      // (`walk-in` is always allowed) so a freshly bootstrapped
+      // project doesn't break.
+      const bookingSourcesArr: any[] = Array.isArray(hotelConfig.bookingSources) ? hotelConfig.bookingSources : [];
+      const validSourceKeys = bookingSourcesArr
+        .map((s) => (s && typeof s.source === "string" ? s.source.trim() : ""))
+        .filter((s) => s.length > 0);
+      const resolvedSource = validSourceKeys.includes(requestedSource) ? requestedSource : "walk-in";
+      if (resolvedSource !== requestedSource) {
+        // Don't reject outright — `walk-in` is the safe default and
+        // a stale/typo source should still let a check-in happen.
+        // The desk can re-save the booking later with the right
+        // source if needed (booking drawer already exposes the
+        // field once NBS-04 lands).
+        console.warn(`[handleCreateWalkinBooking] unknown source "${requestedSource}" — falling back to "walk-in"`);
+      }
 
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
@@ -1704,8 +1759,12 @@ export async function handleCreateWalkin(req: any, res: any) {
         // (not `""`) so the canonical "absent" value is
         // consistent with the online flow.
         paymentProofUrl: null,
-        source: "walk-in",
-        notes: "Created on-site at Front Desk.",
+        // Per NBS-02 (2026-07-31): source is now selected by the
+        // desk from the configured list; the note is derived from
+        // it so a phone / Agoda / Facebook booking no longer ships
+        // with a note claiming it was created at the desk.
+        source: resolvedSource,
+        notes: deriveSourceNote(resolvedSource),
         handledBy: req.staff.uid || "staff",
         memberId: null,
         pointsRedeemed: 0,

@@ -1,5 +1,4 @@
 import type {
-  BOOKING_SOURCES,
   BOOKING_STATUSES,
   HOUSEKEEPING_STATUSES,
   ROOM_STATUSES
@@ -9,7 +8,14 @@ export type RoomType = string;
 export type RoomStatus = (typeof ROOM_STATUSES)[number];
 export type HousekeepingStatus = (typeof HOUSEKEEPING_STATUSES)[number];
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
-export type BookingSource = (typeof BOOKING_SOURCES)[number];
+// Per NBS-03 (2026-07-31): widened from the historical union
+// ("online" | "walk-in" | "phone" | "facebook" | "corporate") to
+// `string` so new configured entries (e.g. "agoda" per CVQ-08) flow
+// through without a schema change. The `BOOKING_SOURCES` constant
+// stays as the seed/default array. Server-side validation against the
+// configured list (`settings/hotelConfig.bookingSources[]`) is the
+// authoritative gate; the union is no longer the source of truth.
+export type BookingSource = string;
 export type DiscountType = "" | "senior" | "pwd";
 export type PaymentMethod = "pay-at-hotel" | "gcash" | "paypal" | string;
 
