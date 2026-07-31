@@ -3646,6 +3646,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const [breakfastConfig, setBreakfastConfig] = useState({
     isEnabled: true,
     ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+    // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
+    // "include children in the breakfast charge". The server
+    // snapshots this onto every new booking whose client did not
+    // send a per-booking override. `true` is the historical
+    // default (children pay the full rate) and the safe one —
+    // narrowing is a one-line change, unwinding under-charged
+    // bills is not.
+    breakfastIncludesChildrenDefault: true,
     silogItems: [
       { id: "sl-1", name: "Tapsilog", isActive: true },
       { id: "sl-2", name: "Longsilog", isActive: true },

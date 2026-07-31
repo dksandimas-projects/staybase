@@ -278,6 +278,15 @@ export interface Booking {
   confirmedWithBalanceBy?: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  /**
+   * Per CHD-10 (2026-07-31, per CVQ-01): whether children are included
+   * in the breakfast charge. Snapshotted from the admin default
+   * (`settings/breakfastConfig.breakfastIncludesChildrenDefault`) at
+   * booking time so a later policy change never rewrites an existing
+   * bill. `undefined` on legacy bookings reads as `true` for back-compat
+   * (the historical "children pay the full rate" default).
+   */
+  breakfastIncludesChildren?: boolean | null;
   breakfastSelections?: Record<string, string>;
   breakfastServed?: Record<string, boolean>;
   reminderSentAt: string | null;

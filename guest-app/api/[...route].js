@@ -221158,6 +221158,13 @@ var WalkinBookingSchema = external_exports.object({
   checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   guests: external_exports.coerce.number().int().min(1).max(100),
   hasBreakfast: external_exports.boolean(),
+  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
+  // the server snapshots the admin default from
+  // `settings/breakfastConfig.breakfastIncludesChildrenDefault` and
+  // writes the result to the booking doc alongside `hasBreakfast`.
+  // `true` is the safe default (matches the historical "children pay
+  // the full rate" math).
+  breakfastIncludesChildren: external_exports.boolean().optional(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: external_exports.string().trim().min(1).max(80),
   // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
@@ -221412,10 +221419,20 @@ function computeServerFolioTotals(input) {
 function calculateBreakfastAddOn(input) {
   if (!input.hasBreakfast) return 0;
   const rate = Number(input.breakfastRate) || 0;
-  const guests = Number(input.numGuests) || 0;
   const nights = Number(input.numNights) || 0;
-  if (rate === 0 || guests === 0 || nights === 0) return 0;
-  return rate * guests * nights;
+  if (rate === 0 || nights === 0) return 0;
+  const numAdults = Number(input.numAdults);
+  const useSplit = Number.isFinite(numAdults) && numAdults > 0;
+  let effectiveOccupancy;
+  if (useSplit) {
+    const numChildren = Number(input.numChildren) || 0;
+    const includesChildren = input.breakfastIncludesChildren !== false;
+    effectiveOccupancy = numAdults + (includesChildren ? numChildren : 0);
+  } else {
+    effectiveOccupancy = Number(input.numGuests) || 0;
+  }
+  if (effectiveOccupancy === 0) return 0;
+  return rate * effectiveOccupancy * nights;
 }
 
 // ../shared/utils/bookingDiscounts.ts
@@ -224625,6 +224642,13 @@ var createBookingSchema = external_exports.object({
   checkOut: external_exports.string().trim().min(1).max(40),
   guests: external_exports.number().finite().int().min(1).max(100),
   hasBreakfast: external_exports.boolean(),
+  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
+  // the server snapshots the admin default from
+  // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
+  // and writes the result to the booking doc alongside
+  // `hasBreakfast`. `true` is the safe default (matches the
+  // historical "children pay the full rate" math).
+  breakfastIncludesChildren: external_exports.boolean().optional(),
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -224667,6 +224691,14 @@ async function handleCreateBooking(req, res) {
     checkOut,
     guests,
     hasBreakfast,
+    // Per CHD-10 (2026-07-31, per CVQ-01): the optional per-booking
+    // override for "include children in the breakfast charge". When
+    // undefined, the server snapshots the admin default from
+    // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
+    // inside the create transaction. Storing the result on the
+    // booking doc means a later policy change never rewrites an
+    // existing bill.
+    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
     guestDetails: rawGuestDetails,
     discountType,
     discountIdPhotoUrl,
@@ -224880,6 +224912,8 @@ async function handleCreateBooking(req, res) {
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
+      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
+      const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== void 0 ? requestedBreakfastIncludesChildren : breakfastIncludesChildrenDefault;
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
@@ -224958,7 +224992,13 @@ async function handleCreateBooking(req, res) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
-      const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: finalHasBreakfast,
+        breakfastRate: actualBreakfastRate,
+        numGuests: guests,
+        numNights,
+        breakfastIncludesChildren
+      });
       const subtotal = roomTotal + breakfastTotal;
       let discountPct = 0;
       if (discountType === "senior" || discountType === "pwd") {
@@ -225126,6 +225166,12 @@ async function handleCreateBooking(req, res) {
         pointsRedeemedAt: null,
         hasBreakfast: finalHasBreakfast,
         breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
+        // "include children in breakfast" flag. Written to the
+        // booking doc so a later policy change never rewrites an
+        // existing bill. Math consumers (the helper, the receipt
+        // PDF, the rate breakdown) read this field.
+        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -225428,6 +225474,8 @@ async function handleCreateWalkin(req, res) {
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
+      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
+      const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
@@ -225438,7 +225486,13 @@ async function handleCreateWalkin(req, res) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
-      const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: finalHasBreakfast,
+        breakfastRate: actualBreakfastRate,
+        numGuests: guests,
+        numNights,
+        breakfastIncludesChildren
+      });
       const subtotal = roomTotal + breakfastTotal;
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
@@ -225562,6 +225616,11 @@ async function handleCreateWalkin(req, res) {
         pointsRedeemedAt: null,
         hasBreakfast: finalHasBreakfast,
         breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
+        // "include children in breakfast" flag. Same shape as
+        // the online-create path; corporate inquiry surfaces
+        // don't expose a per-booking override.
+        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -227226,7 +227285,8 @@ async function handleRescheduleBooking(req, res) {
         hasBreakfast: booking.hasBreakfast,
         breakfastRate,
         numGuests: booking.numGuests,
-        numNights
+        numNights,
+        breakfastIncludesChildren: booking.breakfastIncludesChildren
       }) : 0;
       const subtotal = roomTotal + breakfastTotal;
       let discountPct = 0;

@@ -177,3 +177,154 @@ describe("calculateBreakfastAddOn — the historical `nonNegativeFinite` sites",
     ).toBe(0);
   });
 });
+
+describe("calculateBreakfastAddOn — CHD-10 adult/child split (2026-07-31, per CVQ-01)", () => {
+  describe("when numAdults is NOT provided, the helper falls back to numGuests (back-compat)", () => {
+    it("matches the pre-CHD-10 output for the historical numGuests input", () => {
+      // Pre-CHD-10 byte-equivalent: 250 × 3 × 2 = 1500. The new helper
+      // returns the same value when numAdults is absent.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numGuests: 3,
+          numNights: 2
+        })
+      ).toBe(1500);
+    });
+
+    it("ignores the breakfastIncludesChildren flag when numAdults is absent", () => {
+      // Per the spec: the toggle only takes effect when the adult/child
+      // split is provided. Without numAdults, the helper uses numGuests
+      // regardless of the toggle — preserving the historical behavior.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numGuests: 3,
+          numNights: 2,
+          breakfastIncludesChildren: false
+        })
+      ).toBe(1500);
+    });
+  });
+
+  describe("when numAdults IS provided, the helper uses (numAdults + (flag ? numChildren : 0))", () => {
+    it("counts only adults when breakfastIncludesChildren is false", () => {
+      // 2 adults + 0 children (excluded) = 2 occupants × ₱250 × 3 nights = ₱1500.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 2,
+          numChildren: 1,
+          numNights: 3,
+          breakfastIncludesChildren: false
+        })
+      ).toBe(1500);
+    });
+
+    it("counts adults + children when breakfastIncludesChildren is true", () => {
+      // 2 adults + 1 child (included) = 3 occupants × ₱250 × 3 nights = ₱2250.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 2,
+          numChildren: 1,
+          numNights: 3,
+          breakfastIncludesChildren: true
+        })
+      ).toBe(2250);
+    });
+
+    it("defaults breakfastIncludesChildren to true when undefined (the historical default)", () => {
+      // 2 adults + 1 child (flag absent, defaults to true) = 3 occupants.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 2,
+          numChildren: 1,
+          numNights: 3
+        })
+      ).toBe(2250);
+    });
+
+    it("handles the children-only edge case (numAdults provided, numChildren = 0)", () => {
+      // 1 adult + 0 children = 1 occupant × ₱250 × 2 nights = ₱500.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 1,
+          numChildren: 0,
+          numNights: 2,
+          breakfastIncludesChildren: true
+        })
+      ).toBe(500);
+    });
+
+    it("ignores numGuests when numAdults is provided (the split takes precedence)", () => {
+      // numAdults = 2 (no children, flag false) = 2 occupants.
+      // numGuests = 5 is ignored. 2 × 250 × 2 = 1000.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 2,
+          numChildren: 0,
+          numGuests: 5, // ignored
+          numNights: 2,
+          breakfastIncludesChildren: false
+        })
+      ).toBe(1000);
+    });
+  });
+
+  describe("defensive coercion in the CHD-10 path", () => {
+    it("treats nullish numChildren as 0", () => {
+      // 2 adults + 0 children (nullish) = 2 occupants.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 2,
+          numChildren: null as any,
+          numNights: 3,
+          breakfastIncludesChildren: true
+        })
+      ).toBe(1500);
+    });
+
+    it("treats breakfastIncludesChildren === null as the default (true)", () => {
+      // null flag → defaults to true → 2 adults + 1 child = 3 occupants.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 2,
+          numChildren: 1,
+          numNights: 3,
+          breakfastIncludesChildren: null as any
+        })
+      ).toBe(2250);
+    });
+
+    it("returns 0 when numAdults is the only occupant and the flag excludes a child", () => {
+      // 2 adults + 0 children excluded (children=2, flag=false) = 2 occupants.
+      // Sanity check the defensive coercion of numChildren=0.
+      expect(
+        calculateBreakfastAddOn({
+          hasBreakfast: true,
+          breakfastRate: 250,
+          numAdults: 2,
+          numChildren: 0,
+          numNights: 3,
+          breakfastIncludesChildren: false
+        })
+      ).toBe(1500);
+    });
+  });
+});
+

@@ -1426,6 +1426,15 @@ export function SettingsPage() {
   // 4. Breakfast Config states
   const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled);
   const [breakfastRate, setBreakfastRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
+  // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
+  // "include children in the breakfast charge". The server snapshots
+  // this onto every new booking whose client did not send a
+  // per-booking override. The admin can flip it here as policy
+  // changes; existing bookings are unaffected (the snapshot is
+  // per-booking, not per-policy).
+  const [breakfastIncludesChildrenDefault, setBreakfastIncludesChildrenDefault] = useState(
+    breakfastConfig.breakfastIncludesChildrenDefault !== false
+  );
   const [silogItems, setSilogItems] = useState<{ id: string; name: string; isActive: boolean }[]>(breakfastConfig.silogItems);
 
   // 5. Store Config states
@@ -2053,6 +2062,7 @@ export function SettingsPage() {
     await runSettingsSave("breakfast", "Dining settings saved", () => updateSettings("breakfastConfig", {
       isEnabled: breakfastEnabled,
       ratePerPersonPerNight: parseFloat(breakfastRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+      breakfastIncludesChildrenDefault,
       silogItems
     }));
   };
@@ -3805,6 +3815,30 @@ export function SettingsPage() {
                     disabled={!breakfastEnabled}
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
                   />
+                </label>
+
+                {/* Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide
+                    default for "include children in the breakfast
+                    charge". The server snapshots this onto every new
+                    booking whose client did not send a per-booking
+                    override. Existing bookings are unaffected (the
+                    snapshot is per-booking, not per-policy). */}
+                <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setBreakfastIncludesChildrenDefault(!breakfastIncludesChildrenDefault)}
+                    disabled={!breakfastEnabled}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                      breakfastIncludesChildrenDefault ? "bg-primary" : "bg-gray-300"
+                    }`}
+                    aria-pressed={breakfastIncludesChildrenDefault}
+                    aria-label="Include children in the breakfast charge by default"
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      breakfastIncludesChildrenDefault ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  Include children in the breakfast charge by default
                 </label>
               </div>
 
