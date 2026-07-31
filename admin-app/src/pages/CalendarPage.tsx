@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Edit3, Plus, XCircle } from "lucide-react";
-import { calculateSeasonalAwareRoomTotal, getNumNights, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, PaymentMethodConfig } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, getNumNights, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, PaymentMethodConfig, calculateBreakfastAddOn } from "@spark-inn/shared";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -237,7 +237,18 @@ export function CalendarPage() {
     const trimmedLast = lastName.trim();
     if (!selection || !selectedRoom || !selectedRoomType || !trimmedFirst || !trimmedLast) return;
     const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-    const totalPrice = selectedRoomTotal + (hasBreakfast ? breakfastRate * guestCount * selectedNights : 0);
+    // Per EXB-02 (2026-07-31): the historical inline
+    // `hasBreakfast ? breakfastRate * guestCount * selectedNights : 0`
+    // now routes through the shared `calculateBreakfastAddOn` helper.
+    // Byte-equivalent output — the helper's defensive coercion matches
+    // the ternary's `hasBreakfast` gate and the `Number(x) || 0`
+    // pattern this site uses.
+    const totalPrice = selectedRoomTotal + calculateBreakfastAddOn({
+      hasBreakfast,
+      breakfastRate,
+      numGuests: guestCount,
+      numNights: selectedNights
+    });
     const result = await addWalkinBooking({
       roomId: selectedRoom.id,
       roomNumber: selectedRoom.roomNumber,

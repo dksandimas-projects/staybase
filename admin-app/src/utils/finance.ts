@@ -3,6 +3,14 @@
 // bucketing, timezone-stable day keys) can be unit-tested without rendering
 // the page.
 
+// Per EXB-02 (2026-07-31): the breakfast add-on math is now sourced
+// from the shared `calculateBreakfastAddOn` helper in
+// `@spark-inn/shared`. The historical inline `nonNegativeFinite(x) *
+// nonNegativeFinite(y) * z` pattern was duplicated across 10 sites
+// (this file + ReportsPage.tsx + rate-breakdown.ts + bookings.ts +
+// pricing.ts + CalendarPage.tsx). One PR fixes all of them.
+import { calculateBreakfastAddOn } from "@spark-inn/shared";
+
 export type PaymentBucket = "cash" | "gcash" | "bank" | "card" | "paypal" | "other";
 
 // The fixed Daily Close columns. "other" is the catch-all so a custom or
@@ -168,9 +176,18 @@ function nonNegativeFinite(value: unknown): number {
 export function splitBookingRevenue(booking: BookingRevenueInput): { room: number; breakfast: number } {
   const total = nonNegativeFinite(booking.totalPrice);
   const nights = nonNegativeFinite(booking.numNights);
-  const breakfastGross = booking.hasBreakfast
-    ? nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * nights
-    : 0;
+  // Per EXB-02 (2026-07-31): the historical inline
+  // `nonNegativeFinite(breakfastRate) * nonNegativeFinite(numGuests) * nights`
+  // pattern now routes through the shared `calculateBreakfastAddOn`
+  // helper. Byte-equivalent output — the helper's `Number(x) || 0`
+  // defensive coercion matches `nonNegativeFinite(x)` for the inputs
+  // this site passes (all non-negative integers from the booking doc).
+  const breakfastGross = calculateBreakfastAddOn({
+    hasBreakfast: booking.hasBreakfast,
+    breakfastRate: nonNegativeFinite(booking.breakfastRate),
+    numGuests: nonNegativeFinite(booking.numGuests),
+    numNights: nights
+  });
 
   if (total === 0 || breakfastGross === 0) {
     return { room: total, breakfast: 0 };
