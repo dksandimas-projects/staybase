@@ -252,6 +252,12 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 **Room Types & Room Type Photos** *(cross-reference — lives on the Room Types tab, not here)* — per W3.5/W3.6/W3.7, the room type entry owns its `imageUrls[]` gallery, rate matrix, `maxCapacity`, `bedDefinition`, `description`, and `amenities`. The Settings → Room Types table is the single edit surface (Add/Edit capture every type field; the Photos modal handles the gallery — max `MAX_ROOM_TYPE_PHOTOS` = 10, stored at `room-types/{typeValue}/{filename}`, public read / staff write). The Rates tab remains for bulk rate review. Rooms inherit all type properties by joining `Room.type` at read time. Source: `settings/hotelConfig.roomTypes[]`.
 
+**Delete behavior (per RTS-04 / RTS-05 / RTS-06, 2026-07-31):**
+- [x] **Two-click confirm** — first click arms the Delete button ("Click to confirm"); second click within 3 seconds executes. The 3-second timer auto-disarms (RTS-05 candidate; cheap follow-up is the existing `ConfirmForm` primitive from Phase 11.7, deferred — not the active user-visible bug at the time of fix).
+- [x] **Failure propagates** — `saveRoomTypes` checks the boolean return of `updateSettings`, throws on failure, and rolls back the optimistic `setRoomTypes` so a failed Firestore write no longer looks successful. `handleDeleteRoomType` already wraps the call in try/catch and surfaces its own error toast, so the new throw lands safely at the UI surface.
+- [x] **Empty array is a legitimate state** — the `roomTypes` sync effect in `AdminContext` distinguishes "not loaded yet" from "loaded and legitimately empty" (RTS-06 candidate; deferred — not the active user-visible bug at the time of fix).
+- [x] **Single-batch write contract** — Add / Edit / Delete / photo upload / photo remove / photo reorder all flow through the same `saveRoomTypes` primitive the Rates matrix uses, so a future multi-type writer cannot accidentally fan out per-item writes and race on the shared `roomTypes[]` field. See `plan/docs/GOTCHAS.md` Firebase section.
+
 ---
 
 ### 10. Breakfast
