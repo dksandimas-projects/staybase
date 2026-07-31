@@ -173,3 +173,347 @@ describe("calculateVoucherBase (DSC extraction, 2026-07-31)", () => {
     });
   });
 });
+
+// Per DSC-01..05 (2026-08-01, per CVQ-06): the scope-aware discount
+// chain. Decomposes a booking's pre-discount subtotal by component
+// (room, breakfast, extra bed), then applies the senior → voucher →
+// member chain with each class's scope respected. For the broad
+// default scope (all true), the output is byte-equivalent to the
+// pre-DSC-01 chain `subtotal → seniorPwdDiscount →
+// afterSeniorPwd → afterVoucher → memberDiscount → total`.
+import { calculateDiscountChain, normalizeDiscountScope, BROAD_DISCOUNT_SCOPE } from "../utils/bookingDiscounts";
+
+describe("normalizeDiscountScope (DSC-01..05, 2026-08-01, per CVQ-06)", () => {
+  it("returns the broad default when the input is undefined", () => {
+    expect(normalizeDiscountScope(undefined)).toEqual(BROAD_DISCOUNT_SCOPE);
+    expect(normalizeDiscountScope(null)).toEqual(BROAD_DISCOUNT_SCOPE);
+  });
+
+  it("fills in missing class entries with all-true defaults", () => {
+    expect(normalizeDiscountScope({} as any)).toEqual(BROAD_DISCOUNT_SCOPE);
+    expect(normalizeDiscountScope({ senior: undefined as any })).toEqual(BROAD_DISCOUNT_SCOPE);
+  });
+
+  it("fills in missing class components with all-true defaults (narrowing is opt-in)", () => {
+    const partial = normalizeDiscountScope({
+      senior: { room: true, breakfast: false } as any,
+      voucher: { room: false } as any,
+      member: { extraBed: false } as any
+    });
+    expect(partial).toEqual({
+      senior: { room: true, breakfast: false, extraBed: true },
+      voucher: { room: false, breakfast: true, extraBed: true },
+      member: { room: true, breakfast: true, extraBed: false }
+    });
+  });
+
+  it("preserves a fully-specified scope byte-for-byte", () => {
+    const explicit = {
+      senior: { room: true, breakfast: true, extraBed: false },
+      voucher: { room: false, breakfast: true, extraBed: true },
+      member: { room: false, breakfast: false, extraBed: true }
+    };
+    expect(normalizeDiscountScope(explicit)).toEqual(explicit);
+  });
+});
+
+describe("calculateDiscountChain — broad scope (default, byte-equivalent to pre-DSC-01)", () => {
+  it("returns the same total as the pre-DSC-01 chain for a senior-only booking", () => {
+    // 1000 room + 200 breakfast + 0 extra bed; 20% senior.
+    // Pre-DSC-01: subtotal=1200, senior=240, afterSenior=960, total=960.
+    // Broad-scope chain: same. The "scope" is all-true, so the
+    // senior percentage applies to the full subtotal.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0,
+      seniorPct: 20
+    });
+    expect(chain.seniorDeduction).toBe(240);
+    expect(chain.voucherDeduction).toBe(0);
+    expect(chain.memberDeduction).toBe(0);
+    expect(chain.total).toBe(960);
+  });
+
+  it("returns the same total as the pre-DSC-01 chain for a senior + voucher booking", () => {
+    // 1000 room + 200 breakfast; 20% senior + 100 voucher.
+    // Pre-DSC-01: subtotal=1200, senior=240, afterSenior=960, voucher=100, total=860.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0,
+      seniorPct: 20,
+      voucherAmount: 100
+    });
+    expect(chain.seniorDeduction).toBe(240);
+    expect(chain.voucherDeduction).toBe(100);
+    expect(chain.memberDeduction).toBe(0);
+    expect(chain.total).toBe(860);
+  });
+
+  it("returns the same total as the pre-DSC-01 chain for a full chain", () => {
+    // 1000 room + 200 breakfast; 20% senior + 100 voucher + 10% member.
+    // Pre-DSC-01: subtotal=1200, senior=240, afterSenior=960, voucher=100,
+    //              afterVoucher=860, member=86, total=774.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0,
+      seniorPct: 20,
+      voucherAmount: 100,
+      memberPct: 10
+    });
+    expect(chain.seniorDeduction).toBe(240);
+    expect(chain.voucherDeduction).toBe(100);
+    expect(chain.memberDeduction).toBe(86);
+    expect(chain.total).toBe(774);
+  });
+
+  it("includes extra bed in the broad-scope chain (the EXB-01 add-on)", () => {
+    // 1000 room + 200 breakfast + 300 extra bed; 20% senior + 100 voucher + 10% member.
+    // subtotal=1500, senior=300, afterSenior=1200, voucher=100, afterVoucher=1100,
+    //              member=110, total=990.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 300,
+      seniorPct: 20,
+      voucherAmount: 100,
+      memberPct: 10
+    });
+    expect(chain.seniorDeduction).toBe(300);
+    expect(chain.voucherDeduction).toBe(100);
+    expect(chain.memberDeduction).toBe(110);
+    expect(chain.total).toBe(990);
+  });
+
+  it("returns 0 deductions + subtotal for a booking with no discounts", () => {
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0
+    });
+    expect(chain.seniorDeduction).toBe(0);
+    expect(chain.voucherDeduction).toBe(0);
+    expect(chain.memberDeduction).toBe(0);
+    expect(chain.total).toBe(1200);
+  });
+});
+
+describe("calculateDiscountChain — narrow scope (DSC-01..05, per CVQ-06)", () => {
+  it("senior scope: room only — 20% of roomTotal, breakfast + extra bed are NOT senior-discounted", () => {
+    // 1000 room + 200 breakfast + 300 extra bed; senior scope: room only.
+    // Senior base = 1000 (room only); senior = 200. After-senior subtotal: 1300.
+    // Voucher (broad) cap = scopeBase(scope.voucher) − seniorDeduction = 1500 − 200 = 1300.
+    //   Voucher = min(100, 1300) = 100. After-voucher subtotal: 1200.
+    // Member (broad) base = scopeBase(scope.member) − senior − voucher = 1500 − 200 − 100 = 1200.
+    //   Member 10% = 120.
+    // Total = 1500 − 200 − 100 − 120 = 1080.
+    // Note: scopes are per-class and independent. Narrowing senior to "room only"
+    // means the senior percentage no longer applies to breakfast/extra bed —
+    // it does NOT remove those components from the voucher or member's base.
+    // The whole remaining subtotal (after the senior deduction) is still visible
+    // to the voucher + member steps.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 300,
+      seniorPct: 20,
+      voucherAmount: 100,
+      memberPct: 10,
+      scope: {
+        senior: { room: true, breakfast: false, extraBed: false },
+        voucher: { room: true, breakfast: true, extraBed: true },
+        member: { room: true, breakfast: true, extraBed: true }
+      }
+    });
+    expect(chain.seniorDeduction).toBe(200);
+    expect(chain.voucherDeduction).toBe(100);
+    expect(chain.memberDeduction).toBe(120);
+    expect(chain.total).toBe(1080);
+  });
+
+  it("senior scope: room + breakfast only — extra bed is NOT discounted", () => {
+    // 1000 room + 200 breakfast + 300 extra bed; senior scope: room + breakfast.
+    // Senior base = 1200; senior = 240. After-senior: 1500 - 240 = 1260.
+    // Voucher (broad) capped by 1260; voucher = 100. After-voucher: 1160.
+    // Member (broad) base = 1500 - 240 - 100 = 1160; member 10% = 116.
+    // Total = 1500 - 240 - 100 - 116 = 1044.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 300,
+      seniorPct: 20,
+      voucherAmount: 100,
+      memberPct: 10,
+      scope: {
+        senior: { room: true, breakfast: true, extraBed: false },
+        voucher: { room: true, breakfast: true, extraBed: true },
+        member: { room: true, breakfast: true, extraBed: true }
+      }
+    });
+    expect(chain.seniorDeduction).toBe(240);
+    expect(chain.voucherDeduction).toBe(100);
+    expect(chain.memberDeduction).toBe(116);
+    expect(chain.total).toBe(1044);
+  });
+
+  it("voucher scope: room only — voucher capped by room-only remaining", () => {
+    // 1000 room + 200 breakfast; 20% senior (broad) + 500 voucher (room only).
+    // Senior base = 1200; senior = 240. After-senior: 960.
+    // Voucher base = (1000 - 240) = 760. Voucher = min(500, 760) = 500.
+    // After-voucher: 460. Member (broad) base = 1200 - 240 - 500 = 460; member 10% = 46.
+    // Total = 1200 - 240 - 500 - 46 = 414.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0,
+      seniorPct: 20,
+      voucherAmount: 500,
+      memberPct: 10,
+      scope: {
+        senior: { room: true, breakfast: true, extraBed: true },
+        voucher: { room: true, breakfast: false, extraBed: false },
+        member: { room: true, breakfast: true, extraBed: true }
+      }
+    });
+    expect(chain.seniorDeduction).toBe(240);
+    expect(chain.voucherDeduction).toBe(500);
+    expect(chain.memberDeduction).toBe(46);
+    expect(chain.total).toBe(414);
+  });
+
+  it("member scope: breakfast only — 10% off breakfast-only remaining", () => {
+    // 1000 room + 200 breakfast; 20% senior (broad) + 50 voucher (broad) + 10% member (breakfast only).
+    // Senior base = 1200; senior = 240. After-senior: 960.
+    // Voucher = 50. After-voucher: 910.
+    // Member base = (200 - 240 - 50) = clipped to 0 (room portion is NOT in member's scope).
+    // Total = 1200 - 240 - 50 - 0 = 910.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0,
+      seniorPct: 20,
+      voucherAmount: 50,
+      memberPct: 10,
+      scope: {
+        senior: { room: true, breakfast: true, extraBed: true },
+        voucher: { room: true, breakfast: true, extraBed: true },
+        member: { room: false, breakfast: true, extraBed: false }
+      }
+    });
+    expect(chain.seniorDeduction).toBe(240);
+    expect(chain.voucherDeduction).toBe(50);
+    expect(chain.memberDeduction).toBe(0);
+    expect(chain.total).toBe(910);
+  });
+
+  it("all three classes narrow — 20% senior + 50 voucher + 10% member, all on room only", () => {
+    // 1000 room + 200 breakfast + 300 extra bed; all classes room only.
+    // Senior base = 1000; senior = 200. After-senior (room only) = 800.
+    // Voucher base = (1000 - 200) = 800. Voucher = min(50, 800) = 50. After-voucher: 750.
+    // Member base = (1000 - 200 - 50) = 750. Member 10% = 75.
+    // Total = 1500 - 200 - 50 - 75 = 1175.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 300,
+      seniorPct: 20,
+      voucherAmount: 50,
+      memberPct: 10,
+      scope: {
+        senior: { room: true, breakfast: false, extraBed: false },
+        voucher: { room: true, breakfast: false, extraBed: false },
+        member: { room: true, breakfast: false, extraBed: false }
+      }
+    });
+    expect(chain.seniorDeduction).toBe(200);
+    expect(chain.voucherDeduction).toBe(50);
+    expect(chain.memberDeduction).toBe(75);
+    expect(chain.total).toBe(1175);
+  });
+
+  it("no components selected in any class — no deductions", () => {
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0,
+      seniorPct: 20,
+      voucherAmount: 50,
+      memberPct: 10,
+      scope: {
+        senior: { room: false, breakfast: false, extraBed: false },
+        voucher: { room: false, breakfast: false, extraBed: false },
+        member: { room: false, breakfast: false, extraBed: false }
+      }
+    });
+    expect(chain.seniorDeduction).toBe(0);
+    expect(chain.voucherDeduction).toBe(0);
+    expect(chain.memberDeduction).toBe(0);
+    expect(chain.total).toBe(1200);
+  });
+
+  it("voucher larger than its scoped base — capped at the base", () => {
+    // 1000 room + 200 breakfast; voucher scope: room only; voucher = 5000 (huge).
+    // Senior = 240. After-senior: 960.
+    // Voucher base (room only) = 1000 - 240 = 760. Voucher = min(5000, 760) = 760.
+    // Total = 1200 - 240 - 760 - 0 = 200.
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: 200,
+      extraBedTotal: 0,
+      seniorPct: 20,
+      voucherAmount: 5000,
+      memberPct: 0,
+      scope: {
+        senior: { room: true, breakfast: true, extraBed: true },
+        voucher: { room: true, breakfast: false, extraBed: false },
+        member: { room: true, breakfast: true, extraBed: true }
+      }
+    });
+    expect(chain.seniorDeduction).toBe(240);
+    expect(chain.voucherDeduction).toBe(760);
+    expect(chain.total).toBe(200);
+  });
+});
+
+describe("calculateDiscountChain — defensive coercion", () => {
+  it("treats nullish inputs as 0", () => {
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: null as any,
+      extraBedTotal: undefined,
+      seniorPct: null as any,
+      voucherAmount: null as any,
+      memberPct: null as any
+    });
+    expect(chain.seniorDeduction).toBe(0);
+    expect(chain.voucherDeduction).toBe(0);
+    expect(chain.memberDeduction).toBe(0);
+    expect(chain.total).toBe(1000);
+  });
+
+  it("treats NaN inputs as 0", () => {
+    const chain = calculateDiscountChain({
+      roomTotal: 1000,
+      breakfastTotal: NaN,
+      extraBedTotal: NaN,
+      seniorPct: NaN,
+      voucherAmount: NaN,
+      memberPct: NaN
+    });
+    expect(chain.seniorDeduction).toBe(0);
+    expect(chain.total).toBe(1000);
+  });
+
+  it("clamps the final total to ≥ 0 (huge voucher scenario)", () => {
+    const chain = calculateDiscountChain({
+      roomTotal: 100,
+      breakfastTotal: 0,
+      extraBedTotal: 0,
+      voucherAmount: 10000
+    });
+    // Voucher capped at 100 (the full subtotal). Total = 0.
+    expect(chain.total).toBe(0);
+  });
+});

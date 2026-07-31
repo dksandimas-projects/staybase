@@ -10,6 +10,7 @@ import {
   MAX_ROOM_TYPE_PHOTOS,
   PROTECTED_PAYMENT_METHODS,
   UNSUPPORTED_PAYMENT_METHODS,
+  type DiscountScope,
   type PaymentMethodConfig,
   type ProtectedPaymentMethod,
   type RoomTypeEntry
@@ -21,7 +22,7 @@ import {
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
   Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw,
-  ChevronDown, ChevronUp, FlaskConical
+  ChevronDown, ChevronUp, FlaskConical, Tag, Percent
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -35,8 +36,8 @@ import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment";
-type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal";
+type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts";
+type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface EmailTriggerCatalogItem {
@@ -1304,6 +1305,17 @@ export function SettingsPage() {
   const [instagramUrl, setInstagramUrl] = useState(hotelConfig.instagramUrl);
   const [twitterHandle, setTwitterHandle] = useState(hotelConfig.twitterHandle ?? config.twitterHandle);
 
+  // Per DSC-01..05 (2026-08-01, per CVQ-06): per-class
+  // discount scope. The Discounts tab renders a 3×3
+  // checkbox editor (senior row admin-only per DSC-03);
+  // this state mirrors the editor and persists via
+  // `handleSaveDiscounts`. The snapshot is written to
+  // `settings/hotelConfig.discountScope` and read by the
+  // server on every new booking. Legacy settings hydrate
+  // to the broad default via `normalizeDiscountScope` in
+  // `AdminContext`.
+  const [discountScope, setDiscountScope] = useState<DiscountScope>(hotelConfig.discountScope);
+
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
   // no longer owns any hero copy — see `handleSaveBranding` below.
@@ -1663,6 +1675,10 @@ export function SettingsPage() {
     setSeoPriceRange(seoSettings.draft?.priceRange || config.priceRange);
     setSeoOgImage(normalizeSeoImageOverride(seoSettings.draft?.ogImage));
     setTwitterHandle(hotelConfig.twitterHandle ?? config.twitterHandle);
+    // Per DSC-01..05 (2026-08-01, per CVQ-06): sync the
+    // discount scope from the latest snapshot (already
+    // normalized in AdminContext).
+    setDiscountScope(hotelConfig.discountScope);
 
     // Safely format address: if it's a seeded object, convert to single-line string.
     let addrStr = "";
@@ -2067,6 +2083,20 @@ export function SettingsPage() {
     }));
   };
 
+  // Per DSC-01..05 (2026-08-01, per CVQ-06): save the per-class
+  // discount scope to `settings/hotelConfig.discountScope`. The
+  // server snapshots this onto every new booking; existing
+  // bookings are unaffected (the snapshot is per-booking).
+  // Front-desk users cannot reach the editor (admin-only), and
+  // the senior row's checkboxes are disabled for non-admins if
+  // the page is reached by a different path.
+  const handleSaveDiscounts = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runSettingsSave("discounts", "Discount scope saved", () => updateSettings("hotelConfig", {
+      discountScope
+    }));
+  };
+
   const handleSaveStore = async () => {
     await runSettingsSave("store", "Store settings saved", () => updateSettings("storeConfig", {
       isEnabled: storeEnabled,
@@ -2464,7 +2494,8 @@ export function SettingsPage() {
     { id: "intercom" as const, label: "Intercom", icon: MessageSquare },
     { id: "legal" as const, label: "Legal Content", icon: Scale },
     { id: "environment" as const, label: "Environment Testing", icon: FlaskConical },
-    { id: "staff" as const, label: "Staff Accounts", icon: UserCog }
+    { id: "staff" as const, label: "Staff Accounts", icon: UserCog },
+    { id: "discounts" as const, label: "Discounts", icon: Percent }
   ];
 
   if (settingsLoading) {
@@ -5832,6 +5863,167 @@ export function SettingsPage() {
                 </>
               )}
             </div>
+          )}
+
+          {/* TAB 12: DISCOUNTS — per-class discount scope editor
+              (DSC-01..05, 2026-08-01, per CVQ-06). Admin-only:
+              front-desk staff cannot reach this surface. The
+              senior row's checkboxes are additionally disabled
+              for non-admins (DSC-03 guardrail — RA 9994 / RA 10754
+              statutory scope). The 3×3 matrix controls which
+              charge components (room · breakfast · extra bed)
+              each discount class (senior · voucher · member)
+              applies to. The "broad" default (all cells true)
+              is byte-equivalent to the pre-DSC-01 behavior and
+              matches the historical "apply to the whole bill"
+              expectation. Narrowing is opt-in via unchecking
+              cells; broadening back is the safe direction. */}
+          {activeTab === "discounts" && (
+            isAdmin ? (
+              <form onSubmit={handleSaveDiscounts} className="space-y-6 text-xs">
+                <div>
+                  <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Discount Scope</h3>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Choose which charge components (room · breakfast · extra bed) each discount class
+                    (senior · voucher · member) applies to. The scope is snapshotted onto every new
+                    booking; existing bookings are unaffected. Uncheck a cell to exclude that component
+                    from the discount's base.
+                  </p>
+                </div>
+
+                {(() => {
+                  // The 3×3 matrix. Three classes (senior · voucher · member)
+                  // × three components (room · breakfast · extra bed). The
+                  // senior row is admin-only per DSC-03; non-admins see the
+                  // checkboxes disabled. `row.senior/voucher/member` is the
+                  // shape stored on `settings/hotelConfig.discountScope`.
+                  const componentLabels: Array<{ key: "room" | "breakfast" | "extraBed"; label: string }> = [
+                    { key: "room", label: "Room" },
+                    { key: "breakfast", label: "Breakfast" },
+                    { key: "extraBed", label: "Extra bed" }
+                  ];
+                  const classLabels: Array<{ key: "senior" | "voucher" | "member"; label: string; hint: string }> = [
+                    {
+                      key: "senior",
+                      label: "Senior / PWD discount",
+                      hint: "RA 9994 / RA 10754 — statutory. Admin-only."
+                    },
+                    {
+                      key: "voucher",
+                      label: "Voucher discount",
+                      hint: "Hotel-issued flat or percent voucher."
+                    },
+                    {
+                      key: "member",
+                      label: `${config.rewardsName} member discount`,
+                      hint: "Loyalty member base room discount."
+                    }
+                  ];
+                  const updateScope = (
+                    cls: "senior" | "voucher" | "member",
+                    component: "room" | "breakfast" | "extraBed",
+                    value: boolean
+                  ) => {
+                    setDiscountScope((prev) => ({
+                      ...prev,
+                      [cls]: { ...prev[cls], [component]: value }
+                    }));
+                  };
+                  const isBroad = (cls: "senior" | "voucher" | "member") =>
+                    componentLabels.every((c) => discountScope[cls][c.key]);
+                  const setClassAll = (cls: "senior" | "voucher" | "member", value: boolean) => {
+                    setDiscountScope((prev) => ({
+                      ...prev,
+                      [cls]: {
+                        room: value,
+                        breakfast: value,
+                        extraBed: value
+                      }
+                    }));
+                  };
+                  return (
+                    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200">
+                            <th className="text-left px-4 py-3 font-semibold text-gray-700 w-1/2">Discount class</th>
+                            {componentLabels.map((c) => (
+                              <th key={c.key} className="px-3 py-3 font-semibold text-gray-700 text-center">{c.label}</th>
+                            ))}
+                            <th className="px-3 py-3 font-semibold text-gray-500 text-center w-24">All</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {classLabels.map((cls) => {
+                            const isSeniorRow = cls.key === "senior";
+                            return (
+                              <tr key={cls.key} className="border-b border-gray-100 last:border-0">
+                                <td className="px-4 py-3 align-top">
+                                  <p className="font-bold text-gray-800">{cls.label}</p>
+                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">{cls.hint}</p>
+                                </td>
+                                {componentLabels.map((c) => {
+                                  const checked = discountScope[cls.key][c.key];
+                                  return (
+                                    <td key={c.key} className="px-3 py-3 text-center align-middle">
+                                      <label className="inline-flex items-center justify-center cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={(e) => updateScope(cls.key, c.key, e.target.checked)}
+                                          className="h-4 w-4 cursor-pointer text-primary focus:ring-primary-light rounded border-gray-300"
+                                          aria-label={`${cls.label} applies to ${c.label}`}
+                                        />
+                                      </label>
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-3 text-center align-middle">
+                                  <button
+                                    type="button"
+                                    onClick={() => setClassAll(cls.key, !isBroad(cls.key))}
+                                    className="text-[10px] font-bold uppercase tracking-wider text-primary hover:underline"
+                                  >
+                                    {isBroad(cls.key) ? "Uncheck all" : "Check all"}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-amber-800 text-[11px] leading-relaxed">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <ShieldAlert size={14} className="shrink-0" />
+                    Senior / PWD scope (RA 9994 / RA 10754)
+                  </p>
+                  <p className="mt-1">
+                    Narrowing the senior row below the statutory default can configure the
+                    hotel into non-compliance. The chain always applies the senior
+                    percentage to whichever components the scope allows; vouchers and
+                    member discounts apply to the remaining components after the senior
+                    step. The saved scope is snapshotted onto every new booking — a later
+                    policy change here never rewrites an existing bill.
+                  </p>
+                </div>
+
+                <SaveActionFooter label="Save Discount Scope" status={getSaveStatus("discounts")} />
+              </form>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+                <p className="font-semibold">Admin-only section</p>
+                <p className="mt-1 leading-relaxed">
+                  The discount scope is restricted to admin accounts. Senior/PWD scoping is
+                  statutorily bounded under RA 9994 / RA 10754 — the senior row is gated
+                  to admins even when this surface is reached. Ask a hotel owner to make
+                  discount-scope changes.
+                </p>
+              </div>
+            )
           )}
         </div>
       </div>
