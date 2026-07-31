@@ -82,7 +82,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/docs/DECISIONS-ARCH.md` — Architecture, stack, tooling, security, white-label decisions
 - `plan/docs/DECISIONS-FEATURES.md` — Feature scope, product, business rules, compliance decisions
 - `plan/docs/GOTCHAS.md` — What agents must never do
-- `plan/docs/CONTRIBUTING.md` — How to update MDs, sync protocol, deploy checklist
+- `plan/docs/CONTRIBUTING.md` — How to update MDs, sync protocol, deploy checklist, **feature intake & spec workflow** (how a request becomes a roadmap block)
 - `plan/docs/SECURITY.md` — Firestore/Storage rules, PII handling, RA 10173 compliance, session management, CSP headers
 - `plan/docs/LEGAL.md` — IP ownership, guest ToS, GDPR awareness, accessibility commitment, white-label licensing, post-launch support
 - `plan/docs/WHITE-LABEL.md` — Hotel config schema, per-client deployment guide, asset checklist

@@ -7,6 +7,7 @@
 
 ## How to Use This File
 
+- **New feature request or bug report? Follow `plan/docs/CONTRIBUTING.md §Feature Intake & Spec Workflow`** — investigate the code first, verify every claim against source rather than an MD, then spec it here as a coded block. Do not start coding from a chat message.
 - **Must be updated on every merge to `dev`** (per `plan/docs/CONTRIBUTING.md §When to Update Which MD`). The closing the loop is: when a `feat:` / `fix:` / `refactor:` lands, this file gets a `docs:` PR in the same batch. The roadmap is the project's source of truth for "what's open" — drift between the code and the roadmap makes the next person pick wrong work.
 - Check off items as they're completed (`⬜` → `✅`); for `XX-01..05` style items, mark each sub-item or convert to one `✅ **XX**` line with the shipped commit(s).
 - Update "Last updated" date at the top on each edit.

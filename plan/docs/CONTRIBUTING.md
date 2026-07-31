@@ -151,6 +151,58 @@ Rule of thumb: **if it changes the data model, adds a screen, or takes more than
 
 ---
 
+## Feature Intake & Spec Workflow
+
+How a request becomes a roadmap block. Established 2026-07-31; every block from `WPM` onward follows it. Use it for anything that qualifies as a change request above — do not start coding from a chat message.
+
+### The loop
+
+1. **Investigate before answering.** Read the actual code paths the request touches. Count the call sites. Name the files and line numbers.
+2. **Verify every claim against code, never against an MD.** The docs drift. On 2026-07-31 `DECISIONS-FEATURES.md #115` stated the system exports a 12% VAT / VATable / VAT-Exempt breakdown; a repo-wide search returned **zero** occurrences. `FIN-06` had been closed as "decision logged", which was true — the calculation never followed. If an MD claims a behaviour exists, grep for it before repeating the claim.
+3. **Surface what the investigation found**, separately from what was asked. Requests and findings are different things and should be labelled as such (see "Findings" below).
+4. **Ask only the decisions that change the work.** Each question needs a stated recommendation and a working default. Anything answerable from the codebase or from convention is not a question — decide it and say so.
+5. **Spec it as a block** (anatomy below), with dependencies and sequencing made explicit.
+6. **Commit and merge** per the git flow below. No code in the same commit.
+
+### Block anatomy
+
+Every block is a `### ` section in `ROADMAP.md §Phase 12` with a three-letter code:
+
+- **Heading** — `### Name (CODE) — proposed|reported YYYY-MM-DD` plus a size or priority marker where useful (`· P1`, `· large, phased`, `· small`).
+- **Preamble blockquote** — the request in one line; what exists today with file/line evidence; the owner's decisions, dated; dependencies and what this gates; anything already half-built that the work can reuse. Flag cost-changing consequences with **⚠**.
+- **Numbered items** — `- ⬜ **CODE-01 — Short imperative title** — detail.` Each item is independently reviewable. The last item is always **Tests + MD sync**, naming every MD that must change.
+
+### Rules that earned their place
+
+- **Reserve a decision number** in the preamble (`#141`, `#142`, …); write the entry in `DECISIONS-FEATURES.md` only when the implementation lands. Reserving avoids collisions across parallel blocks; deferring the write avoids documenting decisions that get revised.
+- **Label findings distinctly from requests.** Work discovered during investigation — `RTS-01`, `NBS-08`, `DSC-06`, `EXB-10`, `WRV-01` — is marked in the item text (**CONFIRMED**, **ADJACENT FINDING**, **the real trap**). These are the items most likely to be dropped, because nobody asked for them.
+- **State the failure mode, not just the fix.** "Reports silently drops unknown sources — no error, no warning" is actionable. "Make Reports dynamic" is not.
+- **Record rejected alternatives and why.** `MRB` records why one document holding `rooms[]` was rejected over `groupId`; `NBS-02` records why the API route is not renamed. Without this, the next reader re-opens a settled question.
+- **Make dependencies explicit both ways.** If A gates B, say so in A *and* in B. Keep the running order in the `Last updated` line so it survives without reading every block.
+- **Supersede, don't delete.** When a decision reverses (`CVQ-01` flipped the child-breakfast rule and moved `CHD` behind the extraction), strike the old text and record the reversal with its consequence. The history is why the sequencing looks the way it does.
+
+### Client Validation Queue (CVQ)
+
+Decisions taken quickly need validating against how the hotel actually operates. Log them as a compact table — question, working default, affected items, why it matters — so **nothing hard-blocks** on a client meeting. Mark which single question changes engineering *cost* rather than a config value, and ask that one first. Fold each row into its decision entry when answered; delete the section when empty.
+
+### Git flow
+
+- Branch `docs/<topic>` off `dev` — never work on `dev` directly, even for docs.
+- Commit `docs: update ROADMAP.md — <summary>`. The body carries the reasoning: what was found, what was decided, what it costs. `docs:` does not bump `VERSION`.
+- `npm run docs:audit` before committing.
+- Merge with `--no-ff` and a `chore: merge <branch>` message, matching the existing history.
+- One block per branch. Cross-block edits (dependency updates, supersessions) ride along with the block that caused them.
+
+### Lifecycle
+
+Block specced → items ship (`⬜` → `✅`) → when every item is done, move the detail to `plan/project/archive/` and leave a one-line ✅ pointer, per §Documentation Budgets & Lifecycle. Open follow-ups stay in the roadmap; they do not go to the archive with their parent block.
+
+### Block code registry
+
+Keep codes unique. In use as of 2026-07-31 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
+
+---
+
 ## Adding a New MD
 
 If a new feature or concern warrants a new MD:
