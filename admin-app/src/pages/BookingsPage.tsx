@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -1083,39 +1083,32 @@ export function BookingsPage() {
   // Advanced payment-state filters calculate each booking's live folio during
   // render, so leaving these const declarations below that memo triggers the
   // temporal dead zone in production builds.
-  const getBookingPaymentsTotal = (booking: Booking) => {
-    if (selectedBooking && selectedBooking.id === booking.id) {
-      return selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
-    }
-    return (booking.onsitePayments || []).reduce((sum, payment) => sum + payment.amount, 0);
-  };
-
-  const getBookingStoreCharges = (booking: Booking) => {
-    return storeOrders.filter(
-      (order) =>
-        order.bookingId === booking.id &&
-        order.paymentMethod === "add-to-bill" &&
-        order.status === "delivered" &&
-        order.isBilled
-    );
-  };
-
+  // Per PMH-02 (2026-07-31): folio math is now sourced from the
+  // shared `computeBookingFolio` helper. The wrapper below is a
+  // thin adapter that feeds the React state (selectedBooking,
+  // selectedBookingPayments, selectedBookingCharges, storeOrders)
+  // into the shared function. Eight call sites in this file now
+  // go through this wrapper; the math lives in `shared/` so MRB-04
+  // and any future group-folio change can edit one place.
   const getBookingFolio = (booking: Booking) => {
-    const storeCharges = getBookingStoreCharges(booking);
-    const storeTotal = storeCharges.reduce((sum, order) => sum + order.totalAmount, 0);
-    const paymentsTotal = getBookingPaymentsTotal(booking);
-    const charges = selectedBooking?.id === booking.id ? selectedBookingCharges : [];
-    const chargesTotal = charges.reduce((sum, charge) => sum + charge.amount, 0);
-    const grandTotal = booking.totalPrice + storeTotal + chargesTotal;
-    return {
-      storeCharges,
-      storeTotal,
-      charges,
-      chargesTotal,
-      paymentsTotal,
-      grandTotal,
-      balance: grandTotal - paymentsTotal
-    };
+    const isSelected = selectedBooking?.id === booking.id;
+    const storeCharges = storeOrders.filter(
+      (o) =>
+        o.bookingId === booking.id &&
+        o.paymentMethod === "add-to-bill" &&
+        o.status === "delivered" &&
+        o.isBilled === true
+    );
+    return computeBookingFolio({
+      booking,
+      // Prefer the live (selected) payments when this is the
+      // selected booking (optimistic-update path). Otherwise
+      // use the booking's persisted payments.
+      selectedBookingPayments: isSelected ? selectedBookingPayments : undefined,
+      persistedPayments: isSelected ? undefined : (booking.onsitePayments || []),
+      selectedBookingCharges: isSelected ? selectedBookingCharges : undefined,
+      storeOrders: storeCharges as any
+    });
   };
 
   // FSO-08/09: Advanced filter predicates
@@ -2074,10 +2067,11 @@ export function BookingsPage() {
         drawPdfSectionTitle(pdf, "Folio Charges", marginL, y, brandRgb);
         y += 4.5;
         receiptFolio.storeCharges.forEach((order) => {
-          drawAmountRow(`Store order ${order.orderRef}`, formatAmount(order.totalAmount));
+          drawAmountRow(`Store order ${order.orderRef || order.bookingId || ""}`, formatAmount(order.totalAmount ?? 0));
         });
         receiptFolio.charges.forEach((charge) => {
-          drawAmountRow(charge.label, formatAmount(charge.amount), { muted: charge.amount < 0 });
+          const amount = charge.amount ?? 0;
+          drawAmountRow(charge.label || "Charge", formatAmount(amount), { muted: amount < 0 });
         });
         drawAmountRow("Folio total", formatAmount(receiptFolio.grandTotal), { bold: true });
         y += 2;
