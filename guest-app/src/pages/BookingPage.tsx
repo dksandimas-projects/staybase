@@ -36,7 +36,8 @@ import {
   staggerContainer,
   compressImageFile,
   calculatePercentDiscount,
-  calculateVoucherBase
+  calculateVoucherBase,
+  calculateBreakfastAddOn
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 // Per BF-29 (booking-flow audit 2026-06-26): replace the
@@ -140,7 +141,15 @@ export function BookingPage() {
   const [bookingId] = useState(() => doc(collection(db, "bookings")).id);
 
   // Dynamic config states loaded from Firestore
-  const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
+  const [breakfastConfig, setBreakfastConfig] = useState({
+    isEnabled: false,
+    ratePerPersonPerNight: 250,
+    // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
+    // "include children in the breakfast charge". The booking-page
+    // toggle inherits this on first paint; the guest can override
+    // for the current booking. `true` is the historical default.
+    breakfastIncludesChildrenDefault: true
+  });
   const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
   const seniorPwdOnlineEnabled = hotelConfig?.seniorPwdOnlineEnabled !== false;
@@ -162,6 +171,21 @@ export function BookingPage() {
   const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
   const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
+  // Per CHD-10 (2026-07-31, per CVQ-01): children (0-11) split out
+  // from the total guest count so the breakfast toggle can deduct
+  // them from the bill. `numAdults` is derived as `guests - numChildren`
+  // (validated to stay ≥ 1). Seed from the `children` URL param so
+  // deep links can pre-fill, then default to 0.
+  const [numChildren, setNumChildren] = useState(Number(searchParams.get("children") ?? 0));
+  const numAdults = Math.max(0, guests - numChildren);
+  // The per-booking override for "include children in the breakfast
+  // charge". Defaults to the admin default from
+  // `settings/breakfastConfig.breakfastIncludesChildrenDefault`.
+  // The server snapshots this onto the booking doc — a later admin
+  // change does not rewrite existing bills.
+  const [breakfastIncludesChildren, setBreakfastIncludesChildren] = useState(
+    breakfastConfig.breakfastIncludesChildrenDefault !== false
+  );
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
   // the server auto-assigns a physical room of that type inside
@@ -362,7 +386,28 @@ export function BookingPage() {
   }, [selectedTypeEntry, selectedRoomRates, checkIn, checkOut, seasonalRateOverrides]);
 
   const discountPct = discountType === "none" ? 0 : 20;
-  const breakfastTotal = hasBreakfast ? breakfastRate * guests * nights : 0;
+  // Per CHD-10 (2026-07-31, per CVQ-01): the inline
+  // `breakfastRate * guests * nights` pattern now routes through the
+  // shared `calculateBreakfastAddOn` helper. When the guest has
+  // children and the toggle is off, the helper uses `numAdults`
+  // (the cheaper line). The `breakfastIncludesChildren` default
+  // (true) matches the historical "children pay the full rate" math.
+  const breakfastTotal = calculateBreakfastAddOn({
+    hasBreakfast,
+    breakfastRate,
+    numGuests: guests,
+    numAdults,
+    numChildren,
+    numNights: nights,
+    breakfastIncludesChildren
+  });
+  // Per CHD-10: the effective breakfast occupancy, exposed for
+  // the rate-card per-night label. When the toggle is on, this
+  // equals `guests`; when off, it equals `numAdults`. Matches
+  // the helper's internal `effectiveOccupancy` derivation.
+  const effectiveBreakfastOccupancy = numChildren > 0 && !breakfastIncludesChildren
+    ? numAdults
+    : guests;
   const subtotal = roomTotal + breakfastTotal;
 
   const voucherDiscount = useMemo(() => {
@@ -797,6 +842,20 @@ export function BookingPage() {
           // Step 1 stepper for guests who never reached Step 2.
           guests: Number(guestDetails.guestCount) || guests,
           hasBreakfast,
+          // Per CHD-10 (2026-07-31, per CVQ-01): the per-booking
+          // override for "include children in the breakfast
+          // charge". The server snapshots this onto the booking
+          // doc; when undefined (older clients), the admin default
+          // from `settings/breakfastConfig.breakfastIncludesChildrenDefault`
+          // applies.
+          breakfastIncludesChildren,
+          // Per CHD-10: the adult/child split. `numAdults` is
+          // derived from `guests - numChildren` in the client.
+          // The server uses these to compute the breakfast total
+          // when the toggle is off; otherwise it falls back to
+          // `numGuests` (the historical path).
+          numAdults,
+          numChildren,
           guestDetails: {
             firstName: guestDetails.firstName,
             lastName: guestDetails.lastName,
@@ -1075,6 +1134,13 @@ export function BookingPage() {
             guests={Number(guestDetails.guestCount) || guests}
             hasBreakfast={hasBreakfast}
             nights={nights}
+            // Per CHD-10 (2026-07-31, per CVQ-01): the adult/child
+            // split and the "include children" toggle thread
+            // through to the aside.
+            numAdults={numAdults}
+            numChildren={numChildren}
+            breakfastIncludesChildren={breakfastIncludesChildren}
+            setBreakfastIncludesChildren={setBreakfastIncludesChildren}
             typeLabel={selectedTypeEntry?.label ?? ""}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
@@ -1546,6 +1612,13 @@ export function BookingPage() {
             guests={guests}
             hasBreakfast={hasBreakfast}
             nights={nights}
+            // Per CHD-10 (2026-07-31, per CVQ-01): the adult/child
+            // split and the "include children" toggle thread
+            // through to the aside.
+            numAdults={numAdults}
+            numChildren={numChildren}
+            breakfastIncludesChildren={breakfastIncludesChildren}
+            setBreakfastIncludesChildren={setBreakfastIncludesChildren}
             typeLabel={selectedTypeEntry?.label ?? ""}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
@@ -1659,6 +1732,43 @@ export function BookingPage() {
                     className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
                     type="button"
                     onClick={() => updateGuests(guests + 1)}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </label>
+
+              {/* Per CHD-10 (2026-07-31, per CVQ-01): the
+                  children/0-11 split. The room rate is free for
+                  children (per the CHD-01 decision #1), but the
+                  breakfast toggle below can add them back in.
+                  `numAdults` is derived as `guests - numChildren`
+                  (validated to stay ≥ 1). */}
+              <label className="grid gap-2 text-sm font-medium text-gray-700">
+                Children (0–11)
+                <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
+                  <button
+                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    type="button"
+                    aria-label="Decrease children count"
+                    onClick={() => setNumChildren(Math.max(0, numChildren - 1))}
+                    disabled={numChildren <= 0}
+                  >
+                    <Minus size={16} />
+                  </button>
+                  <span className="flex items-center gap-2 text-sm text-gray-700">
+                    {numChildren} {numChildren === 1 ? "child" : "children"}
+                    <span className="text-xs text-gray-500">({numAdults} adult{numAdults === 1 ? "" : "s"})</span>
+                  </span>
+                  <button
+                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    type="button"
+                    aria-label="Increase children count"
+                    onClick={() => {
+                      // Cap children at (guests - 1) so at least one adult stays.
+                      setNumChildren(Math.min(numChildren + 1, Math.max(0, guests - 1)));
+                    }}
+                    disabled={numChildren >= Math.max(0, guests - 1)}
                   >
                     <Plus size={16} />
                   </button>
@@ -1784,9 +1894,14 @@ export function BookingPage() {
                             <RateOption
                               active={isSelected && rateChoice === "room-breakfast"}
                               label="Room + Breakfast"
-                              helper="Includes daily local breakfast for selected guests"
-                              // Per BF-26: live rate + guest count.
-                              priceLabel={`${formatPrice(typePricePerNight + liveBreakfastRate * guests)} / night`}
+                              helper={
+                                numChildren > 0 && !breakfastIncludesChildren
+                                  ? `Includes daily local breakfast for ${numAdults} adult${numAdults === 1 ? "" : "s"} (children excluded)`
+                                  : "Includes daily local breakfast for selected guests"
+                              }
+                              // Per BF-26: live rate + (per-CHD-10) the
+                              // effective breakfast occupancy.
+                              priceLabel={`${formatPrice(typePricePerNight + liveBreakfastRate * effectiveBreakfastOccupancy)} / night`}
                               totalLabel={`${formatPrice(breakfastTotal)} total`}
                               onSelect={() => selectRoomType(type.value, "room-breakfast")}
                             />
@@ -1972,6 +2087,14 @@ interface BookingReviewAsideProps {
   guests: number;
   hasBreakfast: boolean;
   nights: number;
+  // Per CHD-10 (2026-07-31, per CVQ-01): the adult/child split
+  // and the "include children" toggle, threaded through so the
+  // aside can show the toggle and recompute the breakfast total
+  // when it changes.
+  numAdults: number;
+  numChildren: number;
+  breakfastIncludesChildren: boolean;
+  setBreakfastIncludesChildren: (value: boolean) => void;
   // Per the room-type booking refactor: the aside shows the chosen
   // type label + (once assigned by the server) the physical room
   // number. Pre-assignment, `assignedRoomNumber` is empty.
@@ -2016,7 +2139,11 @@ function BookingReviewAside({
   memberDiscountPct = 0,
   seasonalRateOverrides = [],
   isMember = false,
-  rateBreakdown = null
+  rateBreakdown = null,
+  numAdults,
+  numChildren,
+  breakfastIncludesChildren,
+  setBreakfastIncludesChildren
 }: BookingReviewAsideProps) {
   const roomTotal = useMemo(() => {
     if (!typeRates || !typeValue) return 0;
@@ -2033,7 +2160,22 @@ function BookingReviewAside({
   if (!typeLabel) return null;
 
   const activeBreakfastRate = breakfastRate ?? 350;
-  const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;
+  // Per CHD-10 (2026-07-31, per CVQ-01): the inline
+  // `activeBreakfastRate * guests * nights` pattern now routes
+  // through the shared `calculateBreakfastAddOn` helper. When
+  // children are present and the toggle is off, the helper uses
+  // `numAdults` (the cheaper line). When the toggle is on or
+  // there are no children, it falls back to `numGuests` —
+  // byte-equivalent to the historical shape.
+  const breakfastTotal = calculateBreakfastAddOn({
+    hasBreakfast,
+    breakfastRate: activeBreakfastRate,
+    numGuests: guests,
+    numAdults,
+    numChildren,
+    numNights: nights,
+    breakfastIncludesChildren
+  });
   const subtotal = roomTotal + breakfastTotal;
   // Per DSC (2026-07-31): the percentage steps now route through the
   // shared `calculatePercentDiscount` helper. Byte-equivalent output:
@@ -2073,10 +2215,42 @@ function BookingReviewAside({
                   <span>{formatPrice(roomTotal)}</span>
                 </div>
                 {hasBreakfast ? (
-                  <div className="flex justify-between">
-                    <span>Breakfast add-on</span>
-                    <span>{formatPrice(breakfastTotal)}</span>
-                  </div>
+                  <>
+                    <div className="flex justify-between">
+                      <span>Breakfast add-on</span>
+                      <span>{formatPrice(breakfastTotal)}</span>
+                    </div>
+                    {/* Per CHD-10 (2026-07-31, per CVQ-01): the
+                        "include children" toggle. Only shown when
+                        the guest has at least one child (otherwise
+                        the toggle has no effect). Server snapshots
+                        this onto the booking doc on create. */}
+                    {numChildren > 0 ? (
+                      <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700 cursor-pointer">
+                        <span>
+                          Include {numChildren} {numChildren === 1 ? "child" : "children"} in breakfast
+                          <span className="block text-[11px] text-gray-500">
+                            {breakfastIncludesChildren
+                              ? `+${formatPrice((breakfastRate ?? 0) * numChildren * nights)} added for children`
+                              : "Children stay free of the breakfast charge"}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setBreakfastIncludesChildren(!breakfastIncludesChildren)}
+                          aria-pressed={breakfastIncludesChildren}
+                          aria-label="Include children in the breakfast charge"
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                            breakfastIncludesChildren ? "bg-primary" : "bg-gray-300"
+                          }`}
+                        >
+                          <div className={`h-4 w-4 rounded-full bg-white transition shadow-sm transform ${
+                            breakfastIncludesChildren ? "translate-x-4" : "translate-x-0"
+                          }`} />
+                        </button>
+                      </label>
+                    ) : null}
+                  </>
                 ) : null}
                 {discountPct > 0 ? (
                   <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">

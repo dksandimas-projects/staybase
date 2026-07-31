@@ -47,6 +47,13 @@ export const WalkinBookingSchema = z.object({
   checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   guests: z.coerce.number().int().min(1).max(100),
   hasBreakfast: z.boolean(),
+  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
+  // the server snapshots the admin default from
+  // `settings/breakfastConfig.breakfastIncludesChildrenDefault` and
+  // writes the result to the booking doc alongside `hasBreakfast`.
+  // `true` is the safe default (matches the historical "children pay
+  // the full rate" math).
+  breakfastIncludesChildren: z.boolean().optional(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: z.string().trim().min(1).max(80),
   // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
