@@ -166,8 +166,14 @@ describe("Phase 11.9 — Room type drives pricing + maxCapacity (W3.6)", () => {
       expect(ratesPageSrc).not.toMatch(/updateRoomConfig\([^)]*corporateRate/);
     });
 
-    it("RatesPage uses updateRoomType to persist rate changes", () => {
-      expect(ratesPageSrc).toMatch(/updateRoomType\(\s*t\.value\s*,\s*\{\s*pricePerNight\s*:[\s\S]*?weekendRate\s*:[\s\S]*?corporateRate\s*:/);
+    it("RatesPage persists the rate matrix via a single batched saveRoomTypes call (RTS-01/02)", () => {
+      // Per RTS-02: handleSaveRates computes the full next array once and
+      // calls saveRoomTypes once. The previous N-fan-out via updateRoomType
+      // raced on the shared `roomTypes` array field and lost all but the
+      // last write.
+      expect(ratesPageSrc).toMatch(/const nextRoomTypes = roomTypes\.map/);
+      expect(ratesPageSrc).toMatch(/await saveRoomTypes\(nextRoomTypes\)/);
+      expect(ratesPageSrc).not.toMatch(/Promise\.all\(/);
     });
 
     it("RatesPage reads the initial price/breakdown from each room type entry", () => {

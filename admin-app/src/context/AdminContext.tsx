@@ -581,7 +581,7 @@ export interface AdminContextType {
       weekendRate: number;
       corporateRate: number;
     }
-  ) => void;
+  ) => Promise<void>;
   updateRoomType: (
     value: string,
     updates: Partial<
@@ -599,8 +599,14 @@ export interface AdminContextType {
         | "corporateRate"
       >
     >
-  ) => void;
-  deleteRoomType: (value: string) => void;
+  ) => Promise<void>;
+  deleteRoomType: (value: string) => Promise<void>;
+  // Bulk-replace the room types array in a single Firestore write.
+  // Used by the Rates matrix save, where N concurrent single-type
+  // writes would race on the shared array field (RTS-01 — see
+  // `plan/project/ROADMAP.md §RTS-02`). Throws if the write fails;
+  // rolls back the optimistic state on failure.
+  saveRoomTypes: (types: RoomTypeEntry[]) => Promise<void>;
   uploadRoomTypePhoto: (typeValue: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
   removeRoomTypePhoto: (typeValue: string, url: string) => Promise<{ success: boolean; error?: string }>;
   reorderRoomTypePhotos: (typeValue: string, imageUrls: string[]) => Promise<{ success: boolean; error?: string }>;
@@ -4204,15 +4210,32 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   }, [hotelConfig.roomTypes]);
 
   const saveRoomTypes = async (newTypes: RoomTypeEntry[]) => {
+    // Capture the prior state so we can roll back on a failed write.
+    // Previously the optimistic `setRoomTypes(newTypes)` ran before
+    // the Firestore write and was never rolled back — a failed write
+    // would leave the UI showing a delete/add/update that never
+    // persisted, and the row would silently come back on the next
+    // snapshot. That swallowed failures is RTS-04.
+    const previousTypes = roomTypes;
     setRoomTypes(newTypes);
     try {
       // Fresh-project safe replacement for the old updateDoc(doc(db, "settings", "hotelConfig")) write.
-      await updateSettings("hotelConfig", {
+      const success = await updateSettings("hotelConfig", {
         roomTypes: newTypes,
         updatedAt: serverTimestamp()
       });
+      if (!success) {
+        // `updateSettings` caught its own error, fired the toast, and
+        // returned `false` — roll back and surface the failure so the
+        // caller can react (e.g. the Settings delete handler shows its
+        // own error and keeps the row armed).
+        setRoomTypes(previousTypes);
+        throw new Error("Failed to persist room types to settings.");
+      }
     } catch (error) {
+      setRoomTypes(previousTypes);
       console.error("Failed to save room types to Firestore:", error);
+      throw error;
     }
   };
 
@@ -4804,6 +4827,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         addRoomType,
         updateRoomType,
         deleteRoomType,
+        saveRoomTypes,
         uploadRoomTypePhoto,
         removeRoomTypePhoto,
         reorderRoomTypePhotos,
