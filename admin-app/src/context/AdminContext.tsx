@@ -3948,6 +3948,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       showInCorporate: false
     }
   };
+  // Per WPM-04 (2026-07-31): the walk-in modal used to hardcode `card`
+  // as one of three options. After WPM-01 it sources the list from
+  // `settings/hotelConfig.paymentMethods[]`. The hotel takes cards
+  // (CVQ-07), so the `card` method must exist under Settings or the
+  // desk silently loses the option on the day WPM lands. This is NOT
+  // a protected method (the admin can delete it) and NOT store-only —
+  // it is a staff-onsite tender, which is its own backfill category.
+  // Existing records are safe either way: the legacy labels render
+  // historical `card` bookings as "Credit Card" without this backfill.
+  const STAFF_ONSITE_TENDER_BACKFILL_DEFAULTS: Record<string, PaymentMethodConfig> = {
+    card: {
+      method: "card",
+      label: "Credit Card",
+      accountName: "",
+      accountNumber: "",
+      qrUrl: "",
+      isEnabled: true,
+      showInStore: false,
+      showInCorporate: false
+    }
+  };
   useEffect(() => {
     if (!currentUser) return;
     if (hasBackfilledProtectedPaymentMethodsRef.current) return;
@@ -3960,14 +3981,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     const missingStore = Object.keys(STORE_PAYMENT_BACKFILL_DEFAULTS).filter(
       (key) => !persisted.some((p: unknown) => typeof (p as { method?: unknown })?.method === "string" && (p as { method: string }).method === key)
     );
-    if (missingProtected.length === 0 && missingStore.length === 0) {
+    const missingStaffOnsite = Object.keys(STAFF_ONSITE_TENDER_BACKFILL_DEFAULTS).filter(
+      (key) => !persisted.some((p: unknown) => typeof (p as { method?: unknown })?.method === "string" && (p as { method: string }).method === key)
+    );
+    if (missingProtected.length === 0 && missingStore.length === 0 && missingStaffOnsite.length === 0) {
       hasBackfilledProtectedPaymentMethodsRef.current = true;
       return;
     }
     const next = [
       ...persisted,
       ...missingProtected.map((key) => BACKFILL_DEFAULTS[key]),
-      ...missingStore.map((key) => STORE_PAYMENT_BACKFILL_DEFAULTS[key])
+      ...missingStore.map((key) => STORE_PAYMENT_BACKFILL_DEFAULTS[key]),
+      ...missingStaffOnsite.map((key) => STAFF_ONSITE_TENDER_BACKFILL_DEFAULTS[key])
     ];
     hasBackfilledProtectedPaymentMethodsRef.current = true;
     setPaymentMethods((next as any[]).map(normalizePaymentMethodConfig));
