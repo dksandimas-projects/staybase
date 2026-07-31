@@ -9,6 +9,7 @@ export * from "./schemas/seo";
 export * from "./types";
 export * from "./utils/bookingDates";
 export * from "./utils/bookingFolio";
+export * from "./utils/bookingAddOns";
 export * from "./utils/cache";
 export * from "./utils/calendar";
 export * from "./utils/checkin";

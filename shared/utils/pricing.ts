@@ -1,4 +1,5 @@
 import type { BookingRateBreakdown } from "../types";
+import { calculateBreakfastAddOn } from "./bookingAddOns";
 
 export interface PriceInput {
   ratePerNight: number;
@@ -25,10 +26,12 @@ export function calculateBookingTotal(input: PriceInput) {
   // to the flat `ratePerNight * numNights` for callers that don't
   // need weekend-aware pricing.
   const roomTotal = input.roomTotal ?? (input.ratePerNight * input.numNights);
-  const breakfastTotal =
-    input.hasBreakfast && input.breakfastRate && input.numGuests
-      ? input.breakfastRate * input.numGuests * input.numNights
-      : 0;
+  // Per EXB-02 (2026-07-31): the inline `breakfastRate × numGuests × numNights`
+  // ternary now routes through the shared `calculateBreakfastAddOn` helper.
+  // Byte-equivalent output: the helper's `hasBreakfast` short-circuit replaces
+  // the original outer guard, and its defensive coercion on each operand
+  // (nullish / 0 → 0) is a strict superset of the historical truthy checks.
+  const breakfastTotal = calculateBreakfastAddOn(input);
   const subtotal = roomTotal + breakfastTotal;
 
   // Stacking order (per DECISIONS-FEATURES.md discount stacking):

@@ -25,7 +25,7 @@ import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
 // by the create / confirm-with-balance / post-checkout transactions)
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
-import { computeServerFolioTotals } from "@spark-inn/shared";
+import { computeServerFolioTotals, calculateBreakfastAddOn } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -4128,8 +4128,18 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // A walk-in manual override is the complete staff-agreed pricing basis;
       // its original breakdown intentionally carries no separate breakfast
       // line. Preserve that convention instead of adding breakfast on move.
-      const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast
-        ? breakfastRate * (booking.numGuests || 1) * numNights
+      // Per EXB-02 (2026-07-31): the inline `breakfastRate * (numGuests || 1) * numNights`
+      // now routes through the shared `calculateBreakfastAddOn` helper
+      // (byte-equivalent output; the `manualNightlyRate === null` guard
+      // becomes `hasBreakfast: false` here, which the helper short-circuits
+      // to 0).
+      const breakfastTotal = manualNightlyRate === null
+        ? calculateBreakfastAddOn({
+            hasBreakfast: booking.hasBreakfast,
+            breakfastRate,
+            numGuests: booking.numGuests,
+            numNights
+          })
         : 0;
       const subtotal = roomTotal + breakfastTotal;
 

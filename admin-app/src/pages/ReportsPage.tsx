@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculateBreakfastAddOn } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -711,7 +711,15 @@ export function ReportsPage() {
 
     rangeBookings.forEach((b) => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-      const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+      // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
+      // numNights` now routes through the shared
+      // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: b.hasBreakfast,
+        breakfastRate: b.breakfastRate,
+        numGuests: b.numGuests,
+        numNights: b.numNights
+      });
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1421,7 +1429,15 @@ export function ReportsPage() {
     ];
     const bookingsRows = filteredBookings.map(b => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-      const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+      // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
+      // numNights` now routes through the shared
+      // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: b.hasBreakfast,
+        breakfastRate: b.breakfastRate,
+        numGuests: b.numGuests,
+        numNights: b.numNights
+      });
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1467,7 +1483,12 @@ export function ReportsPage() {
       b.bookingRef, b.guestName, b.roomNumber,
       toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
       b.numNights, b.numGuests, b.breakfastRate,
-      (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0)
+      calculateBreakfastAddOn({
+        hasBreakfast: b.hasBreakfast,
+        breakfastRate: b.breakfastRate,
+        numGuests: b.numGuests,
+        numNights: b.numNights
+      })
     ]);
 
     const storeHeaders = [
@@ -3075,7 +3096,15 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
         <tbody className="divide-y divide-gray-100">
           {bookings.slice(0, 50).map(b => {
             const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-            const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+            // Per EXB-02 (2026-07-31): inline `breakfastRate ×
+            // numGuests × numNights` now routes through the shared
+            // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+            const breakfastTotal = calculateBreakfastAddOn({
+              hasBreakfast: b.hasBreakfast,
+              breakfastRate: b.breakfastRate,
+              numGuests: b.numGuests,
+              numNights: b.numNights
+            });
             const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
             const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -3177,7 +3206,12 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
     return (
       <div className="space-y-3">
         {bookings.slice(0, 50).map(b => {
-          const total = (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0);
+          const total = calculateBreakfastAddOn({
+            hasBreakfast: b.hasBreakfast,
+            breakfastRate: b.breakfastRate,
+            numGuests: b.numGuests,
+            numNights: b.numNights
+          });
           return (
             <div key={b.id} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
               <div className="flex items-center justify-between gap-2">
@@ -3214,7 +3248,12 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
         </thead>
         <tbody className="divide-y divide-gray-100">
           {bookings.slice(0, 50).map(b => {
-            const total = (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0);
+            const total = calculateBreakfastAddOn({
+            hasBreakfast: b.hasBreakfast,
+            breakfastRate: b.breakfastRate,
+            numGuests: b.numGuests,
+            numNights: b.numNights
+          });
             return (
               <tr key={b.id} className="hover:bg-gray-50/50">
                 <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>

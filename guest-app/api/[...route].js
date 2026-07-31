@@ -221408,6 +221408,16 @@ function computeServerFolioTotals(input) {
   return { folioTotal, computedBalance };
 }
 
+// ../shared/utils/bookingAddOns.ts
+function calculateBreakfastAddOn(input) {
+  if (!input.hasBreakfast) return 0;
+  const rate = Number(input.breakfastRate) || 0;
+  const guests = Number(input.numGuests) || 0;
+  const nights = Number(input.numNights) || 0;
+  if (rate === 0 || guests === 0 || nights === 0) return 0;
+  return rate * guests * nights;
+}
+
 // ../shared/utils/checkin.ts
 var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
 var REQUIRED_REGISTRATION_FIELDS = [
@@ -224382,12 +224392,22 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
   const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
   const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 })) : booking.hasBreakfast ? [{
     label: "Breakfast add-on",
-    amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * nights
+    amount: calculateBreakfastAddOn({
+      hasBreakfast: booking.hasBreakfast,
+      breakfastRate: booking.breakfastRate,
+      numGuests: booking.numGuests,
+      numNights: nights
+    })
   }] : [];
   const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
   const originalAddOns = existing?.addOns ?? (booking.hasBreakfast ? [{
     label: "Breakfast add-on",
-    amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * originalNights
+    amount: calculateBreakfastAddOn({
+      hasBreakfast: booking.hasBreakfast,
+      breakfastRate: booking.breakfastRate,
+      numGuests: booking.numGuests,
+      numNights: originalNights
+    })
   }] : []);
   const originalPricing = composeRateBreakdown({
     roomLines: existing?.roomLines || roomLines,
@@ -227191,7 +227211,12 @@ async function handleRescheduleBooking(req, res) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      const breakfastTotal = manualNightlyRate === null ? calculateBreakfastAddOn({
+        hasBreakfast: booking.hasBreakfast,
+        breakfastRate,
+        numGuests: booking.numGuests,
+        numNights
+      }) : 0;
       const subtotal = roomTotal + breakfastTotal;
       let discountPct = 0;
       if (booking.discountType === "senior" || booking.discountType === "pwd") {

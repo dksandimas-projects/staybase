@@ -1,3 +1,4 @@
+import { calculateBreakfastAddOn } from "@spark-inn/shared";
 import type {
   BookingRateAdjustmentLine,
   BookingRateBreakdown,
@@ -187,12 +188,22 @@ export function rebuildEarlyCheckoutRateBreakdown(
 
   const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
   const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
+  // Per EXB-02 (2026-07-31): the inline `breakfastRate × numGuests × nights`
+  // pattern now routes through the shared `calculateBreakfastAddOn` helper.
+  // Byte-equivalent output: the helper's defensive coercion is at least as
+  // strong as the historical `nonNegativeFinite` wrapper, and the
+  // `booking.hasBreakfast` gate is preserved by the surrounding ternary.
   const addOns = existing
     ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 }))
     : booking.hasBreakfast
       ? [{
           label: "Breakfast add-on",
-          amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * nights
+          amount: calculateBreakfastAddOn({
+            hasBreakfast: booking.hasBreakfast,
+            breakfastRate: booking.breakfastRate,
+            numGuests: booking.numGuests,
+            numNights: nights
+          })
         }]
       : [];
 
@@ -202,7 +213,12 @@ export function rebuildEarlyCheckoutRateBreakdown(
     ?? (booking.hasBreakfast
       ? [{
           label: "Breakfast add-on",
-          amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * originalNights
+          amount: calculateBreakfastAddOn({
+            hasBreakfast: booking.hasBreakfast,
+            breakfastRate: booking.breakfastRate,
+            numGuests: booking.numGuests,
+            numNights: originalNights
+          })
         }]
       : []);
   const originalPricing = composeRateBreakdown({
