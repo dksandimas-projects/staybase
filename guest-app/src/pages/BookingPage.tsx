@@ -34,7 +34,9 @@ import {
   getNumNights,
   staggerChild,
   staggerContainer,
-  compressImageFile
+  compressImageFile,
+  calculatePercentDiscount,
+  calculateVoucherBase
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 // Per BF-29 (booking-flow audit 2026-06-26): replace the
@@ -365,8 +367,12 @@ export function BookingPage() {
 
   const voucherDiscount = useMemo(() => {
     if (!voucherApplied) return 0;
-    const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
-    const voucherBase = Math.max(subtotal - seniorPwdDiscount, 0);
+    // Per DSC (2026-07-31): the percentage step and the clamped
+    // `subtotal − senior` subtraction now route through the shared
+    // `calculatePercentDiscount` + `calculateVoucherBase` helpers.
+    // Byte-equivalent output: same `Math.round` wrap, same clamp.
+    const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+    const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
     if (voucherDiscountType === "percent") {
       return Math.round(voucherBase * (voucherDiscountValue / 100));
     }
@@ -1866,10 +1872,14 @@ function buildGuestRateBreakdown(input: {
     ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
     : [];
   const subtotal = input.roomSubtotal + input.breakfastTotal;
-  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
+  // Per DSC (2026-07-31): the two percentage steps now route through
+  // the shared `calculatePercentDiscount` helper. The afterVoucher
+  // step is intentionally NOT clamped (matches the original pattern).
+  // Byte-equivalent output: same `Math.round` wrap, same chain order.
+  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, input.discountPct));
   const afterSeniorPwd = subtotal - seniorPwdDiscount;
   const afterVoucher = afterSeniorPwd - input.voucherDiscount;
-  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
+  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, input.memberDiscountPct));
   const deductions = [
     ...(seniorPwdDiscount > 0
       ? [{
@@ -2025,10 +2035,17 @@ function BookingReviewAside({
   const activeBreakfastRate = breakfastRate ?? 350;
   const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;
   const subtotal = roomTotal + breakfastTotal;
-  const discountAmount = subtotal * (discountPct / 100);
+  // Per DSC (2026-07-31): the percentage steps now route through the
+  // shared `calculatePercentDiscount` helper. Byte-equivalent output:
+  // the helper returns the same raw product, no rounding (this is the
+  // guest-side display — the booking write goes through pricing.ts's
+  // unrounded path). The afterVoucher step here is intentionally NOT
+  // clamped (the surrounding `Math.max(afterVoucher - memberDiscount, 0)`
+  // is the only clamp), so the inline subtraction stays verbatim.
+  const discountAmount = calculatePercentDiscount(subtotal, discountPct);
   const afterSeniorPwd = subtotal - discountAmount;
   const afterVoucher = afterSeniorPwd - voucherDiscount;
-  const memberDiscountAmount = afterVoucher * (memberDiscountPct / 100);
+  const memberDiscountAmount = calculatePercentDiscount(afterVoucher, memberDiscountPct);
 
   return (
     <aside className="lg:sticky lg:top-28 lg:self-start">

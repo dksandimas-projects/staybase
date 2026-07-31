@@ -1,4 +1,4 @@
-import { calculateBreakfastAddOn } from "@spark-inn/shared";
+import { calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase } from "@spark-inn/shared";
 import type {
   BookingRateAdjustmentLine,
   BookingRateBreakdown,
@@ -61,12 +61,18 @@ function composeRateBreakdown(input: {
   }));
   const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
   const discountPct = nonNegativeFinite(input.discountPct);
-  const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
-  const afterSeniorPwd = Math.max(subtotal - seniorPwdDiscount, 0);
+  // Per DSC (2026-07-31): the percentage steps and the clamped
+  // `subtotal − deduction` subtractions now route through the shared
+  // `calculatePercentDiscount` + `calculateVoucherBase` helpers. Byte-
+  // equivalent output: same `Math.round` wrap, same `Math.max(..., 0)`
+  // clamp, same per-step `nonNegativeFinite` defensive coercion (the
+  // helper's `Number(x) || 0` is at least as strong).
+  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+  const afterSeniorPwd = calculateVoucherBase(subtotal, seniorPwdDiscount);
   const voucherDiscount = nonNegativeFinite(input.voucherDiscount);
-  const afterVoucher = Math.max(afterSeniorPwd - voucherDiscount, 0);
+  const afterVoucher = calculateVoucherBase(afterSeniorPwd, voucherDiscount);
   const memberDiscountPct = nonNegativeFinite(input.memberDiscountPct);
-  const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
   const pointsRedeemedValue = nonNegativeFinite(input.pointsRedeemedValue);
   const deductions: BookingRateAdjustmentLine[] = [
     ...(seniorPwdDiscount > 0

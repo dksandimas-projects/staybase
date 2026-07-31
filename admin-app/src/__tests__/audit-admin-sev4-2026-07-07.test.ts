@@ -52,7 +52,12 @@ describe("Admin audit SEV-4 fixes — 2026-07-07", () => {
     expect(bookingsPage).toMatch(/pdf\.setFont\("helvetica", "normal"\)/);
     expect(bookingsPage).not.toMatch(/addFileToVFS\("APOLLO\.otf"/);
     expect(bookingsPage).not.toMatch(/Inter-Regular\.ttf/);
-    expect(bookingsPage).toMatch(/storedDiscountBase \* \(b\.discountPct \/ 100\)/);
+    // Per DSC (2026-07-31): the inline `storedDiscountBase × (b.discountPct/100)`
+    // pattern now routes through the shared `calculatePercentDiscount` helper.
+    // The `storedDiscountBase` source (the canonical pre-discount total snapshotted
+    // on the booking) is preserved — that's what this assertion guards. The
+    // `subtotal * (b.discountPct / 100)` form is still rejected below.
+    expect(bookingsPage).toMatch(/calculatePercentDiscount\(storedDiscountBase, b\.discountPct\)/);
     expect(bookingsPage).toMatch(/Member Discount \(\$\{b\.memberDiscountPct\}%\)/);
     expect(bookingsPage).not.toMatch(/subtotal \* \(b\.discountPct \/ 100\)/);
   });

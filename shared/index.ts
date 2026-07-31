@@ -10,6 +10,7 @@ export * from "./types";
 export * from "./utils/bookingDates";
 export * from "./utils/bookingFolio";
 export * from "./utils/bookingAddOns";
+export * from "./utils/bookingDiscounts";
 export * from "./utils/cache";
 export * from "./utils/calendar";
 export * from "./utils/checkin";

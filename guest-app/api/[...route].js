@@ -221418,6 +221418,17 @@ function calculateBreakfastAddOn(input) {
   return rate * guests * nights;
 }
 
+// ../shared/utils/bookingDiscounts.ts
+function calculatePercentDiscount(base, pct) {
+  return (Number(base) || 0) * ((Number(pct) || 0) / 100);
+}
+function calculateVoucherBase(subtotal, deduction) {
+  return Math.max(
+    (Number(subtotal) || 0) - (Number(deduction) || 0),
+    0
+  );
+}
+
 // ../shared/utils/checkin.ts
 var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
 var REQUIRED_REGISTRATION_FIELDS = [
@@ -224299,12 +224310,12 @@ function composeRateBreakdown(input) {
   }));
   const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
   const discountPct = nonNegativeFinite(input.discountPct);
-  const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
-  const afterSeniorPwd = Math.max(subtotal - seniorPwdDiscount, 0);
+  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+  const afterSeniorPwd = calculateVoucherBase(subtotal, seniorPwdDiscount);
   const voucherDiscount = nonNegativeFinite(input.voucherDiscount);
-  const afterVoucher = Math.max(afterSeniorPwd - voucherDiscount, 0);
+  const afterVoucher = calculateVoucherBase(afterSeniorPwd, voucherDiscount);
   const memberDiscountPct = nonNegativeFinite(input.memberDiscountPct);
-  const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
   const pointsRedeemedValue = nonNegativeFinite(input.pointsRedeemedValue);
   const deductions = [
     ...seniorPwdDiscount > 0 ? [{
@@ -224984,8 +224995,8 @@ async function handleCreateBooking(req, res) {
           ((vData.applicableRoomTypes?.length ?? 0) === 0 || vData.applicableRoomTypes.includes(roomData.type)) && assignedTypeMatchesChosen;
           if (isValid2) {
             appliedVoucherCode = formattedCode;
-            const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
-            const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+            const seniorPwdDiscountForVoucher = Math.round(calculatePercentDiscount(subtotal, discountPct));
+            const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscountForVoucher);
             voucherDiscount = Math.round(calculateVoucherDiscount({
               discountType: vData.discountType === "percent" ? "percent" : "flat",
               discountValue: Number(vData.discountValue) || 0
@@ -225016,10 +225027,10 @@ async function handleCreateBooking(req, res) {
           }
         }
       }
-      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
       const afterSeniorPwd = subtotal - seniorPwdDiscount;
       const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
+      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       if (!Number.isFinite(totalPrice)) {
         throw new Error("Invalid booking total.");
@@ -225432,8 +225443,8 @@ async function handleCreateWalkin(req, res) {
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
       const pricingSubtotal = totalPriceOverride !== void 0 && totalPriceOverride !== null ? Number(totalPriceOverride) : subtotal;
-      const seniorPwdDiscount = Math.round(pricingSubtotal * (discountPct / 100));
-      const voucherBase = Math.max(pricingSubtotal - seniorPwdDiscount, 0);
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(pricingSubtotal, discountPct));
+      const voucherBase = calculateVoucherBase(pricingSubtotal, seniorPwdDiscount);
       let voucherCode = "";
       let voucherDiscount = 0;
       let voucherUsageUpdate = null;
@@ -225638,8 +225649,8 @@ async function handleApplyBookingDiscount(req, res) {
       if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
-      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
-      const voucherBase = Math.max(subtotal - seniorPwdDiscount, 0);
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+      const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
       let voucherDiscount = 0;
       let voucherCode = "";
       let voucherRef = null;
@@ -225666,9 +225677,9 @@ async function handleApplyBookingDiscount(req, res) {
           discountValue: Number(voucher.discountValue) || 0
         }, voucherBase));
       }
-      const afterVoucher = Math.max(voucherBase - voucherDiscount, 0);
+      const afterVoucher = calculateVoucherBase(voucherBase, voucherDiscount);
       const memberDiscountPct = Number(booking.memberDiscountPct || 0);
-      const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
       const pointsValue = Number(booking.pointsRedeemedValue || 0);
       const totalPrice = Math.max(afterVoucher - memberDiscount - pointsValue, 0);
       const rateBreakdown = buildRateBreakdown({
@@ -225729,9 +225740,9 @@ async function handleRejectDiscount(req, res) {
       return res.status(500).json({ success: false, error: "Original total price not stored on booking." });
     }
     const voucherDiscount = Number(bookingData2.voucherDiscount || 0);
-    const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
+    const afterVoucher = calculateVoucherBase(originalTotalPrice, voucherDiscount);
     const memberDiscountPct = Number(bookingData2.memberDiscountPct || 0);
-    const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+    const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
     const rawPointsRedeemedValue = Number(bookingData2.pointsRedeemedValue || 0);
     const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
     const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
@@ -227228,8 +227239,8 @@ async function handleRescheduleBooking(req, res) {
         const voucherDoc = await transaction.get(voucherRef);
         if (voucherDoc.exists) {
           const vData = voucherDoc.data() || {};
-          const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
-          const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+          const seniorPwdDiscountForVoucher = Math.round(calculatePercentDiscount(subtotal, discountPct));
+          const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscountForVoucher);
           voucherDiscount = Math.round(calculateVoucherDiscount({
             discountType: vData.discountType === "percent" ? "percent" : "flat",
             discountValue: Number(vData.discountValue) || 0
@@ -227250,10 +227261,10 @@ async function handleRescheduleBooking(req, res) {
           }
         }
       }
-      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
       const afterSeniorPwd = subtotal - seniorPwdDiscount;
       const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
+      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
       const originalTotalPrice = subtotal;
