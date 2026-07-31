@@ -107,7 +107,14 @@ BookingStatus =
   "pending" | "payment-uploaded" | "payment-confirmed" |
   "confirmed" | "checked-in" | "checked-out" | "cancelled"
 
-BookingSource = "online" | "walk-in" | "phone" | "facebook" | "corporate"
+// Per NBS-03 (2026-07-31): widened from the 5-value union to
+// `string` so configured entries (e.g. "agoda" per CVQ-08) flow
+// through without a schema change. The configured list lives on
+// `settings/hotelConfig.bookingSources[]`; `BOOKING_SOURCES`
+// in `shared/constants` stays as the seed/default array. Server-
+// side validation against the configured list is the authoritative
+// gate. `shared/types/index.ts` carries the same widening.
+BookingSource = string
 
 DiscountType = "" | "senior" | "pwd"
 
