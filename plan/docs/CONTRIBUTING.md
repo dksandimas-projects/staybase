@@ -96,6 +96,38 @@ Husky's `commit-msg` hook auto-bumps `shared/VERSION.ts` based on the prefix.
 
 ---
 
+## Testing
+
+Three test layers, each with a different purpose. **Pick the right one for the bug you're guarding against** — the wrong layer silently misses whole bug classes.
+
+| Layer | What it tests | Cost | Catches |
+|---|---|---|---|
+| Source-text (default `npm test`) | Asserts that source patterns exist (string matches, import paths, interface shapes). Cheap, deterministic, no setup. | <5s per workspace | Regressions of structure — "did someone rename this function?" "did someone remove this import?" "does the interface still declare this method?" |
+| Emulator-based rules (`firebase/tests/*.rules.test.ts`, runs under `npm run test:rules`) | Loads `firestore.rules` into the Firestore emulator and exercises real read/write attempts with the right auth contexts. | ~15s emulator startup + test time | Invalid-but-present rules (NC-02c shipped a `keys().union(...)` rule that passed every grep test but errored at evaluation time). Access-control regressions. |
+| Emulator-based behavioral (`firebase/tests/*.emulator.test.ts`, same `npm run test:rules`) | Replicates the write pattern against a real Firestore and asserts the contract. Does not import application code (which is React-context code, hard to load in Node). | ~15s emulator startup + test time | Wrong-answer-no-error-no-test-failure bugs. The exact class RTS-01 was — the success toast fired, the values snapped back on the next snapshot, and no source-text test could ever catch it. |
+
+**Rules that earned their place:**
+
+- **Default to source-text.** It is fast and catches the common case. Do not write emulator tests for things source-text already covers (string presence, import paths, function signatures).
+- **Promote to emulator when the bug class is "looks right, behaves wrong."** A behavioral test for a write race, a money math path, an availability transaction, a discount calculation, an idempotency key, a timestamp invariant — any contract that Firestore evaluates at runtime, not at parse time. The first such test is `firebase/tests/room-types-array-write.emulator.test.ts` (PMH-03, 2026-07-31) — pins the RTS-01 fix at the Firestore layer.
+- **Test pattern for `*.emulator.test.ts` files** — seed via the admin context, exercise the write pattern, assert the contract. Do not import `AdminContext` or other React-context code; replicate the write semantics directly. The harness loads `firestore.rules` automatically, so any rule change that breaks a write will surface here too.
+- **The Java requirement is real.** `npm run test:rules` boots the Firestore emulator, which needs Java. `npm run test:fast` skips it. CI uses `npm test` (full chain) so emulator tests must pass before merge.
+
+**Scripts:**
+
+- `npm test` — full chain: shared + api + admin + infra + rules. Includes the emulator. Requires Java.
+- `npm run test:fast` — source-text only: shared + api + admin + infra. Sub-30s. No Java required.
+- `npm run test:rules` — emulator only (`firebase emulators:exec --only firestore` + `vitest run --config vitest.rules.config.ts`). Includes both `*.rules.test.ts` and `*.emulator.test.ts`.
+- `npm run test:shared` / `test:guest:api` / `test:infra` — individual layers.
+
+**Naming convention:**
+
+- `*.rules.test.ts` — security-rule evaluation (existing).
+- `*.emulator.test.ts` — behavioral write-path test (new in PMH-03).
+- `*.test.ts` (anywhere else) — source-text test, picked up by the app's own vitest config.
+
+---
+
 ## Deploy Checklist (merge `dev → main`)
 
 - [ ] All features for this milestone are complete and manually QA'd
