@@ -3,6 +3,7 @@ import type {
   HOUSEKEEPING_STATUSES,
   ROOM_STATUSES
 } from "../constants";
+import type { DiscountScope } from "../utils/bookingDiscounts";
 
 export type RoomType = string;
 export type RoomStatus = (typeof ROOM_STATUSES)[number];
@@ -301,6 +302,18 @@ export interface Booking {
    */
   extraBedCount?: number;
   extraBedRate?: number;
+  /**
+   * Per DSC-01..05 (2026-08-01, per CVQ-06): the admin's
+   * per-class discount scope at the moment this booking was
+   * created. Snapshotted from `settings/hotelConfig.discountScope`
+   * by `handleCreateBooking` / `handleCreateWalkin` so a later
+   * scope change never rewrites an existing bill. Legacy bookings
+   * (and reschedule transactions that pre-date this field) read
+   * as the broad scope — byte-equivalent to pre-DSC-01 behavior.
+   * Optional; absent reads as `undefined` and `normalizeDiscountScope`
+   * fills in the broad default at read time.
+   */
+  discountScopeSnapshot?: DiscountScope | null;
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;

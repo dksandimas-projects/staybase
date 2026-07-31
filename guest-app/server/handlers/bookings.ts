@@ -8,6 +8,8 @@ import {
   calculateVoucherDiscount,
   calculatePercentDiscount,
   calculateVoucherBase,
+  calculateDiscountChain,
+  normalizeDiscountScope,
   calculateBreakfastAddOn,
   calculateExtraBedAddOn,
   getCheckInReadiness,
@@ -704,6 +706,16 @@ export async function handleCreateBooking(req: any, res: any) {
       }
       const hotelConfig = hotelConfigDoc.data()!;
 
+      // Per DSC-01..05 (2026-08-01, per CVQ-06): snapshot the admin's
+      // per-class discount scope (`settings/hotelConfig.discountScope`)
+      // at booking time so a later scope change never rewrites an
+      // existing bill. `normalizeDiscountScope` fills in the broad
+      // default for legacy settings without the field. The snapshot
+      // is written to `booking.discountScopeSnapshot` and re-read on
+      // reschedule / discount rejection so the math always uses the
+      // scope that was live at create time.
+      const snapshottedDiscountScope = normalizeDiscountScope(hotelConfig.discountScope);
+
       if ((discountType === "senior" || discountType === "pwd") && hotelConfig.seniorPwdOnlineEnabled === false) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
       }
@@ -1165,17 +1177,25 @@ export async function handleCreateBooking(req: any, res: any) {
       //   1. Senior/PWD on subtotal
       //   2. Voucher (flat or percent) on post–Senior/PWD subtotal
       //   3. Member discount (percent) on post-voucher subtotal
-      // Per DSC (2026-07-31): the two percentage steps now route through
-      // the shared `calculatePercentDiscount` helper. The afterVoucher
-      // step here is intentionally NOT clamped (the surrounding
-      // `Math.max(afterVoucher - memberDiscount, 0)` is the only clamp),
-      // so the inline `afterSeniorPwd - voucherDiscount` stays verbatim.
-      // Byte-equivalent output.
-      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
-      const afterSeniorPwd = subtotal - seniorPwdDiscount;
-      const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
-      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      // Per DSC-01..05 (2026-08-01, per CVQ-06): the whole chain
+      // now routes through the shared `calculateDiscountChain` helper
+      // with the snapshotted per-class scope. The chain respects
+      // the scope's per-class breakdown (room · breakfast · extra
+      // bed) so the senior percentage, voucher cap, and member
+      // percentage each see only the components their scope allows.
+      // For the broad default scope (all-true) the chain is
+      // byte-equivalent to the previous inline math. `round: true`
+      // preserves the server's per-step `Math.round(...)` wrap.
+      const { total: totalPrice } = calculateDiscountChain({
+        roomTotal,
+        breakfastTotal,
+        extraBedTotal,
+        seniorPct: discountPct,
+        voucherAmount: voucherDiscount,
+        memberPct: appliedMemberDiscountPct,
+        scope: snapshottedDiscountScope,
+        round: true
+      });
       if (!Number.isFinite(totalPrice)) {
         throw new Error("Invalid booking total.");
       }
@@ -1309,6 +1329,14 @@ export async function handleCreateBooking(req: any, res: any) {
         // on read.
         extraBedCount,
         extraBedRate,
+        // Per DSC-01..05 (2026-08-01, per CVQ-06): the snapshotted
+        // per-class discount scope at create time. Re-read on
+        // reschedule / discount rejection so a later admin scope
+        // change never rewrites an existing bill. The scope is
+        // always written (the helper fills in the broad default
+        // for legacy settings), so the field is never `undefined`
+        // for bookings created after this change.
+        discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -1665,6 +1693,12 @@ export async function handleCreateWalkin(req: any, res: any) {
       if (!typeEntry) {
         throw new Error("Room type is not available.");
       }
+
+      // Per DSC-01..05 (2026-08-01, per CVQ-06): snapshot the admin's
+      // per-class discount scope at booking time (same pattern as
+      // `handleCreateBooking`). Legacy settings without the field
+      // read as the broad default via `normalizeDiscountScope`.
+      const snapshottedDiscountScope = normalizeDiscountScope(hotelConfig.discountScope);
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
@@ -1795,10 +1829,22 @@ export async function handleCreateWalkin(req: any, res: any) {
       const pricingSubtotal = totalPriceOverride !== undefined && totalPriceOverride !== null
         ? Number(totalPriceOverride)
         : subtotal;
-      // Per DSC (2026-07-31): the percentage step and the clamped
-      // `subtotal − senior` subtraction now route through the shared
-      // `calculatePercentDiscount` + `calculateVoucherBase` helpers.
-      // Byte-equivalent output: same `Math.round` wrap, same clamp.
+      // Per DSC-01..05 (2026-08-01, per CVQ-06): the voucher's
+      // base now routes through the shared `calculateVoucherBase`
+      // helper. The chain math (senior + voucher) below also
+      // routes through the shared `calculateDiscountChain` helper
+      // so the walk-in respects the snapshotted scope. The
+      // walk-in has no member step (staff-created, no auth token),
+      // so `memberPct: 0` and the chain's `memberDeduction` is
+      // always 0 — byte-equivalent to the previous inline `finalTotal
+      // = max(voucherBase − voucherDiscount, 0)`. When a manual
+      // `totalPriceOverride` is set, the override collapses the
+      // room/breakfast/extra-bed breakdown into a single
+      // `pricingSubtotal`; the chain treats it as the room term
+      // with breakfast + extra-bed = 0, so a broad scope sees
+      // the full pricingSubtotal as the discountable base (matching
+      // the previous behavior). `round: true` preserves the
+      // server's per-step `Math.round(...)` wrap.
       const seniorPwdDiscount = Math.round(calculatePercentDiscount(pricingSubtotal, discountPct));
       const voucherBase = calculateVoucherBase(pricingSubtotal, seniorPwdDiscount);
       let voucherCode = "";
@@ -1836,8 +1882,37 @@ export async function handleCreateWalkin(req: any, res: any) {
         };
       }
 
-      // Pricing Overrides: Use staff override if provided, otherwise standard computed
-      finalTotalPrice = Math.max(voucherBase - voucherDiscount, 0);
+      // Pricing Overrides: Use staff override if provided, otherwise standard computed.
+      // Per DSC-01..05 (2026-08-01, per CVQ-06): the walk-in's
+      // senior + voucher chain now routes through the shared
+      // `calculateDiscountChain` helper. For the broad default
+      // scope, the helper's `total` is byte-equivalent to
+      // `max(voucherBase − voucherDiscount, 0)`. When a manual
+      // `totalPriceOverride` is in play, we pass the override
+      // as the room term (breakfast + extra-bed = 0) so the
+      // chain sees the override as the discountable base.
+      const walkinChainInput = totalPriceOverride !== undefined && totalPriceOverride !== null
+        ? {
+            roomTotal: pricingSubtotal,
+            breakfastTotal: 0,
+            extraBedTotal: 0,
+            seniorPct: discountPct,
+            voucherAmount: voucherDiscount,
+            memberPct: 0,
+            scope: snapshottedDiscountScope,
+            round: true
+          }
+        : {
+            roomTotal,
+            breakfastTotal,
+            extraBedTotal: walkinExtraBedTotal,
+            seniorPct: discountPct,
+            voucherAmount: voucherDiscount,
+            memberPct: 0,
+            scope: snapshottedDiscountScope,
+            round: true
+          };
+      finalTotalPrice = calculateDiscountChain(walkinChainInput).total;
       const rateBreakdown = buildRateBreakdown({
         roomLines: totalPriceOverride !== undefined && totalPriceOverride !== null
           ? [{
@@ -1948,6 +2023,11 @@ export async function handleCreateWalkin(req: any, res: any) {
         // online-create path.
         extraBedCount: walkinExtraBedCount,
         extraBedRate: walkinExtraBedRate,
+        // Per DSC-01..05 (2026-08-01, per CVQ-06): the snapshotted
+        // per-class discount scope. Same shape as the online-create
+        // path; legacy walk-ins without the field read as the broad
+        // default on reschedule / discount rejection.
+        discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -2180,19 +2260,37 @@ export async function handleRejectDiscount(req: any, res: any) {
     // and re-apply the Spark Rewards member discount after removing
     // only the rejected Senior/PWD discount. Stacking remains:
     // subtotal -> voucher -> member discount -> redeemed points.
-    // Per DSC (2026-07-31): the post-voucher clamp and the member-step
-    // percentage now route through the shared `calculateVoucherBase` +
-    // `calculatePercentDiscount` helpers. Byte-equivalent output: same
-    // `Math.max(..., 0)` clamp, same `Math.round` wrap.
+    // Per DSC-01..05 (2026-08-01, per CVQ-06): the post-senior
+    // chain (voucher + member) now routes through the shared
+    // `calculateDiscountChain` helper with `seniorPct: 0` so the
+    // rejection re-applies the chain with the snapshotted scope.
+    // Legacy bookings without the snapshot read as the broad
+    // default via `normalizeDiscountScope`. The originalTotalPrice
+    // (the pre-senior subtotal) is the only component available
+    // here, so we pass it as the room term; with a broad scope
+    // this collapses to the previous `subtotal → voucher → member`
+    // math. For narrow scopes (e.g. voucher scoped to room only)
+    // the chain applies the scope to the voucher's base and the
+    // member's base. The points-redemption deduction is applied
+    // separately below (preserved as-is). `round: true` keeps
+    // the per-step `Math.round(...)` wrap.
     const voucherDiscount = Number(bookingData.voucherDiscount || 0);
-    const afterVoucher = calculateVoucherBase(originalTotalPrice, voucherDiscount);
     const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
-    const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
     const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
     const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue)
       ? Math.max(rawPointsRedeemedValue, 0)
       : 0;
-    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
+    const rejectChain = calculateDiscountChain({
+      roomTotal: Number(originalTotalPrice) || 0,
+      breakfastTotal: 0,
+      extraBedTotal: 0,
+      seniorPct: 0,
+      voucherAmount: voucherDiscount,
+      memberPct: memberDiscountPct,
+      scope: normalizeDiscountScope(bookingData.discountScopeSnapshot),
+      round: true
+    });
+    const restoredTotalPrice = Math.max(rejectChain.total - pointsRedeemedValue, 0);
     const rateBreakdown = rebuildRateBreakdown({
       ...bookingData,
       discountType: "",
@@ -4382,17 +4480,28 @@ export async function handleRescheduleBooking(req: any, res: any) {
         }
       }
 
-      // Per DSC (2026-07-31): the two percentage steps now route through
-      // the shared `calculatePercentDiscount` helper. The afterVoucher
-      // step here is intentionally NOT clamped (the surrounding
-      // `Math.max(afterVoucher - memberDiscount, 0)` is the only clamp),
-      // so the inline `afterSeniorPwd - voucherDiscount` stays verbatim.
-      // Byte-equivalent output.
-      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
-      const afterSeniorPwd = subtotal - seniorPwdDiscount;
-      const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
-      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      // Per DSC-01..05 (2026-08-01, per CVQ-06): the chain now
+      // routes through the shared `calculateDiscountChain` helper
+      // with the booking's snapshotted per-class scope. Legacy
+      // bookings without the field read as the broad default
+      // via `normalizeDiscountScope`. The chain is byte-equivalent
+      // to the previous inline math for the broad default
+      // scope; for narrow scopes it applies the scope to the
+      // senior + voucher + member steps. `round: true` preserves
+      // the server's per-step `Math.round(...)` wrap. The chain
+      // returns the post-discount total; the points-redemption
+      // deduction is applied separately below (preserved as-is).
+      const rescheduleChain = calculateDiscountChain({
+        roomTotal,
+        breakfastTotal,
+        extraBedTotal,
+        seniorPct: discountPct,
+        voucherAmount: voucherDiscount,
+        memberPct: appliedMemberDiscountPct,
+        scope: normalizeDiscountScope(booking.discountScopeSnapshot),
+        round: true
+      });
+      const totalPrice = rescheduleChain.total;
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
       const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({

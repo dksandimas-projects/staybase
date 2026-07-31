@@ -221459,6 +221459,46 @@ function calculateVoucherBase(subtotal, deduction) {
     0
   );
 }
+var BROAD_DISCOUNT_SCOPE = {
+  senior: { room: true, breakfast: true, extraBed: true },
+  voucher: { room: true, breakfast: true, extraBed: true },
+  member: { room: true, breakfast: true, extraBed: true }
+};
+function normalizeDiscountScope(scope) {
+  if (!scope) return BROAD_DISCOUNT_SCOPE;
+  const fill = (cls) => ({
+    room: cls?.room !== false,
+    breakfast: cls?.breakfast !== false,
+    extraBed: cls?.extraBed !== false
+  });
+  return {
+    senior: fill(scope.senior),
+    voucher: fill(scope.voucher),
+    member: fill(scope.member)
+  };
+}
+function calculateDiscountChain(input) {
+  const roomTotal = Number(input.roomTotal) || 0;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const extraBedTotal = Number(input.extraBedTotal) || 0;
+  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
+  const scope = normalizeDiscountScope(input.scope);
+  const scopeBase = (cls) => (cls.room ? roomTotal : 0) + (cls.breakfast ? breakfastTotal : 0) + (cls.extraBed ? extraBedTotal : 0);
+  const seniorBase = scopeBase(scope.senior);
+  const seniorRaw = seniorBase * ((Number(input.seniorPct) || 0) / 100);
+  const seniorDeduction = input.round ? Math.round(seniorRaw) : seniorRaw;
+  const voucherBase = Math.max(0, scopeBase(scope.voucher) - seniorDeduction);
+  const voucherAmount = Number(input.voucherAmount) || 0;
+  const voucherDeduction = Math.min(Math.max(0, voucherAmount), voucherBase);
+  const memberBase = Math.max(
+    0,
+    scopeBase(scope.member) - seniorDeduction - voucherDeduction
+  );
+  const memberRaw = memberBase * ((Number(input.memberPct) || 0) / 100);
+  const memberDeduction = input.round ? Math.round(memberRaw) : memberRaw;
+  const total = Math.max(0, subtotal - seniorDeduction - voucherDeduction - memberDeduction);
+  return { seniorDeduction, voucherDeduction, memberDeduction, total };
+}
 
 // ../shared/utils/checkin.ts
 var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
@@ -224865,6 +224905,7 @@ async function handleCreateBooking(req, res) {
         throw new Error("Room type catalog is not configured.");
       }
       const hotelConfig = hotelConfigDoc.data();
+      const snapshottedDiscountScope = normalizeDiscountScope(hotelConfig.discountScope);
       if ((discountType === "senior" || discountType === "pwd") && hotelConfig.seniorPwdOnlineEnabled === false) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
       }
@@ -225108,11 +225149,16 @@ async function handleCreateBooking(req, res) {
           }
         }
       }
-      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
-      const afterSeniorPwd = subtotal - seniorPwdDiscount;
-      const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
-      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      const { total: totalPrice } = calculateDiscountChain({
+        roomTotal,
+        breakfastTotal,
+        extraBedTotal,
+        seniorPct: discountPct,
+        voucherAmount: voucherDiscount,
+        memberPct: appliedMemberDiscountPct,
+        scope: snapshottedDiscountScope,
+        round: true
+      });
       if (!Number.isFinite(totalPrice)) {
         throw new Error("Invalid booking total.");
       }
@@ -225220,6 +225266,14 @@ async function handleCreateBooking(req, res) {
         // on read.
         extraBedCount,
         extraBedRate,
+        // Per DSC-01..05 (2026-08-01, per CVQ-06): the snapshotted
+        // per-class discount scope at create time. Re-read on
+        // reschedule / discount rejection so a later admin scope
+        // change never rewrites an existing bill. The scope is
+        // always written (the helper fills in the broad default
+        // for legacy settings), so the field is never `undefined`
+        // for bookings created after this change.
+        discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -225493,6 +225547,7 @@ async function handleCreateWalkin(req, res) {
       if (!typeEntry) {
         throw new Error("Room type is not available.");
       }
+      const snapshottedDiscountScope = normalizeDiscountScope(hotelConfig.discountScope);
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
@@ -225598,7 +225653,26 @@ async function handleCreateWalkin(req, res) {
           data: { usageCount: Number(voucherData.usageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
         };
       }
-      finalTotalPrice = Math.max(voucherBase - voucherDiscount, 0);
+      const walkinChainInput = totalPriceOverride !== void 0 && totalPriceOverride !== null ? {
+        roomTotal: pricingSubtotal,
+        breakfastTotal: 0,
+        extraBedTotal: 0,
+        seniorPct: discountPct,
+        voucherAmount: voucherDiscount,
+        memberPct: 0,
+        scope: snapshottedDiscountScope,
+        round: true
+      } : {
+        roomTotal,
+        breakfastTotal,
+        extraBedTotal: walkinExtraBedTotal,
+        seniorPct: discountPct,
+        voucherAmount: voucherDiscount,
+        memberPct: 0,
+        scope: snapshottedDiscountScope,
+        round: true
+      };
+      finalTotalPrice = calculateDiscountChain(walkinChainInput).total;
       const rateBreakdown = buildRateBreakdown({
         roomLines: totalPriceOverride !== void 0 && totalPriceOverride !== null ? [{
           source: "manual",
@@ -225696,6 +225770,11 @@ async function handleCreateWalkin(req, res) {
         // online-create path.
         extraBedCount: walkinExtraBedCount,
         extraBedRate: walkinExtraBedRate,
+        // Per DSC-01..05 (2026-08-01, per CVQ-06): the snapshotted
+        // per-class discount scope. Same shape as the online-create
+        // path; legacy walk-ins without the field read as the broad
+        // default on reschedule / discount rejection.
+        discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -225874,12 +225953,20 @@ async function handleRejectDiscount(req, res) {
       return res.status(500).json({ success: false, error: "Original total price not stored on booking." });
     }
     const voucherDiscount = Number(bookingData2.voucherDiscount || 0);
-    const afterVoucher = calculateVoucherBase(originalTotalPrice, voucherDiscount);
     const memberDiscountPct = Number(bookingData2.memberDiscountPct || 0);
-    const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
     const rawPointsRedeemedValue = Number(bookingData2.pointsRedeemedValue || 0);
     const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
-    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
+    const rejectChain = calculateDiscountChain({
+      roomTotal: Number(originalTotalPrice) || 0,
+      breakfastTotal: 0,
+      extraBedTotal: 0,
+      seniorPct: 0,
+      voucherAmount: voucherDiscount,
+      memberPct: memberDiscountPct,
+      scope: normalizeDiscountScope(bookingData2.discountScopeSnapshot),
+      round: true
+    });
+    const restoredTotalPrice = Math.max(rejectChain.total - pointsRedeemedValue, 0);
     const rateBreakdown = rebuildRateBreakdown({
       ...bookingData2,
       discountType: "",
@@ -227403,11 +227490,17 @@ async function handleRescheduleBooking(req, res) {
           }
         }
       }
-      const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
-      const afterSeniorPwd = subtotal - seniorPwdDiscount;
-      const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, appliedMemberDiscountPct));
-      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      const rescheduleChain = calculateDiscountChain({
+        roomTotal,
+        breakfastTotal,
+        extraBedTotal,
+        seniorPct: discountPct,
+        voucherAmount: voucherDiscount,
+        memberPct: appliedMemberDiscountPct,
+        scope: normalizeDiscountScope(booking.discountScopeSnapshot),
+        round: true
+      });
+      const totalPrice = rescheduleChain.total;
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
       const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({

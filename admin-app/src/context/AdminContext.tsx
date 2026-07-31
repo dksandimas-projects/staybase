@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 import {
   ACTIVE_BOOKING_STATUSES,
+  BROAD_DISCOUNT_SCOPE,
   CreateRoomInput,
   DEFAULT_BOOKING_SOURCES,
   DEFAULT_CORPORATE_PERKS,
@@ -25,10 +26,12 @@ import {
   StoreConfig,
   bustPublicSiteContentCache,
   compressImageFile,
+  normalizeDiscountScope,
   normalizeSeasonalRateOverrides,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   type BookingRateBreakdown,
   type BookingSourceConfig,
+  type DiscountScope,
   type ProtectedBookingSource,
   type ProtectedPaymentMethod,
   type RoomBlock,
@@ -3347,7 +3350,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
     roomTypes: [...DEFAULT_ROOM_TYPES],
-    seasonalRateOverrides: []
+    seasonalRateOverrides: [],
+    // Per DSC-01..05 (2026-08-01, per CVQ-06): per-class discount
+    // scope. Defaults to the broad scope (all classes apply to
+    // room + breakfast + extra bed) so the live preview / server
+    // math is byte-equivalent to the pre-DSC-01 behavior. The
+    // Settings → Discounts tab exposes a 3×3 checkbox editor
+    // (senior row admin-only per DSC-03). Legacy settings without
+    // the field read as the broad default via `normalizeDiscountScope`.
+    discountScope: BROAD_DISCOUNT_SCOPE
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -3705,7 +3716,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>) }));
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
