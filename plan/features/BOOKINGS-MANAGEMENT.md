@@ -214,3 +214,11 @@ The walk-in modal's **Payment Method** dropdown is the one payment selector in t
 - **Tests** — `admin-app/src/__tests__/walkin-payment-method-from-settings.test.ts` (13 source-text guards) pins: (1) the walk-in selector maps the memo (guard against re-introducing literal `<option value="card">`); (2) `pay-at-hotel` is prepended exactly once; (3) the memo still excludes non-tender keys; (4) `card` backfill exists and is wired into the `useEffect`; (5) the field label reads "Payment Method"; (6) the drawer uses the label helper (3 sites in `BookingsPage` + the `paymentMethodLabel` prop on `BookingDrawerWorkspaceHeader`); (7) `CalendarPage` destructures `paymentMethods` and builds its memo with the same shape. `firebase/tests/payment-methods-array-write.emulator.test.ts` (the PMH-05 generalization of the PMH-03 `roomTypes[]` test) pins the array-write hazard on `paymentMethods[]` — N concurrent per-method writes lose all but the last, single batched `setDoc` persists every change. Together these prevent the "wrong list, no error" class of bug from shipping again on the same field the spec author flagged.
 - **No server change** — `WalkinBookingSchema` is unchanged. The dynamic value flows through the existing string field.
 - **Related MDs** — `SETTINGS.md §Payment Methods` notes the front desk as a fourth consumer governed by no surface flag; `DECISIONS-FEATURES.md #141` records the WPM-03 decision (no `showAtFrontDesk` pill).
+
+---
+
+## Extra Bed (EXB-01..10)
+
+The walk-in form uses adult, child, and extra-bed steppers and previews the shared occupancy rule before submission. The booking table and reports use compact occupancy text; the drawer and receipt use the expanded adult/child split and show extra beds when present. Legacy bookings without the split retain the historical guest-count fallback.
+
+Walk-in creation and rescheduling enforce per-type capacity and hotel-wide inventory inside their server transactions. Rescheduling preserves the booking's snapshotted `extraBedRate` and excludes the booking itself from inventory-in-use calculations. See `plan/features/BOOKING-FLOW.md §Extra Bed` for the shared rules.

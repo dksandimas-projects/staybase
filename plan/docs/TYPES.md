@@ -55,6 +55,8 @@ Room {
 // every room of that type; consumers join by `Room.type` at read
 // time. See `plan/features/RATE-MANAGEMENT.md §W3.6` and
 // `plan/features/ROOM-MANAGEMENT.md §W3.7` for the migration notes.
+//
+// EXB-01: missing extra-bed fields normalize to 0.
 
 RoomType {
   value: string                 // unique key, lowercase, kebab-case
@@ -65,6 +67,9 @@ RoomType {
   description: string           // one-paragraph marketing copy
   amenities: string[]           // e.g. ["WiFi", "AC", "Hot Shower", "Cable TV"]
   maxCapacity: number           // canonical occupancy for every room of this type
+  maxChildren?: number          // per CHD-02 (2026-08-01, decision #144): max children
+  maxExtraBeds?: number         // per EXB-01: hard cap on per-booking extraBedCount (0 = not allowed)
+  extraBedRate?: number         // per EXB-01: per-bed-per-night rate, snapshotted onto Booking
   pricePerNight: number         // base rate per night
   weekendRate: number           // applied for stays including Sat/Sun nights
   corporateRate: number         // flat public rate used at /corporate/book
@@ -130,6 +135,11 @@ Booking {
   guestEmail: string
   guestPhone: string
   numGuests: number
+  numAdults?: number       // absent derives to numGuests
+  numChildren?: number     // absent derives to 0
+  extraBedCount?: number   // absent derives to 0; capped by RoomType.maxExtraBeds
+  extraBedRate?: number     // snapshotted at create time from room type's `extraBedRate`
+  extraBedTotal?: number    // canonical computed total = extraBedCount × extraBedRate × numNights
   checkIn: Timestamp        // Firestore Timestamp — see `DECISIONS-FEATURES.md #84`
   checkOut: Timestamp       // (always stored as `Timestamp.fromDate(jsDate)`, never raw Date or ISO string)
   numNights: number
@@ -491,6 +501,7 @@ HotelConfig {
   paymentMethods: PaymentMethodConfig[]
   intercomQuickRequests: string[]
   notificationSoundUrl: string
+  extraBedInventory?: number // EXB-10: 0/absent = no hotel-wide constraint
 }
 
 // HotelConfig additions (in hotel.config.ts)
@@ -791,4 +802,4 @@ ApiResponse<T> = ApiSuccess<T> | ApiError
 
 ## Booking Form (Zod — Step by Step)
 
-Zod schemas for the 4-step booking form live in `shared/schemas/booking.ts`. TypeScript types are derived via `z.infer`. See `plan/features/BOOKING-FLOW.md` for field-level validation rules.
+Zod schemas for the 4-step booking form live in `shared/schemas/booking.ts`. TypeScript types are derived via `z.infer`. See `plan/features/BOOKING-FLOW.md` for field-level validation rules. EXB shared helper behavior is owned by decisions #145, #153, and #157 and covered by the shared room-type, booking-add-on, and extra-bed-inventory tests.

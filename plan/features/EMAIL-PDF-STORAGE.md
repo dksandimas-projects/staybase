@@ -219,3 +219,9 @@ Used for: room photos, payment proof screenshots, QR notification sounds, websit
 - Font embedding gotcha: `plan/docs/GOTCHAS.md §jsPDF`
 - Receipt trigger in admin: `plan/features/BOOKINGS-MANAGEMENT.md`
 - Payment proof upload in guest flow: `plan/features/BOOKING-FLOW.md §Step 3`
+
+---
+
+## Extra Bed (EXB-08)
+
+Receipts and booking emails render the stored adult/child split when present and retain the legacy total-only fallback. When `extraBedCount > 0`, both show the extra-bed quantity and the independently stored add-on amount; no extra-bed line appears for zero or absent counts. The authoritative add-on entry comes from the server-built `rateBreakdown.addOns[]`; display surfaces do not recompute pricing.
