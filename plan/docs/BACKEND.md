@@ -94,6 +94,11 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `guestEmail` | string | |
 | `guestPhone` | string | |
 | `numGuests` | number | |
+| `numAdults` | number \| absent | Per CHD-01 (2026-08-01, decision #144): the adult/child split. Absent fields derive to `numAdults = numGuests` (the historical "all guests are adults" shape). When present, the server validates `numAdults + numChildren === numGuests`. |
+| `numChildren` | number \| absent | Per CHD-01. Absent = 0. Server validates the sum with `numAdults`. |
+| `extraBedCount` | number \| absent | Per EXB-01 (2026-08-01, decision #145): the extra-bed count. Absent = 0. Bounded by the room type's `maxExtraBeds` (a count > `maxExtraBeds` is rejected with a 400). |
+| `extraBedRate` | number \| absent | Per EXB-01: per-bed-per-night rate, snapshotted at create time from the room type's `extraBedRate`. A later rate change never rewrites this value. |
+| `extraBedTotal` | number \| absent | Per EXB-01: canonical computed total = `extraBedCount × extraBedRate × numNights`. Stored for receipt/email/drawer rendering. |
 | `checkIn` | timestamp | |
 | `checkOut` | timestamp | |
 | `numNights` | number | Computed at booking time |
@@ -314,6 +319,10 @@ Key fields (per Phase 11.8 PR 3, all admin-editable from Settings → Hotel Info
 > **`bookingSources[]`** (per NBS, 2026-07-31) — array of `BookingSourceConfig` records. Each entry owns its `source` key, `label`, `isEnabled` flag, and `selectableAtFrontDesk` flag. The list is the source of truth for the New Booking modal's source selector, the Bookings table source filter, and the Reports acquisition chart. Default seed: `DEFAULT_BOOKING_SOURCES` in `shared/constants` (the historical 5 + `agoda` per CVQ-08). `online` / `walk-in` / `corporate` are system-assigned (`selectableAtFrontDesk: false`) and never appear in the New Booking modal's source selector. `PROTECTED_BOOKING_SOURCES` (the same three keys) cannot be deleted — `AdminContext.deleteBookingSource` refuses. **No Firestore rules change** — the doc is `allow read: if true; allow write: if isAdmin()` already. The Settings → Booking Sources tab (NBS-04) is the planned edit surface; until it ships, the seed list applies (admin can still change the list by editing Firestore directly). Same array-write integrity lesson from PMH-03 / WPM-04 / NBS-08 applies — see `plan/docs/GOTCHAS.md §Firebase` and the `firebase/tests/booking-sources-array-write.emulator.test.ts` regression guard.
 
 > **`seasonalRateOverrides[]`** — array of active/inactive date-range nightly rate overrides managed from Rates → Seasonal Rate Overrides. Shape: `{ id, name, startDate, endDate, rate, roomTypeValues[], isActive }`. Empty `roomTypeValues[]` means all room types. Overrides apply only to new standard and staff walk-in bookings, beat weekend rates for matching nights, and do not override negotiated or flat corporate rates. Existing bookings keep their locked `totalPrice`.
+
+> **`extraBedInventory`** (EXB-10, decision #157) — hotel-wide rollaway-bed count. `0` or absent means no inventory constraint. Create, walk-in, and reschedule enforce a positive limit inside their room-assignment transaction. The field currently defaults to `0` in the admin data model but has no Settings editor.
+
+> **`roomTypes[]` extra-bed fields** (EXB-01, decision #145) — `maxExtraBeds` is the per-booking cap (`0` = not offered); `extraBedRate` is the non-negative per-bed-per-night rate snapshotted onto new bookings. Legacy missing values normalize to `0`.
 
 ---
 

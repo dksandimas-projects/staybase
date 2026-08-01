@@ -258,3 +258,13 @@ Let guests understand why the final booking total changes when their stay includ
 - The Step 3 total, API-created `totalPrice`, Step 4 total, lookup page, email summary, and admin receipt agree.
 - Existing bookings without `rateBreakdown` still render a sensible summary.
 - No public response leaks payment proof URLs, internal notes, or unrelated booking PII.
+
+---
+
+## Extra Bed (EXB-01..10)
+
+Step 1 shows adults, children, and extra-bed steppers; extra beds appear only when the selected room type allows them and reset when the type changes. The shared overflow rule requires enough beds for adult and child occupancy above the type caps, while the server separately rejects counts above `maxExtraBeds`.
+
+The server snapshots `extraBedRate` on creation and preserves that snapshot during reschedule. Extra-bed cost is count × snapshotted rate × nights and remains independent of breakfast occupancy. Step 3 displays it as its own add-on line. Hotel-wide inventory, when configured above zero, is enforced transactionally; the field currently has no admin Settings editor.
+
+Coverage: room-type boundary tests, server cap guards, multi-night add-on tests, and `guest-app/tests/api/exb-09-rate-snapshotting-and-breakfast-coupling.test.ts`. See decisions #145, #153–#158 and `plan/docs/BACKEND.md` for the canonical data contracts.

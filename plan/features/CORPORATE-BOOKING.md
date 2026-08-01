@@ -80,3 +80,9 @@ A dedicated booking route at `/corporate/book` for corporate clients. Reuses all
 - Access code generation (admin side): `plan/features/CORPORATE-INQUIRIES.md`
 - Validation API route: `plan/docs/API-ROUTES.md §validate`
 - Corporate marketing page CTA: `plan/features/STATIC-PAGES.md`
+
+---
+
+## Extra Bed (EXB-07)
+
+Corporate Step 1 uses the same adult, child, and extra-bed steppers and shared overflow hint as the public booking flow. The submitted total remains `numAdults + numChildren`, with the split and `extraBedCount` sent to the existing booking API. Legacy `?guests=N` links hydrate as N adults and zero children. See `plan/features/BOOKING-FLOW.md §Extra Bed` for the server rules and pricing contract.
