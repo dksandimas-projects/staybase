@@ -699,6 +699,12 @@ export function BookingsPage() {
   // Payment Form States
   const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false);
   const paymentSubmissionIdRef = useRef<string | null>(null);
+  // Per CRL-01 (2026-08-01): preallocated refundId is the canonical
+  // idempotency key for /api/bookings/add-refund. A retry after an
+  // uncertain response (network blip, closed tab) replays the original
+  // commit instead of appending a second refund entry. Mirrors the
+  // paymentSubmissionIdRef pattern above.
+  const refundSubmissionIdRef = useRef<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
@@ -2682,22 +2688,46 @@ export function BookingsPage() {
       toast.warning("Check refund details", "Enter a positive amount and a required refund reason.");
       return;
     }
+    // Per CRL-01: client-preallocated refundId for idempotency. Keep the
+    // same ID across a retry-after-uncertain-response so the server
+    // transaction replays the original commit; mint a fresh one on the
+    // next intentional submit so a new refund does not collide with a
+    // previous one. The mint uses the Firestore-generated payments doc
+    // ID so the ID is server-acceptable under the existing rules shape
+    // (no client-side rules allowlist for /payments/{id}).
+    const refundId = refundSubmissionIdRef.current
+      || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+    refundSubmissionIdRef.current = refundId;
     setIsRefunding(true);
+    let refundCompleted = false;
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-refund`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-        body: JSON.stringify({ bookingId: selectedBooking.id, amount, method: refundMethod, reason: refundReason.trim() })
+        body: JSON.stringify({ bookingId: selectedBooking.id, refundId, amount, method: refundMethod, reason: refundReason.trim() })
       });
       const payload = await response.json();
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to record refund.");
+      if (!response.ok || !payload.success) {
+        // 409 means the staff reused an ID for a different refund; clear
+        // the held ref so the next submit mints a fresh one, and surface
+        // the server's reason verbatim.
+        if (response.status === 409) {
+          refundSubmissionIdRef.current = null;
+        }
+        throw new Error(payload.error || "Unable to record refund.");
+      }
+      refundCompleted = true;
       setRefundAmount("");
       setRefundReason("");
       toast.success("Refund recorded", `${formatPrice(amount)} returned via ${getOnsitePaymentMethodLabel(refundMethod)}.`);
     } catch (error: any) {
       toast.error("Could not record refund", error.message || "Please try again.");
     } finally {
+      // Keep the same ID after an uncertain/network failure. A manual
+      // retry then replays the original server commit instead of creating
+      // a second ledger entry. Successful submissions mint a fresh ID.
+      if (refundCompleted) refundSubmissionIdRef.current = null;
       setIsRefunding(false);
     }
   };
@@ -5692,17 +5722,34 @@ export function BookingsPage() {
                 toast.warning("Check refund details", "Enter a positive amount and a required refund reason.");
                 return;
               }
+              // Per CRL-01: client-preallocated refundId for idempotency.
+              // See handleRefundSubmit for the full rationale; the inline
+              // Approve button mirrors the same preallocate-keep-replay-mint
+              // flow so a manual retry after a closed tab never appends a
+              // second refund entry.
+              const refundId = refundSubmissionIdRef.current
+                || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+              refundSubmissionIdRef.current = refundId;
               setRefundError(null);
               setIsRefunding(true);
+              let refundCompleted = false;
               try {
                 const token = await auth.currentUser?.getIdToken(true);
                 const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-refund`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-                  body: JSON.stringify({ bookingId: selectedBooking.id, amount, method: refundMethod, reason: refundReason.trim() })
+                  body: JSON.stringify({ bookingId: selectedBooking.id, refundId, amount, method: refundMethod, reason: refundReason.trim() })
                 });
                 const payload = await response.json();
-                if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to record refund.");
+                if (!response.ok || !payload.success) {
+                  // 409 means the staff reused an ID for a different refund;
+                  // clear the held ref so the next submit mints a fresh one.
+                  if (response.status === 409) {
+                    refundSubmissionIdRef.current = null;
+                  }
+                  throw new Error(payload.error || "Unable to record refund.");
+                }
+                refundCompleted = true;
                 setRefundAmount("");
                 setRefundReason("");
                 setShowRefundModal(false);
@@ -5710,6 +5757,11 @@ export function BookingsPage() {
               } catch (error: any) {
                 setRefundError(error.message || "Please try again.");
               } finally {
+                // Keep the same ID after an uncertain/network failure. A
+                // manual retry then replays the original server commit
+                // instead of creating a second ledger entry. Successful
+                // submissions mint a fresh ID.
+                if (refundCompleted) refundSubmissionIdRef.current = null;
                 setIsRefunding(false);
               }
             })()} disabled={isRefunding || !refundAmount || Number(refundAmount) <= 0 || !refundReason.trim()} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">

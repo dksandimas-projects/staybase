@@ -226875,22 +226875,27 @@ async function handleAddRefund(req, res) {
   if (req.staff?.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only an administrator can approve refunds." });
   }
-  const { bookingId, amount, method, reason } = req.body || {};
-  const numericAmount = Number(amount);
-  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
-  const safeMethod = typeof method === "string" ? method.trim().slice(0, 80) : "";
+  const { bookingId, refundId, amount, method, reason, transactionReference } = req.body || {};
   if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
+  if (!refundId || !PREALLOCATED_PAYMENT_ID_REGEX.test(String(refundId))) {
+    return res.status(400).json({ success: false, error: "A valid refund ID is required." });
+  }
+  const numericAmount = Number(amount);
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const safeMethod = typeof method === "string" ? method.trim().slice(0, 80) : "";
   if (!Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 1e6) {
     return res.status(400).json({ success: false, error: "Refund amount must be between 0.01 and 1,000,000." });
   }
   if (!safeMethod || !safeReason) {
     return res.status(400).json({ success: false, error: "Refund method and reason are required." });
   }
+  const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
   try {
     let refundRecord = {};
     let netCollected = 0;
+    let idempotentReplay = false;
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef);
@@ -226898,11 +226903,22 @@ async function handleAddRefund(req, res) {
       const paymentsRef = bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       netCollected = paymentsSnapshot.docs.reduce((sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0), 0);
+      const existingRefund = paymentsSnapshot.docs.find((docSnap) => docSnap.id === refundId);
+      if (existingRefund) {
+        const existingData = existingRefund.data();
+        const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount && String(existingData.method || "") === safeMethod && String(existingData.note || "") === safeReason && (existingData.transactionReference || null) === safeTransactionReference;
+        if (!sameRequest) {
+          throw new Error("Refund ID has already been used for a different refund.");
+        }
+        refundRecord = existingData;
+        idempotentReplay = true;
+        return;
+      }
       if (numericAmount > netCollected) {
         throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
       }
       const approvedBy = req.staff.uid || "admin";
-      refundRecord = {
+      const newRecord = {
         type: "refund",
         amount: -numericAmount,
         method: safeMethod,
@@ -226912,11 +226928,23 @@ async function handleAddRefund(req, res) {
         recordedBy: approvedBy,
         recordedAt: /* @__PURE__ */ new Date()
       };
-      transaction.set(paymentsRef.doc(), refundRecord);
+      if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
+      refundRecord = newRecord;
+      transaction.create(paymentsRef.doc(refundId), newRecord);
     });
-    return res.status(200).json({ success: true, data: { ...refundRecord, netCollected: netCollected - numericAmount } });
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...refundRecord,
+        netCollected: netCollected - numericAmount,
+        idempotentReplay
+      }
+    });
   } catch (error) {
     if (error.message === "Booking not found") return res.status(404).json({ success: false, error: "Booking not found." });
+    if (error.message === "Refund ID has already been used for a different refund.") {
+      return res.status(409).json({ success: false, error: error.message });
+    }
     const status = String(error.message || "").startsWith("Refund exceeds") ? 400 : 500;
     return res.status(status).json({ success: false, error: error.message || "Unable to record refund." });
   }
