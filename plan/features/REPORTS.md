@@ -10,7 +10,8 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 
 ### Export CSV Button (page header, both tabs)
 
-- [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
+- [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Guests, Adults, Children, Total Price, Status, Source, Payment Method, and latest Payment Reference.
+- [x] **Adult/child occupancy split (CHD-08)** — every booking-oriented CSV/XLSX row keeps the historical `Guests` total and adds separate `Adults` + `Children` columns. This covers the page CSV, Sales XLSX Bookings and Breakfast sheets, and Full Backup Bookings sheet. Legacy or inconsistent rows fall back to `Adults = numGuests`, `Children = 0`; no migration is required. Occupancy, ADR, and RevPAR remain room-night based and are unchanged.
 - [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and the **latest `transactionReference`** on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields` — the previous top-level `b.paymentReferenceNumber` is retired; see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`).
 
 ### Custom Date Range (owner request 2026-07-09)
@@ -185,8 +186,8 @@ One XLSX file with 5 sheets covering all revenue data.
 | Sheet | Contents |
 |---|---|
 | **Summary** | Revenue totals by stream + payment method breakdown for the period |
-| **Bookings** | All booking records (same columns as §Data Backup) |
-| **Breakfast** | Per-booking breakfast breakdown (ref, room, nights, guests, rate, total) |
+| **Bookings** | All booking records (same columns as §Data Backup, including Guests, Adults, and Children) |
+| **Breakfast** | Per-booking breakfast breakdown (ref, room, nights, guests, adults, children, rate, total) |
 | **Store Orders** | All delivered store order records (ref, room, items, qty, price, total, payment, date) |
 | **Charges** | Incidental ledger entries joined to booking ref, including reversals |
 
@@ -304,6 +305,8 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 | Check-Out | `checkOut` (YYYY-MM-DD) |
 | Nights | computed |
 | Guests | `numGuests` |
+| Adults | `numAdults` when the stored split is valid; otherwise `numGuests` |
+| Children | `numChildren` when the stored split is valid; otherwise `0` |
 | Has Breakfast | `hasBreakfast` |
 | Rate/Night | `ratePerNight` |
 | Breakfast Rate | `breakfastRate` |
