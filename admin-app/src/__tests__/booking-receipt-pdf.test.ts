@@ -85,7 +85,17 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
       expect(funcBody).toMatch(/\{ label:\s*["']Room["'],\s*value:\s*`\$\{b\.roomNumber\}\s*\(\$\{b\.roomType\}\)` \}/);
       expect(funcBody).toMatch(/\{ label:\s*["']Dates["'],\s*value:\s*`\$\{b\.checkIn\}\s*to\s*\$\{b\.checkOut\}` \}/);
-      expect(funcBody).toMatch(/\{ label:\s*["']Stay["'],\s*value:\s*`\$\{b\.numNights\}/);
+      // Per EXB-08 (2026-08-01, per decision #156): the
+      // Stay line now uses a multi-line IIFE that
+      // surfaces the adult/child split + extra bed
+      // count when those fields are present on the
+      // booking. The label key is unchanged
+      // (`"Stay"`); only the value expression grew
+      // to handle the split.
+      expect(funcBody).toMatch(/\{ label:\s*["']Stay["'],\s*value:\s*\(\(\) => \{/);
+      expect(funcBody).toMatch(/numAdults/);
+      expect(funcBody).toMatch(/numChildren/);
+      expect(funcBody).toMatch(/extraBedCount/);
       expect(funcBody).toMatch(/formatAmount\(b\.ratePerNight\)\}\s*\/ night/);
       expect(funcBody).toMatch(/drawInfoCard\("Guest"/);
       expect(funcBody).toMatch(/drawInfoCard\("Stay"/);

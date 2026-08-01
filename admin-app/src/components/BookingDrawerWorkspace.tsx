@@ -83,7 +83,35 @@ export function BookingDrawerWorkspaceHeader({
                 Room {booking.roomNumber} · {booking.roomType.replace(/-/g, " ")}
               </span>
               <span>{booking.checkIn} → {booking.checkOut}</span>
-              <span>{booking.numGuests} guest{booking.numGuests === 1 ? "" : "s"}</span>
+              {/* Per EXB-08 (2026-08-01, per decision #156):
+                  the drawer header's occupancy line now
+                  shows the adult/child split when both
+                  fields are present, with the extra bed
+                  count appended when > 0. Legacy pre-CHD
+                  bookings without the split read as a
+                  single `numGuests` total (the historical
+                  "all guests are adults" shape, byte-
+                  equivalent to pre-EXB-08). Matches the
+                  receipt PDF + the email helper + the
+                  /my-booking card so the staff / guest
+                  surfaces stay in lockstep. */}
+              {(() => {
+                const numAdults = Number((booking as any).numAdults);
+                const numChildren = Number((booking as any).numChildren);
+                const extraBedCount = Number((booking as any).extraBedCount);
+                if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+                  const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"}`;
+                  const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+                    ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+                    : "";
+                  return (
+                    <span title={`${booking.numGuests || 1} guest${(booking.numGuests || 1) === 1 ? "" : "s"} total`}>
+                      {splitLabel}{extraLabel}
+                    </span>
+                  );
+                }
+                return <span>{booking.numGuests} guest{booking.numGuests === 1 ? "" : "s"}</span>;
+              })()}
             </div>
           </div>
 

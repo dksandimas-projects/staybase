@@ -3382,7 +3382,27 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
               <p className="mt-1 text-sm font-semibold text-gray-900">{b.bookingRef}</p>
               <p className="mt-0.5 text-sm text-gray-700">{b.guestName} · Room {b.roomNumber}</p>
               <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
-                <span>{b.numNights} nt × {b.numGuests} guests</span>
+                {/* Per EXB-08 (2026-08-01, per decision #156):
+                    the Reports line now shows the adult/child
+                    split when both fields are present, with
+                    the extra bed count appended when > 0.
+                    Legacy pre-CHD bookings read as a single
+                    `numGuests` total. Matches the drawer
+                    header + receipt PDF + the email helper
+                    so the staff surfaces stay in lockstep. */}
+                <span>{b.numNights} nt × {(() => {
+                  const numAdults = Number((b as any).numAdults);
+                  const numChildren = Number((b as any).numChildren);
+                  const extraBedCount = Number((b as any).extraBedCount);
+                  if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+                    const splitLabel = `${numAdults}A + ${numChildren}C`;
+                    const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+                      ? ` + ${extraBedCount} bed${extraBedCount === 1 ? "" : "s"}`
+                      : "";
+                    return <span title={`${b.numGuests} guest${b.numGuests === 1 ? "" : "s"} total`}>{splitLabel}{extraLabel}</span>;
+                  }
+                  return <>{b.numGuests} guests</>;
+                })()}</span>
                 <span>Rate {formatPrice(b.breakfastRate)}</span>
               </div>
               <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(total)}</p>

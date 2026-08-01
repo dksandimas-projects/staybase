@@ -1420,6 +1420,17 @@ export async function handleCreateBooking(req: any, res: any) {
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the extra-bed add-on term. The `addOns[]`
+        // now includes both the breakfast line and
+        // the extra-bed line, so the receipt PDF +
+        // PriceBreakdown + email surfaces all
+        // display the term. The label includes the
+        // count when > 1 for natural reading on
+        // multi-bed stays.
+        extraBedTotal,
+        extraBedCount: extraBedCount,
+        extraBedRate: extraBedRate,
         discountType,
         discountPct,
         voucherDiscount,
@@ -2332,6 +2343,19 @@ export async function handleCreateWalkin(req: any, res: any) {
           : roomBreakdown.roomLines,
         roomSubtotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? pricingSubtotal : roomTotal,
         breakfastTotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? 0 : breakfastTotal,
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the walk-in also surfaces the extra-bed
+        // add-on term. When `totalPriceOverride` is
+        // set, the manual rate collapses the extra
+        // bed into the room subtotal (the historical
+        // manual-rate shape) — so the add-on line is
+        // 0 in that path. When no override is set,
+        // the per-type `walkinExtraBedTotal` flows
+        // through to `addOns[]` exactly like the
+        // online create path.
+        extraBedTotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? 0 : walkinExtraBedTotal,
+        extraBedCount: walkinExtraBedCount,
+        extraBedRate: walkinExtraBedRate,
         discountType,
         discountPct,
         voucherDiscount,
