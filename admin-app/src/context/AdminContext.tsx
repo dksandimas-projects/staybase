@@ -4140,11 +4140,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   };
 
   const persistBookingSources = async (next: BookingSourceConfig[]) => {
+    const previous = bookingSources;
     setBookingSources(next);
-    await updateSettings("hotelConfig", {
-      bookingSources: next,
-      updatedAt: serverTimestamp()
-    });
+    try {
+      const success = await updateSettings("hotelConfig", {
+        bookingSources: next,
+        updatedAt: serverTimestamp()
+      });
+      if (!success) throw new Error("The booking source changes were not saved.");
+    } catch (error) {
+      setBookingSources(previous);
+      throw error;
+    }
   };
 
   const addBookingSource = async (config: BookingSourceConfig) => {
@@ -4182,7 +4189,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     const attached = bookings.filter((b) => b.source === source);
     if (attached.length > 0) {
       throw new Error(
-        `${attached.length} booking${attached.length === 1 ? "" : "s"} reference this source. Reassign or close those bookings first.`
+        `${attached.length} booking${attached.length === 1 ? "" : "s"} reference this source. Reassign those bookings or disable this source instead.`
       );
     }
     await persistBookingSources(bookingSources.filter((s) => s.source !== source));

@@ -98,6 +98,22 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 
 ---
 
+### 2A. Booking Sources (NBS-04)
+
+Admin-only CRUD for `settings/hotelConfig.bookingSources[]`, the shared list used by New Booking, booking filters, and acquisition reports.
+
+- [x] Deep link: `/settings?tab=sources`; available in the mobile tab strip and desktop navigation.
+- [x] One responsive card per source with label, immutable key, enabled status, and front-desk visibility.
+- [x] Add/Edit modal validates a unique lowercase key (`a-z`, `0-9`, hyphens) and a required display label.
+- [x] Custom sources can be enabled/disabled, shown/hidden in New Booking, reordered, edited, or deleted.
+- [x] `online`, `walk-in`, and `corporate` show a **Required** pill, cannot be deleted, and cannot be made front-desk-selectable because server workflows assign them.
+- [x] Delete uses a two-click three-second confirmation. The data layer also blocks deletion when existing bookings reference the source.
+- [x] Every mutation uses the existing full-array `persistBookingSources` write. Failed writes roll optimistic state back and surface a plain-language toast.
+- [x] Controls are at least 44px high; the shared `Modal` supplies mobile-sheet layout, focus trapping, reduced-motion handling, and safe-area footer spacing.
+- [x] Source: `settings/hotelConfig.bookingSources[]`; seed and protected keys live in `shared/constants`.
+
+---
+
 ### 3. Email
 
 - [x] From email address (Resend sender — `sparkinn.dev@gmail.com`)
