@@ -276,6 +276,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 - [x] Both the mobile card and desktop table show the adult/child caps so staff can audit the configured occupancy without opening Edit.
 - [x] Add and Edit persist `maxChildren` through the existing single-array `saveRoomTypes` path. Failed writes retain the established rollback and toast behavior.
 - [x] Children remain free of the room rate. Breakfast inclusion and extra-bed requirements are independent booking-level rules.
+- [x] Legacy room-type entries without `maxChildren` are normalized on every server booking read before capacity validation; the per-adult-cap default is applied without rewriting Firestore.
 
 **Extra bed fields on the type entry (EXB-01):** the Add/Edit modal includes:
 - **Max extra beds** (numeric, `0..99`) — `0` means the type does not allow extra beds (a booking with `extraBedCount > 0` is rejected server-side with a 400). Defaults to `0` for legacy types that pre-date EXB-01 — back-compat with the historical "no extra bed" shape.

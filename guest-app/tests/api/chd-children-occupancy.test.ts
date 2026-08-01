@@ -134,6 +134,14 @@ describe("CHD-02 — `maxChildren` on the room type", () => {
 });
 
 describe("CHD-04 — capacity validation splits into two checks (server-authoritative)", () => {
+  it("normalizes every room type before reading child-cap defaults", () => {
+    expect(bookingsHandlerSrc.match(/applyRoomTypeDefaults\(rawTypeEntry\)/g)).toHaveLength(3);
+  });
+
+  it("does not compare total guests directly with the adult cap", () => {
+    expect(bookingsHandlerSrc).not.toMatch(/if\s*\(guests\s*>\s*typeMaxCapacity\)/);
+  });
+
   it("handleCreateBooking validates `numAdults + numChildren === guests`", () => {
     // The "no trusting either value from the client" rule:
     // the server derives the split from the request body and

@@ -123,8 +123,8 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 #### Sales Detail Table
 - [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**
 - [x] **Incidentals sub-table** — Booking Ref, Room, Category, Label, Amount, Added By, Date
-- [x] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
-- [x] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
+- [x] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, adult/child occupancy, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
+- [x] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, adult/child occupancy, Breakfast Rate/person, Total Breakfast Revenue
 - [x] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
 - [x] All sub-tables are paginated (20 rows default), searchable by ref or name
 - [x] All sub-tables filterable by payment method and status
@@ -136,7 +136,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 ### Data & Logic Checklist
 - [x] Bookings query: `status` in `["payment-confirmed", "confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
 - [x] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
-- [x] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
+- [x] Breakfast gross basis uses the booking's snapshotted chargeable occupancy: `breakfastRate × (numAdults + included children) × numNights`; the historical `numGuests` fallback applies when no split exists. Legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation.
 - [x] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
 - [x] Incidental revenue: real-time `collectionGroup("charges")`, filtered by `addedAt`; positive charges and negative reversals net together
 - [x] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)

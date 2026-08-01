@@ -221718,6 +221718,26 @@ function defaultRandomBytes(n2) {
 }
 
 // ../shared/utils/roomTypes.ts
+var DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY = {
+  1: 0,
+  2: 1,
+  3: 2,
+  4: 2,
+  5: 2,
+  6: 2
+};
+var FALLBACK_MAX_CHILDREN = 2;
+function normalizeMaxChildren(raw, maxCapacity) {
+  const value = Number(raw);
+  if (Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  const cap = Number(maxCapacity);
+  if (Number.isFinite(cap) && cap > 0 && DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY[cap] !== void 0) {
+    return DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY[cap];
+  }
+  return FALLBACK_MAX_CHILDREN;
+}
 function requiredExtraBedsFor(input) {
   const adults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
   const children = Math.max(0, Math.floor(Number(input.numChildren) || 0));
@@ -221729,6 +221749,44 @@ function requiredExtraBedsFor(input) {
     overflowAdults,
     overflowChildren,
     requiredExtraBeds: overflowAdults + overflowChildren
+  };
+}
+function applyRoomTypeDefaults(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {
+      value: "",
+      label: "",
+      shortLabel: "",
+      imageUrls: [],
+      bedDefinition: "",
+      description: "",
+      amenities: [],
+      maxCapacity: 0,
+      maxChildren: 0,
+      pricePerNight: 0,
+      weekendRate: 0,
+      corporateRate: 0,
+      maxExtraBeds: 0,
+      extraBedRate: 0
+    };
+  }
+  const r3 = raw;
+  const maxCapacity = Number(r3.maxCapacity) || 0;
+  return {
+    value: String(r3.value || ""),
+    label: String(r3.label || r3.value || ""),
+    shortLabel: String(r3.shortLabel || r3.label || r3.value || ""),
+    imageUrls: Array.isArray(r3.imageUrls) ? r3.imageUrls.slice() : [],
+    bedDefinition: String(r3.bedDefinition || ""),
+    description: String(r3.description || ""),
+    amenities: Array.isArray(r3.amenities) ? r3.amenities.slice() : [],
+    maxCapacity,
+    maxChildren: normalizeMaxChildren(r3.maxChildren, maxCapacity),
+    pricePerNight: Number(r3.pricePerNight) || 0,
+    weekendRate: Number(r3.weekendRate) || 0,
+    corporateRate: Number(r3.corporateRate) || 0,
+    maxExtraBeds: Number(r3.maxExtraBeds) || 0,
+    extraBedRate: Number(r3.extraBedRate) || 0
   };
 }
 
@@ -225082,18 +225140,16 @@ async function handleCreateBooking(req, res) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
       }
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
-      if (!typeEntry) {
+      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
+      if (!rawTypeEntry) {
         throw new Error("Selected room type is not available.");
       }
+      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      if (guests > typeMaxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
-      }
       const candidatesQuery = adminDb.collection("rooms").where("type", "==", roomType).where("isActive", "==", true);
       const candidatesSnapshot = await transaction.get(candidatesQuery);
       const candidates = candidatesSnapshot.docs.map((d) => ({ id: d.id, data: d.data() })).filter((c2) => c2.data).sort((a, b3) => {
@@ -225860,10 +225916,11 @@ async function handleCreateWalkin(req, res) {
       }
       const hotelConfig = hotelConfigDoc.data();
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
-      if (!typeEntry) {
+      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
+      if (!rawTypeEntry) {
         throw new Error("Room type is not available.");
       }
+      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
       const snapshottedDiscountScope = normalizeDiscountScope(hotelConfig.discountScope);
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
@@ -225874,9 +225931,6 @@ async function handleCreateWalkin(req, res) {
       const resolvedSource = validSourceKeys.includes(requestedSource) ? requestedSource : "walk-in";
       if (resolvedSource !== requestedSource) {
         console.warn(`[handleCreateWalkinBooking] unknown source "${requestedSource}" \u2014 falling back to "walk-in"`);
-      }
-      if (guests > typeMaxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
       const walkinNumAdults = Number.isFinite(Number(requestedNumAdults)) ? Math.max(0, Math.floor(Number(requestedNumAdults))) : guests;
       const walkinNumChildren = Number.isFinite(Number(requestedNumChildren)) ? Math.max(0, Math.floor(Number(requestedNumChildren))) : 0;
@@ -227867,8 +227921,9 @@ async function handleRescheduleBooking(req, res) {
       if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
       const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
       const breakfastConfig = breakfastConfigDoc.data() || {};
-      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
-      if (!typeEntry) throw new Error("Room type configuration not found.");
+      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
+      if (!rawTypeEntry) throw new Error("Room type configuration not found.");
+      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
       const rescheduleNumAdults = Number.isFinite(Number(booking.numAdults)) ? Math.max(0, Math.floor(Number(booking.numAdults))) : Math.max(0, Math.floor(Number(booking.numGuests) || 0));
       const rescheduleNumChildren = Math.max(0, Math.floor(Number(booking.numChildren) || 0));
       const rescheduleMaxCapacity = Math.max(0, Number(typeEntry.maxCapacity) || 0);

@@ -86,3 +86,5 @@ A dedicated booking route at `/corporate/book` for corporate clients. Reuses all
 ## Extra Bed (EXB-07)
 
 Corporate Step 1 uses the same adult, child, and extra-bed steppers and shared overflow hint as the public booking flow. The submitted total remains `numAdults + numChildren`, with the split and `extraBedCount` sent to the existing booking API. Legacy `?guests=N` links hydrate as N adults and zero children. See `plan/features/BOOKING-FLOW.md §Extra Bed` for the server rules and pricing contract.
+
+The shared booking API re-derives and validates the total, normalizes the selected room type before reading its caps, and evaluates adults and children independently. A corporate group may therefore use the full adult cap plus the allowed children; children are not incorrectly counted against `maxCapacity`.

@@ -26,12 +26,12 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ### UI Checklist
 - [x] Check-in / check-out date pickers — blocks past dates, min 1 night enforced
-- [x] Guest count input — validated against the chosen room type's `maxCapacity`
+- [x] Adult and child inputs — validated independently against the chosen room type's adult cap (`maxCapacity`) and child cap (`maxChildren`), with configured extra beds covering either kind of overflow
 - [x] **Available room types grid** — one card per room type defined in `settings/hotelConfig.roomTypes[]` (falling back to `DEFAULT_ROOM_TYPES`). Cards are grouped by type, not per physical room — see "Room type booking" below.
 - [x] Each type card shows "X of Y available for your dates" so guests see live capacity without exposing specific room numbers
 - [x] Each type card shows two options (if breakfast is enabled in `settings/breakfastConfig`):
   - [x] **Room Only** — standard rate per night
-  - [x] **Room + Breakfast** — combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` per night
+  - [x] **Room + Breakfast** — combined rate uses the chargeable breakfast occupancy: adults plus children when the booking's include-children toggle is on
 - [x] Breakfast rate shown as combined nightly total — not broken out separately on the card
 - [x] If breakfast is disabled (`breakfastConfig.isEnabled: false`) — Room Only shown, no breakfast option
 - [x] Rate per night + computed total displayed on each card
@@ -47,8 +47,8 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Holiday/seasonal rate overrides applied per night before weekend/base rates, using the shared seasonal-aware pricing utility.
 - [x] Price breakdown model derived from the same nightly-rate calculation as the booking total; never maintain a separate client-only formula.
 - [x] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
-- [x] Breakfast combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` — recompute when guest count changes
-- [x] Selected room type, dates, guest count, and breakfast choice (`hasBreakfast: boolean`) persisted in booking context/state
+- [x] Breakfast combined rate uses adults plus included children and recomputes whenever either occupancy count or the include-children toggle changes
+- [x] Selected room type, dates, `numAdults`, `numChildren`, derived total `numGuests`, and breakfast choices persist in booking context/state
 - [x] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
 
 ---
@@ -264,6 +264,8 @@ Let guests understand why the final booking total changes when their stay includ
 ## Children in Booking (CHD-05)
 
 Step 1 separates the total group into adults aged 12+ and children aged 0–11. Room-type availability evaluates the adult and child caps independently; it does not count every child against the adult cap.
+
+The server validates `numAdults + numChildren === numGuests` inside both public and walk-in creation transactions. Room types are normalized before their caps are read, so legacy types receive the configured per-capacity child default. The historical combined `numGuests > maxCapacity` check must not return: `maxCapacity` is the adult cap, not total occupancy. Legacy requests without the split derive to all adults and zero children.
 
 - [x] The child stepper states the selected room type's included child allowance and explains when the current group reaches its limit.
 - [x] Extra beds may cover adult or child overflow. The picker uses the same shared overflow rule as the server, explains the exact number of additional beds required, and blocks continuation until that requirement is met.
