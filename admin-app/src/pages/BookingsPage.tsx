@@ -1365,7 +1365,28 @@ export function BookingsPage() {
         </span>
       </div>
       <p className="text-xs text-gray-500">
-        {row.numNights} {row.numNights === 1 ? "night" : "nights"} · {row.numGuests} {row.numGuests === 1 ? "guest" : "guests"}
+        {row.numNights} {row.numNights === 1 ? "night" : "nights"} · {(() => {
+          // Per EXB-08 (2026-08-01, per decision #156):
+          // the Bookings table row now shows the
+          // adult/child split when both fields are
+          // present, with the extra bed count appended
+          // when > 0. Legacy pre-CHD bookings read as
+          // a single `numGuests` total. Matches the
+          // drawer header + receipt PDF + the email
+          // helper so the staff surfaces stay in
+          // lockstep.
+          const numAdults = Number((row as any).numAdults);
+          const numChildren = Number((row as any).numChildren);
+          const extraBedCount = Number((row as any).extraBedCount);
+          if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+            const splitLabel = `${numAdults}A + ${numChildren}C`;
+            const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+              ? ` + ${extraBedCount} bed${extraBedCount === 1 ? "" : "s"}`
+              : "";
+            return <span title={`${row.numGuests} guest${row.numGuests === 1 ? "" : "s"} total`}>{splitLabel}{extraLabel}</span>;
+          }
+          return <>{row.numGuests} {row.numGuests === 1 ? "guest" : "guests"}</>;
+        })()}
       </p>
       <div className="flex items-center justify-between gap-2">
         <p className="text-lg font-bold text-primary-dark">{formatPrice(row.totalPrice)}</p>
@@ -1724,7 +1745,30 @@ export function BookingsPage() {
     y += 4.4;
     pdf.text(`Check-in: ${b.checkIn}  |  Check-out: ${b.checkOut}`, marginL + 5, y);
     y += 4.4;
-    pdf.text(`Guests: ${b.numGuests}  |  Nights: ${b.numNights}`, marginL + 5, y);
+    // Per EXB-08 (2026-08-01, per decision #156): the
+    // receipt PDF's occupancy line now shows the
+    // adult/child split when both fields are present,
+    // with the extra bed count appended when > 0.
+    // Legacy pre-CHD bookings read as a single
+    // `numGuests` total. The "Guests:" prefix is
+    // preserved for the legacy case so the receipt
+    // stays scannable; the split case uses the
+    // compact "2A + 1C + 1 extra bed" form to fit
+    // the single-line PDF layout.
+    {
+      const numAdults = Number((b as any).numAdults);
+      const numChildren = Number((b as any).numChildren);
+      const extraBedCount = Number((b as any).extraBedCount);
+      if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+        const splitLabel = `${numAdults}A + ${numChildren}C (${b.numGuests})`;
+        const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+          ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+          : "";
+        pdf.text(`Guests: ${splitLabel}${extraLabel}  |  Nights: ${b.numNights}`, marginL + 5, y);
+      } else {
+        pdf.text(`Guests: ${b.numGuests}  |  Nights: ${b.numNights}`, marginL + 5, y);
+      }
+    }
     y += 10;
 
     const contentTop = y;
@@ -2079,7 +2123,25 @@ export function BookingsPage() {
       const stayRows = [
         { label: "Room", value: `${b.roomNumber} (${b.roomType})` },
         { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
-        { label: "Stay", value: `${b.numNights} night${b.numNights === 1 ? "" : "s"} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}` },
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the receipt's "Stay" line shows the adult/child
+        // split when both fields are present, with the
+        // extra bed count appended when > 0. Legacy pre-CHD
+        // bookings read as a single `numGuests` total.
+        { label: "Stay", value: (() => {
+          const numAdults = Number((b as any).numAdults);
+          const numChildren = Number((b as any).numChildren);
+          const extraBedCount = Number((b as any).extraBedCount);
+          const nightsLabel = `${b.numNights} night${b.numNights === 1 ? "" : "s"}`;
+          if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+            const splitLabel = `${numAdults}A + ${numChildren}C (${b.numGuests} total)`;
+            const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+              ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+              : "";
+            return `${nightsLabel} • ${splitLabel}${extraLabel}`;
+          }
+          return `${nightsLabel} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}`;
+        })() },
         { label: "Rate", value: `${formatAmount(b.ratePerNight)} / night` }
       ];
       if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
@@ -3525,7 +3587,29 @@ export function BookingsPage() {
                     <span>Check-Out: <strong>{selectedBooking.checkOut}</strong></span>
                   </p>
                   <p>Duration: {selectedBooking.numNights} nights</p>
-                  <p>Guests: {selectedBooking.numGuests}</p>
+                  {/* Per EXB-08 (2026-08-01, per decision #156):
+                      the drawer "Guests:" line now shows
+                      the adult/child split when both
+                      fields are present, with the extra
+                      bed count appended when > 0. Legacy
+                      pre-CHD bookings read as a single
+                      `numGuests` total. Matches the
+                      receipt PDF + the email helper +
+                      the table row so the staff
+                      surfaces stay in lockstep. */}
+                  <p>Guests: {(() => {
+                    const numAdults = Number((selectedBooking as any).numAdults);
+                    const numChildren = Number((selectedBooking as any).numChildren);
+                    const extraBedCount = Number((selectedBooking as any).extraBedCount);
+                    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+                      const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${selectedBooking.numGuests} total)`;
+                      const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+                        ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+                        : "";
+                      return <span>{splitLabel}{extraLabel}</span>;
+                    }
+                    return <span>{selectedBooking.numGuests}</span>;
+                  })()}</p>
                   <p>Breakfast: {selectedBooking.hasBreakfast ? "Included" : "Excluded"}</p>
                 </div>
                 {/* Move Booking trigger */}

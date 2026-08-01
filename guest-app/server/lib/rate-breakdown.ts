@@ -9,6 +9,30 @@ type BuildRateBreakdownInput = {
   roomLines: BookingRateLine[];
   roomSubtotal: number;
   breakfastTotal: number;
+  // Per EXB-08 (2026-08-01, per decision #156): the
+  // extra-bed add-on term. The helper now writes the
+  // "Extra bed add-on" line into `addOns[]` so the
+  // receipt PDF + PriceBreakdown + email surfaces
+  // (which all read `rateBreakdown.addOns[]`) display
+  // the term — previously the addOns array only
+  // included the breakfast entry, leaving the extra
+  // bed total invisible on every downstream surface.
+  // Defensive `Number(x) || 0` coercion handles legacy
+  // callers + the create-time empty case (a guest who
+  // doesn't add an extra bed sees no extra line, the
+  // same as the historical "0 add-on" behavior).
+  extraBedTotal?: number;
+  // Per EXB-01 (2026-07-31, per decision #147): the
+  // extra-bed count + rate are snapshotted onto the
+  // booking doc. The label "Extra bed add-on" reads
+  // better with a count-aware variant when the count
+  // is > 1 — "Extra bed add-on (2 beds × rate × nights)".
+  // The count + rate are optional so legacy callers
+  // (rate-breakdown uses the input interface from
+  // many sites) still work; the label degrades to the
+  // count-agnostic form when either is missing.
+  extraBedCount?: number;
+  extraBedRate?: number;
   discountType: string;
   discountPct: number;
   voucherDiscount: number;
@@ -96,11 +120,44 @@ function composeRateBreakdown(input: {
 }
 
 export function buildRateBreakdown(input: BuildRateBreakdownInput): BookingRateBreakdown {
+  // Per EXB-08 (2026-08-01, per decision #156): the
+  // addOns array now includes BOTH the breakfast
+  // term (when `breakfastTotal > 0`) AND the extra-bed
+  // term (when `extraBedTotal > 0`). The order matches
+  // the historical add-on order in the receipt PDF +
+  // the PriceBreakdown component (breakfast first,
+  // then extra bed). The label includes the count when
+  // available so the receipt reads naturally for
+  // multi-bed stays ("Extra bed add-on (2 beds × rate ×
+  // nights)"); the count-agnostic label is the fallback
+  // when either count or rate is missing.
+  const breakfastAddOn: BookingRateAdjustmentLine | null =
+    input.breakfastTotal > 0
+      ? { label: "Breakfast add-on", amount: input.breakfastTotal }
+      : null;
+  const extraBedAddOn: BookingRateAdjustmentLine | null =
+    (input.extraBedTotal ?? 0) > 0
+      ? {
+          label: (() => {
+            const count = Number(input.extraBedCount) || 0;
+            const rate = Number(input.extraBedRate) || 0;
+            const nights = input.roomLines.reduce(
+              (sum, line) => sum + (Number(line.nights) || 0),
+              0
+            ) || 1;
+            if (count > 1 && rate > 0) {
+              return `Extra bed add-on (${count} beds × ${nights} ${nights === 1 ? "night" : "nights"})`;
+            }
+            return "Extra bed add-on";
+          })(),
+          amount: input.extraBedTotal ?? 0
+        }
+      : null;
   return composeRateBreakdown({
     ...input,
-    addOns: input.breakfastTotal > 0
-      ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
-      : [],
+    addOns: [breakfastAddOn, extraBedAddOn].filter(
+      (line): line is BookingRateAdjustmentLine => line !== null
+    ),
     pointsRedeemedValue: input.pointsRedeemedValue || 0
   });
 }

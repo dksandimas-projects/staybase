@@ -127,7 +127,30 @@ function generateReceiptPdf(booking: any): Buffer {
   text("Check-in:", fmtDate(booking.checkIn), top); top += 6;
   text("Check-out:", fmtDate(booking.checkOut), top); top += 6;
   text("Nights:", String(booking.numNights || 0), top); top += 6;
-  text("Guests:", String(booking.numGuests || 1), top); top += 6;
+  // Per EXB-08 (2026-08-01, per decision #156): the
+  // email's occupancy line now shows the adult/child
+  // split when both fields are present, with the extra
+  // bed count appended when the booking has any. Legacy
+  // pre-CHD bookings without the split read as a single
+  // `numGuests` total (the historical "all guests are
+  // adults" shape, byte-equivalent to pre-EXB-08). The
+  // split is staff-visible on the receipt PDF too (per
+  // the receipt helper), so the email + receipt stay
+  // in lockstep.
+  {
+    const numAdults = Number((booking as any).numAdults);
+    const numChildren = Number((booking as any).numChildren);
+    const extraBedCount = Number((booking as any).extraBedCount);
+    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+      const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
+      text(guestLine, "", top); top += 6;
+      if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
+        text(`Extra beds: ${extraBedCount} (${extraBedCount} × ${fmtMoney((booking as any).extraBedRate)} / bed / night)`, "", top); top += 6;
+      }
+    } else {
+      text("Guests:", String(booking.numGuests || 1), top); top += 6;
+    }
+  }
   if (booking.source) { text("Source:", String(booking.source), top); top += 6; }
 
   top += 2;

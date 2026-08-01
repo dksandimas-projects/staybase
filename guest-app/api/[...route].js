@@ -221986,8 +221986,23 @@ function generateReceiptPdf(booking) {
   top += 6;
   text("Nights:", String(booking.numNights || 0), top);
   top += 6;
-  text("Guests:", String(booking.numGuests || 1), top);
-  top += 6;
+  {
+    const numAdults = Number(booking.numAdults);
+    const numChildren = Number(booking.numChildren);
+    const extraBedCount = Number(booking.extraBedCount);
+    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+      const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
+      text(guestLine, "", top);
+      top += 6;
+      if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
+        text(`Extra beds: ${extraBedCount} (${extraBedCount} \xD7 ${fmtMoney(booking.extraBedRate)} / bed / night)`, "", top);
+        top += 6;
+      }
+    } else {
+      text("Guests:", String(booking.numGuests || 1), top);
+      top += 6;
+    }
+  }
   if (booking.source) {
     text("Source:", String(booking.source), top);
     top += 6;
@@ -224471,9 +224486,27 @@ function composeRateBreakdown(input) {
   };
 }
 function buildRateBreakdown(input) {
+  const breakfastAddOn = input.breakfastTotal > 0 ? { label: "Breakfast add-on", amount: input.breakfastTotal } : null;
+  const extraBedAddOn = (input.extraBedTotal ?? 0) > 0 ? {
+    label: (() => {
+      const count = Number(input.extraBedCount) || 0;
+      const rate = Number(input.extraBedRate) || 0;
+      const nights = input.roomLines.reduce(
+        (sum, line) => sum + (Number(line.nights) || 0),
+        0
+      ) || 1;
+      if (count > 1 && rate > 0) {
+        return `Extra bed add-on (${count} beds \xD7 ${nights} ${nights === 1 ? "night" : "nights"})`;
+      }
+      return "Extra bed add-on";
+    })(),
+    amount: input.extraBedTotal ?? 0
+  } : null;
   return composeRateBreakdown({
     ...input,
-    addOns: input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [],
+    addOns: [breakfastAddOn, extraBedAddOn].filter(
+      (line) => line !== null
+    ),
     pointsRedeemedValue: input.pointsRedeemedValue || 0
   });
 }
@@ -225316,6 +225349,17 @@ async function handleCreateBooking(req, res) {
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the extra-bed add-on term. The `addOns[]`
+        // now includes both the breakfast line and
+        // the extra-bed line, so the receipt PDF +
+        // PriceBreakdown + email surfaces all
+        // display the term. The label includes the
+        // count when > 1 for natural reading on
+        // multi-bed stays.
+        extraBedTotal,
+        extraBedCount,
+        extraBedRate,
         discountType,
         discountPct,
         voucherDiscount,
@@ -225951,6 +225995,19 @@ async function handleCreateWalkin(req, res) {
         }] : roomBreakdown.roomLines,
         roomSubtotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? pricingSubtotal : roomTotal,
         breakfastTotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? 0 : breakfastTotal,
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the walk-in also surfaces the extra-bed
+        // add-on term. When `totalPriceOverride` is
+        // set, the manual rate collapses the extra
+        // bed into the room subtotal (the historical
+        // manual-rate shape) — so the add-on line is
+        // 0 in that path. When no override is set,
+        // the per-type `walkinExtraBedTotal` flows
+        // through to `addOns[]` exactly like the
+        // online create path.
+        extraBedTotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? 0 : walkinExtraBedTotal,
+        extraBedCount: walkinExtraBedCount,
+        extraBedRate: walkinExtraBedRate,
         discountType,
         discountPct,
         voucherDiscount,

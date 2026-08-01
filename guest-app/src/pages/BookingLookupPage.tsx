@@ -846,8 +846,34 @@ export function BookingLookupPage() {
                       <Users className="mt-0.5 h-5 w-5 text-primary shrink-0" />
                       <div>
                         <p className="text-xs font-semibold text-gray-500 uppercase">Guests</p>
+                        {/* Per EXB-08 (2026-08-01, per decision
+                            #156): the /my-booking card now
+                            shows the adult/child split when
+                            both fields are present, with
+                            the extra bed count appended
+                            when > 0. Legacy pre-CHD bookings
+                            read as a single `numGuests`
+                            total. Matches the receipt PDF
+                            + the email helper + the admin
+                            drawer header so the staff +
+                            guest surfaces stay in
+                            lockstep. The guest sees the
+                            exact same occupancy breakdown
+                            the desk sees. */}
                         <p className="mt-1 font-semibold text-gray-900">
-                          {activeBooking.numGuests} {activeBooking.numGuests === 1 ? "Guest" : "Guests"}
+                          {(() => {
+                            const numAdults = Number((activeBooking as any).numAdults);
+                            const numChildren = Number((activeBooking as any).numChildren);
+                            const extraBedCount = Number((activeBooking as any).extraBedCount);
+                            if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+                              const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${activeBooking.numGuests} total)`;
+                              const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+                                ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+                                : "";
+                              return <span>{splitLabel}{extraLabel}</span>;
+                            }
+                            return <>{activeBooking.numGuests} {activeBooking.numGuests === 1 ? "Guest" : "Guests"}</>;
+                          })()}
                         </p>
                         <p className="text-xs text-gray-500">{activeBooking.numNights} {activeBooking.numNights === 1 ? "night" : "nights"} duration</p>
                       </div>
