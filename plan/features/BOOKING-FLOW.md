@@ -35,7 +35,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Breakfast rate shown as combined nightly total — not broken out separately on the card
 - [x] If breakfast is disabled (`breakfastConfig.isEnabled: false`) — Room Only shown, no breakfast option
 - [x] Rate per night + computed total displayed on each card
-- [x] If selected dates include mixed pricing, show a compact total breakdown so guests can see which nights used regular, weekend, or holiday/seasonal rates before they continue.
+- [x] Whenever any night uses a non-standard rate (weekend, seasonal/holiday, or corporate), show the rate panel so the headline "From {base rate}" is never higher than the total without explanation. For a single-source stay, the panel renders one line (e.g. "Weekend nights: 1 × ₱2,700" with the line subtotal on the right). For a multi-source stay, the existing "This stay uses mixed nightly rates" heading + per-source line list is used. Fully regular stays render no panel. Option price labels match the selected stay: a one-source stay shows that source's actual nightly amount, a multi-source stay prefixes the option price with "From", and a fully regular stay shows the base rate with no prefix. Per WRV (2026-08-01).
 - [x] Pre-populated if navigating from Homepage checker or Rooms page CTA
 - [x] Step indicator showing current step (1 of 4)
 - [x] "No room types available for these dates" empty state with "try fewer guests or different dates" nudge
@@ -231,7 +231,7 @@ Let guests understand why the final booking total changes when their stay includ
 
 ### UX Requirements
 
-- Step 1 room cards should stay scannable: show the final stay total and a small expandable/inline note only when more than one rate source is present.
+- Step 1 room cards should stay scannable: show the final stay total and a small inline note whenever any rate source is non-standard, not only when more than one source is present. A single-source weekend stay is the most common weekend booking and was previously silent on the rate charged. The option price label must match the selected stay — no headline-vs-total surprise. Per WRV (2026-08-01).
 - Step 3 must show the full breakdown before terms/payment confirmation so the guest can catch surprises before submitting.
 - Labels should use plain language: "Regular nights", "Weekend nights", and the seasonal override name such as "Holy Week".
 - Deductions should be visibly negative and ordered after add-ons.
@@ -254,6 +254,7 @@ Let guests understand why the final booking total changes when their stay includ
 
 - A booking that spans weekday and weekend nights shows separate lines explaining both rates.
 - A booking that spans a holiday/seasonal override shows the override label and rate, and does not double-count weekend pricing for those nights.
+- A booking that is **entirely** a non-regular rate (e.g. a Saturday→Sunday weekend-only stay, or a stay fully inside a seasonal/holiday window) shows the rate panel on Step 1 even though the breakdown is a single line, and the option price labels reflect the actual source's nightly amount. Per WRV (2026-08-01).
 - The Step 3 total, API-created `totalPrice`, Step 4 total, lookup page, email summary, and admin receipt agree.
 - Existing bookings without `rateBreakdown` still render a sensible summary.
 - No public response leaks payment proof URLs, internal notes, or unrelated booking PII.
