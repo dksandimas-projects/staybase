@@ -8,8 +8,10 @@ import {
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
+  PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
   UNSUPPORTED_PAYMENT_METHODS,
+  type BookingSourceConfig,
   type DiscountScope,
   type PaymentMethodConfig,
   type ProtectedPaymentMethod,
@@ -37,7 +39,7 @@ import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts";
+type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts";
 type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -95,6 +97,7 @@ const EMAIL_TRIGGER_GROUPS: Array<{ label: string; triggers: EmailTriggerCatalog
 const VALID_TAB_IDS: TabId[] = [
   "hotel",
   "payment",
+  "sources",
   "roomtypes",
   "branding",
   "website",
@@ -106,7 +109,8 @@ const VALID_TAB_IDS: TabId[] = [
   "intercom",
   "legal",
   "staff",
-  "environment"
+  "environment",
+  "discounts"
 ];
 
 const DEFAULT_OG_IMAGE_URL = config.ogImage.startsWith("http")
@@ -434,6 +438,432 @@ function BrandingAssetRow({
         </div>
         {error && <p className="text-[10px] text-red-600">{error}</p>}
       </div>
+    </div>
+  );
+}
+
+interface BookingSourcesTabBodyProps {
+  bookingSources: BookingSourceConfig[];
+  onAdd: (config: BookingSourceConfig) => Promise<void>;
+  onUpdate: (source: string, updates: Partial<Omit<BookingSourceConfig, "source">>) => Promise<void>;
+  onReorder: (next: BookingSourceConfig[]) => Promise<void>;
+  onDelete: (source: string) => Promise<void>;
+}
+
+type BookingSourceEditModalState =
+  | { open: false }
+  | { open: true; isNew: boolean; source: BookingSourceConfig };
+
+function emptyBookingSource(): BookingSourceConfig {
+  return {
+    source: "",
+    label: "",
+    isEnabled: true,
+    selectableAtFrontDesk: true
+  };
+}
+
+function BookingSourcesTabBody({
+  bookingSources,
+  onAdd,
+  onUpdate,
+  onReorder,
+  onDelete
+}: BookingSourcesTabBodyProps) {
+  const toast = useToast();
+  const [editModal, setEditModal] = useState<BookingSourceEditModalState>({ open: false });
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const timer = setTimeout(() => setPendingDelete(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDelete]);
+
+  const isProtected = (source: string) =>
+    (PROTECTED_BOOKING_SOURCES as readonly string[]).includes(source);
+
+  const runMutation = async (
+    action: () => Promise<void>,
+    successTitle: string,
+    successMessage: string
+  ) => {
+    try {
+      await action();
+      toast.success(successTitle, successMessage);
+      return true;
+    } catch (error) {
+      toast.error(
+        "Could not update booking sources",
+        error instanceof Error ? error.message : "Please try again."
+      );
+      return false;
+    }
+  };
+
+  const handleToggleEnabled = async (entry: BookingSourceConfig) => {
+    await runMutation(
+      () => onUpdate(entry.source, { isEnabled: !entry.isEnabled }),
+      entry.isEnabled ? "Booking source disabled" : "Booking source enabled",
+      `${entry.label} is ${entry.isEnabled ? "hidden from active source options; historical bookings stay intact" : "available again"}.`
+    );
+  };
+
+  const handleToggleFrontDesk = async (entry: BookingSourceConfig) => {
+    if (isProtected(entry.source)) return;
+    await runMutation(
+      () => onUpdate(entry.source, { selectableAtFrontDesk: !entry.selectableAtFrontDesk }),
+      "Front-desk visibility updated",
+      `${entry.label} is ${entry.selectableAtFrontDesk ? "no longer" : "now"} available in New Booking.`
+    );
+  };
+
+  const handleReorder = async (source: string, direction: "up" | "down") => {
+    const index = bookingSources.findIndex((entry) => entry.source === source);
+    if (index < 0) return;
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= bookingSources.length) return;
+    const next = [...bookingSources];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    await runMutation(
+      () => onReorder(next),
+      "Booking sources reordered",
+      "The new order is live in Settings and source filters."
+    );
+  };
+
+  const handleDelete = async (entry: BookingSourceConfig) => {
+    if (pendingDelete !== entry.source) {
+      setPendingDelete(entry.source);
+      toast.info("Confirm delete", "Click the delete button again within 3 seconds to confirm.");
+      return;
+    }
+    setPendingDelete(null);
+    await runMutation(
+      () => onDelete(entry.source),
+      "Booking source deleted",
+      `${entry.label} was removed from the configured source list.`
+    );
+  };
+
+  const openAddModal = () => {
+    setEditModal({ open: true, isNew: true, source: emptyBookingSource() });
+  };
+
+  const openEditModal = (entry: BookingSourceConfig) => {
+    setEditModal({ open: true, isNew: false, source: { ...entry } });
+  };
+
+  const closeModal = () => setEditModal({ open: false });
+
+  const handleModalField = (
+    field: keyof BookingSourceConfig,
+    value: string | boolean
+  ) => {
+    if (!editModal.open) return;
+    setEditModal({
+      open: true,
+      isNew: editModal.isNew,
+      source: { ...editModal.source, [field]: value }
+    });
+  };
+
+  const handleSaveModal = async () => {
+    if (!editModal.open) return;
+    const sourceKey = editModal.source.source.trim().toLowerCase();
+    const label = editModal.source.label.trim();
+    if (!sourceKey) {
+      toast.error("Source key is required", "Use a short identifier such as “booking-com” or “travel-agent”.");
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(sourceKey)) {
+      toast.error("Invalid source key", "Use lowercase letters, numbers, and hyphens only.");
+      return;
+    }
+    if (!label) {
+      toast.error("Label is required", "Enter the staff-facing name shown in booking filters and reports.");
+      return;
+    }
+    const protectedSource = isProtected(sourceKey);
+    const normalized: BookingSourceConfig = {
+      source: sourceKey,
+      label,
+      isEnabled: editModal.source.isEnabled,
+      selectableAtFrontDesk: protectedSource
+        ? false
+        : editModal.source.selectableAtFrontDesk
+    };
+    const saved = await runMutation(
+      () => editModal.isNew
+        ? onAdd(normalized)
+        : onUpdate(editModal.source.source, {
+            label: normalized.label,
+            isEnabled: normalized.isEnabled,
+            selectableAtFrontDesk: normalized.selectableAtFrontDesk
+          }),
+      editModal.isNew ? "Booking source added" : "Booking source updated",
+      `${label} is ready for source filters and reporting.`
+    );
+    if (saved) closeModal();
+  };
+
+  return (
+    <div className="space-y-6 text-xs">
+      <div>
+        <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Booking Sources</h3>
+        <p className="mt-0.5 text-[10px] leading-relaxed text-gray-500">
+          Control the channels used by New Booking, booking filters, and acquisition reports.
+          System-assigned sources stay protected; custom sources can be offered to the front desk.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-900">
+        <div className="flex items-start gap-3">
+          <ShieldAlert size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="text-xs font-bold">Keep reporting consistent</p>
+            <p className="mt-1 text-[11px] leading-relaxed">
+              Online, walk-in, and corporate are assigned by the system and cannot be deleted or offered
+              in the front-desk picker. Disable a source to hide it from active filters without rewriting
+              historical bookings.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {bookingSources.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-8 text-center">
+          <Tag size={28} className="mx-auto text-gray-300" aria-hidden="true" />
+          <p className="mt-3 text-sm font-semibold text-gray-700">No booking sources configured</p>
+          <p className="mt-1 text-[11px] text-gray-500">
+            Add a channel so staff can classify new bookings and reports can attribute them correctly.
+          </p>
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="mt-4 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add booking source
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {bookingSources.map((entry, index) => {
+            const protectedSource = isProtected(entry.source);
+            const armed = pendingDelete === entry.source;
+            return (
+              <article
+                key={entry.source}
+                className={`rounded-xl border border-gray-200 bg-white p-4 shadow-sm ${entry.isEnabled ? "" : "opacity-70"}`}
+              >
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-bold text-gray-900">{entry.label || entry.source}</p>
+                      <code className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-mono text-gray-600">
+                        {entry.source}
+                      </code>
+                      {protectedSource && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700">
+                          <Lock size={10} aria-hidden="true" />
+                          Required
+                        </span>
+                      )}
+                      {!entry.isEnabled && (
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                          Disabled
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {protectedSource
+                        ? "System assigned — never shown in the New Booking source picker."
+                        : entry.selectableAtFrontDesk
+                          ? "Available to staff in New Booking."
+                          : "Hidden from the New Booking source picker."}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleEnabled(entry)}
+                      aria-pressed={entry.isEnabled}
+                      className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition ${
+                        entry.isEnabled
+                          ? "border-primary/30 bg-primary-light text-primary-dark"
+                          : "border-gray-200 bg-gray-50 text-gray-600"
+                      }`}
+                    >
+                      {entry.isEnabled ? <CheckSquare size={14} aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}
+                      {entry.isEnabled ? "Enabled" : "Disabled"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleFrontDesk(entry)}
+                      disabled={protectedSource}
+                      aria-pressed={entry.selectableAtFrontDesk}
+                      title={protectedSource ? "System-assigned sources cannot be selected manually." : undefined}
+                      className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        entry.selectableAtFrontDesk
+                          ? "border-primary/30 bg-primary-light text-primary-dark"
+                          : "border-gray-200 bg-white text-gray-600"
+                      }`}
+                    >
+                      <Users size={14} aria-hidden="true" />
+                      Front desk
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleReorder(entry.source, "up")}
+                      disabled={index === 0}
+                      aria-label={`Move ${entry.label} up`}
+                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowUp size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleReorder(entry.source, "down")}
+                      disabled={index === bookingSources.length - 1}
+                      aria-label={`Move ${entry.label} down`}
+                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowDown size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(entry)}
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    >
+                      <Pencil size={13} aria-hidden="true" />
+                      Edit
+                    </button>
+                    {!protectedSource && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(entry)}
+                        aria-label={armed ? `Confirm delete ${entry.label}` : `Delete ${entry.label}`}
+                        className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition ${
+                          armed
+                            ? "border-red-300 bg-red-100 text-red-700"
+                            : "border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700"
+                        }`}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                        {armed ? "Tap again to confirm" : "Delete"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {bookingSources.length > 0 && (
+        <div className="flex justify-end pt-2">
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add booking source
+          </button>
+        </div>
+      )}
+
+      {editModal.open && (
+        <Modal
+          open
+          onClose={closeModal}
+          title={editModal.isNew ? "Add booking source" : `Edit “${editModal.source.label || editModal.source.source}”`}
+          footer={
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-gray-200 bg-white px-5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveModal()}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+              >
+                <Save size={14} aria-hidden="true" />
+                Save
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4 text-xs">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                Source key
+                <input
+                  type="text"
+                  maxLength={80}
+                  value={editModal.source.source}
+                  onChange={(event) => handleModalField("source", event.target.value.toLowerCase())}
+                  disabled={!editModal.isNew}
+                  placeholder="e.g. booking-com"
+                  className="min-h-[44px] rounded-lg border border-gray-250 bg-gray-50/50 px-3 font-mono text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <span className="text-[10px] font-normal text-gray-500">
+                  {editModal.isNew
+                    ? "Immutable identifier stored on each booking. Use lowercase letters, numbers, and hyphens."
+                    : "Cannot be renamed because historical bookings store this key."}
+                </span>
+              </label>
+              <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                Display label
+                <input
+                  type="text"
+                  maxLength={80}
+                  value={editModal.source.label}
+                  onChange={(event) => handleModalField("label", event.target.value)}
+                  placeholder="e.g. Booking.com"
+                  className="min-h-[44px] rounded-lg border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                />
+                <span className="text-[10px] font-normal text-gray-500">
+                  Shown to staff in New Booking, booking filters, and acquisition reports.
+                </span>
+              </label>
+            </div>
+
+            <label className="flex min-h-[44px] cursor-pointer items-center gap-3 font-semibold text-gray-700">
+              <button
+                type="button"
+                onClick={() => handleModalField("isEnabled", !editModal.source.isEnabled)}
+                aria-pressed={editModal.source.isEnabled}
+                className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition ${editModal.source.isEnabled ? "bg-primary" : "bg-gray-200"}`}
+              >
+                <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition ${editModal.source.isEnabled ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
+              Enabled in active source filters and reports
+            </label>
+
+            <label className={`flex min-h-[44px] items-center gap-3 font-semibold text-gray-700 ${isProtected(editModal.source.source) ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+              <button
+                type="button"
+                disabled={isProtected(editModal.source.source)}
+                onClick={() => handleModalField("selectableAtFrontDesk", !editModal.source.selectableAtFrontDesk)}
+                aria-pressed={editModal.source.selectableAtFrontDesk}
+                className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition disabled:cursor-not-allowed ${editModal.source.selectableAtFrontDesk ? "bg-primary" : "bg-gray-200"}`}
+              >
+                <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition ${editModal.source.selectableAtFrontDesk ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
+              Available to staff in the New Booking source picker
+            </label>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1171,6 +1601,11 @@ export function SettingsPage() {
     deletePaymentMethod,
     uploadPaymentMethodQr,
     resetPaymentMethodQr,
+    bookingSources,
+    addBookingSource,
+    updateBookingSource,
+    reorderBookingSources,
+    deleteBookingSource,
     testRuns,
     testRunsLoading,
     createTestRun,
@@ -2491,6 +2926,7 @@ export function SettingsPage() {
   const tabs = [
     { id: "hotel" as const, label: "Hotel Settings", icon: Landmark },
     { id: "payment" as const, label: "Payment Methods", icon: CreditCard },
+    { id: "sources" as const, label: "Booking Sources", icon: Tag },
     { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
     { id: "branding" as const, label: "Branding", icon: Palette },
     { id: "website" as const, label: "Website Content", icon: Globe },
@@ -2748,6 +3184,30 @@ export function SettingsPage() {
             onUploadQr={uploadPaymentMethodQr}
             onResetQr={resetPaymentMethodQr}
           />}
+
+          {/* NBS-04 — admin-managed booking channel list. The data
+              layer already owns normalization, backfill, bulk writes,
+              and protected/reference delete guards. This tab is the
+              single UI surface for those operations. */}
+          {activeTab === "sources" && (
+            isAdmin ? (
+              <BookingSourcesTabBody
+                bookingSources={bookingSources}
+                onAdd={addBookingSource}
+                onUpdate={updateBookingSource}
+                onReorder={reorderBookingSources}
+                onDelete={deleteBookingSource}
+              />
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+                <p className="font-semibold">Admin-only section</p>
+                <p className="mt-1 leading-relaxed">
+                  Booking source configuration affects acquisition reporting and the New Booking
+                  workflow. Ask a hotel owner to make these changes.
+                </p>
+              </div>
+            )
+          )}
 
           {/* TAB 2: BRANDING — hero photos, hero copy, and logo
               overrides. Per `plan/features/SETTINGS.md §Branding`.
