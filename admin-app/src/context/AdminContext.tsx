@@ -162,6 +162,18 @@ export interface Booking {
   guestEmail: string;
   guestPhone: string;
   numGuests: number;
+  // Per CHD-01 (2026-08-01, per decision #144) +
+  // EXB-01 (per decision #147) + EXB-07 (per decision #155):
+  // the admin-side Booking view carries the adult/child split
+  // + the extra bed count, matching the shared `Booking`
+  // type. `numGuests` is the persisted total; the split is
+  // optional so legacy bookings without these fields still
+  // read. The walk-in form (per EXB-07) populates all three
+  // on the create payload; the new-booking drawer reads them
+  // back for the occupancy display.
+  numAdults?: number;
+  numChildren?: number;
+  extraBedCount?: number;
   checkIn: string;
   checkOut: string;
   numNights: number;

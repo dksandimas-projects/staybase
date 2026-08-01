@@ -34,6 +34,14 @@ import {
   compressImageFile,
   getDateKeyInTimezone,
   getNumNights,
+  // Per EXB-07 (2026-08-01, per decision #155): the
+  // capacity overflow rule (per decision #153) is the
+  // single source of truth for whether the requested
+  // occupancy fits the room type. The corporate /book
+  // page uses the helper client-side to render the
+  // "blocked by cap → add an extra bed" contextual
+  // message before the user reaches the review step.
+  requiredExtraBedsFor,
   staggerChild,
   staggerContainer,
   VERSION
@@ -115,7 +123,23 @@ export function CorporateBookingPage() {
   // Booking states
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
   const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
-  const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
+  // Per EXB-07 (2026-08-01, per decision #155): the
+  // corporate /book page gains the same adult/child split
+  // + extra bed count the guest /book page already has.
+  // The single `guests` stepper is replaced by 3 steppers
+  // (adults >= 1, children >= 0, extra beds >= 0). The
+  // `guests` value (the persisted `numGuests` total) is
+  // derived from the adult + child sum, matching the
+  // server's CHD-04 derivation. Legacy callers that
+  // still pass `?guests=N` in the URL hydrate the sum
+  // into `numAdults = N, numChildren = 0` (the historical
+  // "all guests are adults" shape, preserved for
+  // back-compat with existing marketing links).
+  const initialGuests = Number(searchParams.get("guests") ?? 2);
+  const [numAdults, setNumAdults] = useState(initialGuests);
+  const [numChildren, setNumChildren] = useState(0);
+  const [extraBedCount, setExtraBedCount] = useState(0);
+  const guests = numAdults + numChildren;
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
   // the server auto-assigns a physical room of that type inside
@@ -446,11 +470,47 @@ export function CorporateBookingPage() {
     setSearchParams(next, { replace: true });
   }
 
-  function updateGuests(nextGuests: number) {
-    const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
-    setGuests(safeGuests);
-    updateDateParams(checkIn, checkOut, safeGuests);
+  // Per EXB-07 (2026-08-01, per decision #155): the
+  // 3 occupancy steppers on the corporate /book page.
+  // Each stepper has a `safeX` guard so the value
+  // stays in the per-stepper range. Updating any
+  // stepper persists the values to the URL params
+  // (parallel to the legacy `?guests=N` for back-compat)
+  // so a refresh keeps the user's choice.
+  function setAdults(next: number) {
+    const safe = Math.max(1, Math.floor(Number(next) || 1));
+    setNumAdults(safe);
   }
+  function setChildren(next: number) {
+    const safe = Math.max(0, Math.floor(Number(next) || 0));
+    setNumChildren(safe);
+  }
+  function setExtraBeds(next: number) {
+    const max = Number(selectedTypeEntry?.maxExtraBeds) || 0;
+    const safe = Math.max(0, Math.min(Math.floor(Number(next) || 0), max));
+    setExtraBedCount(safe);
+  }
+  // Per EXB-07: the EXB-03 overflow rule (per decision
+  // #153) is the single source of truth for whether the
+  // requested occupancy fits the room type. The
+  // `requiredExtraBedsFor` helper is the same one the
+  // server uses, so the client-side preview is
+  // byte-equivalent to the server's `handleCreateBooking`
+  // check. When `requiredExtraBeds > extraBedCount`, the
+  // contextual hint below the steppers offers the path
+  // through (add an extra bed) instead of letting the
+  // guest hit a dead-end server error.
+  const corpOverflow = selectedTypeEntry
+    ? requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: Number(selectedTypeEntry.maxCapacity) || 0,
+        maxChildren: Number(selectedTypeEntry.maxChildren) || 0
+      })
+    : { overflowAdults: 0, overflowChildren: 0, requiredExtraBeds: 0 };
+  const corpExtraBedsAllowed = Number(selectedTypeEntry?.maxExtraBeds) || 0;
+  const corpShowOverflowHint =
+    selectedTypeEntry && corpOverflow.requiredExtraBeds > extraBedCount;
 
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
     setSelectedRoomType(typeValue);
@@ -662,7 +722,20 @@ export function CorporateBookingPage() {
         roomType: selectedTypeEntry?.value ?? "",
         checkIn,
         checkOut,
+        // Per EXB-07 (2026-08-01, per decision #155):
+        // the corporate /book page now carries the
+        // adult/child split + the extra bed count.
+        // The server (per CHD-04 + EXB-03) validates
+        // `numAdults + numChildren === guests` and
+        // applies the EXB-03 overflow rule via
+        // `requiredExtraBedsFor`. The `guests` field
+        // is kept for back-compat with the server's
+        // derivation (it equals `numAdults + numChildren`
+        // on the wire).
         guests: Number(guestDetails.guestCount) || guests,
+        numAdults,
+        numChildren,
+        extraBedCount,
         hasBreakfast: hasBreakfast,
         guestDetails: {
           firstName: guestDetails.firstName,
@@ -985,29 +1058,116 @@ export function CorporateBookingPage() {
                   }}
                 />
 
-                <label className="grid gap-2 text-sm font-medium text-gray-700">
-                  Guests
-                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                      type="button"
-                      onClick={() => updateGuests(guests - 1)}
-                    >
-                      -
-                    </button>
-                    <span className="flex items-center gap-2 text-sm text-gray-700">
-                      <Users size={16} className="text-primary" />
-                      {guests} {guests === 1 ? "guest" : "guests"}
+                {/* Per EXB-07 (2026-08-01, per decision #155):
+                    the corporate /book occupancy block.
+                    Three steppers (adults >= 1, children >= 0,
+                    extra beds >= 0 capped at the selected
+                    type's `maxExtraBeds`, hidden entirely
+                    when the type allows 0). The total
+                    `guests` is derived from the adult + child
+                    sum, matching the server's CHD-04
+                    derivation. The contextual overflow hint
+                    renders when the requested split exceeds
+                    the type's caps — strongest UX: tell the
+                    guest exactly how many extra beds to add
+                    instead of letting the server reject. */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <span>Occupancy</span>
+                    <span className="text-gray-400 normal-case font-normal">
+                      {guests} guest{guests === 1 ? "" : "s"} total
                     </span>
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                      type="button"
-                      onClick={() => updateGuests(guests + 1)}
-                    >
-                      +
-                    </button>
                   </div>
-                </label>
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Adults</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Decrease adults"
+                        onClick={() => setAdults(numAdults - 1)}
+                        disabled={numAdults <= 1}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{numAdults}</span>
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Increase adults"
+                        onClick={() => setAdults(numAdults + 1)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Children (0–11, free of room rate)</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Decrease children"
+                        onClick={() => setChildren(numChildren - 1)}
+                        disabled={numChildren <= 0}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{numChildren}</span>
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Increase children"
+                        // Cap children at (guests - 1) so at
+                        // least one adult stays — matches
+                        // the guest /book picker's invariant.
+                        onClick={() => setChildren(numChildren + 1)}
+                        disabled={numChildren >= Math.max(0, guests - 1)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+                  {corpExtraBedsAllowed > 0 ? (
+                    <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                      <span>Extra beds</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          type="button"
+                          aria-label="Decrease extra beds"
+                          onClick={() => setExtraBeds(extraBedCount - 1)}
+                          disabled={extraBedCount <= 0}
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="w-6 text-center tabular-nums">{extraBedCount}</span>
+                        <button
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          type="button"
+                          aria-label="Increase extra beds"
+                          onClick={() => setExtraBeds(extraBedCount + 1)}
+                          disabled={extraBedCount >= corpExtraBedsAllowed}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </label>
+                  ) : null}
+                  {corpShowOverflowHint && selectedTypeEntry ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                      {corpExtraBedsAllowed > 0 ? (
+                        <>
+                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} (or {Number(selectedTypeEntry.maxCapacity) + corpExtraBedsAllowed}/{Number(selectedTypeEntry.maxChildren) + corpExtraBedsAllowed} with {corpExtraBedsAllowed} extra bed{corpExtraBedsAllowed === 1 ? "" : "s"}). Add {corpOverflow.requiredExtraBeds} extra bed{corpOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit your group, or pick a different room.
+                        </>
+                      ) : (
+                        <>
+                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} and does not allow extra beds. Pick a different room type to fit your group.
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </aside>
@@ -1369,8 +1529,17 @@ export function CorporateBookingPage() {
                 label="Guests count"
                 onBlur={() => markTouched("guestCount")}
                 onChange={(value) => {
+                  // Per EXB-07 (2026-08-01, per decision #155):
+                  // the Step 2 "Guests count" form field
+                  // is a confirmation input — it overrides
+                  // the Step 1 stepper when the user edits
+                  // it. We treat the typed value as a total
+                  // count and update `numAdults` to match
+                  // (preserving `numChildren`); the EXB-03
+                  // overflow check fires on submit.
                   updateGuestDetail("guestCount", value);
-                  setGuests(Number(value) || 1);
+                  const next = Math.max(1, Number(value) || 1);
+                  setAdults(Math.max(next, numChildren));
                 }}
                 placeholder="2"
                 required
