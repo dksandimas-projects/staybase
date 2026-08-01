@@ -589,6 +589,14 @@ export interface AdminContextType {
       description: string;
       amenities: string[];
       maxCapacity: number;
+      // Per CHD-02 (2026-08-01, per decision #144): per-room-type
+      // child cap. `maxCapacity` is now the ADULT cap (the
+      // semantic shift is safe because every existing booking has
+      // `numChildren = 0`). The default seed is keyed on
+      // `maxCapacity` (a Single allows 0, a Family allows 2). Admins
+      // can tune via the Room Types editor (CHD-03). Absent fields
+      // normalize via `normalizeMaxChildren` so legacy settings hydrate.
+      maxChildren?: number;
       pricePerNight: number;
       weekendRate: number;
       corporateRate: number;
@@ -4432,6 +4440,10 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       description: string;
       amenities: string[];
       maxCapacity: number;
+      // Per CHD-02 (2026-08-01, per decision #144): per-type child
+      // cap. `maxCapacity` is the ADULT cap. `maxChildren` is the
+      // CHILD cap (0 = no children allowed, e.g. a Single).
+      maxChildren?: number;
       pricePerNight: number;
       weekendRate: number;
       corporateRate: number;
@@ -4449,6 +4461,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       description: rt.description || "",
       amenities: Array.isArray(rt.amenities) ? rt.amenities.filter((a) => a && a.trim()) : [],
       maxCapacity: Math.max(1, Math.floor(rt.maxCapacity)),
+      // Per CHD-02: child cap. The seed (0/1/1/1/2) lives in
+      // `DEFAULT_ROOM_TYPES` for the initial population; the
+      // admin can tune per-type here. The Add form's default
+      // reads from the type's existing record when editing.
+      maxChildren: Math.max(0, Math.floor(Number(rt.maxChildren) || 0)),
       pricePerNight: Math.max(0, rt.pricePerNight),
       weekendRate: Math.max(0, rt.weekendRate),
       corporateRate: Math.max(0, rt.corporateRate),
@@ -4474,6 +4491,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         | "description"
         | "amenities"
         | "maxCapacity"
+        | "maxChildren"
         | "pricePerNight"
         | "weekendRate"
         | "corporateRate"

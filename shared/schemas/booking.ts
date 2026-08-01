@@ -54,6 +54,15 @@ export const WalkinBookingSchema = z.object({
   // `true` is the safe default (matches the historical "children pay
   // the full rate" math).
   breakfastIncludesChildren: z.boolean().optional(),
+  // Per CHD-01 (2026-08-01, per decision #144): adults/children
+  // split. Both optional — when absent, the server derives
+  // `numAdults = guests`, `numChildren = 0` (the historical
+  // "all guests are adults" shape). When present, the server
+  // validates `numAdults + numChildren === guests` and rejects
+  // any client-supplied `numGuests` that disagrees (the
+  // spec's "no trusting either value from the client" rule).
+  numAdults: z.coerce.number().int().min(0).max(100).optional(),
+  numChildren: z.coerce.number().int().min(0).max(100).optional(),
   // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
   // absent, the server treats it as 0 (the "no extra bed" case).
   // Bounded server-side by the room type's `maxExtraBeds` (a

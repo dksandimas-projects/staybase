@@ -56,11 +56,11 @@ export const ROOM_STATUSES = ["available", "occupied", "blocked"] as const;
 export const HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"] as const;
 
 export const DEFAULT_ROOM_TYPES: readonly RoomTypeEntry[] = [
-  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
-  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
-  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
-  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
-  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
+  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
+  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
+  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
+  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
+  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
 ];
 
 export type RoomTypeEntry = {
@@ -83,7 +83,23 @@ export type RoomTypeEntry = {
   bedDefinition: string;
   description: string;
   amenities: string[];
+  // Per CHD-02 (2026-08-01, per decision #144 + owner
+  // decision 2026-07-31 #2): `maxCapacity` is now the
+  // **ADULT** cap. The semantic shift is safe precisely
+  // because every existing booking has `numChildren = 0`
+  // (CHD-10 is the only place children exist in the
+  // system, and it's the breakfast toggle, not the
+  // occupancy split — that lands with CHD-01). A Single
+  // realistically allows 0 children (a "Single" is a
+  // solo-stay product), while a Family allows more. The
+  // default seeds below already encode the per-type
+  // reality; admins can tune via the Room Types editor
+  // (CHD-03). Absent `maxChildren` on a legacy settings
+  // doc reads as the seed value via the normalize-on-read
+  // helper in `shared/utils/roomTypes.ts` — same
+  // permissive pattern used for the #111 surface flags.
   maxCapacity: number;
+  maxChildren?: number;
   pricePerNight: number;
   weekendRate: number;
   corporateRate: number;

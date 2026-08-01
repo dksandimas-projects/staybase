@@ -221165,6 +221165,15 @@ var WalkinBookingSchema = external_exports.object({
   // `true` is the safe default (matches the historical "children pay
   // the full rate" math).
   breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per CHD-01 (2026-08-01, per decision #144): adults/children
+  // split. Both optional — when absent, the server derives
+  // `numAdults = guests`, `numChildren = 0` (the historical
+  // "all guests are adults" shape). When present, the server
+  // validates `numAdults + numChildren === guests` and rejects
+  // any client-supplied `numGuests` that disagrees (the
+  // spec's "no trusting either value from the client" rule).
+  numAdults: external_exports.coerce.number().int().min(0).max(100).optional(),
+  numChildren: external_exports.coerce.number().int().min(0).max(100).optional(),
   // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
   // absent, the server treats it as 0 (the "no extra bed" case).
   // Bounded server-side by the room type's `maxExtraBeds` (a
@@ -224758,6 +224767,16 @@ var createBookingSchema = external_exports.object({
   // `hasBreakfast`. `true` is the safe default (matches the
   // historical "children pay the full rate" math).
   breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per CHD-01 (2026-08-01, per decision #144): the
+  // adults/children split. Both optional — when absent,
+  // the server derives `numAdults = guests`, `numChildren
+  // = 0` (the historical "all guests are adults" shape,
+  // byte-equivalent to pre-CHD-01 read sites). When
+  // present, the server validates
+  // `numAdults + numChildren === guests` (the spec's
+  // "no trusting either value from the client" rule).
+  numAdults: external_exports.coerce.number().int().min(0).max(100).optional(),
+  numChildren: external_exports.coerce.number().int().min(0).max(100).optional(),
   // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
   // absent, the server treats it as 0. Bounded server-side by the
   // room type's `maxExtraBeds` (a booking with
@@ -224807,6 +224826,19 @@ async function handleCreateBooking(req, res) {
     checkOut,
     guests,
     hasBreakfast,
+    // Per CHD-01 (2026-08-01, per decision #144): the
+    // adults/children split. Both optional — when absent,
+    // the server derives `numAdults = guests`, `numChildren
+    // = 0` (the historical "all guests are adults" shape,
+    // byte-equivalent to pre-CHD-01 read sites). When
+    // present, the server validates
+    // `numAdults + numChildren === guests` and rejects any
+    // client-supplied total that disagrees. The booking doc
+    // stores both fields so the rate breakdown + the
+    // booking drawer + the receipt PDF can render the split
+    // (CHD-07 follow-up).
+    numAdults: requestedNumAdults,
+    numChildren: requestedNumChildren,
     // Per CHD-10 (2026-07-31, per CVQ-01): the optional per-booking
     // override for "include children in the breakfast charge". When
     // undefined, the server snapshots the admin default from
@@ -225063,6 +225095,24 @@ async function handleCreateBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
       const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== void 0 ? requestedBreakfastIncludesChildren : breakfastIncludesChildrenDefault;
+      const numAdults = Number.isFinite(Number(requestedNumAdults)) ? Math.max(0, Math.floor(Number(requestedNumAdults))) : guests;
+      const numChildren = Number.isFinite(Number(requestedNumChildren)) ? Math.max(0, Math.floor(Number(requestedNumChildren))) : 0;
+      if (numAdults + numChildren !== guests) {
+        throw new Error(
+          `Occupancy split mismatch: numAdults (${numAdults}) + numChildren (${numChildren}) must equal guests (${guests}).`
+        );
+      }
+      const typeMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
+      if (numAdults > typeMaxCapacity) {
+        throw new Error(
+          `Guest count exceeds room adult capacity of ${typeMaxCapacity}.`
+        );
+      }
+      if (numChildren > typeMaxChildren) {
+        throw new Error(
+          `Children (${numChildren}) exceeds room child capacity of ${typeMaxChildren}.`
+        );
+      }
       const extraBedCount = Math.max(0, Number(requestedExtraBedCount) || 0);
       const typeMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
       const typeExtraBedRate = Math.max(0, Number(typeEntry.extraBedRate) || 0);
@@ -225154,6 +225204,8 @@ async function handleCreateBooking(req, res) {
         hasBreakfast: finalHasBreakfast,
         breakfastRate: actualBreakfastRate,
         numGuests: guests,
+        numAdults,
+        numChildren,
         numNights,
         breakfastIncludesChildren
       });
@@ -225286,6 +225338,17 @@ async function handleCreateBooking(req, res) {
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
+        // Per CHD-01 (2026-08-01, per decision #144):
+        // adults/children split. Server-validated
+        // `numAdults + numChildren === guests` (CHD-04). The
+        // booking stores both fields so the rate breakdown,
+        // the booking drawer, the receipt PDF, and the
+        // confirmation email can render the split (CHD-07
+        // follow-up). `numGuests` is the persisted total
+        // and remains the source of truth for every existing
+        // read site — adding the split is additive.
+        numAdults,
+        numChildren,
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
@@ -225582,6 +225645,13 @@ async function handleCreateWalkin(req, res) {
     // Per EXB-01: extra-bed count. Optional — walk-in defaults to
     // 0 when absent. Bounded by the room type's `maxExtraBeds`.
     extraBedCount: requestedExtraBedCount,
+    // Per CHD-01 (2026-08-01, per decision #144): same
+    // adult/child split on the walk-in surface as on the
+    // public create. The schema defaults to absent →
+    // all adults. Server derives the split + validates the
+    // derived total against `guests` (CHD-04).
+    numAdults: requestedNumAdults,
+    numChildren: requestedNumChildren,
     guestDetails,
     paymentMethod,
     // Per NBS-02 (2026-07-31): the source is now selected by the
@@ -225694,6 +225764,19 @@ async function handleCreateWalkin(req, res) {
       }
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
+      }
+      const walkinNumAdults = Number.isFinite(Number(requestedNumAdults)) ? Math.max(0, Math.floor(Number(requestedNumAdults))) : guests;
+      const walkinNumChildren = Number.isFinite(Number(requestedNumChildren)) ? Math.max(0, Math.floor(Number(requestedNumChildren))) : 0;
+      if (walkinNumAdults + walkinNumChildren !== guests) {
+        throw new Error(
+          `Occupancy split mismatch: numAdults (${walkinNumAdults}) + numChildren (${walkinNumChildren}) must equal guests (${guests}).`
+        );
+      }
+      const walkinMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
+      if (walkinNumChildren > walkinMaxChildren) {
+        throw new Error(
+          `Children (${walkinNumChildren}) exceeds room child capacity of ${walkinMaxChildren}.`
+        );
       }
       const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", roomId).where("status", "in", ROOM_OCCUPYING_STATUSES);
       const bookingsSnapshot = await transaction.get(bookingsQuery);
@@ -225871,6 +225954,15 @@ async function handleCreateWalkin(req, res) {
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
+        // Per CHD-01 (2026-08-01, per decision #144):
+        // walk-in staff-created split. The schema accepts
+        // the fields (validated inside the transaction to
+        // `numAdults + numChildren === guests`), and the
+        // booking doc stores both. The room type's
+        // `maxChildren` is enforced inside the transaction
+        // (CHD-04).
+        numAdults: walkinNumAdults,
+        numChildren: walkinNumChildren,
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
