@@ -52,6 +52,59 @@ export function normalizeMaxChildren(raw: unknown, maxCapacity?: number): number
   return FALLBACK_MAX_CHILDREN;
 }
 
+// Per EXB-03 (2026-08-01, per decision #145 + owner
+// decision 2026-07-31 #1): the overflow rule. Extra beds grant
+// additional occupant slots usable by an adult **or** a
+// child, so the validation is **not** simply a higher cap
+// on each. The precise rule:
+//
+//   max(0, adults − maxCapacity) + max(0, children − maxChildren)
+//   ≤ extraBedCount
+//
+// i.e. the number of "extra people" beyond the per-type
+// cap (split into adult and child overflows) is at most
+// the number of extra beds. Each extra bed can serve 1
+// extra person (adult or child).
+//
+// When `extraBedCount === 0`, the rule reduces to
+// `max(0, adults − maxCapacity) + max(0, children − maxChildren) ≤ 0`,
+// which is the two hard caps that CHD-04 was originally
+// written to express. When `extraBedCount > 0`, the rule
+// allows overflow up to the extra bed count. The single
+// function replaces the two independent hard rejects with
+// one generalized check, and it's the only authoritative
+// capacity check on the create / walkin / reschedule
+// transactions.
+//
+// Edge cases pinned by the source-text test:
+//   - 2 adults in a Single (1 adult cap, 0 children, 0 extra
+//     beds) → 1 overflow adult, 0 extra beds → reject.
+//   - 2 adults in a Single with 1 extra bed → 1 overflow
+//     adult, 1 extra bed → accept.
+//   - 2 adults + 1 child in a Single (1 adult cap, 0
+//     children, 1 extra bed) → 1 overflow adult + 1
+//     overflow child = 2 overflow, 1 extra bed → reject
+//     (the rule does not distinguish which extra bed
+//     serves which overflow occupant).
+export function requiredExtraBedsFor(input: {
+  numAdults: number;
+  numChildren: number;
+  maxCapacity: number;
+  maxChildren: number;
+}): { overflowAdults: number; overflowChildren: number; requiredExtraBeds: number } {
+  const adults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
+  const children = Math.max(0, Math.floor(Number(input.numChildren) || 0));
+  const maxCapacity = Math.max(0, Math.floor(Number(input.maxCapacity) || 0));
+  const maxChildren = Math.max(0, Math.floor(Number(input.maxChildren) || 0));
+  const overflowAdults = Math.max(0, adults - maxCapacity);
+  const overflowChildren = Math.max(0, children - maxChildren);
+  return {
+    overflowAdults,
+    overflowChildren,
+    requiredExtraBeds: overflowAdults + overflowChildren
+  };
+}
+
 // Per CHD-02: apply the documented defaults to a raw room
 // type entry. `maxChildren` is the only new field; `maxExtraBeds`
 // and `extraBedRate` are EXB-01's defaults. The helper is the

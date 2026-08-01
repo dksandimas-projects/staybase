@@ -144,22 +144,49 @@ describe("CHD-04 — capacity validation splits into two checks (server-authorit
   });
 
   it("handleCreateBooking rejects `numAdults > maxCapacity` (the adult cap)", () => {
+    // Per EXB-03 (2026-08-01, per decision #145): the two
+    // CHD-04 hard rejects (`numAdults > maxCapacity` +
+    // `numChildren > maxChildren`) are subsumed by the
+    // single overflow check via `requiredExtraBedsFor`.
+    // When `extraBedCount === 0`, the helper reduces to
+    // the two hard caps — so the rejection still happens,
+    // just through a generalized code path. The source
+    // text below pins the call + the `if (overflow.requiredExtraBeds > extraBedCount)` reject.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(numAdults\s*>\s*typeMaxCapacity\)\s*\{[\s\S]{0,200}throw new Error\(\s*`Guest count exceeds room adult capacity of/
+      /const\s+overflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults,[\s\S]{0,200}numChildren,[\s\S]{0,200}maxCapacity:\s*typeMaxCapacity,[\s\S]{0,200}maxChildren:\s*typeMaxChildren[\s\S]{0,200}\}\)/
+    );
+    expect(bookingsHandlerSrc).toMatch(
+      /if\s*\(\s*overflow\.requiredExtraBeds\s*>\s*extraBedCount\s*\)\s*\{[\s\S]{0,300}Not enough extra beds/
     );
   });
 
   it("handleCreateBooking rejects `numChildren > maxChildren` (the new child cap)", () => {
+    // Per EXB-03: subsumed by the same overflow helper.
+    // The helper takes both `numAdults` and `numChildren`
+    // so a child-only overflow (e.g. 2 adults + 2 children
+    // in a Std Double with 1 child cap) still rejects when
+    // the overflow exceeds the extra bed count. The
+    // single check on `overflow.requiredExtraBeds` covers
+    // both the adult-cap and the child-cap case.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(numChildren\s*>\s*typeMaxChildren\)\s*\{[\s\S]{0,200}throw new Error\(\s*`Children \(\$\{numChildren\}\) exceeds room child capacity of/
+      /requiredExtraBedsFor\(\{[\s\S]{0,200}numChildren,[\s\S]{0,200}maxChildren:\s*typeMaxChildren/
     );
   });
 
   it("handleCreateWalkin applies the same two-checks (adult cap + child cap)", () => {
-    // The walk-in schema accepts the split; the same
-    // validation runs inside the walk-in transaction.
+    // Per EXB-03: the walk-in path uses the same
+    // `requiredExtraBedsFor` helper, scoped to the
+    // walk-in variables (`walkinNumAdults` +
+    // `walkinNumChildren` + `walkinExtraBedCount`). The
+    // helper subsumes the old `walkinNumChildren >
+    // walkinMaxChildren` hard reject — when
+    // `walkinExtraBedCount === 0`, the helper reduces to
+    // both hard caps.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(walkinNumChildren\s*>\s*walkinMaxChildren\)\s*\{[\s\S]{0,200}throw new Error\(\s*`Children \(\$\{walkinNumChildren\}\) exceeds room child capacity of/
+      /const\s+walkinOverflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}walkinNumAdults,[\s\S]{0,200}walkinNumChildren,[\s\S]{0,200}maxCapacity:\s*typeMaxCapacity,[\s\S]{0,200}maxChildren:\s*walkinMaxChildren[\s\S]{0,200}\}\)/
+    );
+    expect(bookingsHandlerSrc).toMatch(
+      /if\s*\(\s*walkinOverflow\.requiredExtraBeds\s*>\s*walkinExtraBedCount\s*\)/
     );
   });
 });

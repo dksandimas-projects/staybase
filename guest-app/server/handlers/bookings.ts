@@ -34,7 +34,18 @@ import {
   isBookingOccupyingRoom,
   computeHoldExpiresAt,
   normalizePaymentHoldWindowHours,
-  EXPIRED_HOLD_CANCELLATION_REASON
+  EXPIRED_HOLD_CANCELLATION_REASON,
+  // Per EXB-03 (2026-08-01, per decision #145): the
+  // capacity overflow rule. Replaces the two CHD-04 hard
+  // rejects (`numAdults > maxCapacity` +
+  // `numChildren > maxChildren`) with one generalized
+  // check: extra beds grant additional occupant slots
+  // usable by an adult OR a child. Used by
+  // handleCreateBooking / handleCreateWalkin /
+  // handleRescheduleBooking. See the JSDoc on the
+  // function in `shared/utils/roomTypes.ts` for the
+  // exact rule + the edge cases the test pins.
+  requiredExtraBedsFor
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
@@ -988,16 +999,25 @@ export async function handleCreateBooking(req: any, res: any) {
         );
       }
       const typeMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
-      if (numAdults > typeMaxCapacity) {
-        throw new Error(
-          `Guest count exceeds room adult capacity of ${typeMaxCapacity}.`
-        );
-      }
-      if (numChildren > typeMaxChildren) {
-        throw new Error(
-          `Children (${numChildren}) exceeds room child capacity of ${typeMaxChildren}.`
-        );
-      }
+      // Per EXB-03 (2026-08-01, per decision #145): the
+      // overflow rule replaces the two independent hard
+      // rejects (the original CHD-04 shape) with one
+      // generalized check. Extra beds grant additional
+      // occupant slots usable by an adult OR a child, so
+      // the rule is:
+      //   max(0, adults − maxCapacity) + max(0, children − maxChildren)
+      //   ≤ extraBedCount
+      // When `extraBedCount === 0`, the rule reduces to
+      // the two hard caps (CHD-04's original shape). When
+      // `extraBedCount > 0`, the rule allows overflow up to
+      // the extra bed count. The helper is the only
+      // authority; every create / walkin / reschedule
+      // transaction routes through it.
+      // Compute the overflow AFTER reading the extra-bed
+      // count (which is read below at line ~1009); we
+      // hoist it so the overflow check + the per-type
+      // cap check are in the same scope.
+      // (See `requiredExtraBedsFor` in `shared/utils/roomTypes.ts`.)
 
       // Per EXB-01 (2026-07-31): validate `extraBedCount` against
       // the room type's `maxExtraBeds`, then snapshot the rate
@@ -1015,6 +1035,26 @@ export async function handleCreateBooking(req: any, res: any) {
         );
       }
       const extraBedRate = extraBedCount > 0 ? typeExtraBedRate : 0;
+      // Per EXB-03 (2026-08-01, per decision #145): the
+      // overflow rule. See the doc block above for the
+      // rationale. Computed after the per-type cap is read
+      // so both checks are in the same scope. The helper
+      // is the only authority; the two hard rejects that
+      // CHD-04 wrote (`numAdults > typeMaxCapacity` +
+      // `numChildren > typeMaxChildren`) are subsumed —
+      // when `extraBedCount === 0`, the rule naturally
+      // enforces both hard caps.
+      const overflow = requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: typeMaxCapacity,
+        maxChildren: typeMaxChildren
+      });
+      if (overflow.requiredExtraBeds > extraBedCount) {
+        throw new Error(
+          `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${typeMaxExtraBeds} extra bed(s).`
+        );
+      }
 
       // 4. Handle Corporate Code validation. Per W1.3 / decision #79 /
       // audit S1.5: the server is the only source of truth for
@@ -2025,11 +2065,19 @@ export async function handleCreateWalkin(req: any, res: any) {
         );
       }
       const walkinMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
-      if (walkinNumChildren > walkinMaxChildren) {
-        throw new Error(
-          `Children (${walkinNumChildren}) exceeds room child capacity of ${walkinMaxChildren}.`
-        );
-      }
+      // Per EXB-03 (2026-08-01, per decision #145): the
+      // two independent hard rejects that CHD-04 wrote
+      // (`numChildren > maxChildren` + the implicit
+      // `numAdults > maxCapacity`) are subsumed by the
+      // single overflow check below. When
+      // `walkinExtraBedCount === 0`, the rule naturally
+      // enforces both hard caps. When
+      // `walkinExtraBedCount > 0`, the rule allows
+      // overflow up to the extra bed count (each extra
+      // bed can serve 1 extra person — adult or child).
+      // The check is hoisted to right after the
+      // `walkinExtraBedCount` validation so both reads
+      // are in the same scope.
 
       // 2. Overlapping Booking Check
       const bookingsQuery = adminDb.collection("bookings")
@@ -2119,6 +2167,29 @@ export async function handleCreateWalkin(req: any, res: any) {
         );
       }
       const walkinExtraBedRate = walkinExtraBedCount > 0 ? walkinTypeExtraBedRate : 0;
+      // Per EXB-03 (2026-08-01, per decision #145): the
+      // overflow rule. Same shape as handleCreateBooking.
+      // `requiredExtraBedsFor` returns the number of
+      // extra people beyond the per-type cap, split into
+      // adult and child overflows. The check rejects
+      // when the required overflow exceeds the selected
+      // extra bed count. When
+      // `walkinExtraBedCount === 0`, the helper reduces
+      // to the two hard caps (CHD-04's original shape);
+      // when `> 0`, the rule allows overflow up to the
+      // extra bed count. See the JSDoc on
+      // `requiredExtraBedsFor` in `shared/utils/roomTypes.ts`.
+      const walkinOverflow = requiredExtraBedsFor({
+        numAdults: walkinNumAdults,
+        numChildren: walkinNumChildren,
+        maxCapacity: typeMaxCapacity,
+        maxChildren: walkinMaxChildren
+      });
+      if (walkinOverflow.requiredExtraBeds > walkinExtraBedCount) {
+        throw new Error(
+          `Not enough extra beds: ${walkinOverflow.overflowAdults} overflow adult(s) + ${walkinOverflow.overflowChildren} overflow child(ren) = ${walkinOverflow.requiredExtraBeds} extra bed(s) needed, but only ${walkinExtraBedCount} extra bed(s) selected. The room type allows up to ${walkinTypeMaxExtraBeds} extra bed(s).`
+        );
+      }
 
       // 4. Calculate Nightly Rate Total. Seasonal overrides beat
       // weekend rates for walk-ins unless staff enters a manual
@@ -4793,9 +4864,49 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
       if (!typeEntry) throw new Error("Room type configuration not found.");
 
-      // PF-03: Capacity check
-      if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
-        throw new Error(`Target room type capacity is exceeded. Maximum allowed guests: ${typeEntry.maxCapacity}.`);
+      // Per CHD-04 + EXB-03 (2026-08-01, per decision #144
+      // + #145): the reschedule transaction validates the
+      // existing booking's adult/child occupancy against
+      // the NEW room type's caps, using the existing
+      // snapshotted `extraBedCount` (the reschedule body
+      // does not let staff change the extra bed count;
+      // the count is part of the booking, not the
+      // reschedule). The booking doc already has
+      // `numAdults` + `numChildren` (validated at create /
+      // walkin time per CHD-04) — for legacy pre-CHD
+      // bookings the fields are absent, so we derive
+      // `numAdults = numGuests, numChildren = 0` (the
+      // historical "all guests are adults" shape).
+      //
+      // This subsumes the previous PF-03 combined-cap
+      // check (`numGuests > maxCapacity`), which could
+      // not express the overflow case: a booking with
+      // extra beds fits a larger occupancy than the
+      // type's `maxCapacity`. The EXB-03 helper is the
+      // single authority — when `extraBedCount === 0` it
+      // reduces to the two hard caps (PF-03's shape +
+      // CHD-04's `numChildren > maxChildren`); when
+      // `> 0` it allows overflow up to the extra bed
+      // count. See `requiredExtraBedsFor` in
+      // `shared/utils/roomTypes.ts`.
+      const rescheduleNumAdults = Number.isFinite(Number(booking.numAdults))
+        ? Math.max(0, Math.floor(Number(booking.numAdults)))
+        : Math.max(0, Math.floor(Number(booking.numGuests) || 0));
+      const rescheduleNumChildren = Math.max(0, Math.floor(Number(booking.numChildren) || 0));
+      const rescheduleMaxCapacity = Math.max(0, Number(typeEntry.maxCapacity) || 0);
+      const rescheduleMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
+      const rescheduleExtraBedCount = Math.max(0, Number(booking.extraBedCount) || 0);
+      const rescheduleMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
+      const rescheduleOverflow = requiredExtraBedsFor({
+        numAdults: rescheduleNumAdults,
+        numChildren: rescheduleNumChildren,
+        maxCapacity: rescheduleMaxCapacity,
+        maxChildren: rescheduleMaxChildren
+      });
+      if (rescheduleOverflow.requiredExtraBeds > rescheduleExtraBedCount) {
+        throw new Error(
+          `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra bed(s) needed, but the booking has ${rescheduleExtraBedCount} extra bed(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra bed(s).`
+        );
       }
 
       // PF-03: Pricing recalculation
