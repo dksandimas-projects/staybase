@@ -4828,6 +4828,9 @@ export function SettingsPage() {
                             {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS} photos
                           </p>
                           <p className="text-[11px] text-gray-500">
+                            Up to {type.maxCapacity} adult{type.maxCapacity === 1 ? "" : "s"} · {type.maxChildren ?? 0} child{(type.maxChildren ?? 0) === 1 ? "" : "ren"}
+                          </p>
+                          <p className="text-[11px] text-gray-500">
                             {countRoomsUsingType(type.value)} room{countRoomsUsingType(type.value) === 1 ? "" : "s"} using this type
                           </p>
                         </div>
@@ -4866,6 +4869,7 @@ export function SettingsPage() {
                         <th className="px-4 py-2.5">Identifier Key</th>
                         <th className="px-4 py-2.5">Display Label</th>
                         <th className="px-4 py-2.5">Short Abbreviation</th>
+                        <th className="px-4 py-2.5">Occupancy Caps</th>
                         <th className="px-4 py-2.5">Photos</th>
                         <th className="px-4 py-2.5">In Use</th>
                         <th className="px-4 py-2.5 text-right">Actions</th>
@@ -4880,6 +4884,11 @@ export function SettingsPage() {
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-105 text-gray-700 border border-gray-200">
                               {type.shortLabel}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-[11px] text-gray-600">
+                            <span className="font-semibold text-gray-800">{type.maxCapacity}</span> adult{type.maxCapacity === 1 ? "" : "s"}
+                            <span className="mx-1 text-gray-300">·</span>
+                            <span className="font-semibold text-gray-800">{type.maxChildren ?? 0}</span> child{(type.maxChildren ?? 0) === 1 ? "" : "ren"}
                           </td>
                           <td className="px-4 py-3">
                             <button
@@ -4941,6 +4950,13 @@ export function SettingsPage() {
                       ? amenitiesRaw.split(",").map((a) => a.trim()).filter(Boolean)
                       : [];
                     const maxCapacity = parseInt((form.elements.namedItem("cap") as HTMLInputElement).value, 10) || 1;
+                    // Per CHD-03 (2026-08-01): `maxCapacity` is the
+                    // adult cap; children have their own non-negative
+                    // per-type cap.
+                    const maxChildren = Math.max(
+                      0,
+                      parseInt((form.elements.namedItem("maxChildren") as HTMLInputElement).value, 10) || 0
+                    );
                     const pricePerNight = parseFloat((form.elements.namedItem("baseRate") as HTMLInputElement).value) || 0;
                     const weekendRate = parseFloat((form.elements.namedItem("weekendRate") as HTMLInputElement).value) || pricePerNight;
                     const corporateRate = parseFloat((form.elements.namedItem("corpRate") as HTMLInputElement).value) || pricePerNight;
@@ -4969,6 +4985,7 @@ export function SettingsPage() {
                       description,
                       amenities,
                       maxCapacity,
+                      maxChildren,
                       pricePerNight,
                       weekendRate,
                       corporateRate,
@@ -4979,7 +4996,7 @@ export function SettingsPage() {
                     form.reset();
                     toast.success(
                       "Room type added",
-                      `${label} (${shortLabel}) — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night${maxExtraBeds > 0 ? `, +${maxExtraBeds} extra bed${maxExtraBeds === 1 ? "" : "s"} at ${formatPrice(extraBedRate)}/night` : ""}.`
+                      `${label} (${shortLabel}) — up to ${maxCapacity} adult${maxCapacity === 1 ? "" : "s"} and ${maxChildren} child${maxChildren === 1 ? "" : "ren"}, base ${formatPrice(pricePerNight)}/night${maxExtraBeds > 0 ? `, +${maxExtraBeds} extra bed${maxExtraBeds === 1 ? "" : "s"} at ${formatPrice(extraBedRate)}/night` : ""}.`
                     );
                   }}
                   className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
@@ -5051,9 +5068,9 @@ export function SettingsPage() {
                     />
                   </label>
 
-                  <div className="grid gap-4 sm:grid-cols-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Max guests
+                      Maximum adults (12+)
                       <input
                         name="cap"
                         type="number"
@@ -5062,6 +5079,22 @@ export function SettingsPage() {
                         required
                         className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                       />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Maximum children (0–11)
+                      <input
+                        name="maxChildren"
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={0}
+                        required
+                        aria-describedby="add-room-type-child-cap-help"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                      <span id="add-room-type-child-cap-help" className="text-[10px] font-normal leading-relaxed text-gray-500">
+                        Children are free of the room rate. Set 0 when this room type does not accommodate children.
+                      </span>
                     </label>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                       Base rate / night ({config.currencySymbol})
@@ -5195,6 +5228,10 @@ export function SettingsPage() {
                     .map((a) => a.trim())
                     .filter(Boolean);
                   const maxCapacity = parseInt(get("cap"), 10) || 1;
+                  // Per CHD-03 (2026-08-01): persist the child cap
+                  // alongside the adult cap in the same room-types
+                  // array write.
+                  const maxChildren = Math.max(0, parseInt(get("maxChildren"), 10) || 0);
                   const pricePerNight = parseFloat(get("baseRate")) || 0;
                   const weekendRate = parseFloat(get("weekendRate")) || pricePerNight;
                   const corporateRate = parseFloat(get("corpRate")) || pricePerNight;
@@ -5216,6 +5253,7 @@ export function SettingsPage() {
                       description,
                       amenities,
                       maxCapacity,
+                      maxChildren,
                       pricePerNight,
                       weekendRate,
                       corporateRate,
@@ -5225,7 +5263,7 @@ export function SettingsPage() {
                     });
                     toast.success(
                       "Room type updated",
-                      `${label} — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night.`
+                      `${label} — up to ${maxCapacity} adult${maxCapacity === 1 ? "" : "s"} and ${maxChildren} child${maxChildren === 1 ? "" : "ren"}, base ${formatPrice(pricePerNight)}/night.`
                     );
                     setEditType(null);
                   } catch (err) {
@@ -5299,9 +5337,9 @@ export function SettingsPage() {
                   />
                 </label>
 
-                <div className="grid gap-4 sm:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Max guests
+                    Maximum adults (12+)
                     <input
                       name="cap"
                       type="number"
@@ -5310,6 +5348,22 @@ export function SettingsPage() {
                       defaultValue={editType.maxCapacity}
                       className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                     />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Maximum children (0–11)
+                    <input
+                      name="maxChildren"
+                      type="number"
+                      min={0}
+                      step={1}
+                      required
+                      defaultValue={editType.maxChildren ?? 0}
+                      aria-describedby="edit-room-type-child-cap-help"
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                    <span id="edit-room-type-child-cap-help" className="text-[10px] font-normal leading-relaxed text-gray-500">
+                      Children are free of the room rate. Set 0 when this room type does not accommodate children.
+                    </span>
                   </label>
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                     Base rate / night ({config.currencySymbol})
