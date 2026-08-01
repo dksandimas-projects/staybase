@@ -30,6 +30,10 @@
     {
       "path": "/api/email/checkin-reminder",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/holds/expire",
+      "schedule": "0 1 * * *"
     }
   ],
   "rewrites": [

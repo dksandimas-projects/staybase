@@ -27,6 +27,7 @@ import {
   bustPublicSiteContentCache,
   compressImageFile,
   normalizeDiscountScope,
+  normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverrides,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   type BookingRateBreakdown,
@@ -3358,7 +3359,16 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // Settings → Discounts tab exposes a 3×3 checkbox editor
     // (senior row admin-only per DSC-03). Legacy settings without
     // the field read as the broad default via `normalizeDiscountScope`.
-    discountScope: BROAD_DISCOUNT_SCOPE
+    discountScope: BROAD_DISCOUNT_SCOPE,
+    // Per PEX-01 (2026-08-01, per CVQ-12 + decision #147): the
+    // window (in hours) a `pending` booking holds its room before
+    // the hold auto-expires. Snapshotted onto each booking at
+    // create time — a later Settings change never shortens or
+    // lengthens an existing guest's promise. Default 24h per the
+    // decision. The admin can shorten for large groups via the
+    // Settings UI; the per-booking `holdExpiresAt` is the only
+    // field the rest of the system reads.
+    paymentHoldWindowHours: 24
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -3716,7 +3726,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
