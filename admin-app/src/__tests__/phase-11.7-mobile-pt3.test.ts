@@ -132,19 +132,26 @@ describe("Phase 11.7 P3 — remaining mobile responsive work", () => {
       expect(cardBlock, "expected mobile card list for room pricing").toBeTruthy();
     });
 
-    it("mobile rate card contains all 3 numeric inputs (base / weekend / corporate)", () => {
+    it("mobile rate card contains all 4 numeric inputs (base / weekend / corporate / extraBed)", () => {
       const card = ratesSrc.match(
         /isMobile\s*\?\s*\(\s*<div className="space-y-3">[\s\S]*?roomTypes\.map[\s\S]*?<\/div>\s*\)/
       );
       expect(card).toBeTruthy();
       if (card) {
         const text = card[0];
-        // Three <input type="number"> with values bound to base/weekend/corporate.
+        // Four <input type="number"> with values bound to base / weekend /
+        // corporate / extraBed. Per EXB-05 (2026-08-01, per decision
+        // #154): the matrix gains the 4th column for the per-room-type
+        // extra-bed rate. The 3 room-rate fields keep their existing
+        // shape; the extra-bed rate is its own per-night-per-bed term
+        // (matches the per-room rate shape, snapshotted at booking
+        // time per EXB-01).
         const inputCount = (text.match(/<input\s+type="number"/g) || []).length;
-        expect(inputCount).toBe(3);
+        expect(inputCount).toBe(4);
         expect(text).toMatch(/prices\[type\.value\]\?\.base/);
         expect(text).toMatch(/prices\[type\.value\]\?\.weekend/);
         expect(text).toMatch(/prices\[type\.value\]\?\.corporate/);
+        expect(text).toMatch(/prices\[type\.value\]\?\.extraBed/);
       }
     });
 
@@ -155,7 +162,7 @@ describe("Phase 11.7 P3 — remaining mobile responsive work", () => {
       expect(card).toBeTruthy();
       if (card) {
         const inputCount = (card[0].match(/min-h-\[44px\]/g) || []).length;
-        expect(inputCount).toBeGreaterThanOrEqual(3);
+        expect(inputCount).toBeGreaterThanOrEqual(4);
       }
     });
 
