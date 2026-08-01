@@ -631,6 +631,7 @@ export interface AdminContextType {
         | "description"
         | "amenities"
         | "maxCapacity"
+        | "maxChildren"
         | "pricePerNight"
         | "weekendRate"
         | "corporateRate"

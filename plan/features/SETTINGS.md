@@ -268,7 +268,14 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 
 Source: `settings/websiteContent` — `setDoc` on save per section.
 
-**Room Types & Room Type Photos** *(cross-reference — lives on the Room Types tab, not here)* — per W3.5/W3.6/W3.7, the room type entry owns its `imageUrls[]` gallery, rate matrix, `maxCapacity`, `bedDefinition`, `description`, and `amenities`. The Settings → Room Types table is the single edit surface (Add/Edit capture every type field; the Photos modal handles the gallery — max `MAX_ROOM_TYPE_PHOTOS` = 10, stored at `room-types/{typeValue}/{filename}`, public read / staff write). The Rates tab remains for bulk rate review. Rooms inherit all type properties by joining `Room.type` at read time. Source: `settings/hotelConfig.roomTypes[]`.
+**Room Types & Room Type Photos** *(cross-reference — lives on the Room Types tab, not here)* — per W3.5/W3.6/W3.7 and CHD-03, the room type entry owns its `imageUrls[]` gallery, rate matrix, adult cap (`maxCapacity`), child cap (`maxChildren`), `bedDefinition`, `description`, and `amenities`. The Settings → Room Types table is the single edit surface (Add/Edit capture every type field; the Photos modal handles the gallery — max `MAX_ROOM_TYPE_PHOTOS` = 10, stored at `room-types/{typeValue}/{filename}`, public read / staff write). The Rates tab remains for bulk rate review. Rooms inherit all type properties by joining `Room.type` at read time. Source: `settings/hotelConfig.roomTypes[]`.
+
+**Children cap on the type entry (CHD-03):**
+- [x] The Add and Edit forms label `maxCapacity` as **Maximum adults (12+)** and expose a separate **Maximum children (0–11)** numeric field.
+- [x] The child cap is a required non-negative whole number; `0` means the room type does not accommodate children.
+- [x] Both the mobile card and desktop table show the adult/child caps so staff can audit the configured occupancy without opening Edit.
+- [x] Add and Edit persist `maxChildren` through the existing single-array `saveRoomTypes` path. Failed writes retain the established rollback and toast behavior.
+- [x] Children remain free of the room rate. Breakfast inclusion and extra-bed requirements are independent booking-level rules.
 
 **Extra bed fields on the type entry (EXB-01):** the Add/Edit modal includes:
 - **Max extra beds** (numeric, `0..99`) — `0` means the type does not allow extra beds (a booking with `extraBedCount > 0` is rejected server-side with a 400). Defaults to `0` for legacy types that pre-date EXB-01 — back-compat with the historical "no extra bed" shape.
