@@ -1887,7 +1887,23 @@ export function BookingPage() {
                   ? (breakfastConfig.ratePerPersonPerNight || 0)
                   : 0;
                 const typeRoomBreakdown = calculateTypeRoomBreakdown(type, checkIn, checkOut, seasonalRateOverrides);
-                const hasMixedRates = typeRoomBreakdown.roomLines.length > 1;
+                const roomLines = typeRoomBreakdown.roomLines;
+                // Per WRV-01 (2026-08-01): the rate panel must show whenever
+                // any line is non-regular, not only when there is more than
+                // one line. A Saturday→Sunday weekend-only stay produces a
+                // single line, and that single line is the one the headline
+                // "From {base rate}" silently misleads the guest about.
+                const isSingleSource = roomLines.length === 1;
+                const hasNonRegularRate = roomLines.some((line) => line.source !== "regular");
+                const isMultiSource = roomLines.length > 1;
+                // Per WRV-02: option labels show the actual nightly amount
+                // for a one-source stay, and prefix "From" for a multi-source
+                // stay so the option price matches the breakdown + exact
+                // total. Fully regular stays fall through with no prefix
+                // (the existing "no From" path stays correct for them).
+                const singleSourceRate = isSingleSource ? roomLines[0].nightlyRate : null;
+                const optionNightlyRate = singleSourceRate ?? typePricePerNight;
+                const optionRatePrefix = isMultiSource ? "From " : "";
                 const roomOnlyTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights,
@@ -1960,7 +1976,11 @@ export function BookingPage() {
                             active={isSelected && rateChoice === "room-only"}
                             label="Room Only"
                             helper="Simple stay, flexible payment at the hotel"
-                            priceLabel={`${formatPrice(typePricePerNight)} / night`}
+                            // Per WRV-02: the option price matches the
+                            // selected stay — the single source's nightly
+                            // amount for a one-source stay, or a "From"
+                            // prefix for a multi-source stay.
+                            priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate)} / night`}
                             totalLabel={`${formatPrice(roomOnlyTotal)} total`}
                             onSelect={() => selectRoomType(type.value, "room-only")}
                           />
@@ -1974,24 +1994,39 @@ export function BookingPage() {
                                   : "Includes daily local breakfast for selected guests"
                               }
                               // Per BF-26: live rate + (per-CHD-10) the
-                              // effective breakfast occupancy.
-                              priceLabel={`${formatPrice(typePricePerNight + liveBreakfastRate * effectiveBreakfastOccupancy)} / night`}
+                              // effective breakfast occupancy. Per WRV-02:
+                              // option price tracks the selected stay.
+                              priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate + liveBreakfastRate * effectiveBreakfastOccupancy)} / night`}
                               totalLabel={`${formatPrice(breakfastTotal)} total`}
                               onSelect={() => selectRoomType(type.value, "room-breakfast")}
                             />
                           ) : null}
                         </div>
-                        {hasMixedRates ? (
+                        {hasNonRegularRate ? (
                           <div className="mt-4 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-                            <p className="font-semibold text-gray-800">This stay uses mixed nightly rates.</p>
-                            <div className="mt-2 space-y-1">
-                              {typeRoomBreakdown.roomLines.map((line, lineIndex) => (
-                                <div key={`${type.value}-${line.source}-${lineIndex}`} className="flex justify-between gap-3">
-                                  <span>{line.label}: {line.nights} x {formatPrice(line.nightlyRate)}</span>
-                                  <span className="font-semibold text-gray-900">{formatPrice(line.subtotal)}</span>
+                            {isSingleSource ? (
+                              // Per WRV-01: a single-source stay (e.g.
+                              // Saturday→Sunday weekend-only) renders a
+                              // single line — no "mixed nightly rates"
+                              // claim would be true here. The line item
+                              // is the panel.
+                              <div key={`${type.value}-${roomLines[0].source}-0`} className="flex justify-between gap-3">
+                                <span className="font-semibold text-gray-800">{roomLines[0].label}: {roomLines[0].nights} x {formatPrice(roomLines[0].nightlyRate)}</span>
+                                <span className="font-semibold text-gray-900">{formatPrice(roomLines[0].subtotal)}</span>
+                              </div>
+                            ) : (
+                              <>
+                                <p className="font-semibold text-gray-800">This stay uses mixed nightly rates.</p>
+                                <div className="mt-2 space-y-1">
+                                  {roomLines.map((line, lineIndex) => (
+                                    <div key={`${type.value}-${line.source}-${lineIndex}`} className="flex justify-between gap-3">
+                                      <span>{line.label}: {line.nights} x {formatPrice(line.nightlyRate)}</span>
+                                      <span className="font-semibold text-gray-900">{formatPrice(line.subtotal)}</span>
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
+                              </>
+                            )}
                           </div>
                         ) : null}
                       </div>
