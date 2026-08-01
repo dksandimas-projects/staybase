@@ -221683,6 +221683,21 @@ function defaultRandomBytes(n2) {
   return new Uint8Array(randomBytes(n2));
 }
 
+// ../shared/utils/roomTypes.ts
+function requiredExtraBedsFor(input) {
+  const adults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
+  const children = Math.max(0, Math.floor(Number(input.numChildren) || 0));
+  const maxCapacity = Math.max(0, Math.floor(Number(input.maxCapacity) || 0));
+  const maxChildren = Math.max(0, Math.floor(Number(input.maxChildren) || 0));
+  const overflowAdults = Math.max(0, adults - maxCapacity);
+  const overflowChildren = Math.max(0, children - maxChildren);
+  return {
+    overflowAdults,
+    overflowChildren,
+    requiredExtraBeds: overflowAdults + overflowChildren
+  };
+}
+
 // ../shared/utils/seasonalRates.ts
 function dateKey(value) {
   return startOfDayUtc(value).toISOString().slice(0, 10);
@@ -225103,16 +225118,6 @@ async function handleCreateBooking(req, res) {
         );
       }
       const typeMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
-      if (numAdults > typeMaxCapacity) {
-        throw new Error(
-          `Guest count exceeds room adult capacity of ${typeMaxCapacity}.`
-        );
-      }
-      if (numChildren > typeMaxChildren) {
-        throw new Error(
-          `Children (${numChildren}) exceeds room child capacity of ${typeMaxChildren}.`
-        );
-      }
       const extraBedCount = Math.max(0, Number(requestedExtraBedCount) || 0);
       const typeMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
       const typeExtraBedRate = Math.max(0, Number(typeEntry.extraBedRate) || 0);
@@ -225122,6 +225127,17 @@ async function handleCreateBooking(req, res) {
         );
       }
       const extraBedRate = extraBedCount > 0 ? typeExtraBedRate : 0;
+      const overflow = requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: typeMaxCapacity,
+        maxChildren: typeMaxChildren
+      });
+      if (overflow.requiredExtraBeds > extraBedCount) {
+        throw new Error(
+          `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${typeMaxExtraBeds} extra bed(s).`
+        );
+      }
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
@@ -225773,11 +225789,6 @@ async function handleCreateWalkin(req, res) {
         );
       }
       const walkinMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
-      if (walkinNumChildren > walkinMaxChildren) {
-        throw new Error(
-          `Children (${walkinNumChildren}) exceeds room child capacity of ${walkinMaxChildren}.`
-        );
-      }
       const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", roomId).where("status", "in", ROOM_OCCUPYING_STATUSES);
       const bookingsSnapshot = await transaction.get(bookingsQuery);
       const now = /* @__PURE__ */ new Date();
@@ -225839,6 +225850,17 @@ async function handleCreateWalkin(req, res) {
         );
       }
       const walkinExtraBedRate = walkinExtraBedCount > 0 ? walkinTypeExtraBedRate : 0;
+      const walkinOverflow = requiredExtraBedsFor({
+        numAdults: walkinNumAdults,
+        numChildren: walkinNumChildren,
+        maxCapacity: typeMaxCapacity,
+        maxChildren: walkinMaxChildren
+      });
+      if (walkinOverflow.requiredExtraBeds > walkinExtraBedCount) {
+        throw new Error(
+          `Not enough extra beds: ${walkinOverflow.overflowAdults} overflow adult(s) + ${walkinOverflow.overflowChildren} overflow child(ren) = ${walkinOverflow.requiredExtraBeds} extra bed(s) needed, but only ${walkinExtraBedCount} extra bed(s) selected. The room type allows up to ${walkinTypeMaxExtraBeds} extra bed(s).`
+        );
+      }
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
@@ -227718,8 +227740,22 @@ async function handleRescheduleBooking(req, res) {
       const breakfastConfig = breakfastConfigDoc.data() || {};
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
       if (!typeEntry) throw new Error("Room type configuration not found.");
-      if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
-        throw new Error(`Target room type capacity is exceeded. Maximum allowed guests: ${typeEntry.maxCapacity}.`);
+      const rescheduleNumAdults = Number.isFinite(Number(booking.numAdults)) ? Math.max(0, Math.floor(Number(booking.numAdults))) : Math.max(0, Math.floor(Number(booking.numGuests) || 0));
+      const rescheduleNumChildren = Math.max(0, Math.floor(Number(booking.numChildren) || 0));
+      const rescheduleMaxCapacity = Math.max(0, Number(typeEntry.maxCapacity) || 0);
+      const rescheduleMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
+      const rescheduleExtraBedCount = Math.max(0, Number(booking.extraBedCount) || 0);
+      const rescheduleMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
+      const rescheduleOverflow = requiredExtraBedsFor({
+        numAdults: rescheduleNumAdults,
+        numChildren: rescheduleNumChildren,
+        maxCapacity: rescheduleMaxCapacity,
+        maxChildren: rescheduleMaxChildren
+      });
+      if (rescheduleOverflow.requiredExtraBeds > rescheduleExtraBedCount) {
+        throw new Error(
+          `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra bed(s) needed, but the booking has ${rescheduleExtraBedCount} extra bed(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra bed(s).`
+        );
       }
       const manualNightlyRate = getLockedManualNightlyRate(
         booking.rateBreakdown
