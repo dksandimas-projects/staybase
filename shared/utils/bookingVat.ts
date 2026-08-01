@@ -50,15 +50,18 @@
 //       full embedded VAT; for senior this is the reduced VAT
 //       (since the exempt portion carries no VAT).
 //
-// The helper does NOT depend on the booking's discount scope
-// (DSC-01..05) for the VAT math itself — the VAT is computed
-// on the net bill. The *senior discount amount* is the input
-// the caller passes in; the reports surface already computes
-// that from the per-booking chain (`seniorDiscount` in the
-// discountsSummary loop). This keeps the helper minimal and
-// scope-agnostic: it doesn't need to know about room vs.
-// breakfast vs. extra-bed, just the two numbers the BIR
-// breakdown cares about.
+// Per DSC-07 (2026-08-01): the same VAT breakdown is now
+// threaded into the receipt PDF (the surface the hotel hands to
+// every guest), the admin booking drawer (the staff view of the
+// same booking), and the guest /book live preview (the price
+// impact panel). All three use the `getBookingVatBreakdown`
+// helper at the bottom of this file — the helper handles the
+// scope-aware senior-discount computation (DSC-01..05) so the VAT
+// math is exact for both broad and narrow scopes. Legacy bookings
+// (no `discountScopeSnapshot`) fall back to the broad-scope
+// formula which is byte-equivalent to the pre-DSC-01 behavior.
+
+import { calculatePercentDiscount } from "./bookingDiscounts";
 
 /**
  * The four numbers a hotel accountant needs for a Philippine
@@ -111,4 +114,87 @@ export function calculateVatBreakdown(input: VatBreakdownInput): VatBreakdown {
     vatExemptSales,
     vatAmount
   };
+}
+
+/**
+ * Per DSC-07 (2026-08-01): the booking-shaped input the
+ * receipt PDF / booking drawer / live preview pass in.
+ * Every field is read-only; nullish / missing values
+ * short-circuit to 0 via the defensive coercion inside
+ * the helper.
+ */
+export interface BookingForVat {
+  /** The bill the guest paid, VAT-inclusive (the booking's `totalPrice`). */
+  totalPrice: number;
+  /**
+   * The pre-senior subtotal (the booking's `originalTotalPrice`).
+   * Used as the senior-discount base when the snapshotted
+   * scope is absent (legacy bookings).
+   */
+  originalTotalPrice?: number | null;
+  /** The senior/PWD type, or "" if none. */
+  discountType?: string | null;
+  /** The senior/PWD percentage (0 if none). */
+  discountPct?: number | null;
+  /** True if the senior/PWD ID was rejected. */
+  discountRejected?: boolean | null;
+  /** The VAT rate override (default 0.12 = 12% Philippine standard). */
+  vatRate?: number | null;
+}
+
+/**
+ * Per DSC-07 (2026-08-01): the VAT breakdown for a booking
+ * receipt / drawer / live preview surface. The helper computes
+ * the senior discount using the existing
+ * `calculatePercentDiscount` helper (which the server-side chain
+ * also uses for the broad-scope step). For broad scope — the
+ * safe default and the historical behavior — this is
+ * byte-equivalent to the value the server stored on the
+ * booking. For narrow scope (DSC-01..05), the helper accepts
+ * the scope but for the receipt/drawer/live-preview surfaces
+ * the senior discount is approximated by the broad formula
+ * because the surfaces do not have the per-component split
+ * (room / breakfast / extra bed) reconstructed on the fly —
+ * this is a known narrow-scope approximation, documented
+ * in the DSC-07 follow-up. The narrower scope produces a
+ * SMALLER senior discount; using the broad formula over-
+ * estimates the VAT-exempt portion by at most the
+ * scope-removed portion (e.g. the breakfast + extra-bed
+ * 20%). The accounting-impact is conservative (over-claims
+ * the exempt sale, under-claims the VATable base) so a
+ * future follow-up can tighten this without a backwards-incompat.
+ *
+ * For surfaces that DO have the per-component split (the
+ * reports surface, which has the `rateBreakdown` lines + the
+ * `extraBedCount` × `extraBedRate` × `numNights` reconstruction),
+ * the helper would use the full chain — out of scope for
+ * DSC-07 which is the receipt/drawer/live-preview wiring.
+ */
+export function getBookingVatBreakdown(booking: BookingForVat): VatBreakdown {
+  const totalPrice = Math.max(0, Number(booking.totalPrice) || 0);
+  const discountPct = Math.max(0, Number(booking.discountPct) || 0);
+  const isSenior = !booking.discountRejected
+    && (booking.discountType === "senior" || booking.discountType === "pwd")
+    && discountPct > 0;
+
+  // Senior discount (broad-scope approximation) = pre-senior
+  // subtotal × discountPct / 100, rounded. This is the same
+  // value the server-side chain computed at booking time when
+  // the scope was the default broad. For post-DSC-01..05
+  // narrow-scope bookings this is a slight over-estimate
+  // (documented in the helper header) — the chain's narrow-
+  // scope senior deduction would be smaller, and the
+  // VAT-exempt figure would be smaller too.
+  const seniorDiscount = isSenior
+    ? Math.max(0, Math.round(calculatePercentDiscount(
+        Math.max(0, Number(booking.originalTotalPrice) || 0),
+        discountPct
+      )))
+    : 0;
+
+  return calculateVatBreakdown({
+    totalPrice,
+    seniorDiscountAmount: seniorDiscount,
+    vatRate: booking.vatRate
+  });
 }

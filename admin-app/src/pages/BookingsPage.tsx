@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -398,8 +398,21 @@ function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | nul
   return "downloaded";
 }
 
-function AdminPriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBreakdown | null; total: number }) {
+function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountType, discountPct, discountRejected }: { breakdown?: BookingRateBreakdown | null; total: number; originalTotalPrice?: number | null; discountType?: string | null; discountPct?: number | null; discountRejected?: boolean | null }) {
   if (!breakdown?.roomLines?.length) return null;
+  // Per DSC-07 (2026-08-01, per #115): the admin booking
+  // drawer now shows the 12% VAT reconciliation the same
+  // way the receipt PDF + XLSX export do. The helper
+  // composes the senior discount from the booking's stored
+  // `originalTotalPrice` (broad-scope approximation;
+  // documented narrow-scope edge case in the helper header).
+  const vat = getBookingVatBreakdown({
+    totalPrice: breakdown.finalTotal || total,
+    originalTotalPrice,
+    discountType,
+    discountPct,
+    discountRejected
+  });
   return (
     <div className="space-y-2">
       {breakdown.roomLines.map((line, index) => (
@@ -423,6 +436,25 @@ function AdminPriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBrea
       <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
         <span>Total Bill Amount:</span>
         <span className="text-primary-dark">{formatPrice(breakdown.finalTotal || total)}</span>
+      </div>
+      {/* Per DSC-07 (2026-08-01, per #115): the 12% VAT
+          breakdown sub-block. Three muted lines for the
+          BIR-reconcilable figures; the senior discount
+          (RA 9994) is the VAT-exempt portion when the
+          booking carried one. */}
+      <div className="mt-2 space-y-1 border-t border-dashed border-gray-200 pt-2 text-[11px] text-gray-500">
+        <div className="flex justify-between">
+          <span>VATable Sales (VAT-exclusive)</span>
+          <span className="font-mono">{formatPrice(vat.vatExclusiveSales)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>VAT-Exempt Sales (RA 9994 Senior/PWD)</span>
+          <span className="font-mono">{formatPrice(vat.vatExemptSales)}</span>
+        </div>
+        <div className="flex justify-between font-semibold text-gray-700">
+          <span>VAT Amount (12% × VATable)</span>
+          <span className="font-mono">{formatPrice(vat.vatAmount)}</span>
+        </div>
       </div>
     </div>
   );
@@ -2079,6 +2111,39 @@ export function BookingsPage() {
       setPdfFont(pdf, "Inter");
       y += 6.5;
 
+      // ── VAT Breakdown ──
+      // Per DSC-07 (2026-08-01, per #115): the receipt PDF now
+      // shows the 12% VAT reconciliation the same way the
+      // monthly XLSX export does. The helper composes the
+      // senior discount from the booking's stored `originalTotalPrice`
+      // (broad-scope approximation; documented narrow-scope
+      // edge case in the helper header). The senior discount
+      // is the VAT-exempt portion under RA 9994 (Philippine
+      // BIR); the rest of the bill is VATable at 12%.
+      checkNewPage(20);
+      drawPdfSectionTitle(pdf, "VAT Breakdown (12% Philippine standard)", marginL, y, brandRgb);
+      y += 4.5;
+      const vatBreakdown = getBookingVatBreakdown({
+        totalPrice: b.totalPrice,
+        originalTotalPrice: b.originalTotalPrice,
+        discountType: b.discountType,
+        discountPct: b.discountPct,
+        discountRejected: b.discountRejected
+      });
+      drawAmountRow(
+        "VATable Sales (VAT-exclusive)",
+        formatAmount(vatBreakdown.vatExclusiveSales)
+      );
+      drawAmountRow(
+        "VAT-Exempt Sales (RA 9994 Senior/PWD)",
+        formatAmount(vatBreakdown.vatExemptSales)
+      );
+      drawAmountRow(
+        "VAT Amount (12% × VATable)",
+        formatAmount(vatBreakdown.vatAmount)
+      );
+      y += 1;
+
       if (receiptFolio.storeCharges.length > 0 || receiptFolio.charges.length > 0) {
         checkNewPage(12 + (receiptFolio.storeCharges.length + receiptFolio.charges.length) * 5);
         drawPdfSectionTitle(pdf, "Folio Charges", marginL, y, brandRgb);
@@ -3631,7 +3696,14 @@ export function BookingsPage() {
                       <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
                     </summary>
                     <div className="mt-3 rounded-lg bg-white p-3">
-                      <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
+                      <AdminPriceBreakdown
+                        breakdown={selectedBooking.rateBreakdown}
+                        total={selectedBooking.totalPrice}
+                        originalTotalPrice={selectedBooking.originalTotalPrice}
+                        discountType={selectedBooking.discountType}
+                        discountPct={selectedBooking.discountPct}
+                        discountRejected={selectedBooking.discountRejected}
+                      />
                     </div>
                   </details>
                 )}
