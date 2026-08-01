@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -756,6 +756,60 @@ export function ReportsPage() {
     };
   }, [rangeBookings]);
 
+  // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT breakdown
+  // (12% VAT, VATable Sales, VAT-Exempt Sales, VAT Amount) for
+  // the selected date range. Each booking contributes:
+  //   - VATable Sales (VAT-exclusive) = totalPrice / 1.12
+  //   - VAT-Exempt Sales = seniorDiscount (RA 9994 exemption; 0
+  //     for non-senior bookings)
+  //   - VAT Amount = VATable Sales × 0.12
+  // The helper is scope-agnostic — it just takes the senior
+  // discount amount as input. The chain math above computes the
+  // senior discount from the booking's discount scope (DSC-01..05)
+  // + discountPct, so a narrow senior scope flows through
+  // correctly: the exempt portion is exactly the senior's scoped
+  // share, no more.
+  const vatSummary = useMemo(() => {
+    let vatExclusiveSales = 0;
+    let vatExemptSales = 0;
+    let vatAmount = 0;
+    let seniorBookingsCount = 0;
+
+    rangeBookings.forEach((b) => {
+      const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
+      // Same chain as `discountsSummary` above — keep the per-booking
+      // senior discount in lockstep with the Gross-to-Net bridge so
+      // the VAT-exempt figure matches the senior deduction line.
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: b.hasBreakfast,
+        breakfastRate: b.breakfastRate,
+        numGuests: b.numGuests,
+        numNights: b.numNights
+      });
+      const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
+
+      const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
+      const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
+
+      const { vatExclusiveSales: vxs, vatExemptSales: ves, vatAmount: va } = calculateVatBreakdown({
+        totalPrice: b.totalPrice,
+        seniorDiscountAmount: seniorDiscount
+      });
+      vatExclusiveSales += vxs;
+      vatExemptSales += ves;
+      vatAmount += va;
+      if (seniorDiscount > 0) seniorBookingsCount += 1;
+    });
+
+    return {
+      vatRate: 0.12,
+      vatExclusiveSales,
+      vatExemptSales,
+      vatAmount,
+      seniorBookingsCount
+    };
+  }, [rangeBookings]);
+
   const loyaltyLiability = useMemo(() => {
     const totalPoints = members.reduce((sum, m) => sum + (m.rewardsPoints || 0), 0);
     const redemptionRate = rewardsConfig?.pointsRedemptionRate || 100;
@@ -1415,6 +1469,18 @@ export function ReportsPage() {
       ["Spark Rewards Points Redeemed", discountsSummary.pointsRedeemedValue],
       ["Net Bookings Revenue", discountsSummary.netBookings],
       [],
+      // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT
+      // breakdown block on the Summary sheet. The four lines
+      // mirror the on-screen VAT Breakdown section + the
+      // per-booking VAT columns on the Bookings sheet. The
+      // VAT-Exempt figure is the senior/PWD discount portion
+      // (RA 9994) summed across the range; the rest of the
+      // bill is VATable at 12%.
+      ["VAT Breakdown (12% Philippine standard)", `Value (${config.currencySymbol})`],
+      ["VATable Sales (VAT-exclusive)", vatSummary.vatExclusiveSales],
+      ["VAT-Exempt Sales (RA 9994 Senior/PWD)", vatSummary.vatExemptSales],
+      ["VAT Amount (12% × VATable)", vatSummary.vatAmount],
+      [],
       ["Loyalty Program Liability", "Metric / Value"],
       ["Total Outstanding Points", loyaltyLiability.totalPoints],
       ["Points Redemption Liability", loyaltyLiability.liability],
@@ -1429,6 +1495,14 @@ export function ReportsPage() {
       "Guests", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
       "Discount Type", "Discount %", `Senior/PWD Discount (${currSymbol})`, "Voucher Code", `Voucher Discount (${currSymbol})`,
       `Member Discount (${currSymbol})`, `Points Redeemed Value (${currSymbol})`, `Gross Subtotal (${currSymbol})`, `Net Total Price (${currSymbol})`,
+      // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): per-booking VAT
+      // breakdown columns. VATable Sales (VAT-exclusive) =
+      // totalPrice / 1.12, VAT-Exempt Sales = senior discount
+      // (RA 9994; 0 for non-senior), VAT Amount = VATable × 0.12.
+      // Same numbers as the on-screen VAT Breakdown section;
+      // the per-booking split is what the accountant needs to
+      // reconcile monthly figures back to individual receipts.
+      `VATable Sales (VAT-exclusive) (${currSymbol})`, `VAT-Exempt Sales (${currSymbol})`, `VAT Amount 12% (${currSymbol})`,
       `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference (latest ledger entry)", "Source", "Status"
     ];
     const bookingsRows = filteredBookings.map(b => {
@@ -1440,6 +1514,15 @@ export function ReportsPage() {
       // clamped `afterSenior − voucher` subtraction now route through
       // the shared `calculatePercentDiscount` + `calculateVoucherBase`
       // helpers. Same product, same round, same clamp, same gates.
+      // Per DSC-06 (2026-08-01): the per-booking VAT breakdown
+      // (12% VAT, VATable Sales, VAT-Exempt Sales, VAT Amount) now
+      // routes through the shared `calculateVatBreakdown` helper.
+      // The senior discount computed above flows in as the
+      // VAT-exempt portion (RA 9994) — same value, different
+      // presentation column. The VAT computation itself is
+      // scope-agnostic; the scope choice only affects which
+      // components contribute to the senior discount, which the
+      // chain above already computed correctly per DSC-01..05.
       const breakfastTotal = calculateBreakfastAddOn({
         hasBreakfast: b.hasBreakfast,
         breakfastRate: b.breakfastRate,
@@ -1460,6 +1543,16 @@ export function ReportsPage() {
 
       const ptsRedeemedVal = b.pointsRedeemedValue || 0;
 
+      // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): per-booking VAT
+      // breakdown. The helper takes the senior discount (the
+      // VAT-exempt portion under RA 9994) and the bill
+      // (totalPrice, VAT-inclusive); returns the three VAT
+      // numbers the BIR form needs.
+      const { vatExclusiveSales, vatExemptSales, vatAmount } = calculateVatBreakdown({
+        totalPrice: b.totalPrice,
+        seniorDiscountAmount: seniorDiscount
+      });
+
       const collected = payments.filter(p => p.bookingId === b.id).reduce((sum, p) => sum + p.amount, 0);
       const bookingCharges = charges.filter((c) => c.bookingId === b.id).reduce((sum, c) => sum + c.amount, 0);
       const addToBillTotal = storeOrders
@@ -1476,7 +1569,9 @@ export function ReportsPage() {
         b.hasBreakfast ? "Yes" : "No", b.hasBreakfast ? b.breakfastRate : 0, breakfastTotal,
         b.discountType || "None", discountPct, seniorDiscount,
         b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
-        subtotal, b.totalPrice, collected, outstanding,
+        subtotal, b.totalPrice,
+        vatExclusiveSales, vatExemptSales, vatAmount,
+        collected, outstanding,
         PAYMENT_LABELS[b.paymentMethod] || b.paymentMethod,
         getLatestPaymentReference(b) || "",
         b.source, b.status
@@ -1949,6 +2044,7 @@ export function ReportsPage() {
           chartColors={chartColors}
           isMobile={isMobile}
           discountsSummary={discountsSummary}
+          vatSummary={vatSummary}
           loyaltyLiability={loyaltyLiability}
           rewardsConfig={rewardsConfig}
         />
@@ -2337,6 +2433,13 @@ function SalesTab(props: {
     pointsRedeemedValue: number;
     netBookings: number;
   };
+  vatSummary: {
+    vatRate: number;
+    vatExclusiveSales: number;
+    vatExemptSales: number;
+    vatAmount: number;
+    seniorBookingsCount: number;
+  };
   loyaltyLiability: {
     totalPoints: number;
     liability: number;
@@ -2356,7 +2459,7 @@ function SalesTab(props: {
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
     toDate, chartColors, isMobile,
-    discountsSummary, loyaltyLiability,
+    discountsSummary, vatSummary, loyaltyLiability,
     rewardsConfig
   } = props;
 
@@ -2705,7 +2808,7 @@ function SalesTab(props: {
 
           <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Loyalty Program Liability</h3>
-            
+
             <div className="rounded-lg border border-gray-150 p-4 bg-gray-50 space-y-4 h-[calc(100%-1.75rem)]">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Outstanding Points</p>
@@ -2721,6 +2824,51 @@ function SalesTab(props: {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT breakdown for the selected date range. */}
+      <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
+        <div>
+          <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">VAT Breakdown</h2>
+          <p className="mt-1 text-[10px] text-gray-500">
+            Philippine 12% VAT reconciliation for the selected range. VAT-Exempt Sales is the
+            Senior/PWD discount portion under RA 9994; the rest of the bill is VATable at 12%.
+            Rounded to whole pesos on the cards; the XLSX export carries the same figures without
+            rounding.
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-gray-150 p-4 bg-gray-50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">VAT Rate</p>
+            <p className="mt-1 text-2xl font-heading text-gray-950">{(vatSummary.vatRate * 100).toFixed(0)}%</p>
+            <p className="text-[10px] text-gray-500 mt-1">Philippine standard hotel VAT.</p>
+          </div>
+          <div className="rounded-lg border border-gray-150 p-4 bg-gray-50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">VATable Sales (VAT-exclusive)</p>
+            <p className="mt-1 text-2xl font-heading text-gray-950">{formatPrice(vatSummary.vatExclusiveSales)}</p>
+            <p className="text-[10px] text-gray-500 mt-1">Bill totals ÷ 1.12 across the range.</p>
+          </div>
+          <div className="rounded-lg border border-gray-150 p-4 bg-gray-50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">VAT-Exempt Sales (RA 9994)</p>
+            <p className="mt-1 text-2xl font-heading text-gray-950">{formatPrice(vatSummary.vatExemptSales)}</p>
+            <p className="text-[10px] text-gray-500 mt-1">
+              Senior/PWD discounts across {vatSummary.seniorBookingsCount} booking{vatSummary.seniorBookingsCount === 1 ? "" : "s"}.
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-150 p-4 bg-primary/5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-primary-dark">VAT Amount (12%)</p>
+            <p className="mt-1 text-2xl font-heading text-primary-dark">{formatPrice(vatSummary.vatAmount)}</p>
+            <p className="text-[10px] text-gray-500 mt-1">Output VAT due for the range.</p>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-gray-50 border border-gray-150 p-3 text-[10px] text-gray-500 leading-relaxed">
+          <strong className="text-gray-700">Reconciliation:</strong> VATable Sales (VAT-exclusive) + VAT Amount
+          = Net Bookings Revenue ({formatPrice(discountsSummary.netBookings)}). The VAT-Exempt
+          portion ({formatPrice(vatSummary.vatExemptSales)}) is reported separately and is not
+          included in the VATable base.
         </div>
       </section>
 
