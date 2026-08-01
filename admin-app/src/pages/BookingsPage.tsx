@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -28,6 +28,7 @@ import {
   Calendar,
   Mail,
   Plus,
+  Minus,
   Eye,
   ShoppingBag,
   Package,
@@ -795,7 +796,28 @@ export function BookingsPage() {
     tomorrow.setDate(tomorrow.getDate() + 1);
     return formatDateInput(tomorrow);
   });
-  const [numGuests, setNumGuests] = useState(1);
+  // Per EXB-07 (2026-08-01, per decision #155): the walk-in
+  // modal gains the same adult/child split + extra bed steppers
+  // the guest `/book` page already has. The split is
+  // staff-edited (the desk can decide a 3-guest booking is
+  // 2 adults + 1 child or 3 adults depending on what the
+  // guest said at the counter); the server derives
+  // `numGuests = numAdults + numChildren` (per CHD-04) so the
+  // booking doc stays consistent. The extra-bed stepper
+  // renders only when the selected room type has
+  // `maxExtraBeds > 0` (per EXB-01's "no separate
+  // `allowsExtraBed` boolean" rule). The legacy single
+  // `numGuests` input is replaced by the 3 steppers; the
+  // total is auto-derived from the adult + child sum.
+  const [walkinNumAdults, setWalkinNumAdults] = useState(1);
+  const [walkinNumChildren, setWalkinNumChildren] = useState(0);
+  const [walkinExtraBedCount, setWalkinExtraBedCount] = useState(0);
+  // Derived from the split (per CHD-04): the price preview
+  // and the booking doc's `numGuests` field both use this
+  // sum. The walkin form no longer has an independent
+  // `numGuests` input — the 3 steppers are the only source
+  // of truth.
+  const numGuests = walkinNumAdults + walkinNumChildren;
   // Per NBS-07 (2026-07-31): the New Booking modal now records the
   // source (walk-in / phone / facebook / agoda / etc.) and writes it
   // to `Booking.source`. Default is still "walk-in" so the common
@@ -933,6 +955,42 @@ export function BookingsPage() {
   const availableRoomsOfType = rooms.filter(
     r => r.type === roomType && r.status === "available"
   );
+
+  // Per EXB-07 (2026-08-01, per decision #155): the walk-in
+  // modal reads the selected room TYPE (not the room number —
+  // the desk picks a type first, then a specific room) to
+  // surface the per-type caps (`maxCapacity` + `maxChildren`
+  // + `maxExtraBeds` + `extraBedRate`) for the occupancy
+  // steppers + the overflow contextual message. The lookup
+  // is intentionally separate from `selectedRoomType` (which
+  // reads from the room number's type) so the overflow
+  // message can render before the desk has picked a specific
+  // room — that's the case where the message is most
+  // actionable.
+  const walkinTypeEntry = roomTypes.find(t => t.value === roomType);
+  const walkinTypeMaxCapacity = Number(walkinTypeEntry?.maxCapacity) || 0;
+  const walkinTypeMaxChildren = Number(walkinTypeEntry?.maxChildren) || 0;
+  const walkinTypeMaxExtraBeds = Number(walkinTypeEntry?.maxExtraBeds) || 0;
+  const walkinTypeExtraBedRate = Number(walkinTypeEntry?.extraBedRate) || 0;
+  // The derived `numGuests` for the price preview is the
+  // sum of the adult + child split (per CHD-04). When the
+  // desk changes either stepper, the total auto-updates.
+  const walkinDerivedNumGuests = walkinNumAdults + walkinNumChildren;
+  // The overflow for the contextual message. Uses the same
+  // `requiredExtraBedsFor` helper the server uses
+  // (per decision #153) so the client-side preview is
+  // byte-equivalent to the server's `handleCreateWalkin`
+  // check.
+  const walkinOverflow = walkinTypeEntry
+    ? requiredExtraBedsFor({
+        numAdults: walkinNumAdults,
+        numChildren: walkinNumChildren,
+        maxCapacity: walkinTypeMaxCapacity,
+        maxChildren: walkinTypeMaxChildren
+      })
+    : { overflowAdults: 0, overflowChildren: 0, requiredExtraBeds: 0 };
+  const walkinShowOverflowHint =
+    walkinTypeEntry && walkinOverflow.requiredExtraBeds > walkinExtraBedCount;
 
   // Calculate rate per night for the selected room number — per W3.6
   // the rate lives on the room's type, not the room itself.
@@ -2687,6 +2745,17 @@ export function BookingsPage() {
         guestEmail: guestEmail || `walkin-${Date.now()}@example.invalid`,
         guestPhone: guestPhone || "n/a",
         numGuests,
+        // Per EXB-07 (2026-08-01, per decision #155): the
+        // walk-in modal now carries the adult/child split
+        // + the extra bed count. The server (per CHD-04 +
+        // EXB-03) validates `numAdults + numChildren === numGuests`
+        // and applies the EXB-03 overflow rule
+        // (`requiredExtraBedsFor` helper). The extra-bed count
+        // is the desk's choice; absent fields on legacy data
+        // hydrate to all-adults (per CHD-04's fallback rule).
+        numAdults: walkinNumAdults,
+        numChildren: walkinNumChildren,
+        extraBedCount: walkinExtraBedCount,
         checkIn: checkInDate,
         checkOut: checkOutDate,
         numNights,
@@ -2750,6 +2819,12 @@ export function BookingsPage() {
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
         setWalkinTestRunId("");
+        // Per EXB-07: reset the adult/child split + extra bed
+        // count to the defaults so the next walk-in starts
+        // from the 1-adult-0-children-0-extra-bed state.
+        setWalkinNumAdults(1);
+        setWalkinNumChildren(0);
+        setWalkinExtraBedCount(0);
         setIsModalOpen(false);
         toast.success(
           "Walk-in booking created",
@@ -4911,17 +4986,115 @@ export function BookingsPage() {
             />
           </label>
 
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Number of Guests
-            <input
-              type="number"
-              min={1}
-              required
-              value={numGuests}
-              onChange={(e) => setNumGuests(parseInt(e.target.value) || 1)}
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs"
-            />
-          </label>
+          {/* Per EXB-07 (2026-08-01, per decision #155):
+              the walk-in modal's occupancy block. Three
+              steppers: adults (>= 1, required), children
+              (>= 0), and extra beds (>= 0, capped at
+              `maxExtraBeds` for the selected type, hidden
+              entirely when the type allows 0). The sum
+              (`numGuests`) auto-updates the price preview
+              below. The contextual overflow hint renders
+              when the requested split exceeds the type's
+              caps — strongest UX: tell the desk exactly
+              how many extra beds to add instead of letting
+              the server reject. */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <span>Occupancy</span>
+              <span className="text-gray-400 normal-case font-normal">
+                {numGuests} guest{numGuests === 1 ? "" : "s"} total
+              </span>
+            </div>
+            <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+              <span>Adults</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                  aria-label="Decrease adults"
+                  onClick={() => setWalkinNumAdults(Math.max(1, walkinNumAdults - 1))}
+                  disabled={walkinNumAdults <= 1}
+                >
+                  <Minus size={14} />
+                </button>
+                <span className="w-6 text-center tabular-nums">{walkinNumAdults}</span>
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                  aria-label="Increase adults"
+                  onClick={() => setWalkinNumAdults(walkinNumAdults + 1)}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </label>
+            <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+              <span>Children (0–11, free of room rate)</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                  aria-label="Decrease children"
+                  onClick={() => setWalkinNumChildren(Math.max(0, walkinNumChildren - 1))}
+                  disabled={walkinNumChildren <= 0}
+                >
+                  <Minus size={14} />
+                </button>
+                <span className="w-6 text-center tabular-nums">{walkinNumChildren}</span>
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                  aria-label="Increase children"
+                  // Cap children at (numGuests - 1) so at least
+                  // one adult stays — matches the guest /book
+                  // picker's invariant.
+                  onClick={() => setWalkinNumChildren(Math.min(walkinNumChildren + 1, Math.max(0, numGuests - 1)))}
+                  disabled={walkinNumChildren >= Math.max(0, numGuests - 1)}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </label>
+            {walkinTypeMaxExtraBeds > 0 ? (
+              <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                <span>Extra beds ({formatPrice(walkinTypeExtraBedRate)} / bed / night)</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    aria-label="Decrease extra beds"
+                    onClick={() => setWalkinExtraBedCount(Math.max(0, walkinExtraBedCount - 1))}
+                    disabled={walkinExtraBedCount <= 0}
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <span className="w-6 text-center tabular-nums">{walkinExtraBedCount}</span>
+                  <button
+                    type="button"
+                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    aria-label="Increase extra beds"
+                    onClick={() => setWalkinExtraBedCount(Math.min(walkinExtraBedCount + 1, walkinTypeMaxExtraBeds))}
+                    disabled={walkinExtraBedCount >= walkinTypeMaxExtraBeds}
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+              </label>
+            ) : null}
+            {walkinShowOverflowHint && walkinTypeEntry ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                {walkinTypeMaxExtraBeds > 0 ? (
+                  <>
+                    This room type allows up to {walkinTypeMaxCapacity} adult{walkinTypeMaxCapacity === 1 ? "" : "s"} + {walkinTypeMaxChildren} child{walkinTypeMaxChildren === 1 ? "" : "ren"} (or {walkinTypeMaxCapacity + walkinTypeMaxExtraBeds}/{walkinTypeMaxChildren + walkinTypeMaxExtraBeds} with {walkinTypeMaxExtraBeds} extra bed{walkinTypeMaxExtraBeds === 1 ? "" : "s"}). Add {walkinOverflow.requiredExtraBeds} extra bed{walkinOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit your group, or pick a different room.
+                  </>
+                ) : (
+                  <>
+                    This room type allows up to {walkinTypeMaxCapacity} adult{walkinTypeMaxCapacity === 1 ? "" : "s"} + {walkinTypeMaxChildren} child{walkinTypeMaxChildren === 1 ? "" : "ren"} and does not allow extra beds. Pick a different room type to fit your group.
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
 
           <div className="space-y-2 pt-1">
             <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
