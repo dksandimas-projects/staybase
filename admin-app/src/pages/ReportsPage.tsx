@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
+import { getReportOccupancySplit } from "../utils/reportOccupancy";
 import {
   AlertTriangle, BarChart3, Download, DollarSign, Users, Home,
   TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet,
@@ -1151,11 +1152,12 @@ export function ReportsPage() {
       toast.error("Invalid range", "Start date cannot be after end date.");
       return;
     }
-    let csvContent = "Booking Reference,Guest Name,Room Number,Check In,Check Out,Nights,Total Price,Status,Source,Payment Method,Payment Reference (latest ledger entry)\n";
+    let csvContent = "Booking Reference,Guest Name,Room Number,Check In,Check Out,Nights,Guests,Adults,Children,Total Price,Status,Source,Payment Method,Payment Reference (latest ledger entry)\n";
     filteredBookings.forEach(b => {
       const checkIn = toDate(b.checkIn);
       const checkOut = toDate(b.checkOut);
-      csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${getLatestPaymentReference(b) || ""}"\n`;
+      const occupancy = getReportOccupancySplit(b);
+      csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${occupancy.guests},${occupancy.adults},${occupancy.children},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${getLatestPaymentReference(b) || ""}"\n`;
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `${config.hotelId}_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
@@ -1273,7 +1275,9 @@ export function ReportsPage() {
 
       const wb = XLSX.utils.book_new();
 
-      const bookingRows = bookings.map((b: any) => ({
+      const bookingRows = bookings.map((b: any) => {
+        const occupancy = getReportOccupancySplit(b);
+        return {
       "Booking Ref": b.bookingRef,
       "Guest Name": b.guestName,
       "Guest Email": b.guestEmail,
@@ -1283,7 +1287,9 @@ export function ReportsPage() {
       "Check-In": toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
       "Check-Out": toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
       Nights: b.numNights,
-      Guests: b.numGuests,
+      Guests: occupancy.guests,
+      Adults: occupancy.adults,
+      Children: occupancy.children,
       "Has Breakfast": b.hasBreakfast ? "Yes" : "No",
       "Rate/Night": b.ratePerNight,
       "Breakfast Rate": b.breakfastRate,
@@ -1317,7 +1323,8 @@ export function ReportsPage() {
       Notes: b.notes,
       "Created At": toDate(b.createdAt)?.toISOString() || "",
       "Updated At": toDate((b as any).updatedAt)?.toISOString() || ""
-    }));
+        };
+      });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(bookingRows), "Bookings");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(paymentRows), "Payments");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chargeRows), "Charges");
@@ -1492,7 +1499,7 @@ export function ReportsPage() {
     const currSymbol = config.currencySymbol;
     const bookingsHeaders = [
       "Booking Ref", "Guest Name", "Room Number", "Check-In", "Check-Out", "Nights",
-      "Guests", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
+      "Guests", "Adults", "Children", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
       "Discount Type", "Discount %", `Senior/PWD Discount (${currSymbol})`, "Voucher Code", `Voucher Discount (${currSymbol})`,
       `Member Discount (${currSymbol})`, `Points Redeemed Value (${currSymbol})`, `Gross Subtotal (${currSymbol})`, `Net Total Price (${currSymbol})`,
       // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): per-booking VAT
@@ -1506,6 +1513,7 @@ export function ReportsPage() {
       `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference (latest ledger entry)", "Source", "Status"
     ];
     const bookingsRows = filteredBookings.map(b => {
+      const occupancy = getReportOccupancySplit(b);
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
       // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
       // numNights` now routes through the shared
@@ -1565,7 +1573,7 @@ export function ReportsPage() {
         b.bookingRef, b.guestName, b.roomNumber,
         toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
         toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
-        b.numNights, b.numGuests, b.ratePerNight, roomSubtotal,
+        b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.ratePerNight, roomSubtotal,
         b.hasBreakfast ? "Yes" : "No", b.hasBreakfast ? b.breakfastRate : 0, breakfastTotal,
         b.discountType || "None", discountPct, seniorDiscount,
         b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
@@ -1579,20 +1587,23 @@ export function ReportsPage() {
     });
 
     const breakfastHeaders = [
-      "Booking Ref", "Guest Name", "Room Number", "Check-In", "Nights", "Guests",
+      "Booking Ref", "Guest Name", "Room Number", "Check-In", "Nights", "Guests", "Adults", "Children",
       "Breakfast Rate/person", "Total Breakfast Revenue"
     ];
-    const breakfastRows = filteredBreakfastBookings.map(b => [
-      b.bookingRef, b.guestName, b.roomNumber,
-      toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
-      b.numNights, b.numGuests, b.breakfastRate,
-      calculateBreakfastAddOn({
-        hasBreakfast: b.hasBreakfast,
-        breakfastRate: b.breakfastRate,
-        numGuests: b.numGuests,
-        numNights: b.numNights
-      })
-    ]);
+    const breakfastRows = filteredBreakfastBookings.map(b => {
+      const occupancy = getReportOccupancySplit(b);
+      return [
+        b.bookingRef, b.guestName, b.roomNumber,
+        toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
+        b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.breakfastRate,
+        calculateBreakfastAddOn({
+          hasBreakfast: b.hasBreakfast,
+          breakfastRate: b.breakfastRate,
+          numGuests: b.numGuests,
+          numNights: b.numNights
+        })
+      ];
+    });
 
     const storeHeaders = [
       "Order Ref", "Room Number", "Booking ID", "Guest Name", "Items",
