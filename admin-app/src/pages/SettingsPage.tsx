@@ -30,6 +30,7 @@ import { storage } from "../firebase/config";
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
+import { ConfirmForm } from "../components/ConfirmForm";
 import { useToast } from "../components/Toast";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
@@ -1454,7 +1455,13 @@ export function SettingsPage() {
   const [lowStockThreshold, setLowStockThreshold] = useState(String(storeConfig.lowStockThreshold));
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
   const [pendingDeleteStoreItemId, setPendingDeleteStoreItemId] = useState<string | null>(null);
-  const [pendingDeleteRoomType, setPendingDeleteRoomType] = useState<string | null>(null);
+  // Per RTS-05 (2026-08-01): the room-type delete now uses a proper
+  // Modal + ConfirmForm (matching the RoomsPage delete flow) instead
+  // of a 3-second auto-disarm "Click to confirm" button — the old
+  // pattern could be re-armed indefinitely by a hesitant click and
+  // therefore never delete anything.
+  const [pendingDeleteRoomType, setPendingDeleteRoomType] = useState<RoomTypeEntry | null>(null);
+  const [isDeletingRoomType, setIsDeletingRoomType] = useState(false);
 
   // Email preview states
   const [previewingTemplate, setPreviewingTemplate] = useState<string | null>(null);
@@ -1486,11 +1493,10 @@ export function SettingsPage() {
     const timer = setTimeout(() => setPendingDeleteStoreItemId(null), 3000);
     return () => clearTimeout(timer);
   }, [pendingDeleteStoreItemId]);
-  useEffect(() => {
-    if (!pendingDeleteRoomType) return;
-    const timer = setTimeout(() => setPendingDeleteRoomType(null), 3000);
-    return () => clearTimeout(timer);
-  }, [pendingDeleteRoomType]);
+  // Per RTS-05 (2026-08-01): no more 3-second auto-disarm timer on the
+  // room-type delete — the confirm now lives in a Modal + ConfirmForm
+  // (matching the RoomsPage delete flow). The Modal's `onClose` cancels
+  // the pending delete; the ConfirmForm's `onCancel` does the same.
 
   // Room type photos manager state (per `plan/features/SETTINGS.md §Room Types`).
   const [photoTarget, setPhotoTarget] = useState<RoomTypeEntry | null>(null);
@@ -2390,12 +2396,14 @@ export function SettingsPage() {
       setPendingDeleteRoomType(null);
       return;
     }
+    setIsDeletingRoomType(true);
     try {
       await deleteRoomType(typeValue);
+      setPendingDeleteRoomType(null);
     } catch (error) {
       toast.error("Cannot delete room type", error instanceof Error ? error.message : "Unknown error");
     } finally {
-      setPendingDeleteRoomType(null);
+      setIsDeletingRoomType(false);
     }
   };
   const selectedStoreCategoryLabel = storeCategoryFilter === "all"
@@ -4382,20 +4390,10 @@ export function SettingsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              if (pendingDeleteRoomType === type.value) {
-                                void handleDeleteRoomType(type.value);
-                              } else {
-                                setPendingDeleteRoomType(type.value);
-                              }
-                            }}
-                            className={`shrink-0 font-bold hover:underline min-h-[44px] px-2 ${
-                              pendingDeleteRoomType === type.value
-                                ? "text-red-700"
-                                : "text-red-650 hover:text-red-700"
-                            }`}
+                            onClick={() => setPendingDeleteRoomType(type)}
+                            className="shrink-0 font-bold hover:underline min-h-[44px] px-2 text-red-650 hover:text-red-700"
                           >
-                            {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
+                            Delete
                           </button>
                         </div>
                       </li>
@@ -4448,21 +4446,11 @@ export function SettingsPage() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (pendingDeleteRoomType === type.value) {
-                                    void handleDeleteRoomType(type.value);
-                                  } else {
-                                    setPendingDeleteRoomType(type.value);
-                                  }
-                                }}
-                                className={`font-bold hover:underline ${
-                                  pendingDeleteRoomType === type.value
-                                    ? "text-red-700"
-                                    : "text-red-650 hover:text-red-700"
-                              }`}
-                            >
-                              {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
-                            </button>
+                                onClick={() => setPendingDeleteRoomType(type)}
+                                className="font-bold hover:underline text-red-650 hover:text-red-700"
+                              >
+                                Delete
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -4921,6 +4909,61 @@ export function SettingsPage() {
                   </label>
                 </div>
               </form>
+            ) : null}
+          </Modal>
+
+          {/* ROOM TYPE DELETE CONFIRM (per RTS-05, 2026-08-01) */}
+          <Modal
+            title={pendingDeleteRoomType ? `Delete · ${pendingDeleteRoomType.label}` : "Delete room type"}
+            open={!!pendingDeleteRoomType}
+            onClose={() => {
+              if (isDeletingRoomType) return;
+              setPendingDeleteRoomType(null);
+            }}
+            footer={null}
+          >
+            {pendingDeleteRoomType ? (
+              <div className="space-y-4 text-sm">
+                <p className="text-xs leading-relaxed text-gray-600">
+                  You are about to permanently delete the <strong>{pendingDeleteRoomType.label}</strong> room type
+                  ({pendingDeleteRoomType.value}). Any new bookings will no longer be able to select this type. Historical
+                  bookings keep their denormalized type, but the type is gone for new reservations and any associated
+                  room-classification UI.
+                </p>
+                {countRoomsUsingType(pendingDeleteRoomType.value) > 0 ? (
+                  <ConfirmForm
+                    title="Cannot delete this room type yet"
+                    message={
+                      <>
+                        <strong>{countRoomsUsingType(pendingDeleteRoomType.value)}</strong> room{countRoomsUsingType(pendingDeleteRoomType.value) === 1 ? "" : "s"} still
+                        use this type. Reassign those rooms to a different type before deleting it.
+                      </>
+                    }
+                    confirmLabel="Got it"
+                    cancelLabel="Back"
+                    variant="primary"
+                    onConfirm={() => setPendingDeleteRoomType(null)}
+                    onCancel={() => setPendingDeleteRoomType(null)}
+                    testId="delete-room-type-blocked"
+                  />
+                ) : (
+                  <ConfirmForm
+                    title="Type a reason and confirm"
+                    message={`Provide a short note for the audit log (e.g. \u201CMigrated all Standard Doubles to Deluxe, decommissioning the type\u201D).`}
+                    reasonLabel="Reason (required)"
+                    reasonRequired
+                    reasonPlaceholder="Why is this room type being removed?"
+                    confirmLabel={isDeletingRoomType ? "Deleting…" : "Delete room type permanently"}
+                    variant="danger"
+                    onConfirm={() => void handleDeleteRoomType(pendingDeleteRoomType.value)}
+                    onCancel={() => {
+                      if (isDeletingRoomType) return;
+                      setPendingDeleteRoomType(null);
+                    }}
+                    testId="delete-room-type-confirm"
+                  />
+                )}
+              </div>
             ) : null}
           </Modal>
 

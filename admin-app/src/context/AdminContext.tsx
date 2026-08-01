@@ -4352,9 +4352,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const [roomTypes, setRoomTypes] = useState<RoomTypeEntry[]>(() => {
     return DEFAULT_ROOM_TYPES.map((t) => ({ ...t, imageUrls: [...t.imageUrls] }));
   });
+  // Per RTS-06 (2026-08-01): distinguish "not loaded yet" from "loaded
+  // and legitimately empty". The previous `roomTypes.length > 0` guard
+  // meant that a hotel which had deleted every room type would, on the
+  // next page load, see the snapshot's `[]` value, skip the effect, and
+  // fall back to the DEFAULT_ROOM_TYPES initializer — silently resurrecting
+  // all 8 deleted types. The flag flips to `true` after the first sync
+  // (whatever the length), and from then on the effect always syncs.
+  const [roomTypesLoaded, setRoomTypesLoaded] = useState(false);
 
   useEffect(() => {
-    if (Array.isArray(hotelConfig.roomTypes) && hotelConfig.roomTypes.length > 0) {
+    if (Array.isArray(hotelConfig.roomTypes)) {
       setRoomTypes(
         hotelConfig.roomTypes.map((t: any) => ({
           value: t.value,
@@ -4370,6 +4378,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           corporateRate: Number(t.corporateRate) || 0
         }))
       );
+      setRoomTypesLoaded(true);
     }
   }, [hotelConfig.roomTypes]);
 
