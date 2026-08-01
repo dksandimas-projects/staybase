@@ -184,6 +184,21 @@ export interface Booking {
   guestEmail: string;
   guestPhone: string;
   numGuests: number;
+  // Per CHD-01 (2026-08-01, per CVQ-01 + decision #144):
+  // adults/children split. `numGuests` is the persisted total
+  // and is derived server-side from `numAdults + numChildren`
+  // (the client may supply a `numGuests` for legacy callers
+  // and the server derives the split). Legacy bookings
+  // without these fields read as `numAdults = numGuests`,
+  // `numChildren = 0` (the historical "all guests are
+  // adults" shape, preserved so every existing read site keeps
+  // working). The fields are optional in the type (legacy)
+  // but always present on bookings created after this
+  // change. Children are free of the **room** rate; whether
+  // they are charged breakfast is a separate flag
+  // (`breakfastIncludesChildren` from CHD-10, per CVQ-01).
+  numAdults?: number;
+  numChildren?: number;
   checkIn: Date;
   checkOut: Date;
   numNights: number;

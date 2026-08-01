@@ -23,6 +23,7 @@ export * from "./utils/paymentReference";
 export * from "./utils/pricing";
 export * from "./utils/publicSiteCache";
 export * from "./utils/references";
+export * from "./utils/roomTypes";
 export * from "./utils/seasonalRates";
 export * from "./utils/storageJanitor";
 export * from "./utils/storePaymentMethods";

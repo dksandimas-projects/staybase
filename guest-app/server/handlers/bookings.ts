@@ -438,6 +438,16 @@ const createBookingSchema = z.object({
   // `hasBreakfast`. `true` is the safe default (matches the
   // historical "children pay the full rate" math).
   breakfastIncludesChildren: z.boolean().optional(),
+  // Per CHD-01 (2026-08-01, per decision #144): the
+  // adults/children split. Both optional — when absent,
+  // the server derives `numAdults = guests`, `numChildren
+  // = 0` (the historical "all guests are adults" shape,
+  // byte-equivalent to pre-CHD-01 read sites). When
+  // present, the server validates
+  // `numAdults + numChildren === guests` (the spec's
+  // "no trusting either value from the client" rule).
+  numAdults: z.coerce.number().int().min(0).max(100).optional(),
+  numChildren: z.coerce.number().int().min(0).max(100).optional(),
   // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
   // absent, the server treats it as 0. Bounded server-side by the
   // room type's `maxExtraBeds` (a booking with
@@ -498,6 +508,19 @@ export async function handleCreateBooking(req: any, res: any) {
     checkOut,
     guests,
     hasBreakfast,
+    // Per CHD-01 (2026-08-01, per decision #144): the
+    // adults/children split. Both optional — when absent,
+    // the server derives `numAdults = guests`, `numChildren
+    // = 0` (the historical "all guests are adults" shape,
+    // byte-equivalent to pre-CHD-01 read sites). When
+    // present, the server validates
+    // `numAdults + numChildren === guests` and rejects any
+    // client-supplied total that disagrees. The booking doc
+    // stores both fields so the rate breakdown + the
+    // booking drawer + the receipt PDF can render the split
+    // (CHD-07 follow-up).
+    numAdults: requestedNumAdults,
+    numChildren: requestedNumChildren,
     // Per CHD-10 (2026-07-31, per CVQ-01): the optional per-booking
     // override for "include children in the breakfast charge". When
     // undefined, the server snapshots the admin default from
@@ -941,6 +964,41 @@ export async function handleCreateBooking(req: any, res: any) {
         ? requestedBreakfastIncludesChildren
         : breakfastIncludesChildrenDefault;
 
+      // Per CHD-01 + CHD-04 (2026-08-01, per decision #144):
+      // validate the adults/children split against the room
+      // type's `maxCapacity` (adults) + `maxChildren` (children).
+      // The split is optional — absent fields derive to
+      // `numAdults = guests`, `numChildren = 0` (the historical
+      // "all guests are adults" shape). When present, the
+      // server validates `numAdults + numChildren === guests`
+      // and rejects any client-supplied total that disagrees
+      // (the spec's "no trusting either value from the client"
+      // rule). The typeEntry carries `maxCapacity` (adult cap)
+      // and `maxChildren` (per-CHD-02, normalized via
+      // `normalizeMaxChildren` on the legacy settings path).
+      const numAdults = Number.isFinite(Number(requestedNumAdults))
+        ? Math.max(0, Math.floor(Number(requestedNumAdults)))
+        : guests;
+      const numChildren = Number.isFinite(Number(requestedNumChildren))
+        ? Math.max(0, Math.floor(Number(requestedNumChildren)))
+        : 0;
+      if (numAdults + numChildren !== guests) {
+        throw new Error(
+          `Occupancy split mismatch: numAdults (${numAdults}) + numChildren (${numChildren}) must equal guests (${guests}).`
+        );
+      }
+      const typeMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
+      if (numAdults > typeMaxCapacity) {
+        throw new Error(
+          `Guest count exceeds room adult capacity of ${typeMaxCapacity}.`
+        );
+      }
+      if (numChildren > typeMaxChildren) {
+        throw new Error(
+          `Children (${numChildren}) exceeds room child capacity of ${typeMaxChildren}.`
+        );
+      }
+
       // Per EXB-01 (2026-07-31): validate `extraBedCount` against
       // the room type's `maxExtraBeds`, then snapshot the rate
       // onto the booking doc. `maxExtraBeds === 0` means the room
@@ -1116,12 +1174,16 @@ export async function handleCreateBooking(req: any, res: any) {
       // routes through the shared `calculateBreakfastAddOn` helper.
       // The helper falls back to `numGuests` when the adult/child
       // split is not provided (the historical path, byte-equivalent);
-      // when the split is provided (a future CHD-01 surface change),
-      // the helper uses `(numAdults + (flag ? numChildren : 0))`.
+      // when the split is provided (CHD-01), the helper uses
+      // `(numAdults + (flag ? numChildren : 0))`. Both shapes
+      // are covered; we always pass the split when present so
+      // the breakfast math tracks the persisted booking fields.
       const breakfastTotal = calculateBreakfastAddOn({
         hasBreakfast: finalHasBreakfast,
         breakfastRate: actualBreakfastRate,
         numGuests: guests,
+        numAdults,
+        numChildren,
         numNights,
         breakfastIncludesChildren
       });
@@ -1370,6 +1432,17 @@ export async function handleCreateBooking(req: any, res: any) {
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
+        // Per CHD-01 (2026-08-01, per decision #144):
+        // adults/children split. Server-validated
+        // `numAdults + numChildren === guests` (CHD-04). The
+        // booking stores both fields so the rate breakdown,
+        // the booking drawer, the receipt PDF, and the
+        // confirmation email can render the split (CHD-07
+        // follow-up). `numGuests` is the persisted total
+        // and remains the source of truth for every existing
+        // read site — adding the split is additive.
+        numAdults,
+        numChildren,
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
@@ -1756,6 +1829,13 @@ export async function handleCreateWalkin(req: any, res: any) {
     // Per EXB-01: extra-bed count. Optional — walk-in defaults to
     // 0 when absent. Bounded by the room type's `maxExtraBeds`.
     extraBedCount: requestedExtraBedCount,
+    // Per CHD-01 (2026-08-01, per decision #144): same
+    // adult/child split on the walk-in surface as on the
+    // public create. The schema defaults to absent →
+    // all adults. Server derives the split + validates the
+    // derived total against `guests` (CHD-04).
+    numAdults: requestedNumAdults,
+    numChildren: requestedNumChildren,
     guestDetails,
     paymentMethod,
     // Per NBS-02 (2026-07-31): the source is now selected by the
@@ -1924,6 +2004,31 @@ export async function handleCreateWalkin(req: any, res: any) {
 
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
+      }
+      // Per CHD-01 + CHD-04 (2026-08-01, per decision #144):
+      // walk-ins are staff-created, so the adult/child split
+      // is staff-supplied (or absent → all adults). Same
+      // validation as handleCreateBooking: derive
+      // `numAdults + numChildren === guests`, then check
+      // each against the room type's `maxCapacity` (adult)
+      // and `maxChildren` (per-CHD-02). The new walk-in
+      // booking stores both fields on the doc.
+      const walkinNumAdults = Number.isFinite(Number(requestedNumAdults))
+        ? Math.max(0, Math.floor(Number(requestedNumAdults)))
+        : guests;
+      const walkinNumChildren = Number.isFinite(Number(requestedNumChildren))
+        ? Math.max(0, Math.floor(Number(requestedNumChildren)))
+        : 0;
+      if (walkinNumAdults + walkinNumChildren !== guests) {
+        throw new Error(
+          `Occupancy split mismatch: numAdults (${walkinNumAdults}) + numChildren (${walkinNumChildren}) must equal guests (${guests}).`
+        );
+      }
+      const walkinMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
+      if (walkinNumChildren > walkinMaxChildren) {
+        throw new Error(
+          `Children (${walkinNumChildren}) exceeds room child capacity of ${walkinMaxChildren}.`
+        );
       }
 
       // 2. Overlapping Booking Check
@@ -2192,6 +2297,15 @@ export async function handleCreateWalkin(req: any, res: any) {
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
+        // Per CHD-01 (2026-08-01, per decision #144):
+        // walk-in staff-created split. The schema accepts
+        // the fields (validated inside the transaction to
+        // `numAdults + numChildren === guests`), and the
+        // booking doc stores both. The room type's
+        // `maxChildren` is enforced inside the transaction
+        // (CHD-04).
+        numAdults: walkinNumAdults,
+        numChildren: walkinNumChildren,
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
