@@ -261,6 +261,19 @@ Let guests understand why the final booking total changes when their stay includ
 
 ---
 
+## Children in Booking (CHD-05)
+
+Step 1 separates the total group into adults aged 12+ and children aged 0–11. Room-type availability evaluates the adult and child caps independently; it does not count every child against the adult cap.
+
+- [x] The child stepper states the selected room type's included child allowance and explains when the current group reaches its limit.
+- [x] Extra beds may cover adult or child overflow. The picker uses the same shared overflow rule as the server, explains the exact number of additional beds required, and blocks continuation until that requirement is met.
+- [x] Room cards show adult, child, and extra-bed allowances instead of an ambiguous total capacity.
+- [x] Children and extra-bed counts persist across booking-step URLs and refreshes.
+- [x] The picker and price summary explicitly state that children have no additional room charge. Breakfast and a required extra bed remain separate chargeable add-ons.
+- [x] Touched stepper controls meet the 44px minimum and cap guidance is announced as live status text.
+
+---
+
 ## Extra Bed (EXB-01..10)
 
 Step 1 shows adults, children, and extra-bed steppers; extra beds appear only when the selected room type allows them and reset when the type changes. The shared overflow rule requires enough beds for adult and child occupancy above the type caps, while the server separately rejects counts above `maxExtraBeds`.

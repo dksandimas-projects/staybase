@@ -39,7 +39,8 @@ import {
   calculatePercentDiscount,
   calculateVoucherBase,
   calculateBreakfastAddOn,
-  calculateExtraBedAddOn
+  calculateExtraBedAddOn,
+  requiredExtraBedsFor
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 // Per BF-29 (booking-flow audit 2026-06-26): replace the
@@ -194,7 +195,9 @@ export function BookingPage() {
   // separate `allowsExtraBed` boolean" rule). The server
   // validates against `maxExtraBeds` and snapshots `extraBedRate`
   // onto the booking doc.
-  const [extraBedCount, setExtraBedCount] = useState(0);
+  const [extraBedCount, setExtraBedCount] = useState(
+    Math.max(0, Number(searchParams.get("extraBeds") ?? 0))
+  );
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
   // the server auto-assigns a physical room of that type inside
@@ -328,17 +331,40 @@ export function BookingPage() {
     });
   }, [rooms, roomTypes, bookedRanges, checkIn, checkOut]);
 
-  // Types shown in Step 1 — only those that can fit the guest count
-  // and still have at least one free physical room for the window.
+  // Per CHD-05 + EXB-03: occupancy is two-dimensional. `maxCapacity`
+  // is the adult cap and `maxChildren` is the child cap; a configured
+  // extra bed can cover one overflow adult OR child. Filtering by
+  // `maxCapacity >= guests` treated every child as an adult and hid
+  // valid family configurations.
   const availableRoomTypes = useMemo(
     () =>
       typeAvailability.filter(
-        (entry) => entry.type.maxCapacity >= guests && entry.availableCount > 0
+        (entry) => {
+          const overflow = requiredExtraBedsFor({
+            numAdults,
+            numChildren,
+            maxCapacity: Number(entry.type.maxCapacity) || 0,
+            maxChildren: Number(entry.type.maxChildren) || 0
+          });
+          return (
+            overflow.requiredExtraBeds <= (Number(entry.type.maxExtraBeds) || 0)
+            && entry.availableCount > 0
+          );
+        }
       ),
-    [typeAvailability, guests]
+    [typeAvailability, numAdults, numChildren]
   );
   const maxGuestCapacity = useMemo(
-    () => Math.max(1, ...roomTypes.map((type) => Number(type.maxCapacity) || 0)),
+    () =>
+      Math.max(
+        1,
+        ...roomTypes.map(
+          (type) =>
+            (Number(type.maxCapacity) || 0)
+            + (Number(type.maxChildren) || 0)
+            + (Number(type.maxExtraBeds) || 0)
+        )
+      ),
     [roomTypes]
   );
 
@@ -373,11 +399,44 @@ export function BookingPage() {
   const selectedTypeEntry = roomTypes.find((type) => type.value === selectedRoomType)
     ?? availableRoomTypes[0]?.type
     ?? null;
+  const selectedTypeIsAvailable = Boolean(
+    selectedTypeEntry
+    && availableRoomTypes.some((entry) => entry.type.value === selectedTypeEntry.value)
+  );
   // Per W3.6 — pricing + max occupancy live on the room's type.
   const selectedRoomRates = selectedTypeEntry
     ? getRoomTypeRates(roomTypes, selectedTypeEntry.value)
     : null;
   const selectedMaxCapacity = selectedRoomRates?.maxCapacity ?? 0;
+  const selectedMaxChildren = Number(selectedTypeEntry?.maxChildren) || 0;
+  const selectedMaxExtraBeds = Number(selectedTypeEntry?.maxExtraBeds) || 0;
+  const selectedOccupancyOverflow = requiredExtraBedsFor({
+    numAdults,
+    numChildren,
+    maxCapacity: selectedMaxCapacity,
+    maxChildren: selectedMaxChildren
+  });
+  const missingExtraBeds = Math.max(
+    selectedOccupancyOverflow.requiredExtraBeds - extraBedCount,
+    0
+  );
+  // The selected type may use its rollaway-bed allowance for adult
+  // or child overflow. Find the highest child split supported for the
+  // current total rather than silently stopping at `maxChildren`.
+  const selectedMaxSelectableChildren = useMemo(() => {
+    if (!selectedTypeEntry) return Math.max(0, guests - 1);
+    let highest = 0;
+    for (let children = 0; children <= Math.max(0, guests - 1); children += 1) {
+      const overflow = requiredExtraBedsFor({
+        numAdults: guests - children,
+        numChildren: children,
+        maxCapacity: Number(selectedTypeEntry.maxCapacity) || 0,
+        maxChildren: Number(selectedTypeEntry.maxChildren) || 0
+      });
+      if (overflow.requiredExtraBeds <= selectedMaxExtraBeds) highest = children;
+    }
+    return highest;
+  }, [guests, selectedMaxExtraBeds, selectedTypeEntry]);
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
 
@@ -494,6 +553,8 @@ export function BookingPage() {
     checkIn,
     checkOut,
     guests: String(guests),
+    children: String(numChildren),
+    extraBeds: String(extraBedCount),
     roomType: selectedTypeEntry?.value ?? "",
     breakfast: hasBreakfast ? "yes" : "no"
   });
@@ -519,9 +580,14 @@ export function BookingPage() {
       : "Enter a valid email address.",
     phone: guestDetails.phone.trim().length >= 8 ? "" : "Phone number is required.",
     guestCount:
-      Number(guestDetails.guestCount) >= 1 && selectedMaxCapacity > 0 && Number(guestDetails.guestCount) <= selectedMaxCapacity
+      Number(guestDetails.guestCount) >= 1
+      && numAdults >= 1
+      && selectedTypeIsAvailable
+      && missingExtraBeds === 0
         ? ""
-        : `Guest count must be between 1 and ${selectedMaxCapacity || guests}.`
+        : missingExtraBeds > 0
+          ? `Add ${missingExtraBeds} more extra bed${missingExtraBeds === 1 ? "" : "s"} for this room type, or reduce the group.`
+          : "Keep at least one adult and choose a room type that fits the adult and child counts."
   };
   const canContinueToReview =
     Object.values(guestErrors).every((error) => !error) && guestDetails.consent && Boolean(selectedTypeEntry);
@@ -606,6 +672,7 @@ export function BookingPage() {
   useEffect(() => {
     if (!selectedRoomType && availableRoomTypes[0]) {
       setSelectedRoomType(availableRoomTypes[0].type.value);
+      setExtraBedCount(0);
       return;
     }
 
@@ -615,6 +682,7 @@ export function BookingPage() {
       && availableRoomTypes[0]
     ) {
       setSelectedRoomType(availableRoomTypes[0].type.value);
+      setExtraBedCount(0);
     }
   }, [availableRoomTypes, selectedRoomType]);
 
@@ -629,8 +697,44 @@ export function BookingPage() {
 
   function updateGuests(nextGuests: number) {
     const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
+    const safeChildren = Math.min(numChildren, Math.max(0, safeGuests - 1));
     setGuests(safeGuests);
-    updateDateParams(checkIn, checkOut, safeGuests);
+    setNumChildren(safeChildren);
+    setGuestDetails((current) => ({
+      ...current,
+      guestCount: String(safeGuests)
+    }));
+    const next = new URLSearchParams(searchParams);
+    next.set("checkIn", checkIn);
+    next.set("checkOut", checkOut);
+    next.set("guests", String(safeGuests));
+    next.set("children", String(safeChildren));
+    if (selectedRoomType) next.set("roomType", selectedRoomType);
+    setSearchParams(next, { replace: true });
+  }
+
+  function updateChildren(nextChildren: number) {
+    const safeChildren = Math.min(
+      Math.max(nextChildren, 0),
+      selectedMaxSelectableChildren,
+      Math.max(0, guests - 1)
+    );
+    setNumChildren(safeChildren);
+    const next = new URLSearchParams(searchParams);
+    next.set("children", String(safeChildren));
+    next.set("guests", String(guests));
+    setSearchParams(next, { replace: true });
+  }
+
+  function updateExtraBeds(nextCount: number) {
+    const safeCount = Math.min(
+      Math.max(nextCount, 0),
+      selectedMaxExtraBeds
+    );
+    setExtraBedCount(safeCount);
+    const next = new URLSearchParams(searchParams);
+    next.set("extraBeds", String(safeCount));
+    setSearchParams(next, { replace: true });
   }
 
   function validateUploadFile(file: File) {
@@ -675,6 +779,8 @@ export function BookingPage() {
     next.set("checkIn", checkIn);
     next.set("checkOut", checkOut);
     next.set("guests", String(guests));
+    next.set("children", String(numChildren));
+    next.set("extraBeds", "0");
     setSearchParams(next, { replace: true });
   }
 
@@ -1782,10 +1888,10 @@ export function BookingPage() {
                 Children (0–11)
                 <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
                   <button
-                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
                     type="button"
                     aria-label="Decrease children count"
-                    onClick={() => setNumChildren(Math.max(0, numChildren - 1))}
+                    onClick={() => updateChildren(numChildren - 1)}
                     disabled={numChildren <= 0}
                   >
                     <Minus size={16} />
@@ -1795,18 +1901,43 @@ export function BookingPage() {
                     <span className="text-xs text-gray-500">({numAdults} adult{numAdults === 1 ? "" : "s"})</span>
                   </span>
                   <button
-                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
                     type="button"
                     aria-label="Increase children count"
-                    onClick={() => {
-                      // Cap children at (guests - 1) so at least one adult stays.
-                      setNumChildren(Math.min(numChildren + 1, Math.max(0, guests - 1)));
-                    }}
-                    disabled={numChildren >= Math.max(0, guests - 1)}
+                    aria-describedby="children-cap-help"
+                    onClick={() => updateChildren(numChildren + 1)}
+                    disabled={
+                      numChildren >= selectedMaxSelectableChildren
+                      || numChildren >= Math.max(0, guests - 1)
+                    }
                   >
                     <Plus size={16} />
                   </button>
                 </div>
+                <span
+                  id="children-cap-help"
+                  className={`text-xs font-normal leading-relaxed ${
+                    numChildren >= selectedMaxSelectableChildren
+                      ? "text-amber-700"
+                      : "text-gray-500"
+                  }`}
+                  aria-live="polite"
+                >
+                  {selectedTypeEntry ? (
+                    <>
+                      This room includes space for {selectedMaxChildren} child{selectedMaxChildren === 1 ? "" : "ren"}.
+                      {" "}Children stay free of the room charge.
+                      {selectedMaxSelectableChildren > selectedMaxChildren
+                        ? ` Up to ${selectedMaxSelectableChildren} can fit when extra beds cover the overflow.`
+                        : ""}
+                      {numChildren >= selectedMaxSelectableChildren
+                        ? " You have reached this room type’s limit for the current group."
+                        : ""}
+                    </>
+                  ) : (
+                    <>Choose a room type to see its child limit. Children stay free of the room charge.</>
+                  )}
+                </span>
               </label>
 
               {/* Per EXB-01 (2026-07-31): the extra-bed selector.
@@ -1819,10 +1950,10 @@ export function BookingPage() {
                   Extra bed{Number(selectedTypeEntry.maxExtraBeds) > 1 ? "s" : ""} ({formatPrice(Number(selectedTypeEntry.extraBedRate) || 0)} / bed / night)
                   <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
                     <button
-                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
                       type="button"
                       aria-label="Decrease extra bed count"
-                      onClick={() => setExtraBedCount(Math.max(0, extraBedCount - 1))}
+                      onClick={() => updateExtraBeds(extraBedCount - 1)}
                       disabled={extraBedCount <= 0}
                     >
                       <Minus size={16} />
@@ -1834,19 +1965,32 @@ export function BookingPage() {
                       </span>
                     </span>
                     <button
-                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
                       type="button"
                       aria-label="Increase extra bed count"
-                      onClick={() => {
-                        const max = Number(selectedTypeEntry.maxExtraBeds) || 0;
-                        setExtraBedCount(Math.min(extraBedCount + 1, max));
-                      }}
+                      onClick={() => updateExtraBeds(extraBedCount + 1)}
                       disabled={extraBedCount >= Number(selectedTypeEntry.maxExtraBeds)}
                     >
                       <Plus size={16} />
                     </button>
                   </div>
                 </label>
+              ) : null}
+
+              {selectedTypeEntry && missingExtraBeds > 0 ? (
+                <div
+                  className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Info size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                  <p>
+                    This room includes space for up to {selectedMaxCapacity} adult{selectedMaxCapacity === 1 ? "" : "s"} and{" "}
+                    {selectedMaxChildren} child{selectedMaxChildren === 1 ? "" : "ren"}.
+                    Add {missingExtraBeds} more extra bed{missingExtraBeds === 1 ? "" : "s"} to fit your group,
+                    or choose a different room type.
+                  </p>
+                </div>
               ) : null}
 
               <div className="flex gap-3 rounded-lg bg-primary-light p-4 text-sm text-gray-700">
@@ -1961,10 +2105,17 @@ export function BookingPage() {
                             <BedDouble size={16} className="text-primary" />
                             {type.bedDefinition || ""}
                           </span>
-                          <span className="flex items-center gap-2">
-                            <Users size={16} className="text-primary" />
-                            Up to {typeMaxCapacity}
-                          </span>
+	                          <span className="flex items-center gap-2">
+	                            <Users size={16} className="text-primary" />
+	                            Up to {typeMaxCapacity} adult{typeMaxCapacity === 1 ? "" : "s"} +{" "}
+	                            {Number(type.maxChildren) || 0} child{(Number(type.maxChildren) || 0) === 1 ? "" : "ren"}
+	                          </span>
+	                          {Number(type.maxExtraBeds) > 0 ? (
+	                            <span className="flex items-center gap-2">
+	                              <Plus size={16} className="text-primary" />
+	                              Up to {type.maxExtraBeds} extra bed{Number(type.maxExtraBeds) === 1 ? "" : "s"}
+	                            </span>
+	                          ) : null}
                           <span className="flex items-center gap-2">
                             <CalendarDays size={16} className="text-primary" />
                             {nights} {nights === 1 ? "night" : "nights"}
@@ -2056,11 +2207,31 @@ export function BookingPage() {
               {formatPrice(total)} <span className="text-sm font-normal text-gray-500">including selected options</span>
             </p>
           </div>
-          <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
-            Continue to Step 2
-          </PrimaryButton>
-        </div>
-      </div>
+	          {selectedTypeIsAvailable && missingExtraBeds === 0 ? (
+	            <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
+	              Continue to Step 2
+	            </PrimaryButton>
+	          ) : (
+	            <PrimaryButton
+	              type="button"
+	              disabled
+	              aria-describedby="step-one-occupancy-error"
+	              className="sm:min-w-56"
+	            >
+	              {selectedTypeIsAvailable ? "Add the required extra bed" : "Choose an available room type"}
+	            </PrimaryButton>
+	          )}
+	        </div>
+	        {selectedTypeIsAvailable && missingExtraBeds > 0 ? (
+	          <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
+	            Your selected room needs {missingExtraBeds} more extra bed{missingExtraBeds === 1 ? "" : "s"} before you continue.
+	          </p>
+	        ) : !selectedTypeIsAvailable ? (
+	          <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
+	            Choose an available room type for this adult and child count before you continue.
+	          </p>
+	        ) : null}
+	      </div>
     </>
   );
 }
@@ -2329,8 +2500,17 @@ function BookingReviewAside({
             <SummaryCell label="Guests" value={`${guests} ${guests === 1 ? "guest" : "guests"}`} />
             <SummaryCell alignEnd label="Duration" value={`${nights} ${nights === 1 ? "night" : "nights"}`} />
           </div>
-          <div className="mt-5 space-y-3 text-sm text-gray-600">
-            {rateBreakdown ? (
+	          <div className="mt-5 space-y-3 text-sm text-gray-600">
+	            {numChildren > 0 ? (
+	              <div className="flex items-start justify-between gap-4 rounded-lg bg-status-green-bg px-3 py-2 text-status-green-text">
+	                <span>
+	                  Children’s room charge
+	                  <span className="block text-xs font-normal">Included at no extra room cost</span>
+	                </span>
+	                <span className="font-semibold">{formatPrice(0)}</span>
+	              </div>
+	            ) : null}
+	            {rateBreakdown ? (
               <PriceBreakdown breakdown={rateBreakdown} total={total} />
             ) : (
               <>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/config";
 import {
+  applyRoomTypeDefaults,
   DEFAULT_ROOM_TYPES,
   normalizeSeasonalRateOverrides,
   type RoomTypeEntry,
@@ -52,7 +53,12 @@ export function useRoomTypes(): UseRoomTypesResult {
             .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
             .map((entry) => {
               const fallback = DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value);
-              return {
+              // Per CHD-02/05 + EXB-01: every guest-side room-type
+              // read must retain and normalize the child-cap and
+              // extra-bed fields. The historical manual mapping
+              // dropped all three, which made every live type look
+              // like `maxChildren: 0` with no extra-bed allowance.
+              return applyRoomTypeDefaults({
                 value: String(entry.value ?? ""),
                 label: String(entry.label ?? entry.value ?? ""),
                 shortLabel: String(entry.shortLabel ?? entry.label ?? entry.value ?? ""),
@@ -69,10 +75,13 @@ export function useRoomTypes(): UseRoomTypesResult {
                   ? (entry.amenities as unknown[]).filter((a): a is string => typeof a === "string")
                   : (fallback?.amenities ?? []),
                 maxCapacity: Number(entry.maxCapacity) || fallback?.maxCapacity || 1,
+                maxChildren: entry.maxChildren,
                 pricePerNight: Number(entry.pricePerNight) || fallback?.pricePerNight || 0,
                 weekendRate: Number(entry.weekendRate) || fallback?.weekendRate || 0,
-                corporateRate: Number(entry.corporateRate) || fallback?.corporateRate || 0
-              };
+                corporateRate: Number(entry.corporateRate) || fallback?.corporateRate || 0,
+                maxExtraBeds: entry.maxExtraBeds ?? fallback?.maxExtraBeds,
+                extraBedRate: entry.extraBedRate ?? fallback?.extraBedRate
+              });
             })
             .filter((t) => t.value.length > 0);
           setRoomTypes(normalized);
