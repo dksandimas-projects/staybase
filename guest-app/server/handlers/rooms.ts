@@ -1,4 +1,15 @@
 import { adminDb } from "../lib/firebase-admin";
+// Per PEX-02 (2026-08-01, per decision #147): the availability
+// endpoint is the third of three readers of "does this booking
+// occupy the room?" — the create / walkin / reschedule
+// transactions and the room-blocks handler are the other two.
+// All three now use `isBookingOccupyingRoom` as the per-doc
+// filter on top of the coarse `status in [...]` Firestore query,
+// so an expired `pending` hold shows as free in the public
+// availability response (the cron will retire it eventually;
+// the create / walkin / reschedule transactions retire it
+// atomically when the next guest tries to take the room).
+import { BOOKING_OCCUPYING_STATUSES, isBookingOccupyingRoom } from "@spark-inn/shared";
 
 // Per W4.7 / `plan/features/AVAILABILITY-LOCKING.md`: this endpoint is the
 // guest-side replacement for the previous client-side `bookings` subscription.
@@ -10,8 +21,8 @@ import { adminDb } from "../lib/firebase-admin";
 
 // Bookings with these statuses occupy the room and must be excluded from
 // availability. `cancelled` is intentionally omitted — cancelled bookings
-// release the room.
-const ACTIVE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+// release the room. The shared list is the source of truth (PEX-02).
+const ACTIVE_STATUSES = BOOKING_OCCUPYING_STATUSES;
 
 interface AvailabilityQuery {
   checkIn?: string;
@@ -99,6 +110,15 @@ export async function handleRoomAvailability(req: any, res: any) {
       const roomId = data.roomId;
       const status = data.status;
       if (!startIso || !endIso || !roomId || !status) return;
+
+      // Per PEX-02 (2026-08-01, per decision #147): the public
+      // availability endpoint may display an eligible expired
+      // hold as free. The create / walkin / reschedule
+      // transactions retire it atomically when the next guest
+      // takes the room; the cron retires any leftover ones.
+      if (!isBookingOccupyingRoom({ status, holdExpiresAt: data.holdExpiresAt })) {
+        return;
+      }
 
       const bStart = new Date(`${startIso}T00:00:00Z`);
       const bEnd = new Date(`${endIso}T00:00:00Z`);

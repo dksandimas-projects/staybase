@@ -19,6 +19,7 @@ import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
+import { handleHoldExpiryCron } from "./handlers/hold-expiry";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
@@ -1322,6 +1323,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (domain === "notifications" && action === "prune" && (req.method === "POST" || req.method === "GET")) {
 
     return await handleNotificationsPrune(req, res);
+  }
+
+  // Per PEX-06 (2026-08-01, per decision #147): the daily
+  // cleanup cron for expired `pending` payment holds. Same
+  // CRON_SECRET auth as the other Vercel cron handlers;
+  // registered in `guest-app/vercel.json` so the
+  // project-local cron config (not the monorepo-root
+  // `vercel.json`) owns the schedule. Idempotent — re-fires
+  // of the same cron tick find zero matches.
+  if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
+
+    return await handleHoldExpiryCron(req, res);
   }
 
   // ── Test Runs (ETR) ──────────────────────────────────────

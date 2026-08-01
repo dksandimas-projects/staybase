@@ -23,7 +23,18 @@ import {
   getLockedManualNightlyRate,
   WalkinBookingSchema,
   MAX_STAY_NIGHTS,
-  MAX_ADVANCE_DAYS
+  MAX_ADVANCE_DAYS,
+  // Per PEX-02 (2026-08-01, per decision #147): the shared
+  // occupancy rule — one place that decides whether a booking
+  // holds the room. Uses the snapshotted `holdExpiresAt` so
+  // an expired `pending` hold does not block a later booking
+  // (the in-transaction retirement at the create / walkin /
+  // reschedule sites marks the expired hold `cancelled`).
+  BOOKING_OCCUPYING_STATUSES,
+  isBookingOccupyingRoom,
+  computeHoldExpiresAt,
+  normalizePaymentHoldWindowHours,
+  EXPIRED_HOLD_CANCELLATION_REASON
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
@@ -40,11 +51,25 @@ export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
 }
 
-const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+const ROOM_OCCUPYING_STATUSES = BOOKING_OCCUPYING_STATUSES;
 const ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready — previous guest has not checked out yet.";
 const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+
+// Per PEX-03 (2026-08-01, per decision #147): a `pending` hold is
+// "expired" when its snapshotted deadline is in the past. The
+// helper is a thin wrapper over `isBookingOccupyingRoom` to keep
+// the candidate loop readable. Shared by handleCreateBooking +
+// handleCreateWalkin + handleRescheduleBooking.
+function isExpiredPendingHold(bookingData: any, now: Date): boolean {
+  if (!bookingData) return false;
+  if (bookingData.status !== "pending") return false;
+  return !isBookingOccupyingRoom({
+    status: bookingData.status,
+    holdExpiresAt: bookingData.holdExpiresAt
+  }, now);
+}
 
 function isExpectedBookingUploadPath(path: string | null | undefined, bookingId: string, folder: "payment-proof" | "discount-id") {
   if (!path) return true;
@@ -173,7 +198,21 @@ function getOccupancyConflictReason(input: {
   todayKey: string;
   currentMinutes: number;
   checkOutTime: unknown;
+  now: Date;
 }) {
+  // Per PEX-02 (2026-08-01, per decision #147): the shared
+  // occupancy rule is the only authority. An expired `pending`
+  // hold (or a `pending` hold for which the cron has already
+  // retired — should never happen in the same transaction,
+  // but the read is cheap) does not block the room. The candidate
+  // loop in handleCreateBooking / handleCreateWalkin /
+  // handleRescheduleBooking retires these in the same transaction.
+  if (!isBookingOccupyingRoom({
+    status: input.bookingData.status,
+    holdExpiresAt: input.bookingData.holdExpiresAt
+  }, input.now)) {
+    return null;
+  }
   const existingCheckIn = toDateOrNull(input.bookingData.checkIn);
   const existingCheckOut = toDateOrNull(input.bookingData.checkOut);
   if (!existingCheckIn || !existingCheckOut) return null;
@@ -583,10 +622,26 @@ export async function handleCreateBooking(req: any, res: any) {
     let finalRateBreakdown: BookingRateBreakdown | null = null;
     let computedData: any = {};
     let alreadyExistingBookingResponse: any = null;
+    // Per PEX-05 (2026-08-01, per decision #147): the snapshotted
+    // `holdExpiresAt` is captured inside the transaction (so it
+    // matches the `now` used for the retirement pass) and read
+    // after the transaction commits for the response payload +
+    // the booking-submitted email send. `null` for
+    // `payment-uploaded` bookings (no auto-expiry) and for
+    // legacy callers that omit `paymentHoldWindowHours`.
+    let bookingHoldExpiresAt: Date | null = null;
     // Captured inside the transaction so the response payload
     // can surface the auto-assigned physical room.
     let assignedRoomId = "";
     let assignedRoomNumber = "";
+    // Per PEX-03 (2026-08-01, per decision #147): the list of
+    // `pending` holds retired by THIS create transaction is
+    // collected inside the transaction (so the retirement is
+    // atomic with the new booking) and read after the transaction
+    // commits (so the per-hold `booking-expired` email is sent
+    // from the post-transaction path, never from inside the
+    // transaction).
+    const expiredHoldRetirements: Array<{ ref: FirebaseFirestore.DocumentReference; previousData: any; bookingRef: string; guestEmail: string; holdExpiresAt: Date | null }> = [];
 
     // Detect Spark Rewards member via the request's ID token.
     // Per W2.2 / decision #90: server is authoritative for member discount.
@@ -650,6 +705,22 @@ export async function handleCreateBooking(req: any, res: any) {
     // Run Firestore Transaction
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      // Per PEX-01 + PEX-03 (2026-08-01, per decision #147):
+      // a single `now` is captured at the top of the transaction
+      // and threaded into every occupancy + retirement check so
+      // a later Settings change (window length) or a concurrent
+      // cron tick cannot race the deadline read. The retirement
+      // list collects `pending` holds that have passed their
+      // snapshotted deadline AND overlap with this new booking's
+      // date range — the spec's "every conflicting expired hold"
+      // rule. The retirements are written in this same
+      // transaction (no separate write) so a partial failure
+      // cannot leave the expired hold in the booking's room.
+      const now = new Date();
+      // Per PEX-01 + PEX-04 (2026-08-01, per decision #147): a
+      // late payment proof or a late walk-in with `holdExpiresAt`
+      // still in the past must not be allowed to occupy the
+      // room. The shared rule is the only authority.
 
       // Per LCE-01 (decision #137, 2026-07-25): stamp the
       // current Terms of Service version on every booking
@@ -789,22 +860,53 @@ export async function handleCreateBooking(req: any, res: any) {
           .where("roomId", "==", candidate.id)
           .where("status", "in", ROOM_OCCUPYING_STATUSES);
         const overlapSnapshot = await transaction.get(overlapQuery);
-        const conflictReason = overlapSnapshot.docs
-          .map((doc) => getOccupancyConflictReason({
-            bookingData: doc.data(),
+        // Per PEX-03 (2026-08-01, per decision #147): for each
+        // conflicting doc, decide whether it's an active conflict
+        // (overlap with a still-occupying booking) or an expired
+        // `pending` hold we can retire in this same transaction.
+        // A non-overlapping `pending` hold (wrong dates entirely)
+        // is also ignored — it does not block this room, and the
+        // daily cron (PEX-06) retires it independently.
+        let sawOverlap = false;
+        for (const doc of overlapSnapshot.docs) {
+          const bookingData = doc.data();
+          if (isExpiredPendingHold(bookingData)) {
+            const existingCheckIn = toDateOrNull(bookingData.checkIn);
+            const existingCheckOut = toDateOrNull(bookingData.checkOut);
+            const dateOverlaps = existingCheckIn && existingCheckOut
+              ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate)
+              : false;
+            if (dateOverlaps) {
+              expiredHoldRetirements.push({
+                ref: doc.ref,
+                previousData: bookingData,
+                bookingRef: String(bookingData.bookingRef || doc.id),
+                guestEmail: String(bookingData.guestEmail || ""),
+                holdExpiresAt: toDateOrNull(bookingData.holdExpiresAt)
+              });
+            }
+            // either way: this doc does not block the new booking
+            continue;
+          }
+          const reason = getOccupancyConflictReason({
+            bookingData,
             requestedCheckIn: checkInDate,
             requestedCheckOut: checkOutDate,
             requestedCheckInKey: checkIn,
             todayKey: manilaToday,
             currentMinutes: currentManilaMinutes,
-            checkOutTime: hotelConfig.checkOutTime
-          }))
-          .find(Boolean);
-        if (conflictReason === "lingering-checked-in") {
-          sawLingeringCheckedInConflict = true;
+            checkOutTime: hotelConfig.checkOutTime,
+            now
+          });
+          if (reason === "overlap" || reason === "lingering-checked-in") {
+            if (reason === "lingering-checked-in") {
+              sawLingeringCheckedInConflict = true;
+            }
+            sawOverlap = true;
+            break;
+          }
         }
-        const hasConflict = Boolean(conflictReason);
-        if (hasConflict) {
+        if (sawOverlap) {
           continue;
         }
         const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, candidate.id, checkInDate, checkOutDate);
@@ -1296,6 +1398,22 @@ export async function handleCreateBooking(req: any, res: any) {
         companyName: corporateDetails.companyName,
         specialRequests: guestDetails.requests || "",
         status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
+        // Per PEX-01 (2026-08-01, per decision #147): the
+        // snapshotted deadline. Computed from the admin's
+        // `paymentHoldWindowHours` setting at the same `now`
+        // captured at the top of the transaction, so the
+        // deadline is byte-equivalent to whatever the cron
+        // would later compute. `null` for `payment-uploaded`
+        // bookings (staff-review state — never auto-expired,
+        // per PEX-04) and for legacy callers that omit the
+        // config. The cron + the create / walkin / reschedule
+        // transactions all read this single field via
+        // `isBookingOccupyingRoom`.
+        holdExpiresAt: (paymentProofPath || paymentProofUrl)
+          ? null
+          : (computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now)
+            ? Timestamp.fromDate(computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now) as Date)
+            : null),
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): write
         // `null` (not `""`) when no payment proof is attached.
@@ -1395,6 +1513,33 @@ export async function handleCreateBooking(req: any, res: any) {
       };
 
       transaction.set(bookingDocRef, newBooking);
+      // Per PEX-05 (2026-08-01, per decision #147): capture
+      // the snapshotted deadline for the post-transaction
+      // response payload + the booking-submitted email. The
+      // field is a Timestamp on the doc; we convert to a Date
+      // for the wire (the create handler already does this for
+      // `checkIn` / `checkOut`).
+      if (newBooking && (newBooking as any).holdExpiresAt) {
+        const he = (newBooking as any).holdExpiresAt;
+        bookingHoldExpiresAt = he instanceof Date ? he : (he.toDate ? he.toDate() : null);
+      }
+      // Per PEX-03 (2026-08-01, per decision #147): atomically
+      // retire every expired `pending` hold that overlapped with
+      // the new booking's date range. The retirement is part of
+      // the same Firestore transaction so a partial failure
+      // cannot leave an expired hold in the booking's room. The
+      // expiry email (PEX-05) is sent from the post-transaction
+      // path below — the same loop that writes the success
+      // email also queues the per-expired-hold `booking-expired`
+      // notification.
+      for (const retirement of expiredHoldRetirements) {
+        transaction.update(retirement.ref, {
+          status: "cancelled",
+          cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          cancelledAt: now,
+          updatedAt: now
+        });
+      }
 
       computedData = {
         guestName,
@@ -1428,7 +1573,12 @@ export async function handleCreateBooking(req: any, res: any) {
         ...computedData,
         bookingRef: finalBookingRef,
         guestEmail: computedData.email,
-        paymentMethod
+        paymentMethod,
+        // Per PEX-05 (2026-08-01, per decision #147): the email
+        // template renders "Held until X (hotel-local time)" from
+        // this field. `null` for `payment-uploaded` bookings
+        // (staff-review state — no auto-expiry).
+        holdExpiresAt: bookingHoldExpiresAt
       });
     } catch (emailErr) {
       // Log email error, but do not fail the request since booking document is already written successfully
@@ -1468,6 +1618,35 @@ export async function handleCreateBooking(req: any, res: any) {
       console.error("Failed to send staff-new-booking email:", staffEmailErr);
     }
 
+    // Per PEX-05 (2026-08-01, per decision #147): fire a
+    // `booking-expired` email for each `pending` hold this
+    // create transaction retired in-transaction. Best-effort,
+    // outside the transaction (a failed email never rolls back
+    // the retirement). The email template reuses the same
+    // `booking-cancelled` template the existing
+    // `handleCancelBooking` flow uses; the difference is the
+    // `cancellationReason` field, which carries the
+    // `payment-hold-expired` reason string so the guest sees
+    // a rebook path.
+    for (const retirement of expiredHoldRetirements) {
+      if (!retirement.guestEmail) continue;
+      try {
+        await sendBookingTrigger("booking-cancelled", {
+          bookingRef: retirement.bookingRef,
+          guestEmail: retirement.guestEmail,
+          // The staff-readable "Expired hold — rebook at /book"
+          // copy comes from the email template; the
+          // `cancellationReason` is the discriminator the
+          // template uses to switch the headline.
+          source: "online",
+          notes: "Held until " + (retirement.holdExpiresAt ? retirement.holdExpiresAt.toISOString() : "unknown")
+            + " — your reservation has been released. Please rebook at /book to choose new dates."
+        });
+      } catch (expiredEmailErr) {
+        console.error("Failed to send booking-expired email for", retirement.bookingRef, expiredEmailErr);
+      }
+    }
+
     // Per Phase 12 — Notification Center (decision #120):
     // persist a `notifications` doc for the bell panel. Best-effort;
     // a failure here never fails the booking (the helper swallows
@@ -1503,7 +1682,13 @@ export async function handleCreateBooking(req: any, res: any) {
         rateBreakdown: finalRateBreakdown,
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
-        roomType
+        roomType,
+        // Per PEX-05 (2026-08-01, per decision #147): the
+        // snapshotted deadline. `null` for `payment-uploaded`
+        // bookings (no auto-expiry, staff-review state). The
+        // confirmation page renders "Held until X" so the
+        // guest knows the exact local time the hold lapses.
+        holdExpiresAt: bookingHoldExpiresAt
       }
     });
 
@@ -1612,6 +1797,17 @@ export async function handleCreateWalkin(req: any, res: any) {
       error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten the stay.`
     });
   }
+
+  // Per PEX-01 + PEX-03 (2026-08-01, per decision #147): the
+  // same retirement list pattern as handleCreateBooking.
+  // Walk-ins are exempt from the guest-side hold window
+  // (the staff is creating the booking, not waiting on a
+  // guest action), so the new walk-in booking has no
+  // `holdExpiresAt` — the only retirements that can happen
+  // here are for stale expired holds on the same room
+  // (a guest abandoned booking that was never cleaned up
+  // by the cron and the front desk now needs the room).
+  const expiredHoldRetirements: Array<{ ref: FirebaseFirestore.DocumentReference; previousData: any; bookingRef: string; guestEmail: string; holdExpiresAt: Date | null }> = [];
 
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
@@ -1735,22 +1931,55 @@ export async function handleCreateWalkin(req: any, res: any) {
         .where("roomId", "==", roomId)
         .where("status", "in", ROOM_OCCUPYING_STATUSES);
       const bookingsSnapshot = await transaction.get(bookingsQuery);
-      
-      const conflictReason = bookingsSnapshot.docs
-        .map((doc) => getOccupancyConflictReason({
-          bookingData: doc.data(),
+      // Per PEX-02 + PEX-03 (2026-08-01, per decision #147):
+      // same pattern as handleCreateBooking — split each
+      // conflicting doc into "active conflict" vs "expired
+      // `pending` hold to retire". A walk-in that displaces a
+      // stale expired hold is a real-world case the cron may
+      // not have caught yet (e.g. a `payment-hold-expired`
+      // hold from yesterday that nobody's cron has processed).
+      const now = new Date();
+      let sawConflict = false;
+      let sawLingering = false;
+      for (const doc of bookingsSnapshot.docs) {
+        const bookingData = doc.data();
+        if (isExpiredPendingHold(bookingData, now)) {
+          const existingCheckIn = toDateOrNull(bookingData.checkIn);
+          const existingCheckOut = toDateOrNull(bookingData.checkOut);
+          const dateOverlaps = existingCheckIn && existingCheckOut
+            ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate)
+            : false;
+          if (dateOverlaps) {
+            expiredHoldRetirements.push({
+              ref: doc.ref,
+              previousData: bookingData,
+              bookingRef: String(bookingData.bookingRef || doc.id),
+              guestEmail: String(bookingData.guestEmail || ""),
+              holdExpiresAt: toDateOrNull(bookingData.holdExpiresAt)
+            });
+          }
+          continue;
+        }
+        const reason = getOccupancyConflictReason({
+          bookingData,
           requestedCheckIn: checkInDate,
           requestedCheckOut: checkOutDate,
           requestedCheckInKey: checkIn,
           todayKey,
           currentMinutes: currentManilaMinutes,
-          checkOutTime: hotelConfig.checkOutTime
-        }))
-        .find(Boolean);
-      const hasConflict = Boolean(conflictReason);
+          checkOutTime: hotelConfig.checkOutTime,
+          now
+        });
+        if (reason === "overlap" || reason === "lingering-checked-in") {
+          if (reason === "lingering-checked-in") sawLingering = true;
+          sawConflict = true;
+          break;
+        }
+      }
+      const hasConflict = sawConflict;
 
       if (hasConflict) {
-        throw new Error(conflictReason === "lingering-checked-in" ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
+        throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
       if (hasBlockConflict) {
@@ -2052,6 +2281,19 @@ export async function handleCreateWalkin(req: any, res: any) {
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
       transaction.set(bookingDocRef, newBooking);
+      // Per PEX-03 (2026-08-01, per decision #147): same
+      // in-transaction retirement as handleCreateBooking. The
+      // walk-in covers a corner case the cron may not have
+      // processed yet (a stale expired hold from yesterday),
+      // so the walk-in handler can move first.
+      for (const retirement of expiredHoldRetirements) {
+        transaction.update(retirement.ref, {
+          status: "cancelled",
+          cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          cancelledAt: now,
+          updatedAt: now
+        });
+      }
     });
 
     const resolvedStatus = status || "confirmed";
@@ -2060,6 +2302,26 @@ export async function handleCreateWalkin(req: any, res: any) {
         await sendBookingTrigger("booking-confirmed", { ...newBooking, status: "confirmed" });
       } catch (emailErr) {
         console.error("Failed to send walk-in booking confirmation email:", emailErr);
+      }
+    }
+
+    // Per PEX-05 (2026-08-01, per decision #147): same
+    // per-retirement email send as handleCreateBooking. Best-effort,
+    // outside the transaction. A walk-in that displaces a stale
+    // expired hold should still email the original guest so they
+    // know the hold lapsed (the email carries the rebook path).
+    for (const retirement of expiredHoldRetirements) {
+      if (!retirement.guestEmail) continue;
+      try {
+        await sendBookingTrigger("booking-cancelled", {
+          bookingRef: retirement.bookingRef,
+          guestEmail: retirement.guestEmail,
+          source: "online",
+          notes: "Held until " + (retirement.holdExpiresAt ? retirement.holdExpiresAt.toISOString() : "unknown")
+            + " — your reservation has been released. Please rebook at /book to choose new dates."
+        });
+      } catch (expiredEmailErr) {
+        console.error("Failed to send walk-in retired-hold email for", retirement.bookingRef, expiredEmailErr);
       }
     }
 
@@ -2377,43 +2639,86 @@ export async function handleRejectPayment(req: any, res: any) {
   let bookingData: any = null;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    const bookingDoc = await bookingRef.get();
-    if (!bookingDoc.exists) {
-      return res.status(404).json({ success: false, error: "Booking not found." });
-    }
-    const data = bookingDoc.data()!;
-    if (data.status !== "payment-uploaded") {
-      return res.status(400).json({
-        success: false,
-        error: `Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`
-      });
-    }
-    bookingData = data;
-
+    // Per PEX-04 (2026-08-01, per decision #147): stamping a
+    // fresh `holdExpiresAt` from `paymentRejectedAt` requires
+    // reading `settings/hotelConfig.paymentHoldWindowHours` in
+    // the same write. The previous non-transactional read+update
+    // would have raced the Settings change (a parallel admin
+    // shortening the window could land between the read and
+    // the update). The transaction guarantees the window we
+    // read is the window we snapshot. Same shape as
+    // handleCreateBooking's read of `paymentHoldWindowHours`.
     const updatedAt = new Date();
-    await bookingRef.update({
-      status: "pending",
-      paymentRejectionReason: safeReason,
-      paymentRejectedAt: updatedAt,
-      paymentRejectedBy,
-      // Per the implementation plan: stale proof state is
-      // kept for audit. The re-upload is guest-driven via
-      // the existing `pending` UI on the lookup page.
-      updatedAt
+    let paymentRejectionReason: string | null = null;
+    let paymentRejectedAt: Date | null = null;
+    let paymentRejectedBy: string | null = null;
+    let freshHoldExpiresAt: Date | null = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+      const data = bookingDoc.data()!;
+      if (data.status !== "payment-uploaded") {
+        throw new Error(`Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`);
+      }
+      bookingData = data;
+
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
+      // `normalizePaymentHoldWindowHours` clamps legacy or
+      // out-of-range values to the safe default (24h) so the
+      // fresh deadline is never shorter than the documented
+      // minimum and never longer than the documented maximum.
+      const holdWindowHours = normalizePaymentHoldWindowHours(
+        (hotelConfig as any).paymentHoldWindowHours
+      );
+      const newDeadline = computeHoldExpiresAt(holdWindowHours, updatedAt);
+
+      paymentRejectionReason = safeReason;
+      paymentRejectedAt = updatedAt;
+      paymentRejectedBy = paymentRejectedBy;
+      freshHoldExpiresAt = newDeadline;
+
+      transaction.update(bookingRef, {
+        status: "pending",
+        paymentRejectionReason: safeReason,
+        paymentRejectedAt: updatedAt,
+        paymentRejectedBy,
+        // Per PEX-04 (2026-08-01, per decision #147): a fresh
+        // snapshotted deadline. The retained `paymentProofPath` /
+        // legacy `paymentProofUrl` are audit evidence only and
+        // do NOT exempt this booking — the `holdExpiresAt` is
+        // the only expiry authority. If the guest does not
+        // re-upload, the daily cron (PEX-06) retires the booking
+        // at this deadline.
+        holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+        // Per the implementation plan: stale proof state is
+        // kept for audit. The re-upload is guest-driven via
+        // the existing `pending` UI on the lookup page.
+        updatedAt
+      });
     });
 
     return res.status(200).json({
       success: true,
       data: {
         status: "pending",
-        paymentRejectionReason: safeReason,
-        paymentRejectedAt: updatedAt,
-        paymentRejectedBy
+        paymentRejectionReason,
+        paymentRejectedAt,
+        paymentRejectedBy,
+        holdExpiresAt: freshHoldExpiresAt
       }
     });
   } catch (error: any) {
     console.error("Payment rejection handler error:", error);
-    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+    const message = error.message || "An unexpected error occurred.";
+    // The transaction's `throw new Error(...)` for status
+    // mismatches is a 400, not a 500.
+    if (message.startsWith("Only a booking in 'payment-uploaded' status")) {
+      return res.status(400).json({ success: false, error: message });
+    }
+    return res.status(500).json({ success: false, error: message });
   }
 }
 
@@ -4279,6 +4584,12 @@ export async function handleRescheduleBooking(req: any, res: any) {
   try {
     let updatedBooking: any = null;
     let fullBookingForEmail: any = null;
+    // Per PEX-03 (2026-08-01, per decision #147): same retirement
+    // list pattern as handleCreateBooking / handleCreateWalkin.
+    // The reschedule transaction may displace an expired `pending`
+    // hold on the target room (or the same room, for a dates-only
+    // move); the retirement is atomic with the move.
+    const expiredHoldRetirements: Array<{ ref: FirebaseFirestore.DocumentReference; previousData: any; bookingRef: string; guestEmail: string; holdExpiresAt: Date | null }> = [];
 
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
@@ -4313,20 +4624,47 @@ export async function handleRescheduleBooking(req: any, res: any) {
         .where("roomId", "==", String(roomId))
         .where("status", "in", ROOM_OCCUPYING_STATUSES);
       const overlapSnapshot = await transaction.get(overlapQuery);
-      const conflictReason = overlapSnapshot.docs
-        .filter((doc) => doc.id !== String(bookingId))
-        .map((doc) => getOccupancyConflictReason({
-          bookingData: doc.data(),
+      const now = new Date();
+      let sawConflict = false;
+      let sawLingering = false;
+      for (const doc of overlapSnapshot.docs) {
+        if (doc.id === String(bookingId)) continue;
+        const docData = doc.data();
+        if (isExpiredPendingHold(docData, now)) {
+          const existingCheckIn = toDateOrNull(docData.checkIn);
+          const existingCheckOut = toDateOrNull(docData.checkOut);
+          const dateOverlaps = existingCheckIn && existingCheckOut
+            ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate)
+            : false;
+          if (dateOverlaps) {
+            expiredHoldRetirements.push({
+              ref: doc.ref,
+              previousData: docData,
+              bookingRef: String(docData.bookingRef || doc.id),
+              guestEmail: String(docData.guestEmail || ""),
+              holdExpiresAt: toDateOrNull(docData.holdExpiresAt)
+            });
+          }
+          continue;
+        }
+        const reason = getOccupancyConflictReason({
+          bookingData: docData,
           requestedCheckIn: checkInDate,
           requestedCheckOut: checkOutDate,
           requestedCheckInKey: checkIn,
           todayKey,
           currentMinutes: currentManilaMinutes,
-          checkOutTime: hotelConfig.checkOutTime
-        }))
-        .find(Boolean);
-      if (conflictReason) {
-        throw new Error(conflictReason === "lingering-checked-in"
+          checkOutTime: hotelConfig.checkOutTime,
+          now
+        });
+        if (reason === "overlap" || reason === "lingering-checked-in") {
+          if (reason === "lingering-checked-in") sawLingering = true;
+          sawConflict = true;
+          break;
+        }
+      }
+      if (sawConflict) {
+        throw new Error(sawLingering
           ? "Target room is not ready because the previous guest has not checked out yet."
           : "Target room already has a booking in that date range.");
       }
@@ -4562,6 +4900,19 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
 
       transaction.update(bookingRef, updatedBooking);
+      // Per PEX-03 (2026-08-01, per decision #147): same
+      // in-transaction retirement as handleCreateBooking /
+      // handleCreateWalkin. The reschedule transaction may
+      // displace an expired `pending` hold on the target room
+      // (or the same room, for a dates-only move).
+      for (const retirement of expiredHoldRetirements) {
+        transaction.update(retirement.ref, {
+          status: "cancelled",
+          cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          cancelledAt: now,
+          updatedAt: now
+        });
+      }
     });
 
     // Send email to guest
@@ -4570,6 +4921,24 @@ export async function handleRescheduleBooking(req: any, res: any) {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
         console.error("Failed to send reschedule email:", emailErr);
+      }
+    }
+
+    // Per PEX-05 (2026-08-01, per decision #147): same
+    // per-retirement email send as handleCreateBooking /
+    // handleCreateWalkin. Best-effort, outside the transaction.
+    for (const retirement of expiredHoldRetirements) {
+      if (!retirement.guestEmail) continue;
+      try {
+        await sendBookingTrigger("booking-cancelled", {
+          bookingRef: retirement.bookingRef,
+          guestEmail: retirement.guestEmail,
+          source: "online",
+          notes: "Held until " + (retirement.holdExpiresAt ? retirement.holdExpiresAt.toISOString() : "unknown")
+            + " — your reservation has been released. Please rebook at /book to choose new dates."
+        });
+      } catch (expiredEmailErr) {
+        console.error("Failed to send reschedule retired-hold email for", retirement.bookingRef, expiredEmailErr);
       }
     }
 

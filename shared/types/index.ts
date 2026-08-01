@@ -235,6 +235,18 @@ export interface Booking {
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: Date | null;
   paymentRejectedBy?: string | null;
+  // Per PEX-01 (2026-08-01, per CVQ-12 + decision #147): the
+  // snapshotted deadline at which a `pending` booking's hold on
+  // the room expires. Written by `handleCreateBooking` (and the
+  // walk-in / reject-proof paths) using the admin-configured
+  // `settings/hotelConfig.paymentHoldWindowHours`. Snapshotted —
+  // a later Settings change never shortens or lengthens an
+  // existing guest's promise. `null` for legacy bookings,
+  // `payment-uploaded` bookings (staff-review state, no auto-expiry),
+  // and any status that is not `pending`. The `isBookingOccupyingRoom`
+  // helper in `shared/utils/bookingOccupancy.ts` is the only authority
+  // that should read this field.
+  holdExpiresAt?: Date | null;
   rescheduleHistory?: any[];
   // Per H2 (hardening batch 2026-06-26): 32-char hex
   // random token generated at booking-create time. The

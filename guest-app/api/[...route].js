@@ -221500,6 +221500,47 @@ function calculateDiscountChain(input) {
   return { seniorDeduction, voucherDeduction, memberDeduction, total };
 }
 
+// ../shared/utils/bookingOccupancy.ts
+var BOOKING_OCCUPYING_STATUSES = [
+  "pending",
+  "payment-uploaded",
+  "payment-confirmed",
+  "confirmed",
+  "checked-in"
+];
+function isBookingOccupyingRoom(booking, now = /* @__PURE__ */ new Date()) {
+  if (!booking || !booking.status) return false;
+  if (!BOOKING_OCCUPYING_STATUSES.includes(booking.status)) {
+    return false;
+  }
+  if (booking.status === "payment-uploaded") {
+    return true;
+  }
+  if (booking.status === "pending") {
+    const deadline = booking.holdExpiresAt;
+    if (!deadline) return true;
+    const expiresAt = deadline instanceof Date ? deadline : new Date(deadline);
+    if (isNaN(expiresAt.getTime())) return true;
+    return expiresAt.getTime() > now.getTime();
+  }
+  return true;
+}
+function computeHoldExpiresAt(windowHours, now = /* @__PURE__ */ new Date()) {
+  if (!windowHours || windowHours <= 0 || !Number.isFinite(windowHours)) return null;
+  const expires = new Date(now.getTime() + windowHours * 60 * 60 * 1e3);
+  return expires;
+}
+var DEFAULT_PAYMENT_HOLD_WINDOW_HOURS = 24;
+var MIN_PAYMENT_HOLD_WINDOW_HOURS = 1;
+var MAX_PAYMENT_HOLD_WINDOW_HOURS = 72;
+function normalizePaymentHoldWindowHours(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_PAYMENT_HOLD_WINDOW_HOURS;
+  const clamped = Math.min(MAX_PAYMENT_HOLD_WINDOW_HOURS, Math.max(MIN_PAYMENT_HOLD_WINDOW_HOURS, Math.floor(value)));
+  return clamped;
+}
+var EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
+
 // ../shared/utils/checkin.ts
 var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
 var REQUIRED_REGISTRATION_FIELDS = [
@@ -224518,11 +224559,19 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
 function getConfiguredBookingRefPrefix() {
   return hotel_config_default.bookingRefPrefix || "SI";
 }
-var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+var ROOM_OCCUPYING_STATUSES = BOOKING_OCCUPYING_STATUSES;
 var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest has not checked out yet.";
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+function isExpiredPendingHold(bookingData2, now) {
+  if (!bookingData2) return false;
+  if (bookingData2.status !== "pending") return false;
+  return !isBookingOccupyingRoom({
+    status: bookingData2.status,
+    holdExpiresAt: bookingData2.holdExpiresAt
+  }, now);
+}
 function isExpectedBookingUploadPath(path, bookingId, folder) {
   if (!path) return true;
   const prefix = `bookings/${bookingId}/${folder}/`;
@@ -224601,6 +224650,12 @@ function hasLingeringCheckedInConflict(input) {
   return input.status === "checked-in" && input.requestedCheckInKey === input.todayKey && (existingCheckOutKey < input.todayKey || existingCheckOutKey === input.todayKey && input.currentMinutes >= input.checkoutMinutes);
 }
 function getOccupancyConflictReason(input) {
+  if (!isBookingOccupyingRoom({
+    status: input.bookingData.status,
+    holdExpiresAt: input.bookingData.holdExpiresAt
+  }, input.now)) {
+    return null;
+  }
   const existingCheckIn = toDateOrNull(input.bookingData.checkIn);
   const existingCheckOut = toDateOrNull(input.bookingData.checkOut);
   if (!existingCheckIn || !existingCheckOut) return null;
@@ -224843,8 +224898,10 @@ async function handleCreateBooking(req, res) {
     let finalRateBreakdown = null;
     let computedData = {};
     let alreadyExistingBookingResponse = null;
+    let bookingHoldExpiresAt = null;
     let assignedRoomId = "";
     let assignedRoomNumber = "";
+    const expiredHoldRetirements = [];
     let detectedMemberId = null;
     let detectedMemberDoc = null;
     let memberTokenError = null;
@@ -224876,6 +224933,7 @@ async function handleCreateBooking(req, res) {
     }
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      const now = /* @__PURE__ */ new Date();
       const websiteContentRef = adminDb.collection("settings").doc("websiteContent");
       const websiteContentDoc = await transaction.get(websiteContentRef);
       const termsConsentVersion = websiteContentDoc.exists && typeof websiteContentDoc.data()?.termsVersion === "string" ? String(websiteContentDoc.data().termsVersion) : DEFAULT_TERMS_VERSION;
@@ -224946,20 +225004,43 @@ async function handleCreateBooking(req, res) {
         }
         const overlapQuery = adminDb.collection("bookings").where("roomId", "==", candidate.id).where("status", "in", ROOM_OCCUPYING_STATUSES);
         const overlapSnapshot = await transaction.get(overlapQuery);
-        const conflictReason = overlapSnapshot.docs.map((doc) => getOccupancyConflictReason({
-          bookingData: doc.data(),
-          requestedCheckIn: checkInDate,
-          requestedCheckOut: checkOutDate,
-          requestedCheckInKey: checkIn,
-          todayKey: manilaToday,
-          currentMinutes: currentManilaMinutes,
-          checkOutTime: hotelConfig.checkOutTime
-        })).find(Boolean);
-        if (conflictReason === "lingering-checked-in") {
-          sawLingeringCheckedInConflict = true;
+        let sawOverlap = false;
+        for (const doc of overlapSnapshot.docs) {
+          const bookingData2 = doc.data();
+          if (isExpiredPendingHold(bookingData2)) {
+            const existingCheckIn = toDateOrNull(bookingData2.checkIn);
+            const existingCheckOut = toDateOrNull(bookingData2.checkOut);
+            const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+            if (dateOverlaps) {
+              expiredHoldRetirements.push({
+                ref: doc.ref,
+                previousData: bookingData2,
+                bookingRef: String(bookingData2.bookingRef || doc.id),
+                guestEmail: String(bookingData2.guestEmail || ""),
+                holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
+              });
+            }
+            continue;
+          }
+          const reason = getOccupancyConflictReason({
+            bookingData: bookingData2,
+            requestedCheckIn: checkInDate,
+            requestedCheckOut: checkOutDate,
+            requestedCheckInKey: checkIn,
+            todayKey: manilaToday,
+            currentMinutes: currentManilaMinutes,
+            checkOutTime: hotelConfig.checkOutTime,
+            now
+          });
+          if (reason === "overlap" || reason === "lingering-checked-in") {
+            if (reason === "lingering-checked-in") {
+              sawLingeringCheckedInConflict = true;
+            }
+            sawOverlap = true;
+            break;
+          }
         }
-        const hasConflict = Boolean(conflictReason);
-        if (hasConflict) {
+        if (sawOverlap) {
           continue;
         }
         const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, candidate.id, checkInDate, checkOutDate);
@@ -225106,10 +225187,10 @@ async function handleCreateBooking(req, res) {
         }
         if (voucherDoc.exists) {
           const vData = voucherDoc.data();
-          const now = /* @__PURE__ */ new Date();
+          const now2 = /* @__PURE__ */ new Date();
           const voucherExpiresAt = toDateOrNull(vData.expiresAt);
           const assignedTypeMatchesChosen = !roomType || roomData.type === roomType;
-          const isValid2 = vData.isActive !== false && (!voucherExpiresAt || voucherExpiresAt >= now) && (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) && // Per BF-19 (booking-flow audit 2026-06-26): the
+          const isValid2 = vData.isActive !== false && (!voucherExpiresAt || voucherExpiresAt >= now2) && (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) && // Per BF-19 (booking-flow audit 2026-06-26): the
           // empty-or-undefined case is covered by the optional
           // chaining below; drop the redundant `!vData.applicableRoomTypes`
           // short-circuit. The `length === 0` covers both the
@@ -225233,6 +225314,18 @@ async function handleCreateBooking(req, res) {
         companyName: corporateDetails.companyName,
         specialRequests: guestDetails.requests || "",
         status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
+        // Per PEX-01 (2026-08-01, per decision #147): the
+        // snapshotted deadline. Computed from the admin's
+        // `paymentHoldWindowHours` setting at the same `now`
+        // captured at the top of the transaction, so the
+        // deadline is byte-equivalent to whatever the cron
+        // would later compute. `null` for `payment-uploaded`
+        // bookings (staff-review state — never auto-expired,
+        // per PEX-04) and for legacy callers that omit the
+        // config. The cron + the create / walkin / reschedule
+        // transactions all read this single field via
+        // `isBookingOccupyingRoom`.
+        holdExpiresAt: paymentProofPath || paymentProofUrl ? null : computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now) ? Timestamp.fromDate(computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now)) : null,
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): write
         // `null` (not `""`) when no payment proof is attached.
@@ -225324,6 +225417,18 @@ async function handleCreateBooking(req, res) {
         updatedAt: /* @__PURE__ */ new Date()
       };
       transaction.set(bookingDocRef, newBooking);
+      if (newBooking && newBooking.holdExpiresAt) {
+        const he3 = newBooking.holdExpiresAt;
+        bookingHoldExpiresAt = he3 instanceof Date ? he3 : he3.toDate ? he3.toDate() : null;
+      }
+      for (const retirement of expiredHoldRetirements) {
+        transaction.update(retirement.ref, {
+          status: "cancelled",
+          cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          cancelledAt: now,
+          updatedAt: now
+        });
+      }
       computedData = {
         guestName,
         email: guestDetails.email.trim().toLowerCase(),
@@ -225348,7 +225453,12 @@ async function handleCreateBooking(req, res) {
         ...computedData,
         bookingRef: finalBookingRef,
         guestEmail: computedData.email,
-        paymentMethod
+        paymentMethod,
+        // Per PEX-05 (2026-08-01, per decision #147): the email
+        // template renders "Held until X (hotel-local time)" from
+        // this field. `null` for `payment-uploaded` bookings
+        // (staff-review state — no auto-expiry).
+        holdExpiresAt: bookingHoldExpiresAt
       });
     } catch (emailErr) {
       console.error("Failed to send acknowledgment email:", emailErr);
@@ -225370,6 +225480,23 @@ async function handleCreateBooking(req, res) {
       }
     } catch (staffEmailErr) {
       console.error("Failed to send staff-new-booking email:", staffEmailErr);
+    }
+    for (const retirement of expiredHoldRetirements) {
+      if (!retirement.guestEmail) continue;
+      try {
+        await sendBookingTrigger("booking-cancelled", {
+          bookingRef: retirement.bookingRef,
+          guestEmail: retirement.guestEmail,
+          // The staff-readable "Expired hold — rebook at /book"
+          // copy comes from the email template; the
+          // `cancellationReason` is the discriminator the
+          // template uses to switch the headline.
+          source: "online",
+          notes: "Held until " + (retirement.holdExpiresAt ? retirement.holdExpiresAt.toISOString() : "unknown") + " \u2014 your reservation has been released. Please rebook at /book to choose new dates."
+        });
+      } catch (expiredEmailErr) {
+        console.error("Failed to send booking-expired email for", retirement.bookingRef, expiredEmailErr);
+      }
     }
     await writeNotification({
       type: "booking",
@@ -225394,7 +225521,13 @@ async function handleCreateBooking(req, res) {
         rateBreakdown: finalRateBreakdown,
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
-        roomType
+        roomType,
+        // Per PEX-05 (2026-08-01, per decision #147): the
+        // snapshotted deadline. `null` for `payment-uploaded`
+        // bookings (no auto-expiry, staff-review state). The
+        // confirmation page renders "Held until X" so the
+        // guest knows the exact local time the hold lapses.
+        holdExpiresAt: bookingHoldExpiresAt
       }
     });
   } catch (error) {
@@ -225483,6 +225616,7 @@ async function handleCreateWalkin(req, res) {
       error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten the stay.`
     });
   }
+  const expiredHoldRetirements = [];
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
   let validatedTestRunId = null;
@@ -225563,18 +225697,45 @@ async function handleCreateWalkin(req, res) {
       }
       const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", roomId).where("status", "in", ROOM_OCCUPYING_STATUSES);
       const bookingsSnapshot = await transaction.get(bookingsQuery);
-      const conflictReason = bookingsSnapshot.docs.map((doc) => getOccupancyConflictReason({
-        bookingData: doc.data(),
-        requestedCheckIn: checkInDate,
-        requestedCheckOut: checkOutDate,
-        requestedCheckInKey: checkIn,
-        todayKey,
-        currentMinutes: currentManilaMinutes,
-        checkOutTime: hotelConfig.checkOutTime
-      })).find(Boolean);
-      const hasConflict = Boolean(conflictReason);
+      const now = /* @__PURE__ */ new Date();
+      let sawConflict = false;
+      let sawLingering = false;
+      for (const doc of bookingsSnapshot.docs) {
+        const bookingData2 = doc.data();
+        if (isExpiredPendingHold(bookingData2, now)) {
+          const existingCheckIn = toDateOrNull(bookingData2.checkIn);
+          const existingCheckOut = toDateOrNull(bookingData2.checkOut);
+          const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+          if (dateOverlaps) {
+            expiredHoldRetirements.push({
+              ref: doc.ref,
+              previousData: bookingData2,
+              bookingRef: String(bookingData2.bookingRef || doc.id),
+              guestEmail: String(bookingData2.guestEmail || ""),
+              holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
+            });
+          }
+          continue;
+        }
+        const reason = getOccupancyConflictReason({
+          bookingData: bookingData2,
+          requestedCheckIn: checkInDate,
+          requestedCheckOut: checkOutDate,
+          requestedCheckInKey: checkIn,
+          todayKey,
+          currentMinutes: currentManilaMinutes,
+          checkOutTime: hotelConfig.checkOutTime,
+          now
+        });
+        if (reason === "overlap" || reason === "lingering-checked-in") {
+          if (reason === "lingering-checked-in") sawLingering = true;
+          sawConflict = true;
+          break;
+        }
+      }
+      const hasConflict = sawConflict;
       if (hasConflict) {
-        throw new Error(conflictReason === "lingering-checked-in" ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
+        throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
       if (hasBlockConflict) {
@@ -225794,6 +225955,14 @@ async function handleCreateWalkin(req, res) {
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
       transaction.set(bookingDocRef, newBooking);
+      for (const retirement of expiredHoldRetirements) {
+        transaction.update(retirement.ref, {
+          status: "cancelled",
+          cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          cancelledAt: now,
+          updatedAt: now
+        });
+      }
     });
     const resolvedStatus = status || "confirmed";
     if (resolvedStatus === "confirmed" && newBooking) {
@@ -225801,6 +225970,19 @@ async function handleCreateWalkin(req, res) {
         await sendBookingTrigger("booking-confirmed", { ...newBooking, status: "confirmed" });
       } catch (emailErr) {
         console.error("Failed to send walk-in booking confirmation email:", emailErr);
+      }
+    }
+    for (const retirement of expiredHoldRetirements) {
+      if (!retirement.guestEmail) continue;
+      try {
+        await sendBookingTrigger("booking-cancelled", {
+          bookingRef: retirement.bookingRef,
+          guestEmail: retirement.guestEmail,
+          source: "online",
+          notes: "Held until " + (retirement.holdExpiresAt ? retirement.holdExpiresAt.toISOString() : "unknown") + " \u2014 your reservation has been released. Please rebook at /book to choose new dates."
+        });
+      } catch (expiredEmailErr) {
+        console.error("Failed to send walk-in retired-hold email for", retirement.bookingRef, expiredEmailErr);
       }
     }
     if (newBooking) {
@@ -226017,41 +226199,67 @@ async function handleRejectPayment(req, res) {
   let bookingData2 = null;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    const bookingDoc = await bookingRef.get();
-    if (!bookingDoc.exists) {
-      return res.status(404).json({ success: false, error: "Booking not found." });
-    }
-    const data = bookingDoc.data();
-    if (data.status !== "payment-uploaded") {
-      return res.status(400).json({
-        success: false,
-        error: `Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`
-      });
-    }
-    bookingData2 = data;
     const updatedAt = /* @__PURE__ */ new Date();
-    await bookingRef.update({
-      status: "pending",
-      paymentRejectionReason: safeReason,
-      paymentRejectedAt: updatedAt,
-      paymentRejectedBy,
-      // Per the implementation plan: stale proof state is
-      // kept for audit. The re-upload is guest-driven via
-      // the existing `pending` UI on the lookup page.
-      updatedAt
+    let paymentRejectionReason = null;
+    let paymentRejectedAt = null;
+    let paymentRejectedBy2 = null;
+    let freshHoldExpiresAt = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+      const data = bookingDoc.data();
+      if (data.status !== "payment-uploaded") {
+        throw new Error(`Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`);
+      }
+      bookingData2 = data;
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
+      const holdWindowHours = normalizePaymentHoldWindowHours(
+        hotelConfig.paymentHoldWindowHours
+      );
+      const newDeadline = computeHoldExpiresAt(holdWindowHours, updatedAt);
+      paymentRejectionReason = safeReason;
+      paymentRejectedAt = updatedAt;
+      paymentRejectedBy2 = paymentRejectedBy2;
+      freshHoldExpiresAt = newDeadline;
+      transaction.update(bookingRef, {
+        status: "pending",
+        paymentRejectionReason: safeReason,
+        paymentRejectedAt: updatedAt,
+        paymentRejectedBy: paymentRejectedBy2,
+        // Per PEX-04 (2026-08-01, per decision #147): a fresh
+        // snapshotted deadline. The retained `paymentProofPath` /
+        // legacy `paymentProofUrl` are audit evidence only and
+        // do NOT exempt this booking — the `holdExpiresAt` is
+        // the only expiry authority. If the guest does not
+        // re-upload, the daily cron (PEX-06) retires the booking
+        // at this deadline.
+        holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+        // Per the implementation plan: stale proof state is
+        // kept for audit. The re-upload is guest-driven via
+        // the existing `pending` UI on the lookup page.
+        updatedAt
+      });
     });
     return res.status(200).json({
       success: true,
       data: {
         status: "pending",
-        paymentRejectionReason: safeReason,
-        paymentRejectedAt: updatedAt,
-        paymentRejectedBy
+        paymentRejectionReason,
+        paymentRejectedAt,
+        paymentRejectedBy: paymentRejectedBy2,
+        holdExpiresAt: freshHoldExpiresAt
       }
     });
   } catch (error) {
     console.error("Payment rejection handler error:", error);
-    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+    const message = error.message || "An unexpected error occurred.";
+    if (message.startsWith("Only a booking in 'payment-uploaded' status")) {
+      return res.status(400).json({ success: false, error: message });
+    }
+    return res.status(500).json({ success: false, error: message });
   }
 }
 async function handleCancelBooking(req, res) {
@@ -227347,6 +227555,7 @@ async function handleRescheduleBooking(req, res) {
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
+    const expiredHoldRetirements = [];
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
       const bookingDoc = await transaction.get(bookingRef);
@@ -227371,17 +227580,45 @@ async function handleRescheduleBooking(req, res) {
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const overlapQuery = adminDb.collection("bookings").where("roomId", "==", String(roomId)).where("status", "in", ROOM_OCCUPYING_STATUSES);
       const overlapSnapshot = await transaction.get(overlapQuery);
-      const conflictReason = overlapSnapshot.docs.filter((doc) => doc.id !== String(bookingId)).map((doc) => getOccupancyConflictReason({
-        bookingData: doc.data(),
-        requestedCheckIn: checkInDate,
-        requestedCheckOut: checkOutDate,
-        requestedCheckInKey: checkIn,
-        todayKey,
-        currentMinutes: currentManilaMinutes,
-        checkOutTime: hotelConfig.checkOutTime
-      })).find(Boolean);
-      if (conflictReason) {
-        throw new Error(conflictReason === "lingering-checked-in" ? "Target room is not ready because the previous guest has not checked out yet." : "Target room already has a booking in that date range.");
+      const now = /* @__PURE__ */ new Date();
+      let sawConflict = false;
+      let sawLingering = false;
+      for (const doc of overlapSnapshot.docs) {
+        if (doc.id === String(bookingId)) continue;
+        const docData = doc.data();
+        if (isExpiredPendingHold(docData, now)) {
+          const existingCheckIn = toDateOrNull(docData.checkIn);
+          const existingCheckOut = toDateOrNull(docData.checkOut);
+          const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+          if (dateOverlaps) {
+            expiredHoldRetirements.push({
+              ref: doc.ref,
+              previousData: docData,
+              bookingRef: String(docData.bookingRef || doc.id),
+              guestEmail: String(docData.guestEmail || ""),
+              holdExpiresAt: toDateOrNull(docData.holdExpiresAt)
+            });
+          }
+          continue;
+        }
+        const reason2 = getOccupancyConflictReason({
+          bookingData: docData,
+          requestedCheckIn: checkInDate,
+          requestedCheckOut: checkOutDate,
+          requestedCheckInKey: checkIn,
+          todayKey,
+          currentMinutes: currentManilaMinutes,
+          checkOutTime: hotelConfig.checkOutTime,
+          now
+        });
+        if (reason2 === "overlap" || reason2 === "lingering-checked-in") {
+          if (reason2 === "lingering-checked-in") sawLingering = true;
+          sawConflict = true;
+          break;
+        }
+      }
+      if (sawConflict) {
+        throw new Error(sawLingering ? "Target room is not ready because the previous guest has not checked out yet." : "Target room already has a booking in that date range.");
       }
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, String(roomId), checkInDate, checkOutDate);
       if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
@@ -227555,12 +227792,33 @@ async function handleRescheduleBooking(req, res) {
         transaction.update(roomRef, { status: "occupied" });
       }
       transaction.update(bookingRef, updatedBooking);
+      for (const retirement of expiredHoldRetirements) {
+        transaction.update(retirement.ref, {
+          status: "cancelled",
+          cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          cancelledAt: now,
+          updatedAt: now
+        });
+      }
     });
     if (fullBookingForEmail) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
         console.error("Failed to send reschedule email:", emailErr);
+      }
+    }
+    for (const retirement of expiredHoldRetirements) {
+      if (!retirement.guestEmail) continue;
+      try {
+        await sendBookingTrigger("booking-cancelled", {
+          bookingRef: retirement.bookingRef,
+          guestEmail: retirement.guestEmail,
+          source: "online",
+          notes: "Held until " + (retirement.holdExpiresAt ? retirement.holdExpiresAt.toISOString() : "unknown") + " \u2014 your reservation has been released. Please rebook at /book to choose new dates."
+        });
+      } catch (expiredEmailErr) {
+        console.error("Failed to send reschedule retired-hold email for", retirement.bookingRef, expiredEmailErr);
       }
     }
     return res.status(200).json({ success: true, data: updatedBooking });
@@ -227570,7 +227828,7 @@ async function handleRescheduleBooking(req, res) {
 }
 
 // server/handlers/rooms.ts
-var ACTIVE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+var ACTIVE_STATUSES = BOOKING_OCCUPYING_STATUSES;
 function toIsoDate(value) {
   if (!value) return null;
   if (typeof value.toDate === "function") {
@@ -227618,6 +227876,9 @@ async function handleRoomAvailability(req, res) {
       const roomId = data.roomId;
       const status = data.status;
       if (!startIso || !endIso || !roomId || !status) return;
+      if (!isBookingOccupyingRoom({ status, holdExpiresAt: data.holdExpiresAt })) {
+        return;
+      }
       const bStart = /* @__PURE__ */ new Date(`${startIso}T00:00:00Z`);
       const bEnd = /* @__PURE__ */ new Date(`${endIso}T00:00:00Z`);
       if (bStart < reqEnd && bEnd > reqStart) {
@@ -227650,7 +227911,7 @@ async function handleRoomAvailability(req, res) {
 }
 
 // server/handlers/room-blocks.ts
-var ROOM_OCCUPYING_STATUSES2 = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+var ROOM_OCCUPYING_STATUSES2 = BOOKING_OCCUPYING_STATUSES;
 var blockSchema = external_exports.object({
   roomId: external_exports.string().trim().min(1).max(80),
   startDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -227681,6 +227942,9 @@ async function assertRoomIsFreeForBlock(transaction, roomId, start, end, exclude
   const bookingsSnapshot = await transaction.get(bookingsQuery);
   const bookingConflict = bookingsSnapshot.docs.some((doc) => {
     const data = doc.data();
+    if (!isBookingOccupyingRoom({ status: data.status, holdExpiresAt: data.holdExpiresAt })) {
+      return false;
+    }
     const checkIn = toDateOrNull(data.checkIn);
     const checkOut = toDateOrNull(data.checkOut);
     return Boolean(checkIn && checkOut && overlaps(checkIn, checkOut, start, end));
@@ -230462,6 +230726,104 @@ async function handleNotificationsPrune(req, res) {
   }
 }
 
+// server/handlers/hold-expiry.ts
+var EXPIRY_BATCH_SIZE = 200;
+function isAuthorizedCronRequest3(req) {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) return false;
+  const headerSecret = req.headers["x-cron-secret"];
+  if (typeof headerSecret === "string" && headerSecret === expected) return true;
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ") && authHeader.slice("Bearer ".length) === expected) {
+    return true;
+  }
+  return false;
+}
+async function handleHoldExpiryCron(req, res) {
+  if (req.method !== "POST" && req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  if (!process.env.CRON_SECRET) {
+    return res.status(500).json({
+      success: false,
+      error: "CRON_SECRET is not configured on the server."
+    });
+  }
+  if (!isAuthorizedCronRequest3(req)) {
+    return res.status(401).json({ success: false, error: "Unauthorized cron request." });
+  }
+  const now = /* @__PURE__ */ new Date();
+  const retirements = [];
+  const errors = [];
+  try {
+    const expiredSnapshot = await adminDb.collection("bookings").where("status", "==", "pending").where("holdExpiresAt", "<", Timestamp.fromDate(now)).limit(EXPIRY_BATCH_SIZE).get();
+    for (const doc of expiredSnapshot.docs) {
+      const data = doc.data() || {};
+      try {
+        const retired = await adminDb.runTransaction(async (transaction) => {
+          const freshDoc = await transaction.get(doc.ref);
+          if (!freshDoc.exists) return null;
+          const freshData = freshDoc.data() || {};
+          if (!isBookingOccupyingRoom({
+            status: freshData.status,
+            holdExpiresAt: freshData.holdExpiresAt
+          }, now)) {
+            return null;
+          }
+          transaction.update(doc.ref, {
+            status: "cancelled",
+            cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+            cancelledAt: now,
+            updatedAt: now
+          });
+          return {
+            bookingId: doc.id,
+            bookingRef: String(freshData.bookingRef || doc.id),
+            guestEmail: String(freshData.guestEmail || ""),
+            holdExpiresAt: freshData.holdExpiresAt ? freshData.holdExpiresAt instanceof Date ? freshData.holdExpiresAt : typeof freshData.holdExpiresAt.toDate === "function" ? freshData.holdExpiresAt.toDate() : null : null
+          };
+        });
+        if (retired) {
+          retirements.push(retired);
+        }
+      } catch (perDocErr) {
+        errors.push({ bookingId: doc.id, error: perDocErr.message || "unknown" });
+        console.error("[hold-expiry] failed to retire booking", doc.id, perDocErr);
+      }
+    }
+    for (const retirement of retirements) {
+      if (!retirement.guestEmail) continue;
+      try {
+        await sendBookingTrigger("booking-cancelled", {
+          bookingRef: retirement.bookingRef,
+          guestEmail: retirement.guestEmail,
+          source: "online",
+          notes: "Held until " + (retirement.holdExpiresAt ? retirement.holdExpiresAt.toISOString() : "unknown") + " \u2014 your reservation has been released. Please rebook at /book to choose new dates."
+        });
+      } catch (emailErr) {
+        console.error("[hold-expiry] failed to send expiry email for", retirement.bookingRef, emailErr);
+        errors.push({ bookingId: retirement.bookingId, error: "email: " + (emailErr.message || "unknown") });
+      }
+    }
+    console.log(
+      `[hold-expiry] cron run scanned=${expiredSnapshot.size} retired=${retirements.length} errors=${errors.length} now=${now.toISOString()}`
+    );
+    return res.status(200).json({
+      success: true,
+      data: {
+        scanned: expiredSnapshot.size,
+        retired: retirements.length,
+        errors: errors.length,
+        retirements: retirements.map((r3) => ({ bookingRef: r3.bookingRef, guestEmail: r3.guestEmail })),
+        errorDetails: errors
+      }
+    });
+  } catch (err) {
+    console.error("[hold-expiry] cron run failed:", err);
+    return res.status(500).json({ success: false, error: err.message || "Hold expiry cron failed." });
+  }
+}
+
 // server/handlers/storage.ts
 var privateStoragePathSchema = external_exports.object({
   path: external_exports.string().trim().min(1).max(512)
@@ -231402,6 +231764,9 @@ async function handler(req, res) {
   }
   if (domain === "notifications" && action === "prune" && (req.method === "POST" || req.method === "GET")) {
     return await handleNotificationsPrune(req, res);
+  }
+  if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
+    return await handleHoldExpiryCron(req, res);
   }
   if (domain === "test-runs" && action === "create" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`test-runs-create:${ip}`, 5, 6e4)) {

@@ -1,9 +1,17 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { adminDb } from "../lib/firebase-admin";
-import { toDateOrNull } from "@spark-inn/shared";
+import { toDateOrNull, BOOKING_OCCUPYING_STATUSES, isBookingOccupyingRoom } from "@spark-inn/shared";
 
-const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+// Per PEX-02 (2026-08-01, per decision #147): the room-blocks
+// check uses the shared occupancy rule on top of the coarse
+// `status in [...]` Firestore query, so an expired `pending` hold
+// does not block a staff-initiated block on those dates. The
+// block itself is an explicit staff action; if the hold's
+// late-revival tries to claim the same dates, the create
+// transaction's atomic retirement will have already cancelled
+// the hold. Staff-block safety is preserved.
+const ROOM_OCCUPYING_STATUSES = BOOKING_OCCUPYING_STATUSES;
 
 const blockSchema = z.object({
   roomId: z.string().trim().min(1).max(80),
@@ -48,6 +56,12 @@ async function assertRoomIsFreeForBlock(
   const bookingsSnapshot = await transaction.get(bookingsQuery);
   const bookingConflict = bookingsSnapshot.docs.some((doc) => {
     const data = doc.data();
+    // Per PEX-02 (2026-08-01, per decision #147): an expired
+    // `pending` hold does not block a staff-initiated block. The
+    // shared rule is the only authority.
+    if (!isBookingOccupyingRoom({ status: data.status, holdExpiresAt: data.holdExpiresAt })) {
+      return false;
+    }
     const checkIn = toDateOrNull(data.checkIn);
     const checkOut = toDateOrNull(data.checkOut);
     return Boolean(checkIn && checkOut && overlaps(checkIn, checkOut, start, end));

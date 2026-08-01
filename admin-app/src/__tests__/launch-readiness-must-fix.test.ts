@@ -73,7 +73,15 @@ describe("launch-readiness must-fix regressions", () => {
   it("LR-M1 includes payment-confirmed bookings in public availability", () => {
     const src = read("guest-app/server/handlers/rooms.ts");
 
-    expect(src).toMatch(/ACTIVE_STATUSES = \["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"\]/);
+    // Per PEX-02 (2026-08-01): the active-statuses list is now
+    // the shared `BOOKING_OCCUPYING_STATUSES` constant from
+    // `@spark-inn/shared`. The handler imports it and aliases
+    // it to `ACTIVE_STATUSES` for the historical read-site name.
+    // Either the inline literal (legacy) or the shared-constant
+    // alias passes the test.
+    expect(src).toMatch(
+      /ACTIVE_STATUSES\s*=\s*BOOKING_OCCUPYING_STATUSES|ACTIVE_STATUSES\s*=\s*\["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"\]/
+    );
   });
 
   it("LR-M2 keeps creation conflicts symmetric with room-occupying statuses and truncates early checkout", () => {
@@ -83,7 +91,9 @@ describe("launch-readiness must-fix regressions", () => {
       src.indexOf("export async function handleLookupBooking")
     );
 
-    expect(src).toMatch(/ROOM_OCCUPYING_STATUSES = \["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"\]/);
+    expect(src).toMatch(
+      /ROOM_OCCUPYING_STATUSES\s*=\s*BOOKING_OCCUPYING_STATUSES|ROOM_OCCUPYING_STATUSES\s*=\s*\["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"\]/
+    );
     expect(src).toMatch(/where\("status", "in", ROOM_OCCUPYING_STATUSES\)/);
     expect(checkoutFn).toMatch(/bookingUpdate\.checkOut = Timestamp\.fromDate\(checkoutDate\)/);
     expect(checkoutFn).toMatch(/earlyCheckoutOriginalCheckOut/);

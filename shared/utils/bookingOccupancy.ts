@@ -1,0 +1,117 @@
+// Per PEX-02 (2026-08-01, per CVQ-12 + decision #147): one authoritative
+// server-side rule that decides whether a booking occupies inventory.
+// Used by every caller that asks "does this booking block the room?".
+//
+// The rule is intentionally narrow — a booking only occupies a room
+// when **all** of these hold:
+//   1. Its `status` is in the occupying set
+//      (pending / payment-uploaded / payment-confirmed / confirmed /
+//      checked-in). `cancelled` and `checked-out` release the room.
+//   2. Its `holdExpiresAt` is missing/null (legacy booking) OR is
+//      strictly after `now`.
+//
+// Together those two checks close the gap that motivated PEX:
+// `pending` bookings can hold rooms indefinitely today, because
+// nothing checked whether the payment was still being waited on.
+// After PEX, a `pending` booking whose `holdExpiresAt` is in the past
+// does NOT occupy the room — the next booking transaction is free
+// to take it, and the same transaction marks the expired hold
+// `cancelled` with `cancellationReason: "payment-hold-expired"`.
+
+export const BOOKING_OCCUPYING_STATUSES = [
+  "pending",
+  "payment-uploaded",
+  "payment-confirmed",
+  "confirmed",
+  "checked-in"
+] as const;
+
+export type BookingOccupyingStatus = (typeof BOOKING_OCCUPYING_STATUSES)[number];
+
+export interface OccupancyInput {
+  status: string | null | undefined;
+  holdExpiresAt?: Date | string | null | undefined;
+}
+
+export function isBookingOccupyingRoom(
+  booking: OccupancyInput,
+  now: Date = new Date()
+): boolean {
+  if (!booking || !booking.status) return false;
+  if (!BOOKING_OCCUPYING_STATUSES.includes(booking.status as BookingOccupyingStatus)) {
+    return false;
+  }
+  // Per PEX-04: a `payment-uploaded` booking is awaiting staff review
+  // and is never auto-expired. The deadline only governs the
+  // guest-action states (`pending` and rejected-proof `pending`).
+  if (booking.status === "payment-uploaded") {
+    return true;
+  }
+  // For `pending`: a snapshotted deadline in the past means the
+  // hold has expired and the room is free. A missing deadline
+  // (legacy booking) defaults to occupying (the historical
+  // behavior, preserved so we don't accidentally free legacy rooms).
+  if (booking.status === "pending") {
+    const deadline = booking.holdExpiresAt;
+    if (!deadline) return true;
+    const expiresAt = deadline instanceof Date ? deadline : new Date(deadline);
+    if (isNaN(expiresAt.getTime())) return true;
+    return expiresAt.getTime() > now.getTime();
+  }
+  // For `payment-confirmed` / `confirmed` / `checked-in`: the booking
+  // is a real reservation and the room is held. The deadline is
+  // irrelevant once payment is in (the field is also typically not
+  // set on these states — only `pending` bookings carry a deadline).
+  return true;
+}
+
+// Convenience helper for the call sites that already have the
+// snapshotted window in hours. Returns the `holdExpiresAt` for a
+// booking being created RIGHT NOW, or `null` if no deadline should
+// be set (e.g. payment already uploaded, or staff walk-in).
+//
+// Per PEX-01: the window is admin-configurable in
+// `settings/hotelConfig.paymentHoldWindowHours`. The helper takes
+// the window explicitly so the call site reads the config in one
+// place (handleCreateBooking / handleCreateWalkin).
+export function computeHoldExpiresAt(
+  windowHours: number | null | undefined,
+  now: Date = new Date()
+): Date | null {
+  if (!windowHours || windowHours <= 0 || !Number.isFinite(windowHours)) return null;
+  const expires = new Date(now.getTime() + windowHours * 60 * 60 * 1000);
+  return expires;
+}
+
+// Default the admin-configured hold window. 24 hours is the
+// documented PEX-01 default; legacy settings without the field (or
+// values outside the 1..72h admin-allowed range) hydrate here.
+export const DEFAULT_PAYMENT_HOLD_WINDOW_HOURS = 24;
+export const MIN_PAYMENT_HOLD_WINDOW_HOURS = 1;
+export const MAX_PAYMENT_HOLD_WINDOW_HOURS = 72;
+
+// Per PEX-01: clamp any incoming value to the admin-allowed
+// 1..72h range. The admin UI rejects out-of-range at write time,
+// but a legacy persisted value (or a hand-edited Firestore doc)
+// must not crash the snapshot hydrate. Returns the default if the
+// input is not a finite positive number.
+export function normalizePaymentHoldWindowHours(raw: unknown): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_PAYMENT_HOLD_WINDOW_HOURS;
+  const clamped = Math.min(MAX_PAYMENT_HOLD_WINDOW_HOURS, Math.max(MIN_PAYMENT_HOLD_WINDOW_HOURS, Math.floor(value)));
+  return clamped;
+}
+
+// Per PEX-04 (2026-08-01, per decision #147): the cancellation
+// reason string written to the booking doc when the daily cron or
+// the in-transaction retirement marks a `pending` hold as expired.
+// Pinned by `bookings-create.test.ts` (the in-transaction path) and
+// `pex-cleanup-cron.test.ts` (the cron path) so a typo here would
+// break both surfaces.
+export const EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
+
+// Reason string written when a guest re-uploads a proof after a
+// staff rejection — the booking returns to `pending` with a fresh
+// `holdExpiresAt` stamped from `paymentRejectedAt`. Pinned by the
+// same tests as `EXPIRED_HOLD_CANCELLATION_REASON`.
+export const PAYMENT_REJECTED_FRESH_DEADLINE_FROM = "paymentRejectedAt";
