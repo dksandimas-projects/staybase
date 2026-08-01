@@ -192,3 +192,174 @@ describe("calculateVatBreakdown (DSC-06, 2026-08-01, per CVQ-06/#115)", () => {
     });
   });
 });
+
+import { getBookingVatBreakdown } from "../utils/bookingVat";
+
+describe("getBookingVatBreakdown (DSC-07, 2026-08-01, per CVQ-06/#115)", () => {
+  describe("happy path — non-senior booking", () => {
+    it("returns the broad-scope VAT breakdown for a 1000-peso booking", () => {
+      // 1000 / 1.12 ≈ 892.8571; VAT = 107.1429; no senior discount.
+      const b = getBookingVatBreakdown({
+        totalPrice: 1000,
+        originalTotalPrice: 1000
+      });
+      expect(b.vatRate).toBe(0.12);
+      expect(b.vatExclusiveSales).toBeCloseTo(892.8571, 4);
+      expect(b.vatExemptSales).toBe(0);
+      expect(b.vatAmount).toBeCloseTo(107.1429, 4);
+    });
+  });
+
+  describe("happy path — senior/PWD booking (RA 9994 exemption)", () => {
+    it("returns the VAT breakdown with the senior discount as VAT-exempt", () => {
+      // totalPrice = 800 (post-senior), originalTotalPrice = 1000
+      // (pre-senior), discountPct = 20 → senior = 200.
+      // VATable = 800/1.12, VAT-Exempt = 200, VAT = VATable × 0.12.
+      const b = getBookingVatBreakdown({
+        totalPrice: 800,
+        originalTotalPrice: 1000,
+        discountType: "senior",
+        discountPct: 20
+      });
+      expect(b.vatExemptSales).toBe(200);
+      expect(b.vatExclusiveSales).toBeCloseTo(800 / 1.12, 4);
+      expect(b.vatAmount).toBeCloseTo(800 / 1.12 * 0.12, 4);
+    });
+
+    it("returns the same breakdown for PWD as for senior (both RA 9994)", () => {
+      const senior = getBookingVatBreakdown({
+        totalPrice: 800,
+        originalTotalPrice: 1000,
+        discountType: "senior",
+        discountPct: 20
+      });
+      const pwd = getBookingVatBreakdown({
+        totalPrice: 800,
+        originalTotalPrice: 1000,
+        discountType: "pwd",
+        discountPct: 20
+      });
+      expect(pwd).toEqual(senior);
+    });
+  });
+
+  describe("rejected senior/PWD — no VAT-exempt", () => {
+    it("treats a rejected senior discount as zero (the staff rejected the ID)", () => {
+      // Per LR-L2: when staff rejects the senior ID, the senior
+      // discount is removed but the rest of the chain (voucher +
+      // member) is re-applied. The VAT breakdown for the resulting
+      // bill has zero VAT-exempt sales.
+      const b = getBookingVatBreakdown({
+        totalPrice: 1000,
+        originalTotalPrice: 1200,
+        discountType: "senior",
+        discountPct: 20,
+        discountRejected: true
+      });
+      expect(b.vatExemptSales).toBe(0);
+      expect(b.vatExclusiveSales).toBeCloseTo(1000 / 1.12, 4);
+    });
+  });
+
+  describe("defensive coercion — nullish / NaN / 0 inputs", () => {
+    it("treats nullish totalPrice as 0", () => {
+      const b = getBookingVatBreakdown({ totalPrice: null as any });
+      expect(b.vatExclusiveSales).toBe(0);
+      expect(b.vatAmount).toBe(0);
+    });
+
+    it("treats nullish originalTotalPrice as 0 (no senior discount)", () => {
+      const b = getBookingVatBreakdown({
+        totalPrice: 1000,
+        originalTotalPrice: null,
+        discountType: "senior",
+        discountPct: 20
+      });
+      // originalTotalPrice = 0 → senior discount = 0 (clamped)
+      expect(b.vatExemptSales).toBe(0);
+    });
+
+    it("treats nullish discountPct as 0 (no senior discount)", () => {
+      const b = getBookingVatBreakdown({
+        totalPrice: 1000,
+        originalTotalPrice: 1000,
+        discountType: "senior",
+        discountPct: null
+      });
+      expect(b.vatExemptSales).toBe(0);
+    });
+
+    it("treats 0 discountPct as no senior discount", () => {
+      const b = getBookingVatBreakdown({
+        totalPrice: 1000,
+        originalTotalPrice: 1000,
+        discountType: "senior",
+        discountPct: 0
+      });
+      expect(b.vatExemptSales).toBe(0);
+    });
+
+    it("ignores discountType other than senior/pwd (e.g. corporate)", () => {
+      const b = getBookingVatBreakdown({
+        totalPrice: 1000,
+        originalTotalPrice: 1000,
+        discountType: "corporate",
+        discountPct: 20
+      });
+      expect(b.vatExemptSales).toBe(0);
+    });
+
+    it("treats NaN totalPrice as 0", () => {
+      const b = getBookingVatBreakdown({ totalPrice: NaN });
+      expect(b.vatExclusiveSales).toBe(0);
+      expect(b.vatAmount).toBe(0);
+    });
+  });
+
+  describe("alternative vatRate override", () => {
+    it("supports a custom vatRate (e.g. 0% for testing or zero-rated)", () => {
+      const b = getBookingVatBreakdown({
+        totalPrice: 1000,
+        originalTotalPrice: 1000,
+        vatRate: 0
+      });
+      expect(b.vatRate).toBe(0);
+      expect(b.vatExclusiveSales).toBe(1000);
+      expect(b.vatAmount).toBe(0);
+    });
+  });
+
+  describe("byte-equivalence with the chain math for broad scope", () => {
+    it("matches the broad-scope senior deduction for a senior-only booking", () => {
+      // For a senior-only booking with broad scope:
+      //   seniorDiscount = originalTotalPrice * 20% = 1000 * 0.20 = 200
+      //   totalPrice = 1000 - 200 = 800
+      //   VATable = 800 / 1.12 ≈ 714.2857
+      //   VAT-Exempt = 200
+      //   VAT = 714.2857 * 0.12 ≈ 85.7143
+      const b = getBookingVatBreakdown({
+        totalPrice: 800,
+        originalTotalPrice: 1000,
+        discountType: "senior",
+        discountPct: 20
+      });
+      expect(b.vatExemptSales).toBe(200);
+      expect(b.vatExclusiveSales).toBeCloseTo(714.2857, 4);
+      expect(b.vatAmount).toBeCloseTo(85.7143, 4);
+    });
+
+    it("matches the broad-scope senior deduction for a senior + voucher booking", () => {
+      // 1000 - 200 (senior) - 100 (voucher) = 700
+      // senior = 200 (broad-scope approximation)
+      const b = getBookingVatBreakdown({
+        totalPrice: 700,
+        originalTotalPrice: 1000,
+        discountType: "senior",
+        discountPct: 20
+      });
+      expect(b.vatExemptSales).toBe(200);
+      expect(b.vatExclusiveSales).toBeCloseTo(700 / 1.12, 4);
+      expect(b.vatAmount).toBeCloseTo(700 / 1.12 * 0.12, 4);
+    });
+  });
+});

@@ -30,6 +30,7 @@ import {
   calculateBookingTotal,
   calculateSeasonalAwareRoomBreakdown,
   calculateSeasonalAwareRoomTotal,
+  calculateVatBreakdown,
   getDateKeyInTimezone,
   getNumNights,
   staggerChild,
@@ -2365,6 +2366,34 @@ function BookingReviewAside({
                   <span>Total</span>
                   <span className="text-primary">{formatPrice(total)}</span>
                 </div>
+                {/* Per DSC-07 (2026-08-01, per #115): the 12% VAT
+                    breakdown sub-block. The senior discount
+                    (RA 9994) is the VAT-exempt portion when
+                    the booking carried one. Mirrors the same
+                    three lines on the receipt PDF + XLSX
+                    export + admin booking drawer. */}
+                {(() => {
+                  const vat = calculateVatBreakdown({
+                    totalPrice: total,
+                    seniorDiscountAmount: discountPct > 0 ? discountAmount : 0
+                  });
+                  return (
+                    <div className="mt-2 space-y-1 border-t border-dashed border-gray-200 pt-2 text-[11px] text-gray-500">
+                      <div className="flex justify-between">
+                        <span>VATable Sales (VAT-exclusive)</span>
+                        <span className="font-mono">{formatPrice(vat.vatExclusiveSales)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>VAT-Exempt Sales (RA 9994 Senior/PWD)</span>
+                        <span className="font-mono">{formatPrice(vat.vatExemptSales)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold text-gray-700">
+                        <span>VAT Amount (12% × VATable)</span>
+                        <span className="font-mono">{formatPrice(vat.vatAmount)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>
