@@ -93,9 +93,9 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `guestName` | string | |
 | `guestEmail` | string | |
 | `guestPhone` | string | |
-| `numGuests` | number | |
-| `numAdults` | number \| absent | Per CHD-01 (2026-08-01, decision #144): the adult/child split. Absent fields derive to `numAdults = numGuests` (the historical "all guests are adults" shape). When present, the server validates `numAdults + numChildren === numGuests`. |
-| `numChildren` | number \| absent | Per CHD-01. Absent = 0. Server validates the sum with `numAdults`. |
+| `numGuests` | number | Persisted total occupancy. When the split exists it must equal `numAdults + numChildren`; it is not compared directly with the adult cap. |
+| `numAdults` | number \| absent | Per CHD-01 (2026-08-01, decision #144): adults aged 12+. Absent fields derive to `numAdults = numGuests` (the historical "all guests are adults" shape). Validated independently against the room type's `maxCapacity`, with extra-bed overflow allowed by the shared rule. |
+| `numChildren` | number \| absent | Children aged 0–11. Absent = 0. Server validates the sum with `numAdults` and evaluates this count independently against normalized `maxChildren`. |
 | `extraBedCount` | number \| absent | Per EXB-01 (2026-08-01, decision #145): the extra-bed count. Absent = 0. Bounded by the room type's `maxExtraBeds` (a count > `maxExtraBeds` is rejected with a 400). |
 | `extraBedRate` | number \| absent | Per EXB-01: per-bed-per-night rate, snapshotted at create time from the room type's `extraBedRate`. A later rate change never rewrites this value. |
 | `extraBedTotal` | number \| absent | Per EXB-01: canonical computed total = `extraBedCount × extraBedRate × numNights`. Stored for receipt/email/drawer rendering. |

@@ -7,6 +7,8 @@ For architecture and stack decisions see `plan/docs/DECISIONS-ARCH.md`.
 
 ---
 
+> **Decision #144 closure amendment (CHD-09, 2026-08-01):** EXB-03 is the final capacity authority. Adult overflow above `maxCapacity` and child overflow above `maxChildren` are computed independently; each selected extra bed may cover one overflow adult or child. With zero extra beds this reduces to the original two hard caps. Public create, walk-in create, and reschedule normalize room types through `applyRoomTypeDefaults` before reading either cap and never compare total `numGuests` directly with the adult cap. Behavioral coverage pins mismatched totals, independent overflow, the full adult cap plus allowed children, legacy all-adults fallback, and the included-children breakfast multiplier. The CHD documentation set is synchronized and CHD-01..10 is closed.
+
 | # | Decision |
 |---|---|
 | 1 | Room photos: architectural renders for now — managed via Room Management and Settings |

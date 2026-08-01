@@ -220,6 +220,74 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     expect(jsonArg.data.bookingRef).toMatch(/^SI-\d{8}-\d{5}$/);
   });
 
+  test("allows children alongside the full adult cap", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
+    const body = {
+      bookingId: "walkinChd9A",
+      roomId: "room_101",
+      checkIn: "2026-08-04",
+      checkOut: "2026-08-06",
+      guests: 3,
+      numAdults: 2,
+      numChildren: 1,
+      hasBreakfast: false,
+      guestDetails: {
+        firstName: "Walkin",
+        lastName: "Family",
+        email: "walkin-family@example.test",
+        phone: "09171234567",
+        consent: true
+      },
+      paymentMethod: "pay-at-hotel",
+      status: "confirmed"
+    };
+
+    const req = mockRequest(body);
+    const res = mockResponse();
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const bookingWrite = setCalls.find((c) => c.path === "bookings/walkinChd9A");
+    expect(bookingWrite?.data).toMatchObject({
+      numGuests: 3,
+      numAdults: 2,
+      numChildren: 1
+    });
+  });
+
+  test("rejects a walk-in total that disagrees with adults + children", async () => {
+    const body = {
+      bookingId: "walkinChd9B",
+      roomId: "room_101",
+      checkIn: "2026-08-04",
+      checkOut: "2026-08-06",
+      guests: 3,
+      numAdults: 2,
+      numChildren: 2,
+      hasBreakfast: false,
+      guestDetails: {
+        firstName: "Walkin",
+        lastName: "Mismatch",
+        email: "walkin-mismatch@example.test",
+        phone: "09171234567",
+        consent: true
+      },
+      paymentMethod: "pay-at-hotel",
+      status: "confirmed"
+    };
+
+    const req = mockRequest(body);
+    const res = mockResponse();
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect((res.json as any).mock.calls[0][0].error).toBe(
+      "Occupancy split mismatch: numAdults (2) + numChildren (2) must equal guests (3)."
+    );
+    expect(setCalls.find((c) => c.path === "bookings/walkinChd9B")).toBeUndefined();
+  });
+
   test("computes ratePerNight from the type entry's pricePerNight (not the dead room-doc field)", async () => {
     const body = {
       bookingId: "walkinBf02B",
@@ -283,8 +351,9 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     expect(bookingWrite.data.totalPrice).toBe(5000);
   });
 
-  test("rejects when guest count exceeds the type entry's maxCapacity", async () => {
-    // 5 guests — type's maxCapacity is 4. Should reject.
+  test("rejects when the legacy all-adults shape exceeds the type entry's maxCapacity", async () => {
+    // 5 guests without a split derive to 5 adults. The type's
+    // adult cap is 4 and no extra bed was selected, so reject.
     const body = {
       bookingId: "walkinBf02D",
       roomId: "room_101",
@@ -309,7 +378,9 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
 
     expect(res.status).toHaveBeenCalledWith(500);
     const jsonArg = (res.json as any).mock.calls[0][0];
-    expect(jsonArg.error).toBe("Guest count exceeds room capacity of 4.");
+    expect(jsonArg.error).toBe(
+      "Not enough extra beds: 1 overflow adult(s) + 0 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+    );
     expect(setCalls.find((c) => c.path === "bookings/walkinBf02D")).toBeUndefined();
   });
 

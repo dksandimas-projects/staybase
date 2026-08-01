@@ -46,6 +46,7 @@ import {
   // function in `shared/utils/roomTypes.ts` for the
   // exact rule + the edge cases the test pins.
   requiredExtraBedsFor,
+  applyRoomTypeDefaults,
   // Per EXB-10 (2026-08-01, per decision #157): the
   // hotel-wide rollaway-bed inventory check. The
   // inventory is configured in
@@ -857,19 +858,16 @@ export async function handleCreateBooking(req: any, res: any) {
       // only on the staff verify/add-payment endpoints below.
 
       const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
-      if (!typeEntry) {
+      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
+      if (!rawTypeEntry) {
         throw new Error("Selected room type is not available.");
       }
+      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-
-      if (guests > typeMaxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
-      }
 
       // 2. Find an available physical room of this type. Sort
       // candidates by `roomNumber` for deterministic assignment
@@ -2087,10 +2085,11 @@ export async function handleCreateWalkin(req: any, res: any) {
       }
       const hotelConfig = hotelConfigDoc.data()!;
       const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
-      if (!typeEntry) {
+      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
+      if (!rawTypeEntry) {
         throw new Error("Room type is not available.");
       }
+      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
 
       // Per DSC-01..05 (2026-08-01, per CVQ-06): snapshot the admin's
       // per-class discount scope at booking time (same pattern as
@@ -2124,9 +2123,6 @@ export async function handleCreateWalkin(req: any, res: any) {
         console.warn(`[handleCreateWalkinBooking] unknown source "${requestedSource}" — falling back to "walk-in"`);
       }
 
-      if (guests > typeMaxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
-      }
       // Per CHD-01 + CHD-04 (2026-08-01, per decision #144):
       // walk-ins are staff-created, so the adult/child split
       // is staff-supplied (or absent → all adults). Same
@@ -4989,8 +4985,9 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // here alongside the other transaction reads, before any writes.
       const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
       const breakfastConfig = breakfastConfigDoc.data() || {};
-      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
-      if (!typeEntry) throw new Error("Room type configuration not found.");
+      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
+      if (!rawTypeEntry) throw new Error("Room type configuration not found.");
+      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
 
       // Per CHD-04 + EXB-03 (2026-08-01, per decision #144
       // + #145): the reschedule transaction validates the

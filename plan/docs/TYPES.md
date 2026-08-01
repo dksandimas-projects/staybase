@@ -66,8 +66,8 @@ RoomType {
   bedDefinition: string         // e.g. "1 queen size bed"
   description: string           // one-paragraph marketing copy
   amenities: string[]           // e.g. ["WiFi", "AC", "Hot Shower", "Cable TV"]
-  maxCapacity: number           // canonical occupancy for every room of this type
-  maxChildren?: number          // per CHD-02 (2026-08-01, decision #144): max children
+  maxCapacity: number           // adult cap (ages 12+) for every room of this type
+  maxChildren?: number          // child cap (ages 0–11); legacy values normalize by adult cap
   maxExtraBeds?: number         // per EXB-01: hard cap on per-booking extraBedCount (0 = not allowed)
   extraBedRate?: number         // per EXB-01: per-bed-per-night rate, snapshotted onto Booking
   pricePerNight: number         // base rate per night
@@ -134,7 +134,7 @@ Booking {
   guestName: string
   guestEmail: string
   guestPhone: string
-  numGuests: number
+  numGuests: number        // persisted total; must equal numAdults + numChildren when split exists
   numAdults?: number       // absent derives to numGuests
   numChildren?: number     // absent derives to 0
   extraBedCount?: number   // absent derives to 0; capped by RoomType.maxExtraBeds

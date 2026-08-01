@@ -413,6 +413,9 @@ describe("/api/bookings/create", () => {
             description: "Simple comfort for couples or business travelers.",
             amenities: ["WiFi", "AC"],
             maxCapacity: 4,
+            maxChildren: 1,
+            maxExtraBeds: 0,
+            extraBedRate: 0,
             pricePerNight: 2000,
             weekendRate: 2500,
             corporateRate: 1800
@@ -427,6 +430,138 @@ describe("/api/bookings/create", () => {
     setCalls = [];
     updateCalls = [];
     vi.clearAllMocks();
+  });
+
+  const chdBookingBody = (bookingId: string, occupancy: {
+    guests: number;
+    numAdults?: number;
+    numChildren?: number;
+    hasBreakfast?: boolean;
+  }) => ({
+    bookingId,
+    roomType: "standard-double",
+    checkIn: FUTURE_CHECK_IN_1,
+    checkOut: FUTURE_CHECK_OUT_1,
+    guests: occupancy.guests,
+    numAdults: occupancy.numAdults,
+    numChildren: occupancy.numChildren,
+    hasBreakfast: occupancy.hasBreakfast ?? false,
+    guestDetails: {
+      firstName: "CHD",
+      lastName: "Regression",
+      email: "chd@example.com",
+      phone: "09171234567",
+      consent: true
+    },
+    discountType: "",
+    discountIdPhotoUrl: null,
+    paymentMethod: "pay-at-hotel",
+    turnstileToken: "mock_token"
+  });
+
+  test("rejects a client total that disagrees with adults + children", async () => {
+    const req = mockRequest(chdBookingBody("bookingChd9A", {
+      guests: 3,
+      numAdults: 2,
+      numChildren: 2
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Occupancy split mismatch: numAdults (2) + numChildren (2) must equal guests (3)."
+    });
+    expect(setCalls).toHaveLength(0);
+  });
+
+  test("rejects adult overflow independently of the child cap", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 2;
+    const req = mockRequest(chdBookingBody("bookingChd9B", {
+      guests: 3,
+      numAdults: 3,
+      numChildren: 0
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Not enough extra beds: 1 overflow adult(s) + 0 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+    });
+    expect(setCalls).toHaveLength(0);
+  });
+
+  test("rejects child overflow independently of the adult cap", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
+    const req = mockRequest(chdBookingBody("bookingChd9C", {
+      guests: 4,
+      numAdults: 2,
+      numChildren: 2
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Not enough extra beds: 0 overflow adult(s) + 1 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+    });
+    expect(setCalls).toHaveLength(0);
+  });
+
+  test("allows children alongside the full adult cap without treating total guests as adults", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
+    const req = mockRequest(chdBookingBody("bookingChd9D", {
+      guests: 3,
+      numAdults: 2,
+      numChildren: 1
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const bookingWrite = setCalls.find((call) => call.path === "bookings/bookingChd9D");
+    expect(bookingWrite?.data).toMatchObject({
+      numGuests: 3,
+      numAdults: 2,
+      numChildren: 1
+    });
+  });
+
+  test("breakfast still multiplies by total occupancy when children are included", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
+    mockSettings.breakfastConfig = {
+      isEnabled: true,
+      ratePerPersonPerNight: 250,
+      breakfastIncludesChildrenDefault: true
+    };
+    const req = mockRequest(chdBookingBody("bookingChd9E", {
+      guests: 3,
+      numAdults: 2,
+      numChildren: 1,
+      hasBreakfast: true
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const bookingWrite = setCalls.find((call) => call.path === "bookings/bookingChd9E");
+    expect(bookingWrite?.data.rateBreakdown.addOns).toContainEqual({
+      label: "Breakfast add-on",
+      amount: 2_250
+    });
   });
 
   test.each([
@@ -603,13 +738,13 @@ describe("/api/bookings/create", () => {
   });
 
   test("does not leave partial writes after timeout or abort", async () => {
-    // Room count exceeds capacity - should throw and fail transaction before writing
+    // Adult count exceeds capacity - should throw and fail transaction before writing
     const invalidCapacityBody = {
       bookingId: "bookingErr1",
       roomType: "standard-double",
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
-      guests: 10, // Exceeds type maxCapacity (4)
+      guests: 10, // Legacy all-adults shape exceeds type maxCapacity (4)
       hasBreakfast: false,
       guestDetails: {
         firstName: "Jane",
@@ -631,7 +766,7 @@ describe("/api/bookings/create", () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      error: "Guest count exceeds room capacity of 4."
+      error: "Not enough extra beds: 6 overflow adult(s) + 0 overflow child(ren) = 6 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
     });
     
     // Check that no partial writes were made (neither the booking nor the daily counter was incremented)
