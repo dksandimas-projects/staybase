@@ -12,6 +12,7 @@ export * from "./utils/bookingFolio";
 export * from "./utils/bookingAddOns";
 export * from "./utils/bookingDiscounts";
 export * from "./utils/bookingOccupancy";
+export * from "./utils/extraBedInventory";
 export * from "./utils/bookingVat";
 export * from "./utils/cache";
 export * from "./utils/calendar";

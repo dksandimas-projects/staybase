@@ -3388,7 +3388,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // decision. The admin can shorten for large groups via the
     // Settings UI; the per-booking `holdExpiresAt` is the only
     // field the rest of the system reads.
-    paymentHoldWindowHours: 24
+    paymentHoldWindowHours: 24,
+    // Per EXB-10 (2026-08-01, per decision #157): the
+    // hotel-wide rollaway-bed inventory. The server-side
+    // `handleCreateBooking` / `handleCreateWalkin` /
+    // `handleRescheduleBooking` transactions read this
+    // field and reject bookings that would push the
+    // overlapping-stay total above the configured cap.
+    // `0` = "no constraint" (the historical "any number"
+    // behavior) so legacy settings without the field and
+    // freshly bootstrapped projects get the
+    // pre-EXB-10 semantics for free. A positive integer
+    // is the count of rollaway beds the hotel physically
+    // owns; the create / walkin / reschedule
+    // transactions enforce
+    // `inUseAcrossOverlappingStays + requestedCount <=
+    // extraBedInventory` inside the same Firestore
+    // transaction that assigns the room. The Settings
+    // UI exposes a numeric input (deferred to a future
+    // PR — out of EXB-10's scope, which is the server
+    // invariant).
+    extraBedInventory: 0
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot

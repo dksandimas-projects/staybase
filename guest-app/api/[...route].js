@@ -221550,6 +221550,40 @@ function normalizePaymentHoldWindowHours(raw) {
 }
 var EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
 
+// ../shared/utils/extraBedInventory.ts
+function countExtraBedsInUse(bookings, rangeStart, rangeEnd, excludeBookingId, now = /* @__PURE__ */ new Date()) {
+  let total = 0;
+  for (const b3 of bookings) {
+    if (excludeBookingId && b3.id === excludeBookingId) continue;
+    if (!isBookingOccupyingRoom(
+      { status: b3.status, holdExpiresAt: b3.holdExpiresAt },
+      now
+    )) continue;
+    if (!b3.checkIn || !b3.checkOut) continue;
+    const existingStart = b3.checkIn instanceof Date ? b3.checkIn : new Date(b3.checkIn);
+    const existingEnd = b3.checkOut instanceof Date ? b3.checkOut : new Date(b3.checkOut);
+    if (isNaN(existingStart.getTime()) || isNaN(existingEnd.getTime())) continue;
+    if (existingEnd.getTime() <= rangeStart.getTime()) continue;
+    if (existingStart.getTime() >= rangeEnd.getTime()) continue;
+    total += Number(b3.extraBedCount) || 0;
+  }
+  return total;
+}
+function checkExtraBedInventory(inventory, inUse, requestedCount) {
+  const safeInventory = Math.max(0, Math.floor(Number(inventory) || 0));
+  const safeInUse = Math.max(0, Math.floor(Number(inUse) || 0));
+  const safeRequested = Math.max(0, Math.floor(Number(requestedCount) || 0));
+  if (safeInventory <= 0) {
+    return { inUse: safeInUse, available: Number.POSITIVE_INFINITY, ok: true };
+  }
+  const available = Math.max(0, safeInventory - safeInUse);
+  return {
+    inUse: safeInUse,
+    available,
+    ok: safeRequested <= available
+  };
+}
+
 // ../shared/utils/checkin.ts
 var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
 var REQUIRED_REGISTRATION_FIELDS = [
@@ -225171,6 +225205,25 @@ async function handleCreateBooking(req, res) {
           `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${typeMaxExtraBeds} extra bed(s).`
         );
       }
+      if (extraBedCount > 0) {
+        const extraBedOverlapQuery = adminDb.collection("bookings").where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const extraBedOverlapSnapshot = await transaction.get(extraBedOverlapQuery);
+        const extraBedInUse = countExtraBedsInUse(
+          extraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          checkInDate,
+          checkOutDate
+        );
+        const inventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          extraBedInUse,
+          extraBedCount
+        );
+        if (!inventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${extraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
+      }
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
@@ -225904,6 +225957,25 @@ async function handleCreateWalkin(req, res) {
         throw new Error(
           `Not enough extra beds: ${walkinOverflow.overflowAdults} overflow adult(s) + ${walkinOverflow.overflowChildren} overflow child(ren) = ${walkinOverflow.requiredExtraBeds} extra bed(s) needed, but only ${walkinExtraBedCount} extra bed(s) selected. The room type allows up to ${walkinTypeMaxExtraBeds} extra bed(s).`
         );
+      }
+      if (walkinExtraBedCount > 0) {
+        const walkinExtraBedOverlapQuery = adminDb.collection("bookings").where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const walkinExtraBedOverlapSnapshot = await transaction.get(walkinExtraBedOverlapQuery);
+        const walkinExtraBedInUse = countExtraBedsInUse(
+          walkinExtraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          checkInDate,
+          checkOutDate
+        );
+        const walkinInventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          walkinExtraBedInUse,
+          walkinExtraBedCount
+        );
+        if (!walkinInventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${walkinExtraBedInUse} already booked across overlapping stays + ${walkinExtraBedCount} requested = ${walkinExtraBedInUse + walkinExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
       }
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
@@ -227813,6 +227885,26 @@ async function handleRescheduleBooking(req, res) {
         throw new Error(
           `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra bed(s) needed, but the booking has ${rescheduleExtraBedCount} extra bed(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra bed(s).`
         );
+      }
+      if (rescheduleExtraBedCount > 0) {
+        const rescheduleExtraBedOverlapQuery = adminDb.collection("bookings").where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const rescheduleExtraBedOverlapSnapshot = await transaction.get(rescheduleExtraBedOverlapQuery);
+        const rescheduleExtraBedInUse = countExtraBedsInUse(
+          rescheduleExtraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          checkInDate,
+          checkOutDate,
+          bookingId
+        );
+        const rescheduleInventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          rescheduleExtraBedInUse,
+          rescheduleExtraBedCount
+        );
+        if (!rescheduleInventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${rescheduleExtraBedInUse} already booked across overlapping stays + ${rescheduleExtraBedCount} requested = ${rescheduleExtraBedInUse + rescheduleExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
       }
       const manualNightlyRate = getLockedManualNightlyRate(
         booking.rateBreakdown

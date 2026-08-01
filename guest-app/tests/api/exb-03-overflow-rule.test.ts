@@ -183,11 +183,17 @@ describe("EXB-03 — capacity overflow rule (helper + three call sites)", () => 
     // shared barrel surfaces here. The symbol must
     // appear inside an `import { ... } from
     // "@spark-inn/shared"` block. The block is
-    // multi-line (per the PEX-02 + EXB-03 comment
-    // padding), so the regex anchors on the symbol
-    // + the closing `} from "@spark-inn/shared"`.
+    // multi-line (per the PEX-02 + EXB-03 + EXB-10
+    // comment padding), so the regex anchors on the
+    // symbol + the closing `} from
+    // "@spark-inn/shared"`. The 5000-char upper
+    // bound accommodates the growing doc-block
+    // padding (EXB-10 added 25 lines of JSDoc to
+    // the same import block); the contract is
+    // "imported from @spark-inn/shared", not a
+    // specific distance.
     expect(bookingsHandlerSrc).toMatch(
-      /requiredExtraBedsFor[\s\S]{0,500}\}\s*from\s*"@spark-inn\/shared"/
+      /requiredExtraBedsFor[\s\S]{0,5000}\}\s*from\s*"@spark-inn\/shared"/
     );
   });
 });

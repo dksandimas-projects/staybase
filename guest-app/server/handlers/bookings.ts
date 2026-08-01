@@ -45,7 +45,31 @@ import {
   // handleRescheduleBooking. See the JSDoc on the
   // function in `shared/utils/roomTypes.ts` for the
   // exact rule + the edge cases the test pins.
-  requiredExtraBedsFor
+  requiredExtraBedsFor,
+  // Per EXB-10 (2026-08-01, per decision #157): the
+  // hotel-wide rollaway-bed inventory check. The
+  // inventory is configured in
+  // `settings/hotelConfig.extraBedInventory` (a positive
+  // integer = the count of rollaway beds the hotel
+  // physically owns; 0 or absent = the historical "any
+  // number" behavior, no constraint). The check runs
+  // INSIDE the same Firestore transaction that assigns
+  // the room — a read-then-write check outside the
+  // transaction would race exactly like RTS-01 (two
+  // concurrent bookings both see "1 bed free" and both
+  // take it). `countExtraBedsInUse` takes a pre-fetched
+  // list of candidate bookings (no Firestore dependency)
+  // so the helper is unit-testable; the query lives at
+  // each of the 3 call sites (handleCreateBooking +
+  // handleCreateWalkin + handleRescheduleBooking).
+  // `checkExtraBedInventory` is the pure cap check —
+  // `0 inventory` short-circuits to `ok: true` so legacy
+  // + freshly bootstrapped projects get the historical
+  // semantics for free. See the JSDoc on the helpers in
+  // `shared/utils/extraBedInventory.ts` for the exact
+  // rule + the edge cases the test pins.
+  countExtraBedsInUse,
+  checkExtraBedInventory
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
@@ -1054,6 +1078,53 @@ export async function handleCreateBooking(req: any, res: any) {
         throw new Error(
           `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${typeMaxExtraBeds} extra bed(s).`
         );
+      }
+
+      // Per EXB-10 (2026-08-01, per decision #157): the
+      // hotel-wide rollaway-bed inventory check. Runs
+      // INSIDE the same Firestore transaction that
+      // assigns the room — a read-then-write check
+      // outside the transaction would race exactly like
+      // RTS-01 (two concurrent bookings both see "1 bed
+      // free" and both take it). The query is a single
+      // `where("status", "in", BOOKING_OCCUPYING_STATUSES)`
+      // (the candidate set is bounded by the hotel's
+      // active-booking count — typically dozens, not
+      // thousands) + an in-memory date-overlap filter
+      // inside the helper. No composite index needed;
+      // the existing `(status, checkIn)` index covers
+      // the status filter, and the helper's
+      // `Number(extraBedCount) || 0` defensive coercion
+      // handles zero/absent counts for free. The
+      // helper is pure: it takes the pre-fetched docs
+      // + the requested range and returns the in-use
+      // count; the cap check is a single
+      // `checkExtraBedInventory` call. `0 inventory`
+      // short-circuits to `ok: true` so legacy +
+      // freshly bootstrapped projects get the
+      // historical "any number" behavior for free. The
+      // query skips the "current booking" exclusion —
+      // `handleCreateBooking` is a new booking, so
+      // there is no prior `extraBedCount` to subtract.
+      if (extraBedCount > 0) {
+        const extraBedOverlapQuery = adminDb.collection("bookings")
+          .where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const extraBedOverlapSnapshot = await transaction.get(extraBedOverlapQuery);
+        const extraBedInUse = countExtraBedsInUse(
+          extraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          checkInDate,
+          checkOutDate
+        );
+        const inventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          extraBedInUse,
+          extraBedCount
+        );
+        if (!inventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${extraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
       }
 
       // 4. Handle Corporate Code validation. Per W1.3 / decision #79 /
@@ -2200,6 +2271,39 @@ export async function handleCreateWalkin(req: any, res: any) {
         throw new Error(
           `Not enough extra beds: ${walkinOverflow.overflowAdults} overflow adult(s) + ${walkinOverflow.overflowChildren} overflow child(ren) = ${walkinOverflow.requiredExtraBeds} extra bed(s) needed, but only ${walkinExtraBedCount} extra bed(s) selected. The room type allows up to ${walkinTypeMaxExtraBeds} extra bed(s).`
         );
+      }
+
+      // Per EXB-10 (2026-08-01, per decision #157): the
+      // hotel-wide rollaway-bed inventory check. Same
+      // shape as `handleCreateBooking` — the query is a
+      // single `where("status", "in", ...)` filtered
+      // in-memory by the helper, the cap check is a
+      // single `checkExtraBedInventory` call. `0
+      // inventory` short-circuits to `ok: true` so
+      // legacy + freshly bootstrapped projects get the
+      // historical "any number" behavior for free. The
+      // query skips the "current booking" exclusion —
+      // `handleCreateWalkin` is a new booking, so there
+      // is no prior `extraBedCount` to subtract.
+      if (walkinExtraBedCount > 0) {
+        const walkinExtraBedOverlapQuery = adminDb.collection("bookings")
+          .where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const walkinExtraBedOverlapSnapshot = await transaction.get(walkinExtraBedOverlapQuery);
+        const walkinExtraBedInUse = countExtraBedsInUse(
+          walkinExtraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          checkInDate,
+          checkOutDate
+        );
+        const walkinInventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          walkinExtraBedInUse,
+          walkinExtraBedCount
+        );
+        if (!walkinInventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${walkinExtraBedInUse} already booked across overlapping stays + ${walkinExtraBedCount} requested = ${walkinExtraBedInUse + walkinExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
       }
 
       // 4. Calculate Nightly Rate Total. Seasonal overrides beat
@@ -4931,6 +5035,43 @@ export async function handleRescheduleBooking(req: any, res: any) {
         throw new Error(
           `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra bed(s) needed, but the booking has ${rescheduleExtraBedCount} extra bed(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra bed(s).`
         );
+      }
+
+      // Per EXB-10 (2026-08-01, per decision #157): the
+      // hotel-wide rollaway-bed inventory check. Same
+      // shape as the create / walkin paths, with the
+      // critical `excludeBookingId: bookingId` so the
+      // booking's own snapshotted `extraBedCount` is
+      // NOT counted against itself — without the
+      // exclusion, every reschedule would always "use"
+      // its own bed and reject the new configuration
+      // when the inventory is tight. The helper is pure:
+      // the same `countExtraBedsInUse` + the same
+      // `checkExtraBedInventory` call as the other 2
+      // transactions. `0 inventory` short-circuits to
+      // `ok: true` so the historical "any number"
+      // behavior is preserved when the field is absent
+      // (legacy / freshly bootstrapped projects).
+      if (rescheduleExtraBedCount > 0) {
+        const rescheduleExtraBedOverlapQuery = adminDb.collection("bookings")
+          .where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const rescheduleExtraBedOverlapSnapshot = await transaction.get(rescheduleExtraBedOverlapQuery);
+        const rescheduleExtraBedInUse = countExtraBedsInUse(
+          rescheduleExtraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          checkInDate,
+          checkOutDate,
+          bookingId
+        );
+        const rescheduleInventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          rescheduleExtraBedInUse,
+          rescheduleExtraBedCount
+        );
+        if (!rescheduleInventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${rescheduleExtraBedInUse} already booked across overlapping stays + ${rescheduleExtraBedCount} requested = ${rescheduleExtraBedInUse + rescheduleExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
       }
 
       // PF-03: Pricing recalculation
