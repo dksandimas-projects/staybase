@@ -221435,6 +221435,9 @@ var WebsiteContentSchema = external_exports.object({
   notFound: PublicHeroSchema.optional(),
   privacyPolicyBody: external_exports.string().optional(),
   cancellationPolicy: external_exports.string().optional(),
+  cancellationCutoffHours: external_exports.number().optional(),
+  cancellationRefundPctBefore: external_exports.number().optional(),
+  cancellationRefundPctAfter: external_exports.number().optional(),
   houseRules: external_exports.string().optional(),
   privacyPolicyLastUpdated: external_exports.string().optional()
 });
@@ -222185,6 +222188,115 @@ function validateCorporateCode(code, now = /* @__PURE__ */ new Date()) {
     return { valid: false, error: "Corporate code usage limit reached." };
   }
   return { valid: true, error: "" };
+}
+
+// ../shared/utils/cancellation.ts
+function parseCheckInTime(timeStr) {
+  const normalized = timeStr.trim().toLowerCase();
+  let match = normalized.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/);
+  if (match) {
+    let hours = parseInt(match[1]);
+    const minutes = parseInt(match[2]);
+    const ampm = match[3];
+    if (ampm === "pm" && hours < 12) {
+      hours += 12;
+    } else if (ampm === "am" && hours === 12) {
+      hours = 0;
+    }
+    return { hours, minutes };
+  }
+  match = normalized.match(/^(\d{1,2})\s*(am|pm)$/);
+  if (match) {
+    let hours = parseInt(match[1]);
+    const ampm = match[2];
+    if (ampm === "pm" && hours < 12) {
+      hours += 12;
+    } else if (ampm === "am" && hours === 12) {
+      hours = 0;
+    }
+    return { hours, minutes: 0 };
+  }
+  return { hours: 14, minutes: 0 };
+}
+function timeZoneOffsetMs(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const representedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second)
+  );
+  const instantWithoutMilliseconds = Math.floor(date.getTime() / 1e3) * 1e3;
+  return representedAsUtc - instantWithoutMilliseconds;
+}
+function getCheckInInstant(dateKey2, timeStr, timeZone) {
+  const [year, month, day] = dateKey2.split("-").map(Number);
+  const { hours, minutes } = parseCheckInTime(timeStr);
+  const targetWallClock = Date.UTC(year, month - 1, day, hours, minutes, 0, 0);
+  let instant = targetWallClock;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const offset = timeZoneOffsetMs(new Date(instant), timeZone);
+    const next = targetWallClock - offset;
+    if (next === instant) break;
+    instant = next;
+  }
+  return new Date(instant);
+}
+function getLegacyCancellationPolicy() {
+  return "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.";
+}
+function createCancellationPolicySnapshot(params) {
+  const tz = params.hotelConfig.timezone || "Asia/Manila";
+  const stdCheckInTime = params.hotelConfig.checkInTime || "14:00";
+  const checkInInstant = getCheckInInstant(params.checkInDateKey, stdCheckInTime, tz);
+  let cutoffHours = typeof params.websiteContent.cancellationCutoffHours === "number" ? params.websiteContent.cancellationCutoffHours : 48;
+  let refundPctBefore = typeof params.websiteContent.cancellationRefundPctBefore === "number" ? params.websiteContent.cancellationRefundPctBefore : 100;
+  let refundPctAfter = typeof params.websiteContent.cancellationRefundPctAfter === "number" ? params.websiteContent.cancellationRefundPctAfter : 0;
+  let policyText = params.websiteContent.cancellationPolicy || getLegacyCancellationPolicy();
+  let source = params.websiteContent.cancellationPolicy ? "settings" : "legacy-fallback";
+  if (params.corporateCodeData) {
+    let hasOverride = false;
+    const corp = params.corporateCodeData;
+    if (typeof corp.cancellationCutoffHours === "number") {
+      cutoffHours = corp.cancellationCutoffHours;
+      hasOverride = true;
+    }
+    if (typeof corp.cancellationRefundPctBefore === "number") {
+      refundPctBefore = corp.cancellationRefundPctBefore;
+      hasOverride = true;
+    }
+    if (typeof corp.cancellationRefundPctAfter === "number") {
+      refundPctAfter = corp.cancellationRefundPctAfter;
+      hasOverride = true;
+    }
+    if (typeof corp.cancellationPolicyText === "string" && corp.cancellationPolicyText.trim()) {
+      policyText = corp.cancellationPolicyText.trim();
+      hasOverride = true;
+    }
+    if (hasOverride) {
+      source = "corporate-override";
+    }
+  }
+  return {
+    cutoffHours,
+    refundPctBefore,
+    refundPctAfter,
+    policyText,
+    scheduledCheckInTime: checkInInstant.toISOString(),
+    source
+  };
 }
 
 // server/handlers/email.ts
@@ -225716,10 +225828,11 @@ async function handleCreateBooking(req, res) {
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
       let corporateCodeUsageUpdate = null;
+      let corpCodeDoc = null;
       if (corporateCode) {
         const formattedCorpCode = String(corporateCode).trim().toUpperCase();
         corporateCodeRef = adminDb.collection("corporateCodes").doc(formattedCorpCode);
-        let corpCodeDoc = await transaction.get(corporateCodeRef);
+        corpCodeDoc = await transaction.get(corporateCodeRef);
         if (!corpCodeDoc.exists) {
           const corpCodeQuery = adminDb.collection("corporateCodes").where("code", "==", formattedCorpCode).limit(1);
           const corpCodeQuerySnap = await transaction.get(corpCodeQuery);
@@ -226103,10 +226216,19 @@ async function handleCreateBooking(req, res) {
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
+      const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data() : {};
+      const corpCodeData = corporateDetails.isCorporate && corpCodeDoc && corpCodeDoc.exists ? corpCodeDoc.data() : null;
+      const cancellationPolicySnapshot = createCancellationPolicySnapshot({
+        websiteContent,
+        hotelConfig,
+        checkInDateKey: checkIn,
+        corporateCodeData: corpCodeData
+      });
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName,
+        cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
         memberId: detectedMemberId || null,
@@ -226590,6 +226712,9 @@ async function handleCreateWalkin(req, res) {
         throw new Error("Room type catalog is not configured.");
       }
       const hotelConfig = hotelConfigDoc.data();
+      const websiteContentRef = adminDb.collection("settings").doc("websiteContent");
+      const websiteContentDoc = await transaction.get(websiteContentRef);
+      const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data() : {};
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
       if (!rawTypeEntry) {
@@ -226931,10 +227056,17 @@ async function handleCreateWalkin(req, res) {
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
+      const cancellationPolicySnapshot = createCancellationPolicySnapshot({
+        websiteContent,
+        hotelConfig,
+        checkInDateKey: checkIn,
+        corporateCodeData: null
+      });
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName,
+        cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
         memberId: null,

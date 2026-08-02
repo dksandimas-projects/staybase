@@ -125,6 +125,9 @@ export const WebsiteContentSchema = z.object({
   notFound: PublicHeroSchema.optional(),
   privacyPolicyBody: z.string().optional(),
   cancellationPolicy: z.string().optional(),
+  cancellationCutoffHours: z.number().optional(),
+  cancellationRefundPctBefore: z.number().optional(),
+  cancellationRefundPctAfter: z.number().optional(),
   houseRules: z.string().optional(),
   privacyPolicyLastUpdated: z.string().optional()
 });

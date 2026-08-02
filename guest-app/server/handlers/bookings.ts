@@ -128,6 +128,7 @@ import {
   // `handleCheckinBooking` + `handleCheckoutBooking` +
   // `handleCancelBooking`) call this helper inside the
   // same `runTransaction` as the booking status flip.
+  createCancellationPolicySnapshot,
   computeReservationAggregatePaymentStatus
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
@@ -1628,6 +1629,7 @@ export async function handleCreateBooking(req: any, res: any) {
       let corporateDetails: any = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef: any = null;
       let corporateCodeUsageUpdate: { ref: any; data: any } | null = null;
+      let corpCodeDoc: any = null;
 
       if (corporateCode) {
         // (a) `code`-field fallback: try the doc-ID lookup first
@@ -1639,7 +1641,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // confirm is caught by the re-validation below.
         const formattedCorpCode = String(corporateCode).trim().toUpperCase();
         corporateCodeRef = adminDb.collection("corporateCodes").doc(formattedCorpCode);
-        let corpCodeDoc = await transaction.get(corporateCodeRef);
+        corpCodeDoc = await transaction.get(corporateCodeRef);
         if (!corpCodeDoc.exists) {
           const corpCodeQuery = adminDb
             .collection("corporateCodes")
@@ -2232,10 +2234,23 @@ export async function handleCreateBooking(req: any, res: any) {
       // `paymentStatus` is derived from the child's status
       // ("awaiting-payment" while the child is `pending` or
       // `payment-uploaded`).
+      // Per CRL-05 (2026-08-02): compile the cancellation policy snapshot
+      const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data()! : {};
+      const corpCodeData = corporateDetails.isCorporate && corpCodeDoc && corpCodeDoc.exists
+        ? corpCodeDoc.data()
+        : null;
+      const cancellationPolicySnapshot = createCancellationPolicySnapshot({
+        websiteContent,
+        hotelConfig,
+        checkInDateKey: checkIn,
+        corporateCodeData: corpCodeData
+      });
+
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName,
+        cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
         memberId: detectedMemberId || null,
@@ -2916,6 +2931,9 @@ export async function handleCreateWalkin(req: any, res: any) {
         throw new Error("Room type catalog is not configured.");
       }
       const hotelConfig = hotelConfigDoc.data()!;
+      const websiteContentRef = adminDb.collection("settings").doc("websiteContent");
+      const websiteContentDoc = await transaction.get(websiteContentRef);
+      const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data()! : {};
       const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
       if (!rawTypeEntry) {
@@ -3448,10 +3466,19 @@ export async function handleCreateWalkin(req: any, res: any) {
       // member-from-Authorization-token path, so
       // `memberId: null` + `memberDiscountPct: 0` (same
       // shape as the public path's anonymous branch).
+      // Per CRL-05 (2026-08-02): compile the cancellation policy snapshot
+      const cancellationPolicySnapshot = createCancellationPolicySnapshot({
+        websiteContent,
+        hotelConfig,
+        checkInDateKey: checkIn,
+        corporateCodeData: null
+      });
+
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName,
+        cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
         memberId: null,

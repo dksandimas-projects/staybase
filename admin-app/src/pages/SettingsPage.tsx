@@ -1966,6 +1966,15 @@ export function SettingsPage() {
   // 7. Legal Content states
   const [privacyPolicyBody, setPrivacyPolicyBody] = useState(websiteContent.privacyPolicyBody || "");
   const [cancellationPolicy, setCancellationPolicy] = useState(websiteContent.cancellationPolicy || "");
+  const [cancellationCutoffHours, setCancellationCutoffHours] = useState<string>(
+    websiteContent.cancellationCutoffHours !== undefined ? String(websiteContent.cancellationCutoffHours) : "48"
+  );
+  const [cancellationRefundPctBefore, setCancellationRefundPctBefore] = useState<string>(
+    websiteContent.cancellationRefundPctBefore !== undefined ? String(websiteContent.cancellationRefundPctBefore) : "100"
+  );
+  const [cancellationRefundPctAfter, setCancellationRefundPctAfter] = useState<string>(
+    websiteContent.cancellationRefundPctAfter !== undefined ? String(websiteContent.cancellationRefundPctAfter) : "0"
+  );
   const [houseRules, setHouseRules] = useState(websiteContent.houseRules || "");
   // Per LCE-01 (decision #137, 2026-07-25): the Terms of
   // Service body + version + last-updated are now admin-
@@ -2012,6 +2021,15 @@ export function SettingsPage() {
     setNotificationSoundUrl(hotelConfig.notificationSoundUrl || "");
     setPrivacyPolicyBody(websiteContent.privacyPolicyBody || "");
     setCancellationPolicy(websiteContent.cancellationPolicy || "");
+    setCancellationCutoffHours(
+      websiteContent.cancellationCutoffHours !== undefined ? String(websiteContent.cancellationCutoffHours) : "48"
+    );
+    setCancellationRefundPctBefore(
+      websiteContent.cancellationRefundPctBefore !== undefined ? String(websiteContent.cancellationRefundPctBefore) : "100"
+    );
+    setCancellationRefundPctAfter(
+      websiteContent.cancellationRefundPctAfter !== undefined ? String(websiteContent.cancellationRefundPctAfter) : "0"
+    );
     setHouseRules(websiteContent.houseRules || "");
     // Per LCE-01: hydrate the terms fields when the websiteContent
     // snapshot arrives (the useEffect fires on every snapshot
@@ -2553,10 +2571,30 @@ export function SettingsPage() {
   };
 
   const handleSaveLegal = async () => {
+    const cutoff = parseInt(cancellationCutoffHours);
+    const before = parseFloat(cancellationRefundPctBefore);
+    const after = parseFloat(cancellationRefundPctAfter);
+
+    if (isNaN(cutoff) || cutoff < 0) {
+      toast.error("Please enter a valid cutoff window (minimum 0 hours).");
+      return;
+    }
+    if (isNaN(before) || before < 0 || before > 100) {
+      toast.error("Refund percentage before cutoff must be between 0 and 100.");
+      return;
+    }
+    if (isNaN(after) || after < 0 || after > 100) {
+      toast.error("Refund percentage after cutoff must be between 0 and 100.");
+      return;
+    }
+
     const saved = await runSettingsSave("legal", "Legal content saved", () => updateSettings("websiteContent", {
       ...websiteContent,
       privacyPolicyBody,
       cancellationPolicy,
+      cancellationCutoffHours: cutoff,
+      cancellationRefundPctBefore: before,
+      cancellationRefundPctAfter: after,
       houseRules,
       privacyPolicyLastUpdated: new Date().toISOString().slice(0, 10)
     }));
@@ -5897,6 +5935,45 @@ export function SettingsPage() {
                       className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
                     />
                   </label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+                      Cutoff Window (hours)
+                      <input
+                        type="number"
+                        min="0"
+                        value={cancellationCutoffHours}
+                        onChange={(e) => setCancellationCutoffHours(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-gray-50/50 p-2.5 text-sm font-medium focus:bg-white focus:outline-none"
+                        placeholder="48"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+                      Refund % Before Cutoff
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={cancellationRefundPctBefore}
+                        onChange={(e) => setCancellationRefundPctBefore(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-gray-50/50 p-2.5 text-sm font-medium focus:bg-white focus:outline-none"
+                        placeholder="100"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+                      Refund % After Cutoff
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={cancellationRefundPctAfter}
+                        onChange={(e) => setCancellationRefundPctAfter(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-gray-50/50 p-2.5 text-sm font-medium focus:bg-white focus:outline-none"
+                        placeholder="0"
+                      />
+                    </label>
+                  </div>
                   <p className="text-[10px] text-gray-500">Shown at booking Step 3 and in confirmation emails. If left blank, a default policy is used.</p>
                 </div>
 
