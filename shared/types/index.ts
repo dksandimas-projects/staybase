@@ -5,6 +5,7 @@ import type {
 } from "../constants";
 import type { DiscountScope } from "../utils/bookingDiscounts";
 import type { CancellationSource } from "../utils/bookingOccupancy";
+import type { CancellationPolicySnapshot } from "../utils/cancellation";
 
 export type RoomType = string;
 export type RoomStatus = (typeof ROOM_STATUSES)[number];
@@ -286,6 +287,7 @@ export interface Reservation {
   privacyAccepted: boolean;
   privacyAcceptedAt: Date | null;
   privacyVersion: string;
+  cancellationPolicySnapshot?: CancellationPolicySnapshot | null;
 
   /** Aggregate counters — denormalized for fast UI; recomputed transactionally in MRB-04 / MRB-13. */
   roomCount: number;
