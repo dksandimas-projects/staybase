@@ -227592,10 +227592,25 @@ async function handleAddRefund(req, res) {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found");
-      const paymentsRef = bookingRef.collection("payments");
-      const paymentsSnapshot = await transaction.get(paymentsRef);
-      netCollected = paymentsSnapshot.docs.reduce((sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0), 0);
-      const existingRefund = paymentsSnapshot.docs.find((docSnap) => docSnap.id === refundId);
+      const bookingData2 = bookingDoc.data();
+      const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
+      const refundsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("refunds") : bookingRef.collection("payments");
+      const refundsSnapshot = await transaction.get(refundsRef);
+      let netPositivePayments = 0;
+      if (bookingReservationId2.length > 0) {
+        const paymentsRef = adminDb.collection("reservations").doc(bookingReservationId2).collection("payments");
+        const paymentsSnapshot = await transaction.get(paymentsRef);
+        netPositivePayments = paymentsSnapshot.docs.reduce(
+          (sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0),
+          0
+        );
+      }
+      const netRefunds = refundsSnapshot.docs.reduce(
+        (sum, refundDoc) => sum + Number(refundDoc.data().amount || 0),
+        0
+      );
+      netCollected = netPositivePayments + netRefunds;
+      const existingRefund = refundsSnapshot.docs.find((docSnap) => docSnap.id === refundId);
       if (existingRefund) {
         const existingData = existingRefund.data();
         const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount && String(existingData.method || "") === safeMethod && String(existingData.note || "") === safeReason && (existingData.transactionReference || null) === safeTransactionReference;
@@ -227621,8 +227636,12 @@ async function handleAddRefund(req, res) {
         recordedAt: /* @__PURE__ */ new Date()
       };
       if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
+      if (bookingReservationId2.length > 0) {
+        newRecord.reservationId = bookingReservationId2;
+        newRecord.bookingId = bookingId;
+      }
       refundRecord = newRecord;
-      transaction.create(paymentsRef.doc(refundId), newRecord);
+      transaction.create(refundsRef.doc(refundId), newRecord);
     });
     return res.status(200).json({
       success: true,
@@ -227727,7 +227746,8 @@ async function handleVerifyAndRecordPayment(req, res) {
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data();
       bookingData2 = data;
-      const paymentsRef = bookingRef.collection("payments");
+      const bookingReservationId2 = String(data.reservationId || "").trim();
+      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         return sum + Number(docSnap.data().amount || 0);
@@ -227774,7 +227794,8 @@ async function handleVerifyAndRecordPayment(req, res) {
         recordedAt: /* @__PURE__ */ new Date()
       };
       if (!safeTransactionReference) delete paymentRecord.transactionReference;
-      transaction.create(paymentsRef.doc(paymentId), paymentRecord);
+      const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
+      transaction.create(paymentsRef.doc(paymentId), recordWithReservation);
       const bookingUpdates = {
         updatedAt: /* @__PURE__ */ new Date()
       };

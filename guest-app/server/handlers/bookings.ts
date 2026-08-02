@@ -4463,17 +4463,73 @@ export async function handleAddRefund(req: any, res: any) {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found");
-      const paymentsRef = bookingRef.collection("payments");
-      const paymentsSnapshot = await transaction.get(paymentsRef);
-      netCollected = paymentsSnapshot.docs.reduce((sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0), 0);
+      const bookingData = bookingDoc.data()!;
 
-      // Idempotency check: a refund with this exact refundId already exists.
-      // Same amount/method/reason/reference (or no-reference on both sides)
-      // replays the original commit. A mismatch on any field is a 409 — the
-      // client reused an ID it had already committed for a different refund,
-      // which would be a staff typo or a duplicate-form bug we want loud,
-      // not silent.
-      const existingRefund = paymentsSnapshot.docs.find((docSnap: any) => docSnap.id === refundId);
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision #159):
+      // the canonical refund source moves to the reservation
+      // subcollection for new reservations. The dual-read
+      // pattern (Belt-and-suspenders): for new reservations
+      // (post-MRB-01, `bookingData.reservationId` is non-null),
+      // the refund record lives at
+      // `reservations/{reservationId}/refunds/{refundId}` (the
+      // canonical source). Net collected is computed from the
+      // reservation's `payments/` (positive) + `refunds/`
+      // (negative) subcollections — the same sign-aware sum
+      // the helper `getReservationFolioSummary` uses. For
+      // legacy null-`reservationId` bookings (pre-MRB-01), the
+      // refund record stays at
+      // `bookings/{bookingId}/payments/{refundId}` (the
+      // historical CRL-01 contract — refunds are
+      // negative-amount entries on the booking's payments
+      // subcollection). Net collected is the historical sum
+      // of the booking's payments (which includes the
+      // negative-amount refund entries for legacy).
+      const bookingReservationId = String((bookingData as any).reservationId || "").trim();
+      const refundsRef = bookingReservationId.length > 0
+        ? adminDb.collection("reservations").doc(bookingReservationId).collection("refunds")
+        : bookingRef.collection("payments");
+      // Read existing refunds (new path) or payments (legacy
+      // path) before queuing writes. Firestore transactions
+      // reject reads after writes, and the net collected is
+      // the current sum plus this new refund. The new path
+      // also reads the reservation's payments subcollection
+      // so the net collected reflects BOTH `payments/` and
+      // `refunds/` (the dual-read pattern).
+      const refundsSnapshot = await transaction.get(refundsRef);
+      let netPositivePayments = 0;
+      if (bookingReservationId.length > 0) {
+        const paymentsRef = adminDb.collection("reservations").doc(bookingReservationId).collection("payments");
+        const paymentsSnapshot = await transaction.get(paymentsRef);
+        netPositivePayments = paymentsSnapshot.docs.reduce(
+          (sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0),
+          0
+        );
+      }
+      const netRefunds = refundsSnapshot.docs.reduce(
+        (sum, refundDoc) => sum + Number(refundDoc.data().amount || 0),
+        0
+      );
+      // For new reservations, the "refunds" subcollection
+      // contains only negative-amount entries (per the
+      // writer's contract); for legacy, the "refunds" alias
+      // is the booking's payments subcollection which mixes
+      // positive payments + negative refunds. Either way,
+      // the sum is the net collected — sign-aware.
+      netCollected = netPositivePayments + netRefunds;
+
+      // Idempotency check: a refund with this exact refundId
+      // already exists. Same amount/method/reason/reference
+      // (or no-reference on both sides) replays the original
+      // commit. A mismatch on any field is a 409 — the client
+      // reused an ID it had already committed for a different
+      // refund, which would be a staff typo or a
+      // duplicate-form bug we want loud, not silent.
+      //
+      // For new reservations: search the reservation's
+      // `refunds/` subcollection (the canonical source).
+      // For legacy: search the booking's `payments/`
+      // subcollection (the historical source).
+      const existingRefund = refundsSnapshot.docs.find((docSnap: any) => docSnap.id === refundId);
       if (existingRefund) {
         const existingData = existingRefund.data();
         const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount
@@ -4506,11 +4562,22 @@ export async function handleAddRefund(req: any, res: any) {
         recordedAt: new Date()
       };
       if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
+      // Per MRB-04 Phase 2.x: for new reservations, stamp
+      // the `reservationId` + `bookingId` on the record so
+      // the new subcollection is self-describing (per-room
+      // attribution possible via `bookingId`; canonical
+      // reservation linkage via `reservationId`).
+      if (bookingReservationId.length > 0) {
+        newRecord.reservationId = bookingReservationId;
+        newRecord.bookingId = bookingId;
+      }
       refundRecord = newRecord;
       // transaction.create (not set) so a server-side race that lost the
       // existingRefund lookup still throws a clean ALREADY_EXISTS rather
-      // than overwriting the original ledger entry.
-      transaction.create(paymentsRef.doc(refundId), newRecord);
+      // than overwriting the original ledger entry. The `refundsRef.doc(refundId)`
+      // resolves to `reservations/{id}/refunds/{refundId}` for new reservations
+      // and `bookings/{id}/payments/{refundId}` for legacy.
+      transaction.create(refundsRef.doc(refundId), newRecord);
     });
     return res.status(200).json({
       success: true,
@@ -4632,7 +4699,30 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       const data = bookingDoc.data()!;
       bookingData = data;
 
-      const paymentsRef = bookingRef.collection("payments");
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision
+      // #159): the reservation-owned payment subcollection
+      // path. For new reservations (post-MRB-01, i.e.
+      // `data.reservationId` is non-null), the verified
+      // payment record lives at
+      // `reservations/{reservationId}/payments/{paymentId}`
+      // (the reservation header is the canonical money
+      // source). For legacy null-`reservationId` bookings
+      // (pre-MRB-01), the verified payment record stays at
+      // `bookings/{bookingId}/payments/{paymentId}` (the
+      // historical contract). The status transition on the
+      // booking doc (`payment-confirmed` when fully paid) +
+      // the notification write stay the same for both paths
+      // — only the payment RECORD moves to the new
+      // subcollection. Same pattern as the Phase 2
+      // `handleAddPayment` refactor; the new subcollection
+      // path preserves the CRL-01 idempotency contract
+      // (same `paymentId` + same fingerprint →
+      // `idempotentReplay: true`; same `paymentId` with
+      // different fields → 409 PAYMENT_ID_CONFLICT).
+      const bookingReservationId = String((data as any).reservationId || "").trim();
+      const paymentsRef = bookingReservationId.length > 0
+        ? adminDb.collection("reservations").doc(bookingReservationId).collection("payments")
+        : bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum: number, docSnap: any) => {
         return sum + Number(docSnap.data().amount || 0);
@@ -4695,8 +4785,19 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         recordedAt: new Date()
       };
       if (!safeTransactionReference) delete paymentRecord.transactionReference;
+      // Per MRB-04 Phase 2.x: for new reservations, stamp
+      // the `reservationId` + `bookingId` on the record so
+      // the new subcollection is self-describing (per-room
+      // attribution possible via `bookingId`; canonical
+      // reservation linkage via `reservationId`). For
+      // legacy null-`reservationId` bookings the record
+      // stays byte-equivalent to pre-MRB-04 — no
+      // `reservationId` field on the record.
+      const recordWithReservation = bookingReservationId.length > 0
+        ? { ...paymentRecord, reservationId: bookingReservationId, bookingId: bookingId }
+        : paymentRecord;
 
-      transaction.create(paymentsRef.doc(paymentId), paymentRecord);
+      transaction.create(paymentsRef.doc(paymentId), recordWithReservation);
 
       // Transition to payment-confirmed only when fully paid
       const bookingUpdates: Record<string, any> = {

@@ -393,4 +393,160 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
       expect(summary.balance).toBe(expectedBalance);
     }
   });
+
+  it("`refunds` defaults to [] (backward compat with Phase 1 callers that don't pass it)", () => {
+    // The Phase 1 signature had `payments` + `charges` only.
+    // Phase 2.x adds an optional `refunds` field. Omitting it
+    // must produce the same `paymentsTotal` as the Phase 1
+    // behavior — only the `payments` array contributes. This
+    // keeps every Phase 1 caller (the existing 8 tests above
+    // + the legacy adapter) byte-equivalent.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_phase2x_backcompat",
+      reservationTotal: 1000,
+      payments: [{ amount: 500 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(summary.paymentsTotal).toBe(500);
+    expect(summary.balance).toBe(500);
+  });
+
+  it("`refunds: []` explicitly passed is equivalent to omitting the field", () => {
+    // The defensive default is `refunds: []` when omitted.
+    // Passing it explicitly with an empty array must
+    // produce the same result — the helper normalizes both
+    // shapes to the same internal state.
+    const omitted = getReservationFolioSummary({
+      reservationId: "res_phase2x_omitted",
+      reservationTotal: 1000,
+      payments: [{ amount: 500 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    const explicit = getReservationFolioSummary({
+      reservationId: "res_phase2x_explicit",
+      reservationTotal: 1000,
+      payments: [{ amount: 500 }],
+      refunds: [],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(explicit.paymentsTotal).toBe(omitted.paymentsTotal);
+    expect(explicit.balance).toBe(omitted.balance);
+  });
+
+  it("`refunds: [{ amount: -1000 }]` contributes -1000 to paymentsTotal (the dual-read pattern)", () => {
+    // Per MRB-04 Phase 2.x: the canonical refund source is
+    // `reservations/{id}/refunds/`. The helper sums these
+    // negative-amount entries into `paymentsTotal` so the
+    // balance invariant holds. A 5000 payment + a 1000
+    // canonical refund = 4000 total = balance 5000 + 0 -
+    // 4000 = 1000. Same math as the historical CRL-01
+    // negative-amount convention.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_phase2x_refunds",
+      reservationTotal: 5000,
+      payments: [{ amount: 5000 }],
+      refunds: [{ amount: -1000 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(summary.paymentsTotal).toBe(4000);
+    expect(summary.balance).toBe(1000);
+  });
+
+  it("the dual-read pattern sums payments + refunds into paymentsTotal (Belt-and-suspenders)", () => {
+    // Per the MRB-04 Phase 2.x design: the helper reads
+    // BOTH `payments/` (for any negative-amount entries —
+    // belt-and-suspenders, catches edge cases like legacy
+    // CRL-01 backfills) AND `refunds/` (canonical). The
+    // writer only writes to `refunds/`, so the two arrays
+    // are disjoint in normal operation. This test confirms
+    // the dual-read sums both — a 3000 positive payment +
+    // a -1000 negative payment (legacy backfill) + a -500
+    // canonical refund = 1500 paymentsTotal.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_phase2x_dual",
+      reservationTotal: 4000,
+      payments: [{ amount: 3000 }, { amount: -1000 }],
+      refunds: [{ amount: -500 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(summary.paymentsTotal).toBe(1500);
+    expect(summary.balance).toBe(2500);
+  });
+
+  it("the balance invariant holds when both payments and refunds carry negative entries", () => {
+    // The balance invariant `reservation balance ==
+    // reservationTotal + chargesTotal - paymentsTotal`
+    // must hold for any mix of positive + negative
+    // entries on both subcollections. A 2000 total + a
+    // 1000 payment + a -300 refund + a 500 charge = the
+    // 500 charge adds to the total, the 1000 payment
+    // subtracts, the -300 refund subtracts (adds to the
+    // balance). Expected: 2000 + 500 - (1000 + -300) =
+    // 2500 - 700 = 1800.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_phase2x_invariant",
+      reservationTotal: 2000,
+      payments: [{ amount: 1000 }],
+      refunds: [{ amount: -300 }],
+      charges: [{ amount: 500 }],
+      source: "reservation-subcollection"
+    });
+    expect(summary.paymentsTotal).toBe(700);
+    expect(summary.chargesTotal).toBe(500);
+    expect(summary.balance).toBe(1800);
+  });
+
+  it("legacy adapter uses payments array for refunds (refunds: [] passed; payments carries negative entries)", () => {
+    // Legacy null-`reservationId` bookings keep the
+    // historical CRL-01 shape: refunds are negative-amount
+    // entries on `bookings/{id}/payments`. The legacy
+    // adapter passes `refunds: []` (the refunds subcollection
+    // doesn't exist on the legacy path) and supplies the
+    // refund entries via the `payments` array. The helper
+    // sums both — with `refunds: []` the result is identical
+    // to the pre-Phase-2.x behavior. This is the byte-
+    // equivalent backward-compat guard.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_legacy_refunds",
+      reservationTotal: 5000,
+      payments: [{ amount: 5000 }, { amount: -1000 }],
+      refunds: [],
+      charges: [],
+      source: "booking-subcollection-legacy"
+    });
+    expect(summary.paymentsTotal).toBe(4000);
+    expect(summary.balance).toBe(1000);
+    expect(summary.source).toBe("booking-subcollection-legacy");
+  });
+
+  it("defensive coercion: NaN / undefined amounts on refunds normalize to 0 (same as payments)", () => {
+    // The helper uses `Number(amount) || 0` for the refunds
+    // reduce, matching the payments + charges treatment.
+    // Malformed refund entries (NaN, undefined, string) are
+    // silently treated as 0 — the balance invariant holds
+    // for any mix of malformed inputs. The 2000 total + 1000
+    // payment + a NaN refund + a -500 refund + a 500 charge
+    // = 2000 + 500 - (1000 + 0 + -500) = 2500 - 500 = 2000.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_phase2x_coercion",
+      reservationTotal: 2000,
+      payments: [{ amount: 1000 }],
+      refunds: [
+        { amount: NaN },
+        { amount: undefined as any },
+        { amount: -500 },
+        { amount: "garbage" as any }
+      ],
+      charges: [{ amount: 500 }],
+      source: "reservation-subcollection"
+    });
+    expect(summary.paymentsTotal).toBe(500);
+    expect(summary.chargesTotal).toBe(500);
+    expect(summary.balance).toBe(2000);
+  });
 });

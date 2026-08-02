@@ -325,6 +325,26 @@ export interface ReservationPayment {
   recordedAt: Date;
 }
 
+/** Per MRB-04 Phase 2.x (2026-08-02, per decision #159): a refund entry on the reservation folio. The canonical refund source for new reservations (post-MRB-04 Phase 2.x) lives at `reservations/{id}/refunds/{refundId}`. The shape mirrors the existing legacy `bookings/{id}/refunds/` entry — admin-only, requires an approver UID + a reason + a method. Per the "both, as separate paths" design: the helper `getReservationFolioSummary` reads BOTH `reservations/{id}/payments` (for any negative-amount entries — belt-and-suspenders) AND `reservations/{id}/refunds` (canonical). The writer (`handleAddRefund`) only writes to `refunds/`, so a refund in BOTH subcollections would be a writer bug, not a normal state. */
+export interface ReservationRefund {
+  id: string;
+  reservationId: string;
+  /** Optional — for per-room attribution. Most reservation-level refunds leave this null; per-room refunds (e.g. a refund for a specific room's add-on) carry the bookingId. */
+  bookingId: string | null;
+  /** Always negative — the refund amount as a positive number is `Math.abs(amount)`. The sign convention matches the CRL-01 negative-amount convention on the legacy `bookings/{id}/payments/` ledger. */
+  amount: number;
+  method: string;
+  /** Always required for refunds — admin-only, the staff must supply a reason. */
+  reason: string;
+  /** Tender-specific identifier (GCash ref, bank trace). Same convention as the `ReservationPayment` field. */
+  transactionReference: string | null;
+  /** The admin who approved the refund (required — refunds are admin-only). Mirrors the legacy `bookings/{id}/refunds.approvedBy`. */
+  approvedBy: string;
+  /** The admin who recorded the refund. May be the same as `approvedBy` when a single admin does both steps. */
+  recordedBy: string;
+  recordedAt: Date;
+}
+
 /** A charge (incidental or adjustment) on the reservation folio. Lives at `reservations/{id}/charges/{chargeId}`. The `voidOf` field mirrors the existing `bookings/{id}/charges` ledger — a non-null `voidOf` voids a prior charge. */
 export interface ReservationCharge {
   id: string;

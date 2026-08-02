@@ -238,6 +238,20 @@ export function computeServerFolioTotals(
 // "legacy booking" badge; the receipt path renders
 // the same shape regardless of source).
 //
+// Per MRB-04 Phase 2.x (2026-08-02, per decision #159):
+// refunds are now read from BOTH `reservations/{id}/payments`
+// (for any negative-amount entries — belt-and-suspenders,
+// catches edge cases like a CRL-01 backfill or an admin
+// pre-recording) AND `reservations/{id}/refunds` (the
+// canonical refund source written by `handleAddRefund`).
+// The helper sums both arrays into `paymentsTotal`; the
+// writer only writes to `refunds/`, so the two arrays are
+// disjoint in normal operation. Legacy null-`reservationId`
+// bookings keep the historical behavior — refunds are
+// negative-amount entries on `bookings/{id}/payments`, and
+// the legacy adapter passes `refunds: []` (the caller's
+// `payments` array carries the refund entries).
+//
 // The balance invariant is the canonical money rule:
 // `reservation balance == reservationTotal +
 // chargesTotal − paymentsTotal`. The helper enforces
@@ -270,8 +284,35 @@ export interface ReservationFolioSummaryInput {
   reservationId: string;
   /** The reservation's total — the sum of per-room `totalPrice`. Set at create time; recomputed transactionally in MRB-04's payment write paths. */
   reservationTotal: number;
-  /** The reservation's payment entries (from `reservations/{id}/payments` for new reservations, or `bookings/{id}/payments` for legacy null-`reservationId` bookings). */
+  /**
+   * The reservation's payment entries. For new reservations
+   * (post-MRB-01), from `reservations/{id}/payments` (which
+   * carries positive-amount payment entries per the Phase 2
+   * `handleAddPayment` refactor). For legacy null-`reservationId`
+   * bookings, from `bookings/{id}/payments` (which carries both
+   * positive-amount payments AND negative-amount refunds per the
+   * historical CRL-01 convention).
+   *
+   * Per MRB-04 Phase 2.x: the helper ALSO reads `reservations/{id}/refunds`
+   * via the `refunds` field below. The two arrays are summed into
+   * `paymentsTotal`; in normal operation the writer only writes to
+   * `refunds/`, so the arrays are disjoint. The "belt-and-suspenders"
+   * is a defensive read of the `payments` array for any negative-amount
+   * entries (catches edge cases like legacy CRL-01 backfills or admin
+   * pre-recordings). Callers fetching from new subcollections pass BOTH
+   * arrays; the legacy adapter passes `refunds: []` and supplies the
+   * negative-amount entries via `payments`.
+   */
   payments: FolioReservationPayment[];
+  /**
+   * The reservation's refund entries (canonical source — from
+   * `reservations/{id}/refunds` for new reservations per MRB-04
+   * Phase 2.x). The legacy null-`reservationId` adapter passes
+   * `refunds: []` (the negative-amount refund entries live on
+   * `bookings/{id}/payments` per the historical CRL-01 convention).
+   * Default `[]` keeps the Phase 1 callers backward-compatible.
+   */
+  refunds?: FolioReservationPayment[];
   /** The reservation's charge entries (from `reservations/{id}/charges` for new reservations, or `bookings/{id}/charges` for legacy null-`reservationId` bookings). */
   charges: FolioReservationCharge[];
   /**
@@ -287,20 +328,23 @@ export interface ReservationFolioSummaryInput {
 /**
  * Compute the behavior-frozen reservation folio summary. Pure
  * function — no Firestore calls, no React state, no async. The
- * caller supplies the pre-fetched payments + charges; the helper
- * sums them and computes the balance.
+ * caller supplies the pre-fetched payments + refunds + charges;
+ * the helper sums them and computes the balance.
  *
  * The balance invariant is `reservation balance == reservationTotal
  * + chargesTotal − paymentsTotal`. A single-pass sign-aware sum
  * preserves the invariant at the math level — no separate
  * derivation that could drift. For refunds, `paymentsTotal` is
- * negative; for voids, `chargesTotal` is zero (the void entry has
- * a negative amount that exactly cancels the original; the helper
- * filters out the void entry's contribution by treating the sum
- * at the entry level — the caller is responsible for supplying
- * only the active entries, not the void pair). For a single-pass
- * implementation, the caller should pre-filter the void pairs
- * (the `bookings/{id}/charges` query reads all entries; the legacy
+ * negative (the `refunds` array entries are always negative per
+ * the CRL-01 convention; the `payments` array may also carry
+ * negative entries as a belt-and-suspenders fallback). For voids,
+ * `chargesTotal` is zero (the void entry has a negative amount
+ * that exactly cancels the original; the helper filters out the
+ * void entry's contribution by treating the sum at the entry
+ * level — the caller is responsible for supplying only the active
+ * entries, not the void pair). For a single-pass implementation,
+ * the caller should pre-filter the void pairs (the
+ * `bookings/{id}/charges` query reads all entries; the legacy
  * adapter filters voids in `computeBookingFolio` above; the new
  * reservation adapter should do the same).
  */
@@ -315,17 +359,24 @@ export function getReservationFolioSummary(
   source: "reservation-subcollection" | "booking-subcollection-legacy";
 } {
   const reservationTotal = Number(input.reservationTotal) || 0;
-  // Sign-aware sums — `payments` includes refunds (negative
-  // amounts); `charges` includes adjustments (positive or
-  // negative per the existing per-creator + bounds + void
-  // semantics). A single pass preserves the balance invariant
-  // at the math level: the caller is expected to pre-filter
-  // the void pairs (see the doc block above) so the sum is
-  // over the ACTIVE entries only.
-  const paymentsTotal = input.payments.reduce(
-    (sum, p) => sum + (Number(p.amount) || 0),
-    0
-  );
+  // Sign-aware sums — `payments` + `refunds` are summed into
+  // `paymentsTotal`. Refunds are negative entries on either
+  // subcollection (per CRL-01's negative-amount convention);
+  // positive payments are positive entries on `payments/`. A
+  // single pass over the union preserves the balance invariant
+  // at the math level. In normal operation the writer only
+  // writes to `refunds/`, so the two arrays are disjoint — the
+  // double-count risk only materializes if a refund lives in
+  // BOTH subcollections (a writer bug, not a normal state).
+  // `charges` includes adjustments (positive or negative per
+  // the existing per-creator + bounds + void semantics); the
+  // caller is expected to pre-filter the void pairs (see the
+  // doc block above) so the sum is over the ACTIVE entries
+  // only.
+  const refunds = input.refunds ?? [];
+  const paymentsTotal =
+    input.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) +
+    refunds.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
   const chargesTotal = input.charges.reduce(
     (sum, c) => sum + (Number(c.amount) || 0),
     0

@@ -129,13 +129,14 @@ service cloud.firestore {
     // credential, gated by /api/bookings/lookup).
     //
     // Subcollections mirror the booking's money-shape so MRB-04's
-    // folio migration (payments + charges on the reservation) and
-    // MRB-07's refund-state machine can land without a second
-    // rules change. The `payments` subcollection is server-only
-    // (no client create — same shape as the existing booking
-    // payments rule); the `charges` subcollection allows staff
-    // direct write (same shape as the existing booking charges
-    // rule, with the per-creator + bounds + void semantics).
+    // folio migration (payments + charges + refunds on the
+    // reservation) and MRB-07's refund-state machine can land
+    // without a second rules change. The `payments` and `refunds`
+    // subcollections are server-only (no client create — same shape
+    // as the existing booking payments rule); the `charges`
+    // subcollection allows staff direct write (same shape as the
+    // existing booking charges rule, with the per-creator + bounds
+    // + void semantics).
     match /reservations/{reservationId} {
       allow read: if isStaff();
       allow write: if false;  // Server-authoritative; Admin SDK only.
@@ -143,6 +144,21 @@ service cloud.firestore {
       match /payments/{paymentId} {
         allow read: if isStaff();
         allow create: if false;  // Server-authoritative payment/refund APIs only.
+        allow update, delete: if false;
+      }
+
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision #159): the
+      // canonical refund source for new reservations. The
+      // `handleAddRefund` writer only writes to `refunds/`; the
+      // helper `getReservationFolioSummary` reads BOTH `payments/`
+      // (for any negative-amount entries — belt-and-suspenders) AND
+      // `refunds/` (canonical). Server-only: refunds are admin-only
+      // and require a `client-preallocated refundId` for CRL-01
+      // idempotency. Same shape as the `payments/` subcollection —
+      // no client create/update/delete; staff read.
+      match /refunds/{refundId} {
+        allow read: if isStaff();
+        allow create: if false;  // Server-authoritative refund APIs only.
         allow update, delete: if false;
       }
 
