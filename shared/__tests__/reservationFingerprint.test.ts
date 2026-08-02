@@ -103,6 +103,17 @@ describe("MRB-01 reservation request fingerprint", () => {
     expect(changed).not.toBe(original);
   });
 
+  it("rejects different per-room breakfast choices as a different fingerprint", () => {
+    const changed = computeRequestFingerprint({
+      ...SAMPLE_REQUEST,
+      roomLines: SAMPLE_REQUEST.roomLines.map((room, index) => (
+        index === 0 ? { ...room, hasBreakfast: true } : room
+      ))
+    }, deterministicHasher());
+    const original = computeRequestFingerprint(SAMPLE_REQUEST, deterministicHasher());
+    expect(changed).not.toBe(original);
+  });
+
   it("rejects a different date range as a different fingerprint", () => {
     const changed = computeRequestFingerprint({
       ...SAMPLE_REQUEST,

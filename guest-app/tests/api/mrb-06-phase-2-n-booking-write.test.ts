@@ -22,7 +22,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       );
     });
 
-    it("first room uses the client's preallocated bookingId; subsequent rooms auto-mint", () => {
+    it("uses the booking id preallocated for each normalized room selection", () => {
       // The first room's `bookingId` is the client's
       // preallocated id (the historical contract).
       // The other N-1 rooms auto-mint via the
@@ -33,7 +33,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // client to preallocating N ids once the N>1
       // client surface lands).
       expect(handlers).toMatch(
-        /const bookingIdForThisRoom = bookingIdx === 0\s*\n\s*\? bookingId\s*\n\s*: adminDb\.collection\("bookings"\)\.doc\(\)\.id;/
+        /const bookingIdForThisRoom = assignedRoomForBooking\.selection\.bookingId;/
       );
     });
 
@@ -59,7 +59,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // N (same for every booking doc — the room
       // count is a reservation-level aggregate).
       expect(handlers).toMatch(
-        /roomId: assignedRoomForBooking\.id,\s*\n\s*roomNumber: String\(assignedRoomForBooking\.data\.roomNumber \|\| ""\),\s*\n\s*reservationPosition: bookingIdx \+ 1,\s*\n\s*reservationRoomCount: assignedRooms\.length,/
+        /roomId: assignedRoomForBooking\.id,\s*\n\s*roomNumber: String\(assignedRoomForBooking\.data\.roomNumber \|\| ""\),[\s\S]*?reservationPosition: bookingIdx \+ 1,\s*\n\s*reservationRoomCount: assignedRooms\.length,/
       );
     });
 
@@ -79,7 +79,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
   });
 
   describe("Group totals on the reservation header — N>1 aggregation", () => {
-    it("multiplies the single-room totalPrice by assignedRooms.length for the header's group total", () => {
+    it("writes the already-aggregated reservation totalPrice", () => {
       // The header's `totalPrice` is the sum of
       // the N per-room totals. The per-type math
       // is the same for every room of the same
@@ -90,32 +90,32 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // byte-equivalent to the pre-MRB-06
       // single-room value.
       expect(handlers).toMatch(
-        /totalPrice: totalPrice \* assignedRooms\.length,/
+        /subtotal,\s*\n\s*totalPrice,/
       );
     });
 
-    it("multiplies the single-room originalSubtotal by assignedRooms.length for the header's group total", () => {
+    it("writes the aggregated pre-discount subtotal", () => {
       // Same pattern as `totalPrice`. The header
       // carries the aggregate pre-discount
       // subtotal across the N rooms.
       expect(handlers).toMatch(
-        /originalSubtotal: totalPrice \* assignedRooms\.length,\s*\/\/ MRB-04: the proper originalSubtotal computation/
+        /originalSubtotal: subtotal,/
       );
     });
 
-    it("multiplies the single-room subtotal by assignedRooms.length for the header's group total", () => {
+    it("writes the aggregated subtotal once", () => {
       // Same pattern as `totalPrice` +
       // `originalSubtotal`. The header's
       // post-discount `subtotal` aggregates
       // across the N rooms.
       expect(handlers).toMatch(
-        /subtotal: totalPrice \* assignedRooms\.length,\s*\/\/ MRB-04: the proper subtotal after add-on math/
+        /discountScopeSnapshot: snapshottedDiscountScope,\s*\n\s*subtotal,\s*\n\s*totalPrice,/
       );
     });
   });
 
   describe("EXB-10 inventory check — N>1 total extra beds", () => {
-    it("counts totalExtraBeds as extraBedCount * assignedRooms.length (not the single per-room count)", () => {
+    it("sums the explicit extra-bed count across room stays", () => {
       // The per-room `extraBedCount` is the count
       // per room; for N=1 (the default) the total
       // `extraBedCount * 1` is byte-equivalent to
@@ -127,7 +127,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // to avoid silently under-counting the
       // reservation's footprint.
       expect(handlers).toMatch(
-        /const totalExtraBeds = extraBedCount \* assignedRooms\.length;/
+        /const totalExtraBeds = validatedRoomStays\.reduce\(\s*\n\s*\(sum, stay\) => sum \+ stay\.extraBedCount,\s*\n\s*0\s*\n\s*\);/
       );
     });
 
@@ -154,7 +154,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // single-element array — byte-equivalent to
       // the pre-MRB-06 single fields.
       expect(handlers).toMatch(
-        /rooms: \(typeof bookingWriteRefs === "undefined" \? \[\] : bookingWriteRefs\)\.map\(\(w, idx\) => \{/
+        /rooms: finalRooms,/
       );
     });
 
@@ -168,7 +168,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // room's id + number, and the 1-indexed
       // position in the assigned-rooms list.
       expect(handlers).toMatch(
-        /return \{\s*\n\s*bookingId: w\.ref\.id,\s*\n\s*roomId: r\.id,\s*\n\s*roomNumber: String\(r\.data\.roomNumber \|\| ""\),\s*\n\s*reservationPosition: idx \+ 1\s*\n\s*\};/
+        /bookingId: write\.ref\.id,\s*\n\s*roomId: assigned\.id,\s*\n\s*roomNumber: String\(assigned\.data\.roomNumber \|\| ""\),\s*\n\s*roomType: assigned\.selection\.roomType,\s*\n\s*reservationPosition: index \+ 1,/
       );
     });
   });

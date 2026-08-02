@@ -33,18 +33,18 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
   });
 
-  it("filters room types on separate adult and child caps plus extra-bed allowance", () => {
+  it("keeps available types visible and distributes occupancy per selected room", () => {
     const availabilityBlock = bookingPageSrc.match(
       /const availableRoomTypes = useMemo\([\s\S]*?\n\s*\);/
     );
     expect(availabilityBlock).toBeTruthy();
-    expect(availabilityBlock![0]).toMatch(/numAdults/);
-    expect(availabilityBlock![0]).toMatch(/numChildren/);
-    expect(availabilityBlock![0]).toMatch(/maxChildren:\s*Number\(entry\.type\.maxChildren\)/);
-    expect(availabilityBlock![0]).toMatch(
-      /overflow\.requiredExtraBeds <= \(Number\(entry\.type\.maxExtraBeds\) \|\| 0\)/
+    expect(availabilityBlock![0]).toMatch(/entry\.availableCount > 0/);
+    expect(bookingPageSrc).toMatch(
+      /rebalanceGuestDistribution\(roomCart, roomTypes, numAdults, numChildren\)/
     );
-    expect(availabilityBlock![0]).not.toMatch(/maxCapacity >= guests/);
+    expect(bookingPageSrc).toMatch(
+      /distributedRoomCart\.every\(\(room\) => room\.numAdults >= 1\)/
+    );
   });
 
   it("includes adult, child, and extra-bed allowances in the page-level guest ceiling", () => {
@@ -87,31 +87,24 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
   });
 
-  it("shows the exact extra-bed next step when the selected split overflows", () => {
-    expect(bookingPageSrc).toMatch(
-      /const missingExtraBeds = Math\.max\([\s\S]{0,150}selectedOccupancyOverflow\.requiredExtraBeds - extraBedCount/
-    );
-    expect(bookingPageSrc).toMatch(
-      /selectedTypeEntry && missingExtraBeds > 0/
-    );
-    expect(bookingPageSrc).toMatch(
-      /Add \{missingExtraBeds\} more extra bed/
-    );
+  it("shows per-room extra-bed allocation and a clear incomplete-distribution next step", () => {
+    expect(bookingPageSrc).toMatch(/room\.extraBedCount > 0/);
+    expect(bookingPageSrc).toMatch(/room\.extraBedCount\} extra bed/);
+    expect(bookingPageSrc).toMatch(/!cartDistributionComplete/);
+    expect(bookingPageSrc).toMatch(/Add enough rooms to place every guest/);
     expect(bookingPageSrc).toMatch(/role="status"/);
     expect(bookingPageSrc).toMatch(/aria-live="polite"/);
   });
 
-  it("does not let the guest continue with a missing required bed", () => {
-    expect(bookingPageSrc).toMatch(
-      /selectedTypeIsAvailable && missingExtraBeds === 0[\s\S]{0,300}Continue to Step 2/
-    );
+  it("does not let the guest continue until every room assignment is valid", () => {
+    expect(bookingPageSrc).toMatch(/cartIsReady \? \([\s\S]{0,300}Continue to Step 2/);
     expect(bookingPageSrc).toMatch(
       /disabled[\s\S]{0,200}aria-describedby="step-one-occupancy-error"/
     );
-    expect(bookingPageSrc).toMatch(/Your selected room needs \{missingExtraBeds\} more extra bed/);
+    expect(bookingPageSrc).toMatch(/Add enough available rooms to fit every guest/);
   });
 
-  it("persists children and extra-bed counts across booking-step URLs", () => {
+  it("persists the distributed room cart across booking-step URLs", () => {
     expect(bookingPageSrc).toMatch(
       /extraBedCount[\s\S]{0,100}searchParams\.get\("extraBeds"\)/
     );
@@ -121,6 +114,9 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     expect(continueParams).toBeTruthy();
     expect(continueParams![0]).toMatch(/children:\s*String\(numChildren\)/);
     expect(continueParams![0]).toMatch(/extraBeds:\s*String\(extraBedCount\)/);
+    expect(bookingPageSrc).toMatch(
+      /continueParams\.set\("rooms", serializeBookingRoomCart\(distributedRoomCart\)\)/
+    );
   });
 
   it("keeps every touched occupancy control at least 44px", () => {
@@ -130,10 +126,11 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
     expect(childrenBlock.match(/h-11 w-11/g)).toHaveLength(2);
 
-    const extraBedBlock = bookingPageSrc.slice(
-      bookingPageSrc.indexOf("Extra bed{Number(selectedTypeEntry.maxExtraBeds)"),
-      bookingPageSrc.indexOf("selectedTypeEntry && missingExtraBeds")
+    expect(bookingPageSrc).toMatch(
+      /aria-label=\{`Remove one \$\{type\.label\} room`\}[\s\S]{0,180}h-11 w-11/
     );
-    expect(extraBedBlock.match(/h-11 w-11/g)).toHaveLength(2);
+    expect(bookingPageSrc).toMatch(
+      /aria-label=\{`Add one \$\{type\.label\} room`\}[\s\S]{0,180}h-11 w-11/
+    );
   });
 });

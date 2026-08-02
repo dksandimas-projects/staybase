@@ -78,10 +78,10 @@ describe("EXB-03 — capacity overflow rule (helper + three call sites)", () => 
     // split so the desk / guest can see exactly which
     // axis is over.
     expect(bookingsHandlerSrc).toMatch(
-      /const\s+overflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults,[\s\S]{0,200}numChildren,[\s\S]{0,200}maxCapacity:\s*typeMaxCapacity,[\s\S]{0,200}maxChildren:\s*typeMaxChildren[\s\S]{0,200}\}\)/
+      /const\s+overflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults,[\s\S]{0,200}numChildren,[\s\S]{0,200}maxCapacity,[\s\S]{0,200}maxChildren[\s\S]{0,200}\}\)/
     );
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*overflow\.requiredExtraBeds\s*>\s*extraBedCount\s*\)\s*\{[\s\S]{0,300}Not enough extra beds:[\s\S]{0,200}overflow adult\(s\) \+[\s\S]{0,200}overflow child\(ren\)/m
+      /if\s*\(\s*overflow\.requiredExtraBeds\s*>\s*extraBedCount\s*\)\s*\{[\s\S]{0,700}Not enough extra beds:[\s\S]{0,200}overflow adult\(s\) \+[\s\S]{0,200}overflow child\(ren\)/m
     );
   });
 
@@ -127,7 +127,7 @@ describe("EXB-03 — capacity overflow rule (helper + three call sites)", () => 
     // limit; the overflow is the occupancy-vs-extra-bed
     // accounting. Both must reject, in that order.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*extraBedCount\s*>\s*typeMaxExtraBeds\s*\)\s*\{[\s\S]{0,200}Extra bed count \(\$\{extraBedCount\}\) exceeds the room type's allowance/
+      /if\s*\(\s*extraBedCount\s*>\s*maxExtraBeds\s*\)\s*\{[\s\S]{0,200}Extra bed count \(\$\{extraBedCount\}\) exceeds \$\{selectionType\.label \|\| selection\.roomType\}'s allowance/
     );
   });
 

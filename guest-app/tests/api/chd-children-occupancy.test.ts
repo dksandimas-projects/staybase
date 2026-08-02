@@ -147,7 +147,7 @@ describe("CHD-04 — capacity validation splits into two checks (server-authorit
     // the server derives the split from the request body and
     // rejects any client-supplied total that disagrees.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(numAdults\s*\+\s*numChildren\s*!==\s*guests\)\s*\{[\s\S]{0,200}throw new Error\(\s*`Occupancy split mismatch:/
+      /requestedGuestCount\s*!==\s*guests[\s\S]{0,250}Guest distribution mismatch/
     );
   });
 
@@ -161,7 +161,7 @@ describe("CHD-04 — capacity validation splits into two checks (server-authorit
     // just through a generalized code path. The source
     // text below pins the call + the `if (overflow.requiredExtraBeds > extraBedCount)` reject.
     expect(bookingsHandlerSrc).toMatch(
-      /const\s+overflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults,[\s\S]{0,200}numChildren,[\s\S]{0,200}maxCapacity:\s*typeMaxCapacity,[\s\S]{0,200}maxChildren:\s*typeMaxChildren[\s\S]{0,200}\}\)/
+      /const\s+overflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults,[\s\S]{0,200}numChildren,[\s\S]{0,200}maxCapacity,[\s\S]{0,200}maxChildren[\s\S]{0,200}\}\)/
     );
     expect(bookingsHandlerSrc).toMatch(
       /if\s*\(\s*overflow\.requiredExtraBeds\s*>\s*extraBedCount\s*\)\s*\{[\s\S]{0,300}Not enough extra beds/
@@ -177,7 +177,7 @@ describe("CHD-04 — capacity validation splits into two checks (server-authorit
     // single check on `overflow.requiredExtraBeds` covers
     // both the adult-cap and the child-cap case.
     expect(bookingsHandlerSrc).toMatch(
-      /requiredExtraBedsFor\(\{[\s\S]{0,200}numChildren,[\s\S]{0,200}maxChildren:\s*typeMaxChildren/
+      /requiredExtraBedsFor\(\{[\s\S]{0,200}numChildren,[\s\S]{0,200}maxChildren/
     );
   });
 

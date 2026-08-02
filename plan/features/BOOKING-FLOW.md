@@ -22,13 +22,15 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ---
 
-## Step 1 — Select Dates & Room
+## Step 1 — Select Dates & Rooms
 
 ### UI Checklist
 - [x] Check-in / check-out date pickers — blocks past dates, min 1 night enforced
 - [x] Adult and child inputs — validated independently against the chosen room type's adult cap (`maxCapacity`) and child cap (`maxChildren`), with configured extra beds covering either kind of overflow
 - [x] **Available room types grid** — one card per room type defined in `settings/hotelConfig.roomTypes[]` (falling back to `DEFAULT_ROOM_TYPES`). Cards are grouped by type, not per physical room — see "Room type booking" below.
 - [x] Each type card shows "X of Y available for your dates" so guests see live capacity without exposing specific room numbers
+- [x] Each type card has a 44px quantity selector, capped by live availability; selected types form a small room cart and the sticky summary shows the running reservation total
+- [x] Adults and children are distributed across the selected rooms, with one adult required per room. Each child stay is checked against that type's adult/child/extra-bed limits before the guest can continue.
 - [x] Each type card shows two options (if breakfast is enabled in `settings/breakfastConfig`):
   - [x] **Room Only** — standard rate per night
   - [x] **Room + Breakfast** — combined rate uses the chargeable breakfast occupancy: adults plus children when the booking's include-children toggle is on
@@ -48,8 +50,9 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Price breakdown model derived from the same nightly-rate calculation as the booking total; never maintain a separate client-only formula.
 - [x] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
 - [x] Breakfast combined rate uses adults plus included children and recomputes whenever either occupancy count or the include-children toggle changes
-- [x] Selected room type, dates, `numAdults`, `numChildren`, derived total `numGuests`, and breakfast choices persist in booking context/state
+- [x] Selected room types and quantities, per-room `numAdults`, `numChildren`, extra-bed count and breakfast choice, dates, and aggregate guest total persist in booking context/state
 - [x] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
+- [x] The client sends one explicit `roomSelections[]` entry per requested room. The transaction assigns distinct physical rooms, prices every child stay, applies reservation-level discounts once, and allocates the exact rounded total back to the child bookings.
 
 ---
 
@@ -77,6 +80,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ### UI Checklist
 - [x] Full booking summary (read-only) — room name, dates, nights, rate breakdown, breakfast add-on (if selected), subtotal
+- [x] Multi-room summary lists each room's type, distributed occupancy, breakfast choice, and extra-bed requirement while collecting one lead guest and one payment for the reservation
 - [x] Price breakdown section:
   - [x] Shows regular nights count × regular nightly rate when present.
   - [x] Shows weekend nights count × weekend nightly rate when present.
@@ -113,6 +117,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Discount and voucher calculations happen client-side for display, server-side for storage
 - [x] The breakdown shown in Step 3 is recomputed server-side during booking creation; client-provided totals or breakdown lines are advisory only and must not be trusted.
 - [x] Server response returns the persisted breakdown so Step 4 can show the authoritative explanation for the final total.
+- [x] Per MRB-06, `/api/bookings/create` accepts the explicit room cart, returns all assigned rooms, and keeps the historical single-room fields for compatible callers. The request fingerprint includes per-room occupancy, extra beds, and breakfast choices so changed retries conflict instead of replaying stale pricing.
 - [x] Booking flow preallocates a Firestore booking document ID before Step 3 uploads; `/api/bookings/create` must create the booking document at that same ID
 - [x] Per MRB-02 (2026-08-02, per decision #164): the public `/book` flow preallocates a `reservationId` (UUIDv4, generated client-side via the shared `generateReservationId()` helper) and sends it in the body of `/api/bookings/create`. The server's transaction reads the `reservations/{id}` header first as the idempotency anchor: same `reservationId` + same `requestFingerprint` → idempotent replay (returns the existing booking's response with `idempotentReplay: true`); same `reservationId` + different `requestFingerprint` → 409 conflict; header exists but child missing → 500. The preallocation is held in a `useState` lazy init so the same id survives across renders and retry-after-uncertain-response (the user re-tries without reloading the page; the id is reused). The response payload mirrors the same `reservationId` + `reservationRef` + `idempotentReplay` shape across the three paths (fresh create, reservation-level replay, legacy booking-level replay) so the confirmation page can deep-link to `/manage?reservation=<id>` regardless of which path produced the booking.
 - [x] Payment screenshot uploaded to Firebase Storage before booking creation using the preallocated booking ID path
@@ -127,8 +132,9 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 ## Step 4 — Booking Confirmation
 
 ### UI Checklist
-- [x] Booking reference number displayed prominently (Apollo heading)
+- [x] Reservation reference number displayed prominently (Apollo heading)
 - [x] Full booking summary with authoritative price breakdown returned by `/api/bookings/create`
+- [x] Multi-room confirmations list every assigned room and use the reservation reference for calendar and management links
 - [x] Add to Calendar button (ICS file download or Google Calendar deep link)
 - [x] Payment instructions based on selected payment method
 - [x] Pay at Hotel: "Present this confirmation at check-in. Payment is due upon arrival."

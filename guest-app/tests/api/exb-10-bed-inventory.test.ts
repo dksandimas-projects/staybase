@@ -157,7 +157,7 @@ describe("EXB-10 — hotel-wide rollaway-bed inventory (helper + 3 server call s
     );
   });
 
-  it("handleCreateBooking's inventory check is gated on `extraBedCount > 0` (the no-extra-bed fast path)", () => {
+  it("handleCreateBooking's inventory check is gated on the reservation's aggregate extra-bed count", () => {
     // The inventory check is a no-op when the booking
     // requests 0 extra beds — the early `if` skips the
     // query + the helper call. Pin the gate so a
@@ -166,7 +166,7 @@ describe("EXB-10 — hotel-wide rollaway-bed inventory (helper + 3 server call s
     // read for the 99% case where the booking has no
     // extra bed.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*extraBedCount\s*>\s*0\s*\)\s*\{[\s\S]{0,200}extraBedOverlapQuery/m
+      /const\s+totalExtraBeds\s*=\s*validatedRoomStays\.reduce[\s\S]{0,300}if\s*\(\s*totalExtraBeds\s*>\s*0\s*\)\s*\{[\s\S]{0,200}extraBedOverlapQuery/m
     );
   });
 
