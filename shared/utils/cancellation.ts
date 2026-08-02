@@ -1,5 +1,3 @@
-import { toDateOrNull } from "./bookingDates";
-
 export interface CancellationPolicySnapshot {
   cutoffHours: number;
   refundPctBefore: number;
@@ -205,5 +203,269 @@ export function createCancellationPolicySnapshot(params: {
     policyText,
     scheduledCheckInTime: checkInInstant.toISOString(),
     source
+  };
+}
+
+// Per CRL-06 (2026-08-02, decisions #171–172):
+// the cancellation preview helper. Given the looked-up
+// booking + the cancellable-children set + the
+// reservation's net-collected total (the caller passes
+// the value `getReservationFolioSummary(...).paymentsTotal`,
+// sign-aware — refunds are negative), return the
+// per-scope `CancellationPreview` shape. The helper is
+// pure: no Firestore / no I/O. The handler does the reads
+// + the net-collected sum, then hands the precomputed
+// values to this function.
+//
+// Worst-case semantics (per the CRL-06 spec body):
+// the aggregate `refundPct` is the MINIMUM per-room
+// `refundPct` across the cancellable children — the
+// amount the staff can guarantee without an exception.
+// A higher per-room refund (e.g. a corporate code that
+// overrules the standard policy) is reflected in the
+// per-room `refundPct` field so the staff can see the
+// upside, but the aggregate is the floor.
+//
+// `staffProcessingRequired` is true when the policy
+// refunds money AND the guest has paid. The destructive
+// cancel never auto-refunds per CRL-04 — when both
+// conditions are met, the staff must record a refund
+// after the cancel commits (CRL-07's admin workflow).
+//
+// The helper accepts a `null` reservation for the
+// legacy per-booking path (pre-MRB-01, no
+// `reservationId`); the net-collected total is then
+// the looked-up booking's own `paymentsTotal` (the
+// caller resolves this from the legacy
+// `bookings/{id}/payments` subcollection via the
+// existing `getReservationFolioSummary` adapter).
+
+export interface CancelPreviewChild {
+  id: string;
+  bookingRef: string;
+  status: string;
+  roomType: string;
+  totalPrice: number;
+  reservationPosition?: number | null;
+  cancellationPolicySnapshot: CancellationPolicySnapshot | null;
+}
+
+export interface CancelPreviewInput {
+  scope: "room" | "reservation";
+  now: Date;
+  lookedUpBooking: CancelPreviewChild;
+  reservation: {
+    id: string;
+    reservationRef: string;
+    totalPrice: number;
+  } | null;
+  cancellableChildren: CancelPreviewChild[];
+  reservationNetCollected: number;
+  /**
+   * Subtotal used to allocate a shared reservation folio. For a
+   * whole-reservation preview this equals the cancellable subtotal.
+   * For a room preview it is the subtotal of every currently
+   * cancellable sibling, preventing one room from inheriting the
+   * reservation's entire collected balance.
+   */
+  allocationSubtotal?: number;
+}
+
+export function evaluateCancelPreview(input: CancelPreviewInput): {
+  kind: "single" | "reservation";
+  scope: "room" | "reservation";
+  bookingRef: string;
+  reservationRef: string | null;
+  room: {
+    bookingId: string;
+    bookingRef: string;
+    position: number | null;
+    roomType: string;
+    status: string;
+    subtotal: number;
+    netCollected: number;
+    policyRefund: number;
+    retainedAmount: number;
+    refundPct: number;
+    isBeforeCutoff: boolean;
+    hoursRemaining: number;
+  } | null;
+  rooms: Array<{
+    bookingId: string;
+    bookingRef: string;
+    position: number | null;
+    roomType: string;
+    status: string;
+    subtotal: number;
+    netCollected: number;
+    policyRefund: number;
+    retainedAmount: number;
+    refundPct: number;
+    isBeforeCutoff: boolean;
+    hoursRemaining: number;
+  }> | null;
+  subtotal: number;
+  netCollected: number;
+  policyRefund: number;
+  retainedAmount: number;
+  staffProcessingRequired: boolean;
+  cutoffHours: number;
+  cutoffTimeMs: number;
+  hoursRemaining: number;
+  isBeforeCutoff: boolean;
+  refundPct: number;
+  policyText: string;
+  policySource: "settings" | "corporate-override" | "legacy-fallback";
+} {
+  // Per-room evaluation. Each cancellable child gets its
+  // own `evaluateCancellation(now, snapshot)` so the per-
+  // room `refundPct` reflects the per-room snapshot
+  // (corporate codes can overrule the standard policy
+  // per-room, and that override must surface in the
+  // per-room projection). The `reservationPosition` is
+  // the 1-indexed position the create handler stamps
+  // per MRB-01 — falls back to `null` for legacy null-
+  // `reservationId` bookings.
+  const evalRoom = (child: CancelPreviewChild) => {
+    const evaluation = evaluateCancellation(
+      input.now,
+      child.cancellationPolicySnapshot,
+      // The fallback `fallbackContext` is unused when
+      // the snapshot is present; we still pass it for
+      // the legacy null-snapshot case so a child without
+      // a snapshotted policy (pre-CRL-05) still evaluates
+      // against the standard 48h / 100% / 0% rules.
+      {
+        checkInDateKey: "",
+        checkInTime: "14:00",
+        timeZone: "Asia/Manila"
+      }
+    );
+    const subtotal = Math.max(Number(child.totalPrice) || 0, 0);
+    return {
+      child,
+      evaluation,
+      subtotal
+    };
+  };
+
+  // For "room" scope the looked-up booking is the only
+  // cancellable child. For "reservation" scope the
+  // cancellable set is the input's `cancellableChildren`
+  // (the handler filtered the children to the cancellable
+  // set using the CRL-03 status matrix).
+  const children = input.scope === "room"
+    ? [input.lookedUpBooking]
+    : input.cancellableChildren;
+  const roomRows = children.map(evalRoom);
+
+  // Pro-rata net-collected attribution. The reservation
+  // folio's `paymentsTotal` (sign-aware — refunds are
+  // negative) is the single source of truth; a child's
+  // share is its fraction of the cancellable subtotal.
+  // For the legacy per-booking path the caller passes the
+  // booking's own `paymentsTotal` as
+  // `reservationNetCollected` and the attribution is
+  // exact (the booking owns the entire ledger).
+  const cancellableSubtotal = roomRows.reduce((sum, r) => sum + r.subtotal, 0);
+  const allocationSubtotal = Math.max(
+    Number(input.allocationSubtotal) || cancellableSubtotal,
+    cancellableSubtotal
+  );
+  const availableNetCollected = Math.max(Number(input.reservationNetCollected) || 0, 0);
+  const netCollectedByRoom = roomRows.map((r) => {
+    if (allocationSubtotal === 0) return 0;
+    return Math.round(
+      (r.subtotal / allocationSubtotal) * availableNetCollected * 100
+    ) / 100;
+  });
+
+  const perRoom = roomRows.map((r, idx) => {
+    const netCollected = netCollectedByRoom[idx];
+    // A refund can only return money the guest actually paid.
+    // Applying the policy percentage to the room subtotal would
+    // overstate liability for unpaid and partially-paid bookings.
+    const policyRefund = Math.round(netCollected * (r.evaluation.refundPct / 100) * 100) / 100;
+    const retainedAmount = Math.round((netCollected - policyRefund) * 100) / 100;
+    return {
+      bookingId: r.child.id,
+      bookingRef: r.child.bookingRef,
+      position: r.child.reservationPosition ?? null,
+      roomType: r.child.roomType,
+      status: r.child.status,
+      subtotal: r.subtotal,
+      netCollected,
+      policyRefund,
+      retainedAmount,
+      refundPct: r.evaluation.refundPct,
+      isBeforeCutoff: r.evaluation.isBeforeCutoff,
+      hoursRemaining: r.evaluation.hoursRemaining
+    };
+  });
+
+  // Aggregate fields. For "room" scope the aggregate
+  // is the per-room row; for "reservation" scope it's
+  // the sum of the per-room rows. The aggregate
+  // `refundPct` is the MINIMUM per-room `refundPct` —
+  // the worst-case floor the staff can guarantee
+  // without an exception (CRL-07). The aggregate
+  // `policyText` + `cutoffHours` + `cutoffTimeMs` come
+  // from the looked-up booking's snapshot (the
+  // reservation's policy is the same across children
+  // because every child snapshots the reservation's
+  // policy at create time, and a corporate override
+  // is per-reservation, not per-room).
+  const aggregateSubtotal = cancellableSubtotal;
+  const aggregateNetCollected = Math.round(
+    netCollectedByRoom.reduce((sum, n) => sum + n, 0) * 100
+  ) / 100;
+  const aggregatePolicyRefund = perRoom.reduce((sum, r) => sum + r.policyRefund, 0);
+  const aggregateRetained = Math.round((aggregateNetCollected - aggregatePolicyRefund) * 100) / 100;
+  const aggregateRefundPct = perRoom.length > 0
+    ? Math.min(...perRoom.map((r) => r.refundPct))
+    : 0;
+  // The first cancellable room's policy metadata is
+  // representative — every child snapshots the same
+  // reservation-level policy (corporate override or
+  // settings snapshot). The per-room `refundPct` may
+  // differ across rooms when the standard-vs-corporate
+  // split exists, but the cutoff / cutoff time /
+  // policy text are the same.
+  const representativeEvaluation = roomRows[0]?.evaluation;
+
+  // The destructive cancel never auto-refunds (CRL-04).
+  // Staff processing is required when the policy
+  // refunds money AND the guest has paid. The aggregate
+  // net collected > 0 + aggregate policy refund > 0
+  // is the right condition; partial-overlap cases
+  // (refund > collected) collapse to "still need a
+  // staff action to record what was actually refunded,
+  // bounded by the collected amount".
+  const staffProcessingRequired = aggregateNetCollected > 0 && aggregatePolicyRefund > 0;
+
+  const isReservation = input.scope === "reservation" && input.reservation !== null;
+  return {
+    kind: isReservation ? "reservation" : "single",
+    scope: input.scope,
+    bookingRef: input.lookedUpBooking.bookingRef,
+    reservationRef: input.reservation?.reservationRef ?? null,
+    room: isReservation ? null : (perRoom[0] ?? null),
+    rooms: isReservation ? perRoom : null,
+    subtotal: Math.round(aggregateSubtotal * 100) / 100,
+    netCollected: aggregateNetCollected,
+    policyRefund: Math.round(aggregatePolicyRefund * 100) / 100,
+    retainedAmount: aggregateRetained,
+    staffProcessingRequired,
+    cutoffHours: representativeEvaluation?.refundPct !== undefined
+      ? (representativeEvaluation.cutoffTimeMs && input.lookedUpBooking.cancellationPolicySnapshot
+          ? input.lookedUpBooking.cancellationPolicySnapshot.cutoffHours
+          : 48)
+      : 48,
+    cutoffTimeMs: representativeEvaluation?.cutoffTimeMs ?? 0,
+    hoursRemaining: representativeEvaluation?.hoursRemaining ?? 0,
+    isBeforeCutoff: representativeEvaluation?.isBeforeCutoff ?? false,
+    refundPct: aggregateRefundPct,
+    policyText: input.lookedUpBooking.cancellationPolicySnapshot?.policyText ?? getLegacyCancellationPolicy(),
+    policySource: representativeEvaluation?.policySource ?? "legacy-fallback"
   };
 }

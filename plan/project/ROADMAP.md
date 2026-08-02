@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 2, 2026 (MRB-13 shipped on `feature/phase-12-mrb-13-cancel-scope`; running order — CRL-06/07/08/09; previously — MRB-10 shipped on `feature/phase-12-mrb-10-reservation-lookup`).
+> Last updated: August 2, 2026 (CRL-06 completed on `feature/phase-12-crl-06-cancel-preview`; running order — CRL-07/08/09).
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -27,7 +27,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Enhancements, Multi-Room & CRL | 🔄 Active (MRB-01..13 & CRL-01..05 shipped) | Open MRB-11/12/14/15 & CRL-06..09 items (§Phase 12 below) |
+| 12 — Enhancements, Multi-Room & CRL | 🔄 Active (MRB-01..13 & CRL-01..06 shipped) | Open MRB-11/12/14/15 & CRL-07..09 items (§Phase 12 below) |
 | Plan Audits (FIN, FR, FL, PF, QA, NC, AUD, SA, FLR, PC, INC) | ✅ Closed / In Prod | 0 — details in archive |
 
 ---
@@ -125,7 +125,7 @@
 
 ### Open Cancellation & Refund Lifecycle (CRL) Tasks (CRL-06..09)
 - ✅ **CRL-05 — Structured, snapshotted cancellation policy** — shipped (v0.230.0, merge `babf238`, 2026-08-02); full spec in [`plan/project/archive/ROADMAP-SHIPPED-2026-08-02.md`](archive/ROADMAP-SHIPPED-2026-08-02.md).
-- ⬜ **CRL-06 — Secure cancellation preview + guest workflow (WITH MRB-10/13)** — opening the cancel modal calls a rate-limited preview using the same strict `reservationRef + (verified email | lookup token)` credential as destructive cancellation. Show target scope/room count, policy cutoff, net collected, policy refund, retained amount, and “staff processing still required” before confirmation. Guest cancellation defaults to the whole reservation; no public path cancels one child room independently. The confirmed response and lookup card show the resulting cancellation/refund state without exposing staff notes or payment-proof data.
+- ✅ **CRL-06 — Secure cancellation preview + guest workflow (WITH MRB-10/13)** — shipped 2026-08-02 on `feature/phase-12-crl-06-cancel-preview`. The rate-limited preview uses the same strict owner credential as destructive cancellation and shows target scope, policy cutoff, net collected, policy refund, collected amount retained, and whether staff processing remains required. Guest cancellation covers all pre-arrival states after preview and defaults to whole-reservation scope. Room-scope staff previews allocate the reservation folio across eligible siblings. The post-confirmation lookup card immediately shows the preview-derived refund-processing result; persisted liability follows in CRL-07.
 - ⬜ **CRL-07 — Reservation refund liability + admin workflow (WITH MRB-04/13)** — cancellation atomically snapshots the policy result against net collected and materializes policy refund, admin-approved refund, processed refund (derived from immutable ledger entries), and outstanding refund. States distinguish `not-required`, `retained`, `pending-processing`, `partially-processed`, and `processed`; a discretionary exception changes the approved amount only, requires an admin + reason, and never rewrites the policy result. Rename the action to **Record processed refund**; require amount/method/reason and the configured tender reference when applicable. Front desk may cancel, but only Admin may approve an exception or record a processed refund.
 - ⬜ **CRL-08 — Refund-state emails, notification queue, and reports (WITH MRB-09/11)** — cancellation email lists target rooms, revised total/balance, policy refund, retained amount, and current processing state. Send one separate refund-processed email when a new ledger entry changes processing state. Add persistent staff notifications and a Reports liability queue for pending count/amount, partials, age, processed total, and retained cancellation revenue; exports/Daily Close continue deriving actual cash movement from the payment ledger, never from approval fields.
 - ⬜ **CRL-09 — Behavioral tests, staging rehearsal, and MD sync** — emulator-test refund-id replay/conflict, cancellation metadata atomicity, exact-cutoff assessment, partial/complete processing, admin override audit, guest/staff authorization matrix, whole-vs-room MRB cancellation, and “cancelled but not refunded” communication. Rehearse book → collect → cancel outside/inside cutoff → partial refund → complete refund as TEST DATA before launch. Sync `BOOKING-LOOKUP.md`, `BOOKINGS-MANAGEMENT.md`, `BOOKING-FLOW.md`, `EMAIL-PDF-STORAGE.md`, `REPORTS.md`, `STORE-MANAGEMENT.md`, `BACKEND.md`, `TYPES.md`, `API-ROUTES.md`, `SECURITY.md`, and implementation-time `DECISIONS-FEATURES.md #160`.

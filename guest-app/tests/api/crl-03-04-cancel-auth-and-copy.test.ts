@@ -27,8 +27,8 @@ function isolateHandleCancelStoreOrder() {
 
 describe("CRL-03 server-side cancellation status matrix", () => {
   describe("shared status constants (pinned by CRL-03)", () => {
-    it("GUEST_CANCELLABLE_STATUSES is the 2-value guest self-service list", () => {
-      expect(shared).toMatch(/GUEST_CANCELLABLE_STATUSES = \["pending", "payment-uploaded"\] as const/);
+    it("GUEST_CANCELLABLE_STATUSES covers every pre-arrival status after CRL-06", () => {
+      expect(shared).toMatch(/GUEST_CANCELLABLE_STATUSES = \[\s*"pending",\s*"payment-uploaded",\s*"payment-confirmed",\s*"confirmed"\s*\] as const/);
     });
 
     it("STAFF_CANCELLABLE_STATUSES covers every pre-arrival status (4 values)", () => {

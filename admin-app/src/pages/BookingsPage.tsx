@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -10,6 +10,7 @@ import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
+import { CancellationPreviewPanel } from "../components/CancellationPreviewPanel";
 import {
   BookingCheckInReadiness,
   BookingDrawerActionFooter,
@@ -567,6 +568,19 @@ export function BookingsPage() {
   // a previous session's choice never bleeds into a
   // new session.
   const [bookingCancelScope, setBookingCancelScope] = useState<"room" | "reservation">("room");
+  // Per CRL-06 (2026-08-02): the cancellation preview
+  // state. The admin cancel modal calls the new
+  // `POST /api/bookings/cancel-preview` endpoint on
+  // open (and on scope flip) and renders the
+  // financial breakdown BEFORE the user taps confirm.
+  // The destructive cancel never auto-refunds (CRL-04);
+  // the panel makes the financial effect explicit.
+  // The state resets to `null` on close so a previous
+  // session's preview never bleeds into a new one.
+  const [cancelPreview, setCancelPreview] = useState<CancellationPreview | null>(null);
+  const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
+  const [cancelPreviewError, setCancelPreviewError] = useState<string | null>(null);
+  const cancelPreviewRequestIdRef = useRef(0);
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
   const [chargeToVoid, setChargeToVoid] = useState<IncidentalCharge | null>(null);
 
@@ -2141,7 +2155,75 @@ export function BookingsPage() {
     // new session. The default `"room"` is the safer
     // choice.
     setBookingCancelScope("room");
+    cancelPreviewRequestIdRef.current += 1;
+    // Per CRL-06: drop the preview state on close
+    // so a previous session's breakdown never
+    // bleeds into a new session.
+    setCancelPreview(null);
+    setCancelPreviewError(null);
   };
+
+  // Per CRL-06 (2026-08-02): the cancellation preview
+  // fetch. The cancel modal calls this on open
+  // (mounted by the `useEffect` below) and on scope
+  // flip. The endpoint is `/api/bookings/cancel-preview`
+  // (apiRouter's flat `[domain, action]` shape — same
+  // pattern as `add-payment` / `create-walkin`). The
+  // staff path uses the staff's ID token; the body
+  // carries `bookingId` + `scope` so the server can
+  // resolve the looked-up booking. The fetch never
+  // mutates anything — the user sees the financial
+  // breakdown before tapping confirm.
+  const fetchCancelPreview = async (bookingId: string, scope: "room" | "reservation") => {
+    const requestId = ++cancelPreviewRequestIdRef.current;
+    setCancelPreviewLoading(true);
+    setCancelPreviewError(null);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/cancel-preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, scope })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to load the cancellation preview.");
+      }
+      if (requestId !== cancelPreviewRequestIdRef.current) return;
+      setCancelPreview(data.preview);
+    } catch (err: any) {
+      // Per CRL-06: the preview is best-effort. The
+      // destructive cancel still proceeds (the user
+      // can confirm with the panel in the error
+      // state). The error surfaces in the panel so
+      // the staff knows the breakdown is unavailable.
+      if (requestId === cancelPreviewRequestIdRef.current) {
+        setCancelPreview(null);
+        setCancelPreviewError(err?.message || "Could not load the cancellation preview.");
+      }
+    } finally {
+      if (requestId === cancelPreviewRequestIdRef.current) {
+        setCancelPreviewLoading(false);
+      }
+    }
+  };
+
+  // Per CRL-06: trigger the preview fetch when the
+  // cancel modal opens or the scope flips. The
+  // `useEffect` is intentionally scoped to the
+  // `[showBookingCancelForm, selectedBooking?.id,
+  // bookingCancelScope]` triple — a re-fetch fires
+  // when any of those change. The destructive
+  // cancel never auto-fires this (the modal close
+  // path clears state in `handleCancelBooking`).
+  useEffect(() => {
+    if (showBookingCancelForm && selectedBooking?.id) {
+      void fetchCancelPreview(selectedBooking.id, bookingCancelScope);
+    }
+  }, [showBookingCancelForm, selectedBooking?.id, bookingCancelScope]);
 
   // Per feat/payment-success-modal: the success modal's
   // "Confirm Booking" CTA runs the `payment-confirmed` →
@@ -5486,59 +5568,75 @@ export function BookingsPage() {
                     cancelLabel="Back"
                     variant="danger"
                     additionalFields={
-                      selectedReservationContext ? (
-                        <div
-                          data-testid="booking-cancel-scope-selector"
-                          className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
-                        >
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
-                            Cancellation scope
-                          </p>
-                          <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
-                            This booking is part of reservation {selectedReservationContext.reservationRef || "—"} ({selectedReservationContext.roomCount} rooms). Pick what to cancel.
-                          </p>
-                          <div className="mt-2 grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              data-testid="booking-cancel-scope-room"
-                              onClick={() => setBookingCancelScope("room")}
-                              className={cn(
-                                "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
-                                bookingCancelScope === "room"
-                                  ? "border-primary bg-primary text-white shadow-sm"
-                                  : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                              )}
-                            >
-                              <span className="block text-xs font-bold">This room</span>
-                              <span className={cn(
-                                "mt-0.5 block text-[10px]",
-                                bookingCancelScope === "room" ? "text-white/80" : "text-gray-500"
-                              )}>
-                                Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              data-testid="booking-cancel-scope-reservation"
-                              onClick={() => setBookingCancelScope("reservation")}
-                              className={cn(
-                                "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
-                                bookingCancelScope === "reservation"
-                                  ? "border-red-600 bg-red-600 text-white shadow-sm"
-                                  : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                              )}
-                            >
-                              <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
-                              <span className={cn(
-                                "mt-0.5 block text-[10px]",
-                                bookingCancelScope === "reservation" ? "text-white/80" : "text-gray-500"
-                              )}>
-                                Cancel the whole reservation
-                              </span>
-                            </button>
+                      <div className="space-y-3">
+                        {selectedReservationContext ? (
+                          <div
+                            data-testid="booking-cancel-scope-selector"
+                            className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
+                          >
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+                              Cancellation scope
+                            </p>
+                            <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                              This booking is part of reservation {selectedReservationContext.reservationRef || "—"} ({selectedReservationContext.roomCount} rooms). Pick what to cancel.
+                            </p>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                data-testid="booking-cancel-scope-room"
+                                onClick={() => setBookingCancelScope("room")}
+                                className={cn(
+                                  "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                                  bookingCancelScope === "room"
+                                    ? "border-primary bg-primary text-white shadow-sm"
+                                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                                )}
+                              >
+                                <span className="block text-xs font-bold">This room</span>
+                                <span className={cn(
+                                  "mt-0.5 block text-[10px]",
+                                  bookingCancelScope === "room" ? "text-white/80" : "text-gray-500"
+                                )}>
+                                  Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="booking-cancel-scope-reservation"
+                                onClick={() => setBookingCancelScope("reservation")}
+                                className={cn(
+                                  "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                                  bookingCancelScope === "reservation"
+                                    ? "border-red-600 bg-red-600 text-white shadow-sm"
+                                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                                )}
+                              >
+                                <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
+                                <span className={cn(
+                                  "mt-0.5 block text-[10px]",
+                                  bookingCancelScope === "reservation" ? "text-white/80" : "text-gray-500"
+                                )}>
+                                  Cancel the whole reservation
+                                </span>
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ) : null
+                        ) : null}
+                        {/* Per CRL-06 (2026-08-02): the financial-effect
+                            preview. The panel is mounted below the scope
+                            selector so the staff sees the breakdown
+                            before tapping confirm. The panel is
+                            best-effort — the destructive cancel still
+                            proceeds if the preview errors (the error
+                            state surfaces a clear "breakdown unavailable"
+                            message). The panel re-fetches on scope
+                            flip via the `useEffect` above. */}
+                        <CancellationPreviewPanel
+                          preview={cancelPreview}
+                          isLoading={cancelPreviewLoading}
+                          error={cancelPreviewError}
+                        />
+                      </div>
                     }
                     onConfirm={(reason) => void handleCancelBooking(reason, bookingCancelScope)}
                     onCancel={() => {
@@ -5549,6 +5647,13 @@ export function BookingsPage() {
                       // session. The default `"room"` is
                       // the safer choice.
                       setBookingCancelScope("room");
+                      cancelPreviewRequestIdRef.current += 1;
+                      // Per CRL-06: drop the preview
+                      // state on close so a previous
+                      // session's breakdown never
+                      // bleeds into a new session.
+                      setCancelPreview(null);
+                      setCancelPreviewError(null);
                     }}
                   />
                 ) : (

@@ -139,15 +139,13 @@ export type CancellationSource = (typeof CANCELLATION_SOURCES)[number];
 // handler + the email-template switch + future Reports queries all
 // key off the same lists.
 //
-//   GUEST_CANCELLABLE_STATUSES — the only statuses a guest can
-//   self-service cancel through /api/bookings/cancel. Matches the
-//   guest UI's current button-visibility (which only shows the
-//   button for `pending` / `payment-uploaded`). Once a booking has
-//   reached `payment-confirmed` or `confirmed`, money may have been
-//   collected and the guest must go through the front desk so a
-//   staff member can assess refund eligibility. CRL-06 (secure
-//   cancellation preview) will deliberately expand this set after
-//   the guest sees a policy-derived financial preview first.
+//   GUEST_CANCELLABLE_STATUSES — the pre-arrival statuses a guest
+//   can self-service cancel through /api/bookings/cancel. CRL-06
+//   expands this from the original pre-payment pair to the complete
+//   pre-arrival set because the guest cancel modal now shows the
+//   policy-derived financial preview before confirmation. Paid
+//   cancellations never issue a refund automatically; the preview
+//   explicitly identifies when staff processing remains required.
 //
 //   STAFF_CANCELLABLE_STATUSES — every pre-arrival status. A staff
 //   member can cancel any booking that has not yet checked in.
@@ -170,7 +168,12 @@ export type CancellationSource = (typeof CANCELLATION_SOURCES)[number];
 //   now 2 values, not 3. `checked-out` moved from the
 //   universal reject list to the staff-only "cancelable
 //   with clawback" list.
-export const GUEST_CANCELLABLE_STATUSES = ["pending", "payment-uploaded"] as const;
+export const GUEST_CANCELLABLE_STATUSES = [
+  "pending",
+  "payment-uploaded",
+  "payment-confirmed",
+  "confirmed"
+] as const;
 export type GuestCancellableStatus = (typeof GUEST_CANCELLABLE_STATUSES)[number];
 
 export const STAFF_CANCELLABLE_STATUSES = [
