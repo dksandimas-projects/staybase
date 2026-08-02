@@ -48,29 +48,11 @@ function extractCreateBookingFingerprintBlock(): string {
     anchor
   );
   expect(fingerprintStart).toBeGreaterThanOrEqual(0);
-  let depth = 0;
-  let i = fingerprintStart;
-  let inString = false;
-  let stringChar = "";
-  while (i < handlers.length) {
-    const ch = handlers[i];
-    if (inString) {
-      if (ch === "\\") { i += 2; continue; }
-      if (ch === stringChar) inString = false;
-    } else {
-      if (ch === '"' || ch === "'" || ch === "`") {
-        inString = true; stringChar = ch;
-      } else if (ch === "{") depth++;
-      else if (ch === "}") {
-        depth--;
-        if (depth === 0) {
-          return handlers.slice(anchor, i + 2);
-        }
-      }
-    }
-    i++;
+  const fingerprintEnd = handlers.indexOf("\n  });", fingerprintStart);
+  if (fingerprintEnd < 0) {
+    throw new Error("Could not find the closing call of the fingerprint block.");
   }
-  throw new Error("Could not find the matching closing brace of the fingerprint block.");
+  return handlers.slice(anchor, fingerprintEnd + "\n  });".length);
 }
 const fingerprintBlock = extractCreateBookingFingerprintBlock();
 

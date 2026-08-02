@@ -34,6 +34,27 @@ function parseRateBreakdown(value: string | null): BookingRateBreakdown | null {
   }
 }
 
+interface ConfirmedRoom {
+  bookingId: string;
+  roomType: string;
+  reservationPosition: number;
+  numAdults: number;
+  numChildren: number;
+  extraBedCount: number;
+  hasBreakfast: boolean;
+  totalPrice: number;
+}
+
+function parseConfirmedRooms(value: string | null): ConfirmedRoom[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export function BookingConfirmPage() {
   const [searchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
@@ -108,6 +129,10 @@ export function BookingConfirmPage() {
   const roomNumberParam = searchParams.get("roomNumber") ?? "";
   const roomTypeEntry = roomTypes.find((t) => t.value === roomTypeParam);
   const roomDisplayLabel = roomTypeEntry?.label ?? roomTypeParam;
+  const confirmedRooms = parseConfirmedRooms(searchParams.get("rooms"));
+  const roomSummaryLabel = confirmedRooms.length > 1
+    ? `${confirmedRooms.length} rooms`
+    : roomDisplayLabel;
   const rawPaymentMethod = searchParams.get("paymentMethod") ?? "gcash";
   const total = Number(searchParams.get("total") ?? 0);
   const rateBreakdown = parseRateBreakdown(searchParams.get("rateBreakdown"));
@@ -121,7 +146,7 @@ export function BookingConfirmPage() {
     // room type is surfaced on the post-booking confirmation
     // page (and the calendar event it generates). Room
     // assignment is shown to the guest at check-in instead.
-    const roomLine = roomDisplayLabel;
+    const roomLine = roomSummaryLabel;
     const descriptionLines = [
       `Booking reference: ${bookingRef}`,
       `Guests: ${guests}`,
@@ -153,7 +178,7 @@ export function BookingConfirmPage() {
     description: (() => {
       // See handleAddToCalendar above — room number is not
       // surfaced in the calendar event description either.
-      const roomLine = roomDisplayLabel;
+      const roomLine = roomSummaryLabel;
       return `Booking reference: ${bookingRef}\nGuests: ${guests}\nRoom: ${roomLine}\nTotal: ${formatPrice(total)}\nPayment: ${paymentMethodLabel}`;
     })(),
     location: `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`,
@@ -232,7 +257,7 @@ export function BookingConfirmPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15, duration: 0.4 }}
         >
-          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Booking Reference</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Reservation Reference</span>
           <span className="mt-1 font-mono text-2xl font-bold tracking-tight text-primary">{bookingRef}</span>
         </motion.div>
 
@@ -247,10 +272,33 @@ export function BookingConfirmPage() {
           <div className="mt-6 space-y-5">
             <div className="flex justify-between border-b border-gray-100 pb-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Room Type</p>
-                <p className="mt-1 font-semibold text-gray-900">
-                  {roomDisplayLabel || "Reserved"}
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  {confirmedRooms.length > 1 ? "Rooms" : "Room Type"}
                 </p>
+                {confirmedRooms.length > 1 ? (
+                  <div className="mt-2 space-y-2">
+                    {confirmedRooms.map((room) => {
+                      const type = roomTypes.find((entry) => entry.value === room.roomType);
+                      return (
+                        <div key={room.bookingId} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                          <span className="font-semibold text-gray-900">
+                            Room {room.reservationPosition} · {type?.label || room.roomType}
+                          </span>
+                          <span className="mt-1 block text-xs text-gray-500">
+                            {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
+                            {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
+                            {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
+                            {room.hasBreakfast ? " · Breakfast included" : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="mt-1 font-semibold text-gray-900">
+                    {roomDisplayLabel || "Reserved"}
+                  </p>
+                )}
                 <p className="mt-1 text-xs text-gray-500">
                   Your specific room is assigned at check-in.
                 </p>

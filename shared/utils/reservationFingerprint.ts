@@ -13,7 +13,8 @@
 // canonicalization rules are:
 //   - room types: sorted by `type` then `position` for byte
 //     equivalence; each line carries `quantity` + `adults` +
-//     `children` + `extraBeds` (CHD-01 + EXB-01 + MRB-06 inputs)
+//     `children` + `extraBeds` + breakfast choices
+//     (CHD-01 + EXB-01 + MRB-06 inputs)
 //   - dates: ISO `YYYY-MM-DD` strings, `checkIn` < `checkOut`
 //   - lead booker: `leadGuestEmail` lowercased + trimmed;
 //     `leadGuestName` / `leadGuestPhone` trimmed
@@ -35,6 +36,8 @@ export interface FingerprintableRoomLine {
   adults: number;
   children: number;
   extraBeds: number;
+  hasBreakfast?: boolean;
+  breakfastIncludesChildren?: boolean;
 }
 
 export interface FingerprintableDiscountScope {
@@ -80,7 +83,9 @@ function normalizeRoomLine(line: FingerprintableRoomLine): FingerprintableRoomLi
     quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
     adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
     children: Math.max(0, Math.floor(Number(line.children) || 0)),
-    extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0))
+    extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0)),
+    hasBreakfast: Boolean(line.hasBreakfast),
+    breakfastIncludesChildren: Boolean(line.breakfastIncludesChildren)
   };
 }
 
@@ -113,12 +118,13 @@ function normalizeDiscountScope(scope: FingerprintableDiscountScope | null | und
 function buildCanonicalPayload(req: FingerprintableReservationRequest): string {
   const roomLines = (Array.isArray(req.roomLines) ? req.roomLines : [])
     .map(normalizeRoomLine)
-    // Sort by `type` (primary) then quantity (tie-breaker) so the
-    // canonical JSON is byte-equivalent regardless of the order
-    // the client sent the lines in.
+    // Sort on every normalized field so the canonical JSON is
+    // byte-equivalent regardless of the order the client sent
+    // same-type room selections in.
     .sort((a, b) => {
-      if (a.type !== b.type) return a.type < b.type ? -1 : 1;
-      return a.quantity - b.quantity;
+      const aKey = JSON.stringify(a);
+      const bKey = JSON.stringify(b);
+      return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
     });
   const payload = {
     reservationId: String(req.reservationId || "").trim(),

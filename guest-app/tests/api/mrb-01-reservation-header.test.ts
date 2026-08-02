@@ -175,10 +175,10 @@ describe("MRB-01 reservation header model", () => {
       expect(fingerprint).toMatch(/export function computeRequestFingerprint/);
     });
 
-    it("the helper sorts room lines by (type, quantity) for byte-equivalence", () => {
+    it("the helper sorts room lines by every normalized field for byte-equivalence", () => {
       // The canonical order is the contract — a re-order in
       // the helper would break the dedup test.
-      expect(fingerprint).toMatch(/\.sort\(\(a, b\) => \{[\s\S]+?a\.type !== b\.type/);
+      expect(fingerprint).toMatch(/\.sort\(\(a, b\) => \{[\s\S]+?JSON\.stringify\(a\)[\s\S]+?JSON\.stringify\(b\)/);
     });
 
     it("the helper trims + lowercases the email + uppercases the corporate/voucher codes", () => {
