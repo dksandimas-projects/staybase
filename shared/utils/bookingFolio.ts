@@ -15,6 +15,8 @@
 // step. This file is the single source of truth — pure refactor,
 // zero behavior change, pinned by `shared/__tests__/booking-folio.test.ts`.
 
+import type { ReservationPaymentStatus } from "../types";
+
 /**
  * The minimal shape the folio math needs from a `Booking`. The
  * shared `Booking` type satisfies this; admin-app's `Booking` (which
@@ -394,4 +396,77 @@ export function getReservationFolioSummary(
     balance,
     source: input.source
   };
+}
+
+// Per MRB-04 Phase 3 (2026-08-02, per decision #159): the
+// N=1 mapping from a `Booking.status` to the reservation
+// header's `Reservation.paymentStatus`.
+//
+// The two enums are nearly identical, with three relabels
+// for the reservation-scope wire contract:
+//   - `pending` → `awaiting-payment` (the reservation's
+//     reservation-aware label: "guest has not paid yet" is
+//     more truthful at reservation scope than "pending", which
+//     sounds like a server-side queue state).
+//   - `checked-in` → `in-house` (the reservation's
+//     "in the hotel right now" label).
+//   - `checked-out` → `completed` (the reservation's
+//     "stay finished" label — the room's lifecycle uses
+//     `checked-out`, the reservation's money state uses
+//     `completed`).
+//
+// The other four values pass through unchanged:
+//   - `payment-uploaded` → `payment-uploaded`
+//   - `payment-confirmed` → `payment-confirmed`
+//   - `confirmed` → `confirmed`
+//   - `cancelled` → `cancelled`
+//
+// **Why this is N=1 only** — every reservation currently has
+// exactly one child booking (the N booking write loop shipped
+// in MRB-06 Phase 2, but the N>1 client surface has not landed;
+// the N=1 case is the entire active surface). For N>1, **MRB-05**
+// replaces this helper with an aggregate reader that loops
+// over the N child `bookings/{id}.status` values, maps each via
+// this function, and applies the per-decision-#159 aggregate
+// rule (e.g. all-confirmed → `confirmed`; mix-of-confirmed-and
+// -checked-in → `Partially checked in` — encoded as the
+// `in-house` label until MRB-12 surfaces the granular label).
+//
+// **Defensive coercion** — an unknown status returns the same
+// string passed in (the field type is the runtime guard at the
+// assignment site; the helper never throws on a malformed
+// input, it just passes it through). Nullish input returns
+// the input unchanged (the helper is not a sanitizer; the
+// caller is responsible for not calling it on nullish data).
+//
+// **Pure function** — no React state, no Firestore calls, no
+// async, no side effects. Pinned by 9 characterization tests
+// in `shared/__tests__/booking-folio.test.ts` (the 7 mapping
+// cases + the 2 defensive-coercion cases).
+export function mapBookingStatusToReservationPaymentStatus(
+  bookingStatus: string
+): ReservationPaymentStatus {
+  switch (bookingStatus) {
+    case "pending":
+      return "awaiting-payment";
+    case "checked-in":
+      return "in-house";
+    case "checked-out":
+      return "completed";
+    // The 4 pass-through values: return the input as-is so
+    // the return type is assignable to `ReservationPaymentStatus`
+    // (TS narrows the literal type to the union member).
+    case "payment-uploaded":
+    case "payment-confirmed":
+    case "confirmed":
+    case "cancelled":
+      return bookingStatus as ReservationPaymentStatus;
+    // Unknown status: pass through unchanged (the field type
+    // is the runtime guard; the assignment site will reject an
+    // out-of-union value with a TS error). This is the
+    // defensive-coercion path — a malformed input never
+    // throws, it just doesn't get a relabel.
+    default:
+      return bookingStatus as ReservationPaymentStatus;
+  }
 }

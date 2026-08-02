@@ -50,7 +50,7 @@ describe("MRB-01 reservation header model", () => {
 
     it("owns the money state + the consent fields + the aggregate counters + the PEX hold", () => {
       // Money state mirrors the booking but at reservation scope.
-      expect(types).toMatch(/paymentStatus: "awaiting-payment" \| "payment-uploaded" \| "payment-confirmed" \| "confirmed" \| "in-house" \| "completed" \| "cancelled"/);
+      expect(types).toMatch(/(?:paymentStatus: "awaiting-payment" \| "payment-uploaded" \| "payment-confirmed" \| "confirmed" \| "in-house" \| "completed" \| "cancelled"|paymentStatus: ReservationPaymentStatus)/);
       expect(types).toMatch(/paymentMethod: PaymentMethod/);
       // Consent — single per reservation (same T&C + privacy acceptance covers all rooms).
       expect(types).toMatch(/termsAccepted: boolean/);

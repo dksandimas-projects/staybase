@@ -209,6 +209,31 @@ export interface RoomBlock {
 // active rooms shows the active count + a "X of Y rooms cancelled"
 // secondary label — cancellation is a secondary count, not a hidden
 // state. This is the wire contract for MRB-12's admin affordance.
+//
+// Per MRB-04 Phase 3 (2026-08-02, per decision #159): the
+// canonical money-state union at reservation scope. The 7 values
+// map 1:1 to the booking's `status` enum (see
+// `mapBookingStatusToReservationPaymentStatus` in
+// `shared/utils/bookingFolio.ts` for the N=1 mapping) with two
+// relabels: `pending` → `awaiting-payment` (the reservation's
+// reservation-aware label) and `checked-in` → `in-house` (the
+// reservation's "in the hotel right now" label). The other five
+// values (`payment-uploaded`, `payment-confirmed`, `confirmed`,
+// `checked-out`, `cancelled`) pass through unchanged. Extracted
+// as a named type so the helper's return type + the
+// `Reservation.paymentStatus` field + the
+// `ReservationFolioSummary.status` field all reference one
+// source — no drift between the mapping helper and the fields
+// it feeds.
+export type ReservationPaymentStatus =
+  | "awaiting-payment"
+  | "payment-uploaded"
+  | "payment-confirmed"
+  | "confirmed"
+  | "in-house"
+  | "completed"
+  | "cancelled";
+
 export interface Reservation {
   id: string;
   /** Public ref — `R-YYYYMMDD-NNNNN`. Distinct prefix from `SI-` booking refs. */
@@ -247,7 +272,7 @@ export interface Reservation {
   memberDiscountPct: number;
 
   /** Money state — mirrors the child rooms but at reservation scope. A reservation is "awaiting payment" while any non-cancelled room is `pending` or `payment-uploaded`. */
-  paymentStatus: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled";
+  paymentStatus: ReservationPaymentStatus;
   paymentMethod: PaymentMethod;
   /** Per BF-45: canonical "no payment proof" is `null` (not `""`). */
   paymentProofUrl: string | null;
@@ -373,7 +398,7 @@ export interface ReservationFolioSummary {
   /** Outstanding balance: `reservationTotal + chargesTotal − paymentsTotal`. Positive = guest owes money. Negative = overpaid (refunds pending). */
   balance: number;
   /** Derived status — mirrors the header's `paymentStatus` derivation but at folio scope. */
-  status: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled";
+  status: ReservationPaymentStatus;
   /** Whether the source is the new reservation subcollections or the legacy `bookings/{id}/payments` + `bookings/{id}/charges`. The legacy adapter is for null-`reservationId` bookings (pre-MRB-01). */
   source: "reservation-subcollection" | "booking-subcollection-legacy";
 }
