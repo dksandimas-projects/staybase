@@ -321,7 +321,7 @@ describe("MRB-04 Phase 2.x — handleVerifyAndRecordPayment writes to reservatio
       // `paymentStatus` update in MRB-04 Phase 3
       // (a follow-up).
       expect(handleVerifyBody).toMatch(
-        /if \(fullyPaid\) \{\s*\n\s*bookingUpdates\.status = "payment-confirmed";\s*\n\s*bookingUpdates\.handledBy = staffUid;\s*\n\s*bookingUpdates\.paymentConfirmedAt = new Date\(\);/
+        /if \(fullyPaid\) \{\s*\n\s*bookingUpdates\.status = "payment-confirmed";\s*\n\s*bookingUpdates\.handledBy = staffUid;\s*\n\s*bookingUpdates\.paymentConfirmedAt = (?:new Date\(\)|now);/
       );
     });
   });

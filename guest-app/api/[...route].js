@@ -221515,6 +221515,31 @@ function computeServerFolioTotals(input) {
   const computedBalance = Math.max(folioTotal - collectedTotal, 0);
   return { folioTotal, computedBalance };
 }
+function mapBookingStatusToReservationPaymentStatus(bookingStatus) {
+  switch (bookingStatus) {
+    case "pending":
+      return "awaiting-payment";
+    case "checked-in":
+      return "in-house";
+    case "checked-out":
+      return "completed";
+    // The 4 pass-through values: return the input as-is so
+    // the return type is assignable to `ReservationPaymentStatus`
+    // (TS narrows the literal type to the union member).
+    case "payment-uploaded":
+    case "payment-confirmed":
+    case "confirmed":
+    case "cancelled":
+      return bookingStatus;
+    // Unknown status: pass through unchanged (the field type
+    // is the runtime guard; the assignment site will reject an
+    // out-of-union value with a TS error). This is the
+    // defensive-coercion path — a malformed input never
+    // throws, it just doesn't get a relabel.
+    default:
+      return bookingStatus;
+  }
+}
 
 // ../shared/utils/bookingAddOns.ts
 function calculateBreakfastAddOn(input) {
@@ -227167,6 +227192,7 @@ async function handleRejectPayment(req, res) {
         throw new Error(`Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`);
       }
       bookingData2 = data;
+      const bookingReservationId2 = String(data.reservationId || "").trim();
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
       const holdWindowHours = normalizePaymentHoldWindowHours(
@@ -227195,6 +227221,13 @@ async function handleRejectPayment(req, res) {
         // the existing `pending` UI on the lookup page.
         updatedAt
       });
+      if (bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: mapBookingStatusToReservationPaymentStatus("pending"),
+          updatedAt
+        });
+      }
     });
     return res.status(200).json({
       success: true,
@@ -227413,6 +227446,7 @@ async function handleAddPayment(req, res) {
   let bookingDataSnapshot = null;
   let loyaltyPointsAwarded = 0;
   let idempotentReplay = false;
+  const now = /* @__PURE__ */ new Date();
   try {
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -227467,7 +227501,7 @@ async function handleAddPayment(req, res) {
         bookingUpdates["emailNotificationsSent.staffNewPayment"] = /* @__PURE__ */ new Date();
       }
       if (fullyPaid && isConfirmableStatus) {
-        const updatedAt = /* @__PURE__ */ new Date();
+        const updatedAt = now;
         Object.assign(bookingUpdates, {
           status: "payment-confirmed",
           handledBy: staffUid,
@@ -227506,6 +227540,13 @@ async function handleAddPayment(req, res) {
       }
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
+      }
+      if (transitionedToPaymentConfirmed && bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingDataSnapshot.status),
+          updatedAt: now
+        });
       }
       const newPaymentRef = paymentsRef.doc(paymentId);
       const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
@@ -227741,6 +227782,7 @@ async function handleVerifyAndRecordPayment(req, res) {
     let totalPrice = 0;
     let fullyPaid = false;
     let idempotentReplay = false;
+    const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
@@ -227797,15 +227839,22 @@ async function handleVerifyAndRecordPayment(req, res) {
       const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
       transaction.create(paymentsRef.doc(paymentId), recordWithReservation);
       const bookingUpdates = {
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       };
       if (fullyPaid) {
         bookingUpdates.status = "payment-confirmed";
         bookingUpdates.handledBy = staffUid;
-        bookingUpdates.paymentConfirmedAt = /* @__PURE__ */ new Date();
+        bookingUpdates.paymentConfirmedAt = now;
       }
       transaction.update(bookingRef, bookingUpdates);
       bookingData2 = { ...data, ...bookingUpdates };
+      if (fullyPaid && bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingUpdates.status),
+          updatedAt: now
+        });
+      }
     });
     if (idempotentReplay) {
       return res.status(200).json({
