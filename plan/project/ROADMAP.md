@@ -85,10 +85,10 @@
 - ⬜ First admin account created for hotel owner — operational
 - ⬜ Client training session (booking management, settings, intercom) — operational
 - ⬜ Deployment confirmed live on both domains — operational
-- ⬜ **PC-05 — Archive + Data Carry-Over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
-- ⬜ **PC-06 — Cutover + Smoke Test** — Freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
-- ⬜ **Live Verification** — GCash test booking passes Step 3 with proof upload; guest intercom message + quick request deliver to admin inbox.
-- ⬜ **Breakage Window Audit** — Confirm no stuck bookings/guests during the breakage window.
+- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
+- ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
+- ⬜ Verify live: a GCash test booking passes Step 3 with proof upload; a guest intercom message + quick request deliver to the admin inbox
+- ⬜ Confirm no stuck bookings/guests during the breakage window (check Resend logs / booking creation rate between the 2026-07-17 rules deploy and PR #118)
 
 ---
 
@@ -130,30 +130,39 @@
 - ⬜ **CRL-09 — Admin Cancellation Audit UI Pass** — Displays `cancelledAt` timestamp, `cancelledBy` UID, and `cancellationSource` (`"guest"` | `"staff"` | `"system"`) in the Admin Booking Drawer header for full auditability.
 
 ### Open Multi-Room Booking (MRB) Tasks (MRB-06..15)
-- ⬜ **MRB-06 — Guest `/book` flow: quantity per room type** — Step 1 becomes a small cart: a quantity selector per available room type, a running total, and guest distribution across rooms. Steps 2–4 collect one lead guest and one payment for the whole reservation.
-- ⬜ **MRB-07 — Admin New Booking modal: multi-room** — Build the selector once on the reworked modal for walk-in groups, phone bookings, and OTA entry. The main Bookings list renders one reservation row with nested room stays; operational quick views remain room rows. Every action labels its scope (`This room` / `All rooms`), and deep links support both reservation and child booking IDs.
-- ⬜ **MRB-08 — Corporate `/corporate/book`: multi-room** — The negotiated/flat corporate rate applies per room; the corporate code's `usageCap` counts N rooms as N uses.
-- ⬜ **MRB-09 — Emails fire from the reservation, not N rooms** — `booking-submitted`, `confirmed`, `payment-confirmed`, and `check-in-reminder` send one email listing every room. Whole-reservation cancellation sends one `booking-cancelled` email; partial action sends an updated email.
-- ⬜ **MRB-10 — Guest lookup resolves a reservation with nested rooms** — `/my-booking` finds `reservations.reservationRef` (or email/token) and returns its guest-safe child room projections as one card. Privacy posture (`maskedEmail`) preserved. Cancel/resend act on the reservation.
-- ⬜ **MRB-11 — Reports use the correct owner for each metric** — Reservation, acquisition, payment, and reservation cancellation counts come from headers; occupancy, rooms sold, room-nights, room cancellations, allocated room revenue, and ADR come from child lines.
-- ⬜ **MRB-12 — Admin reservation + room affordance** — Show room count, transactional aggregate status/balance, room-stay navigator, cancellation count, and explicit action scope in drawer and table.
-- ⬜ **MRB-13 — Cancellation: reservation vs room** — Staff chooses one room or the whole reservation with targets and financial effect shown before confirmation.
-- ⬜ **MRB-14 — Post-create room changes** — Staff may add a room to an existing pre-arrival reservation using its current dates; guest self-service cannot add rooms in MRB v1.
-- ⬜ **MRB-15 — Remaining tests + MD sync** — Integration tests for create→cancel lifecycle, single-room header path, transactional summary counters, payment-vs-room state, PEX fan-out, add-room adjustments (MRB-14), checkout, legacy fallback, report reconstruction (MRB-11), and data lifecycle/reset/erasure across all feature MDs.
+- ⬜ **MRB-06 — Guest `/book` flow: quantity per room type** — Step 1 becomes a small cart: a quantity selector per available room type, a running total, and guest distribution across rooms. **Occupancy: resolved by CHD** — the adults/children split, its storage, and the per-room-type caps are specified in §Children in Booking above; land CHD first and MRB-06 inherits it. What remains MRB-specific is distributing guests across the reservation's room stays. Steps 2–4 collect one lead guest and one payment for the whole reservation.
+- ⬜ **MRB-07 — Admin New Booking modal: multi-room** — **depends on NBS.** Build the selector once on the reworked modal for walk-in groups, phone bookings, and OTA entry. The main Bookings list renders one reservation row with nested room stays; operational quick views remain room rows. Every action labels its scope (`This room` / `All rooms`), and deep links support both reservation and child booking IDs.
+- ⬜ **MRB-08 — Corporate `/corporate/book`: multi-room** — **arguably the strongest use case** (companies book blocks). The negotiated/flat corporate rate applies per room; the corporate code's `usageCap` counts N rooms as N uses.
+- ⬜ **MRB-09 — Emails fire from the reservation, not N rooms** — `booking-submitted`, `confirmed`, `payment-confirmed`, and `check-in-reminder` send **one** email listing every room. Whole-reservation cancellation sends one `booking-cancelled` email; a room-only cancellation or other partial action sends one reservation-updated email with the changed room, remaining rooms, revised total/balance, and refund/payment state. The receipt PDF itemises rooms and totals once. **Full template inventory (revised 2026-08-01)** — `booking-cancelled` is explicitly moved to reservation-scope.
+- ⬜ **MRB-10 — Guest lookup resolves a reservation with nested rooms** — `/my-booking` first finds `reservations.reservationRef` (or verified email/token), then returns its guest-safe child room projections as one card. Reuse the MBP wire shape and privacy posture (`maskedEmail`, no guest name reflected — decisions #126/#128/#131 apply unchanged). Cancel/resend act on the reservation. Legacy bookings without `reservationId` retain today's lookup path.
+- ⬜ **MRB-11 — Reports use the correct owner for each metric** — reservation, acquisition, payment, and reservation-cancellation counts come from headers; occupancy, rooms sold, room-nights, room cancellations, allocated room revenue, and ADR come from child lines. Legacy self-contained bookings count as one reservation + one room stay. Charts, Daily Close, CSV, XLSX, and backup/export must reconstruct exactly from stored allocations, never divide a reservation total heuristically.
+- ⬜ **MRB-12 — Admin reservation + room affordance** — show room count, transactional aggregate status/balance, room-stay navigator, cancellation count, and explicit action scope. Keep per-room workspaces for check-in, room moves, registration, housekeeping, and intercom. Reservation summaries never require the table to fetch N children merely to show status or balance.
+- ⬜ **MRB-13 — Cancellation: reservation vs room** — staff chooses one room or the whole reservation with targets and financial effect shown before confirmation. Cancelling one room releases only that room and routes its itemized adjustment/refund state through the reservation folio; cancelling the first-created room has no special financial consequence because no room owns the folio. Guest-facing cancellation defaults to the whole reservation and must state the room count; cancel/resend remain server-authenticated reservation actions.
+- ⬜ **MRB-14 — Post-create room changes** — staff may add a room to an existing pre-arrival reservation using its current dates; guest self-service cannot add rooms in MRB v1. Availability, bed inventory, rate/line allocation, corporate usage, summary, and folio update atomically; the public ref stays unchanged and one update email fires. In-stay extension/early departure changes only the child’s actual dates and line adjustment; the header preserves original shared dates plus projected earliest/latest bounds. Once dates diverge, UI/email show dates per room rather than one misleading range.
+- ⬜ **MRB-15 — Remaining tests + MD sync** — **revised 2026-08-01:** idempotency/concurrency tests (MRB-02), rules-boundary test (MRB-01), and folio balance/rounding property tests (MRB-04) shipped with their respective items. What remains for MRB-15: no-duplicate-counters/email/loyalty across full create→cancel lifecycle, single-room header path, canonical/copy consistency, transactional summary counters, payment-vs-room state, PEX fan-out, add-room adjustments (MRB-14), checkout, legacy fallback, report reconstruction (MRB-11), and data lifecycle/reset/erasure. MDs: `plan/features/BOOKING-FLOW.md`, `plan/features/AVAILABILITY-LOCKING.md`, `plan/features/BOOKINGS-MANAGEMENT.md`, `plan/features/CORPORATE-BOOKING.md`, `plan/features/REPORTS.md`, `plan/features/EMAIL-PDF-STORAGE.md`, `plan/features/VOUCHERS.md`, `plan/features/SPARK-REWARDS.md`, `plan/features/ENVIRONMENT-TEST-RESET.md`, `plan/docs/TYPES.md`, `plan/docs/BACKEND.md`, `plan/docs/API-ROUTES.md`, `plan/docs/SECURITY.md`, and `plan/docs/DECISIONS-FEATURES.md #159`.
 
-### Verification Checklists (BDUX, FSO, BSP, HSD, PEX, ETR)
-- ⬜ **BDUX Verification — Booking Drawer UX** — Verify Drawer across 1440px desktop & 375px mobile viewports: Overview layout readability without scrolling, Folio action entry forms, Total/Paid/Balance updates, sticky payment proof header, 1-tap status actions.
-- ⬜ **FSO Verification — Filtering UX** — Verify 375px mobile table filtering: filter chips, quick search, and one-handed advanced filter sheet.
-- ⬜ **BSP-03 — Breakfast Served Persistence Manual QA** — Verify multi-guest silog selection and daily breakfast-served toggle persistence across multi-session admin views.
-- ⬜ **HSD-05 — HEIC Photo Upload Manual QA** — Verify iPhone camera HEIC photo conversion via `heic-to` on physical iOS devices across Safari, Chrome, and Firefox.
-- ⬜ **PEX-07 — Java Emulator Tests** — Verify Firebase Emulator write-path behavior for auto-expiry hold drops (`/api/holds/expire` cron).
-- 🔄 **ETR-R — Production-to-Staging Refresh Engine (R02..R09)** — Implements remaining staging refresh modules: R02 mode toggles, R03 reviewable preservation, R05 asset sanitization, R06 relational integrity, R07 staging isolation, R08 pre-import scan, R09 controlled replacement.
+### Booking Drawer UX Refactor (BDUX) — remaining verification
+- ⬜ Verify representative bookings across every status + conditional combination.
+- ⬜ At 1440px, staff can understand guest/stay/payment/balance/next action without scrolling the default Overview.
+- ⬜ At 375px, no horizontal scroll; primary action above safe area; modal/sheet focus + close behavior accessible.
+- ⬜ Default Folio has no expanded entry form; each reachable through one labeled action.
+- ⬜ Completing any Folio action leaves the user on Folio with updated Total/Paid/Balance/ledger visible.
+- ⬜ Pending payment proof reachable from sticky header in one action; verified proof accessible without dominating default Folio.
+- ⬜ Next valid status action reachable in one tap from any section.
+- ⬜ Run admin typecheck, booking/admin regression tests, and manual visual QA across mobile/tablet/desktop before marking complete.
 
-### Deferred Architecture, Finance & Audit Tasks
-- ⏸ Online payment gateway (PayMongo — GCash/PayMaya) — deferred.
-- ⏸ Expenses & P&L tracking — out of PMS scope (feed external bookkeeping).
-- ⏸ Day-locking / night-audit snapshots — deferred at 14-room scale.
-- ⏸ **FLR-03 — Bound Reports ledger listeners** — deferred with trigger (~1 year of operation).
-- 🔄 **FLR-05 — Operational handover** — accountant VAT review + owner sign-off before next `dev → main` milestone.
-- ⏸ **MED-3 — "Different email" reconciliation (guest self-service half)** — deferred per decision #135/#140 (front-desk manual link available).
-- ⏸ **LOW-3 — `linkBookingsByEmail` batch not chunked to 500 limit** — deferred theoretical.
+### Bookings & Store Orders Filtering UX (FSO) — remaining verification
+- ⬜ At 375px: no horizontal scroll, quick chips operable, advanced sheet one-handed above safe area.
+
+### Environment Test Runs & Controlled Data Reset (ETR)
+> Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **In progress: ETR-R (production-to-staging refresh) — foundation landed 2026-07-29 (R01 + R04 + R10 partial — server-side authorization, identity-replacement sanitization engine, audit row). Open: R02 (multiple modes — sanitized-snapshot is the only one in the foundation), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement with staging-reset integration — the manual import is the MVP step today).** Also open: ETR-D01..D10, ETR-15..20, ETR-21. Full spec: `plan/features/ENVIRONMENT-TEST-RESET.md`.
+
+### Finance scope boundaries & recommendations
+- ⏸ Expenses & P&L tracking — out of scope; system is a PMS, not accounting software; exports feed external bookkeeping/BIR
+- ⏸ Day-locking / night-audit snapshots — deferred at 14-room scale; payments are already append-only at the rules level, which covers the cash side; revisit if historical figures drift or staff grows
+- ⏸ **FLR-03 — Bound Reports ledger listeners** *(deferred with trigger)* — `collectionGroup("payments"/"charges")` loads full ledger history live on every Reports visit; fine at 14 rooms, linear forever on Blaze. **Trigger: revisit at ~1 year of operation** — switch to `recordedAt`-bounded queries; all-time Receivables fall back to one-shot `getDocs`.
+- 🔄 **FLR-05 — Operational handover** *(owner-facing)* — handover in `FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md`. Daily Close convention + accountant VAT review + staging money-path walkthrough have explicit checklists/evidence. **Remaining:** accountant confirmation + owner sign-off before next `dev → main` milestone.
+
+### Deferred Loyalty & Audit Tasks
+- ⏸ **MED-3 — "Different email" reconciliation (guest self-service half) — Still Deferred.** The guest self-service prompt ("We found bookings under a different email. Would you like to link them?") on the `/rewards` join surface / post-sign-in / post-booking confirmation is the larger of the two MED-3 paths. **Workaround** — guest can still find the booking at `/my-booking` (ref + email); staff can now also link it from the member detail drawer (the front-desk manual link above covers the common case without the guest needing to involve the front desk). `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md §MED-3` and decision #135 + #140.
+- ⏸ **LOW-3 — `linkBookingsByEmail` batch not chunked to Firestore's 500-write limit** — **Deferred (theoretical only)**. A single-hotel guest with >500 same-email matches is not realistic at 14-room scale. Revisit if `linkBookingsByEmail` is ever re-pointed at a multi-property or federation-level surface. No code change.
