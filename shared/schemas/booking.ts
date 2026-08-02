@@ -104,4 +104,46 @@ export const WalkinBookingSchema = z.object({
 export type BookingDatesInput = z.infer<typeof BookingDatesSchema>;
 export type GuestDetailsInput = z.infer<typeof GuestDetailsSchema>;
 export type PaymentReviewInput = z.infer<typeof PaymentReviewSchema>;
+
+// Per MRB-02.x (2026-08-02, per decision #164): the
+// reschedule surface. The reschedule body is small —
+// just the booking + the new room + the new dates + an
+// optional reason. The `reservationId` is optional so the
+// client (the staff modal) doesn't need to send it; the
+// server derives it from the existing booking's
+// `reservationId` field. When the existing booking has
+// a `reservationId`, the server's transaction reads +
+// updates the corresponding `reservations/{id}` header
+// in lock-step with the booking update. When the
+// existing booking has no `reservationId` (legacy
+// null-reservationId self-contained behavior), the
+// server leaves the booking as-is and no header is
+// touched — same shape as the pre-MRB-02.x reschedule.
+//
+// The schema is `strict()` so a client can't add
+// unexpected fields (the same posture as the create +
+// walkin schemas). The `reason` is optional and capped
+// at 500 chars (the same cap the existing handler used
+// when stamping `rescheduleHistory[].reason`).
+export const RescheduleBookingSchema = z.object({
+  bookingId: z.string().trim().min(1).max(64),
+  roomId: z.string().trim().min(1).max(64),
+  checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().trim().max(500).optional().default(""),
+  // The optional `reservationId` is here so a future
+  // reschedule client that preallocates (e.g. a bulk
+  // reschedule tool that wants the staff to be able to
+  // retry the same reschedule without re-picking dates)
+  // can ride the same idempotency contract. The
+  // current staff modal doesn't preallocate, so the
+  // server derives the id from the existing booking
+  // (or, for legacy null-reservationId bookings, the
+  // server auto-mints one if `body.reservationId` is
+  // explicitly provided — a defensive path for a
+  // future migration tool).
+  reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional()
+}).strict();
+
+export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;
 export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;
