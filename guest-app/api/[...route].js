@@ -226199,7 +226199,10 @@ async function handleCreateBooking(req, res) {
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
       }
-      const bookingRef = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
+      const childBookingRefs = assignedRooms.map(
+        (_2, roomIdx) => `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + roomIdx).padStart(5, "0")}`
+      );
+      const bookingRef = childBookingRefs[0];
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
@@ -226211,9 +226214,9 @@ async function handleCreateBooking(req, res) {
         transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
       }
       if (counterDoc.exists) {
-        transaction.update(counterRef, { count: sequence });
+        transaction.update(counterRef, { count: sequence + assignedRooms.length - 1 });
       } else {
-        transaction.set(counterRef, { count: 1 });
+        transaction.set(counterRef, { count: assignedRooms.length });
       }
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       const newBooking = {
@@ -226469,6 +226472,13 @@ async function handleCreateBooking(req, res) {
             // reservation — the room count is a
             // reservation-level aggregate, not a
             // per-room field).
+            // Per MRB-06 Phase 2 follow-up (2026-08-02, per decision
+            // #159): each room stay carries its OWN guest-facing
+            // reference. Without this override every room in the
+            // reservation inherited the spread `newBooking.bookingRef`,
+            // which made a "ref + email" lookup ambiguous across the
+            // group.
+            bookingRef: childBookingRefs[bookingIdx],
             roomId: assignedRoomForBooking.id,
             roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
             roomType: assignedRoomForBooking.selection.roomType,

@@ -88,27 +88,44 @@ describe("MRB-03 — one reservation ref, no sibling refs (PR #1 of 2)", () => {
     });
 
     it("the booking ref and the reservation ref use the same counter sequence in the public create", () => {
-      // Both refs are minted in the same scope, using
-      // the same `sequence` variable. The counter is
-      // shared (one increment per create transaction)
-      // and the two refs have adjacent sequence numbers
-      // (a small "they belong together" affordance).
+      // Both refs are minted in the same scope, off the same
+      // `sequence` variable and the same counter, so a reservation
+      // and its rooms have adjacent sequence numbers (a small "they
+      // belong together" affordance).
+      //
+      // Per MRB-06 Phase 2 follow-up (2026-08-02, per decision #159):
+      // the reservation consumes ONE sequence number per room, so the
+      // per-room refs are `sequence + roomIdx` and the reservation ref
+      // takes the first of them. A single shared ref made a
+      // "ref + email" lookup ambiguous across the group.
+      expect(handlers).toMatch(
+        /const childBookingRefs = assignedRooms\.map\(\s*\(_, roomIdx\) => `\$\{config\.bookingRefPrefix \|\| "SI"\}-\$\{todayCompact\}-\$\{String\(sequence \+ roomIdx\)\.padStart\(5, "0"\)\}`/
+      );
+      expect(handlers).toMatch(/const bookingRef = childBookingRefs\[0\];/);
       // The `{0,3000}` distance accommodates the
       // `// Save output for outer scope` block + the
       // MRB-03 comment block between the two ref mints.
       expect(handlers).toMatch(
-        /const bookingRef = `\$\{config\.bookingRefPrefix \|\| "SI"\}-\$\{todayCompact\}-\$\{String\(sequence\)\.padStart\(5, "0"\)\}`;[\s\S]{0,3000}?finalReservationRef = `R-\$\{todayCompact\}-\$\{String\(sequence\)\.padStart\(5, "0"\)\}`;/
+        /const bookingRef = childBookingRefs\[0\];[\s\S]{0,3000}?finalReservationRef = `R-\$\{todayCompact\}-\$\{String\(sequence\)\.padStart\(5, "0"\)\}`;/
       );
+      // Each child booking is written with its own ref, not the
+      // spread lead-room ref.
+      expect(handlers).toMatch(/bookingRef: childBookingRefs\[bookingIdx\],/);
     });
 
     it("the counter is incremented in the same transaction (atomic with the ref mint)", () => {
-      // The `transaction.update(counterRef, { count: sequence })`
-      // (or `transaction.set(counterRef, { count: 1 })`
-      // for first-of-day) lives in the same runTransaction
-      // as the booking-ref mint and the reservation-ref
-      // mint. No read-then-write race.
+      // The counter write lives in the same runTransaction as the
+      // booking-ref mint and the reservation-ref mint. No
+      // read-then-write race.
+      //
+      // Per MRB-06 Phase 2 follow-up (2026-08-02, per decision #159):
+      // the counter advances past EVERY sequence number the
+      // reservation consumed, so the next booking of the day cannot
+      // reuse a ref already issued to one of these rooms. For a
+      // single-room reservation this is the historical single
+      // increment.
       expect(handlers).toMatch(
-        /if \(counterDoc\.exists\) \{[\s\S]{0,80}?transaction\.update\(counterRef, \{ count: sequence \}\);[\s\S]{0,80}?\} else \{[\s\S]{0,80}?transaction\.set\(counterRef, \{ count: 1 \}\);/
+        /if \(counterDoc\.exists\) \{[\s\S]{0,120}?transaction\.update\(counterRef, \{ count: sequence \+ assignedRooms\.length - 1 \}\);[\s\S]{0,120}?\} else \{[\s\S]{0,120}?transaction\.set\(counterRef, \{ count: assignedRooms\.length \}\);/
       );
     });
   });

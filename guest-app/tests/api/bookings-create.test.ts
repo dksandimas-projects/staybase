@@ -1837,4 +1837,98 @@ describe("/api/bookings/create", () => {
       expect(mockBookings.find((b: any) => b.id === "booking_checked_in").status).toBe("checked-in");
     });
   });
+  describe("MRB-06 — multi-room reservation references", () => {
+    // Regression: every child booking in a multi-room reservation used
+    // to inherit one shared `bookingRef`, because the per-room write
+    // loop overrode room/occupancy/pricing but not the reference. That
+    // made "booking ref + email" lookup ambiguous — the contract in
+    // `plan/features/BOOKING-LOOKUP.md` assumes a ref identifies
+    // exactly one room stay.
+    const multiRoomBody = () => ({
+      bookingId: "bookingMrbRef1",
+      roomType: "standard-double",
+      roomSelections: [
+        {
+          roomType: "standard-double",
+          numAdults: 2,
+          numChildren: 0,
+          hasBreakfast: false
+        },
+        {
+          roomType: "standard-double",
+          numAdults: 2,
+          numChildren: 0,
+          hasBreakfast: false
+        }
+      ],
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
+      guests: 4,
+      hasBreakfast: false,
+      guestDetails: {
+        firstName: "Group",
+        lastName: "Booker",
+        email: "group@example.com",
+        phone: "09171234567",
+        consent: true
+      },
+      discountType: "",
+      discountIdPhotoUrl: null,
+      paymentMethod: "pay-at-hotel",
+      turnstileToken: "mock_token"
+    });
+
+    const createdBookings = () =>
+      setCalls.filter((c: any) => /^bookings\/[^/]+$/.test(c.path));
+
+    test("gives each room stay its own booking reference", async () => {
+      const req = mockRequest(multiRoomBody());
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const written = createdBookings();
+      expect(written).toHaveLength(2);
+
+      const refs = written.map((c: any) => c.data.bookingRef);
+      expect(new Set(refs).size).toBe(2);
+      expect(refs.every((ref: string) => /^SI-\d{8}-\d{5}$/.test(ref))).toBe(true);
+      // Consecutive sequence numbers off the shared daily counter.
+      const sequences = refs.map((ref: string) => Number(ref.split("-")[2]));
+      expect(sequences[1]).toBe(sequences[0] + 1);
+
+      // Each room also keeps its own lookup token, so one room's magic
+      // link cannot resolve another room.
+      expect(new Set(written.map((c: any) => c.data.lookupToken)).size).toBe(2);
+    });
+
+    test("advances the daily counter past every reference the reservation used", async () => {
+      const req = mockRequest(multiRoomBody());
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      // Without this the next booking of the day would reuse a
+      // reference already issued to one of these rooms.
+      const counterWrite = setCalls.filter((c: any) => c.path.startsWith("counters/")).pop();
+      expect(counterWrite!.data.count).toBe(2);
+    });
+
+    test("the reservation reference takes the first sequence number", async () => {
+      const req = mockRequest(multiRoomBody());
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const written = createdBookings();
+      const reservationWrite = setCalls.find((c: any) => c.path.startsWith("reservations/"));
+      expect(reservationWrite).toBeTruthy();
+      const leadSequence = written
+        .map((c: any) => Number(c.data.bookingRef.split("-")[2]))
+        .sort((a: number, b: number) => a - b)[0];
+      expect(reservationWrite!.data.reservationRef).toBe(
+        `R-${written[0].data.bookingRef.split("-")[1]}-${String(leadSequence).padStart(5, "0")}`
+      );
+    });
+  });
 });

@@ -2100,7 +2100,19 @@ export async function handleCreateBooking(req: any, res: any) {
       // `generateBookingRef` helper; the inline form is
       // kept here so the counter transaction + the ref
       // share the same scope.
-      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
+      // Per MRB-06 Phase 2 follow-up (2026-08-02, per decision #159):
+      // every room stay is its own booking with its own guest-facing
+      // reference, so the reservation consumes N consecutive sequence
+      // numbers. Sharing one ref across the N rooms made the ref
+      // ambiguous — `plan/features/BOOKING-LOOKUP.md`'s "ref + email"
+      // contract assumes a ref identifies exactly one room stay, so a
+      // lookup against a shared ref could not say which room it meant.
+      // For N=1 this is the single ref the pre-MRB-06 code minted.
+      // Mirrors `handleCreateWalkin`'s `walkinBookingRefs`.
+      const childBookingRefs = assignedRooms.map(
+        (_, roomIdx) => `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + roomIdx).padStart(5, "0")}`
+      );
+      const bookingRef = childBookingRefs[0];
 
       // Save output for outer scope
       finalBookingRef = bookingRef;
@@ -2108,12 +2120,10 @@ export async function handleCreateBooking(req: any, res: any) {
       finalRateBreakdown = rateBreakdown;
       // Per MRB-03 (2026-08-02, per decision #159): the
       // public reservation ref (`R-YYYYMMDD-NNNNN`) uses
-      // the SAME counter as the booking ref — one counter
-      // increment per create transaction, regardless of
-      // how many rooms (N=1 today; the same pattern holds
-      // for N>1 in MRB-06 Phase 2's booking write loop).
-      // Sharing the counter with the booking ref means a
-      // reservation and its booking have adjacent seq
+      // the SAME counter as the booking refs, taking the
+      // FIRST of the N sequence numbers this reservation
+      // consumed. Sharing the counter with the booking refs
+      // means a reservation and its rooms have adjacent seq
       // numbers (a small "they belong together" affordance
       // for staff skimming the admin list) AND avoids a
       // second counter doc that would need the same
@@ -2134,10 +2144,15 @@ export async function handleCreateBooking(req: any, res: any) {
       if (voucherUsageUpdate) {
         transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
       }
+      // Per MRB-06 Phase 2 follow-up (2026-08-02, per decision #159):
+      // the counter advances past every sequence number this
+      // reservation consumed, so the next booking of the day cannot
+      // reuse a ref already issued to one of these rooms. For N=1 this
+      // is the pre-MRB-06 single increment.
       if (counterDoc.exists) {
-        transaction.update(counterRef, { count: sequence });
+        transaction.update(counterRef, { count: sequence + assignedRooms.length - 1 });
       } else {
-        transaction.set(counterRef, { count: 1 });
+        transaction.set(counterRef, { count: assignedRooms.length });
       }
 
       // 10. Prepare Document Fields
@@ -2449,6 +2464,13 @@ export async function handleCreateBooking(req: any, res: any) {
             // reservation — the room count is a
             // reservation-level aggregate, not a
             // per-room field).
+            // Per MRB-06 Phase 2 follow-up (2026-08-02, per decision
+            // #159): each room stay carries its OWN guest-facing
+            // reference. Without this override every room in the
+            // reservation inherited the spread `newBooking.bookingRef`,
+            // which made a "ref + email" lookup ambiguous across the
+            // group.
+            bookingRef: childBookingRefs[bookingIdx],
             roomId: assignedRoomForBooking.id,
             roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
             roomType: assignedRoomForBooking.selection.roomType,
