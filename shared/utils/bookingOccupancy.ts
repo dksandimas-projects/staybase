@@ -133,3 +133,47 @@ export const PAYMENT_REJECTED_FRESH_DEADLINE_FROM = "paymentRejectedAt";
 //   parallel discriminator, not a replacement.
 export const CANCELLATION_SOURCES = ["guest", "staff", "system"] as const;
 export type CancellationSource = (typeof CANCELLATION_SOURCES)[number];
+
+// Per CRL-03 (2026-08-02): the server-side status matrix that
+// authorises a cancellation. Three sets, each pinned here so the
+// handler + the email-template switch + future Reports queries all
+// key off the same lists.
+//
+//   GUEST_CANCELLABLE_STATUSES — the only statuses a guest can
+//   self-service cancel through /api/bookings/cancel. Matches the
+//   guest UI's current button-visibility (which only shows the
+//   button for `pending` / `payment-uploaded`). Once a booking has
+//   reached `payment-confirmed` or `confirmed`, money may have been
+//   collected and the guest must go through the front desk so a
+//   staff member can assess refund eligibility. CRL-06 (secure
+//   cancellation preview) will deliberately expand this set after
+//   the guest sees a policy-derived financial preview first.
+//
+//   STAFF_CANCELLABLE_STATUSES — every pre-arrival status. A staff
+//   member can cancel any booking that has not yet checked in.
+//   Terminal statuses (checked-in, checked-out, cancelled) are NOT
+//   in this set; cancellation is irreversible, so once a guest is
+//   on-property or past checkout, the status cannot flip back.
+//
+//   TERMINAL_CANCELLATION_STATUSES — the three statuses NO path
+//   can cancel. `cancelled` is already terminal; `checked-in` has
+//   the guest on-property (the cancellation is a checkout, not a
+//   cancel); `checked-out` is past. Every cancellation handler
+//   rejects these with a 400.
+export const GUEST_CANCELLABLE_STATUSES = ["pending", "payment-uploaded"] as const;
+export type GuestCancellableStatus = (typeof GUEST_CANCELLABLE_STATUSES)[number];
+
+export const STAFF_CANCELLABLE_STATUSES = [
+  "pending",
+  "payment-uploaded",
+  "payment-confirmed",
+  "confirmed"
+] as const;
+export type StaffCancellableStatus = (typeof STAFF_CANCELLABLE_STATUSES)[number];
+
+export const TERMINAL_CANCELLATION_STATUSES = [
+  "checked-in",
+  "checked-out",
+  "cancelled"
+] as const;
+export type TerminalCancellationStatus = (typeof TERMINAL_CANCELLATION_STATUSES)[number];

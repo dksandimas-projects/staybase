@@ -654,13 +654,42 @@ function checkinReminderEmail(booking: any, houseRules?: string | null) {
 }
 
 function bookingCancelledEmail(booking: any) {
+  // Per CRL-04 (2026-08-02): truthful communications. The previous
+  // copy said "If this cancellation was unexpected, please contact
+  // our support team right away" — which strongly implied the
+  // cancellation itself resolved any money question. It did not.
+  // The new copy distinguishes "cancellation is permanent" from
+  // "money was returned", and makes explicit that no refund is
+  // issued automatically. The wording is the same across the
+  // three `cancellationSource` values (guest / staff / system)
+  // because the underlying fact — no refund is automatic — is
+  // true in all three cases:
+  //
+  //   guest  — server-restricted to pre-payment statuses by
+  //            CRL-03, so no money was ever collected
+  //   staff  — money may or may not have been collected; the
+  //            front desk assesses refund eligibility out of band
+  //   system — PEX auto-expiry of an unpaid `pending` hold, so
+  //            no money was collected
+  //
+  // The intro line uses the source to switch the actor ("you"
+  // vs "our team" vs "the system") so the email reads naturally
+  // regardless of who initiated the cancellation. The refund
+  // sentence is identical because the rule is identical.
+  const source = String(booking.cancellationSource || "staff");
+  const intro = source === "guest"
+    ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled at your request.`
+    : source === "system"
+      ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled because the payment hold expired.`
+      : `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled by our team.`;
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} has been cancelled.`,
     eyebrow: "Booking cancelled",
     title: "Your reservation has been cancelled",
-    intro: `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled.`,
+    intro,
     body: `
       ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
+      ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> — if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.")}
       ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
@@ -1241,6 +1270,49 @@ export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
     ADMIN_EMAIL,
     `[${config.brandName}] New payment proof: ${booking.bookingRef}`,
     staffNewPaymentEmail(booking, payment)
+  );
+}
+
+// Per CRL-04 (2026-08-02): a paid GCash store order was
+// cancelled by the guest. The guest still gets the standard
+// `store-order-cancelled` email (which now states that no
+// refund is automatic per CRL-04's copy pass), but the
+// staff also needs a separate, dedicated alert: the
+// "front desk will reach out" sentence in the guest email
+// is a single sentence; the staff alert is a queue item
+// the front desk can triage. Without this, a paid order
+// can disappear into the booking's audit log with no
+// operator owning the refund follow-up.
+function staffRefundReviewEmail(order: any) {
+  return emailLayout({
+    preheader: `Paid store order ${order.orderRef} was cancelled.`,
+    eyebrow: "Refund review needed",
+    title: "A guest cancelled a paid store order",
+    intro: `A guest cancelled a paid store order at <strong>${escapeHtml(config.brandName)}</strong>. The guest was charged via the order's payment method; review the payment proof and record a refund through the order's booking if appropriate.`,
+    body: `
+      ${callout("warm", "Action required", "No refund is issued automatically by the cancellation. Open the order's payment screenshot, confirm the amount, and record a refund via the linked booking's Folio → Refund action.")}
+      ${card("Cancelled order", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef)}
+        ${row("Room", order.roomNumber || "—")}
+        ${row("Guest", order.guestName || "—")}
+        ${row("Amount", formatMoney(Number(order.totalAmount || 0)))}
+        ${row("Method", order.paymentMethod || "—")}
+        ${row("Reason", order.cancellationReason ? escapeHtml(order.cancellationReason) : "—")}
+        ${order.paymentProofUrl ? row("Payment proof", `<a href="${escapeHtml(order.paymentProofUrl)}" style="color: ${config.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Open booking",
+    ctaUrl: order.bookingId
+      ? adminUrl(`/bookings?ref=${encodeURIComponent(order.bookingId)}`)
+      : adminUrl("/bookings")
+  });
+}
+
+export async function sendStaffRefundReviewTrigger(order: any) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${config.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
+    staffRefundReviewEmail(order)
   );
 }
 

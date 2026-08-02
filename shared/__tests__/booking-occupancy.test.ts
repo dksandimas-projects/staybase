@@ -6,6 +6,9 @@ import {
   BOOKING_OCCUPYING_STATUSES,
   EXPIRED_HOLD_CANCELLATION_REASON,
   CANCELLATION_SOURCES,
+  GUEST_CANCELLABLE_STATUSES,
+  STAFF_CANCELLABLE_STATUSES,
+  TERMINAL_CANCELLATION_STATUSES,
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
   MIN_PAYMENT_HOLD_WINDOW_HOURS,
   MAX_PAYMENT_HOLD_WINDOW_HOURS
@@ -166,5 +169,27 @@ describe("bookingOccupancy — constants (PEX-02 + PEX-03)", () => {
     // a fourth value requires a coordinated type + every write
     // site + a test for the new value.
     expect(CANCELLATION_SOURCES).toEqual(["guest", "staff", "system"]);
+  });
+
+  it("CRL-03 status matrix: guest set is the 2-value pre-payment list, staff set is the 4-value pre-arrival list, terminal set is the 3-value reject list", () => {
+    // Pinned because handleCancelBooking reads the sets at runtime
+    // via `.includes(...)`; a typo on any value would silently
+    // shift the auth boundary. Guest + staff are disjoint for the
+    // two middle statuses (`payment-confirmed`, `confirmed`); the
+    // union of GUEST_CANCELLABLE_STATUSES + the staff-only
+    // extension equals STAFF_CANCELLABLE_STATUSES, and the
+    // terminal set is disjoint from both.
+    expect(GUEST_CANCELLABLE_STATUSES).toEqual(["pending", "payment-uploaded"]);
+    expect(STAFF_CANCELLABLE_STATUSES).toEqual([
+      "pending",
+      "payment-uploaded",
+      "payment-confirmed",
+      "confirmed"
+    ]);
+    expect(TERMINAL_CANCELLATION_STATUSES).toEqual([
+      "checked-in",
+      "checked-out",
+      "cancelled"
+    ]);
   });
 });

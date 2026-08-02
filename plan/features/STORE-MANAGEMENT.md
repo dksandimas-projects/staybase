@@ -58,7 +58,7 @@ Settings is admin-only. Front Desk processes guest orders and billing from the o
   - `delivered` → staff-authenticated server transition; atomically records the direct tender for COD/online methods, then no further actions
   - `cancelled` → no further actions
 - [x] "Add to Booking Bill" action — available on delivered or confirmed orders with `paymentMethod: "add-to-bill"`; links order to booking, marks as billed
-- [x] Cancel order modal — optional reason input
+- [x] Cancel order modal — optional reason input; **CRL-04 (2026-08-02)** — a cancelled paid GCash order (one with `paymentMethod === "gcash"` and a `paymentProofUrl`) fires a dedicated staff refund-review alert (`sendStaffRefundReviewTrigger`) so the front desk has a queue-able owner for the refund follow-up. The guest still gets the standard `store-order-cancelled` email. COD and Add-to-Bill orders do not need a refund review: the money has either not been collected yet (COD) or rolls into the booking folio (Add-to-Bill, settled at checkout).
 - [x] GCash screenshot viewable in drawer
 
 ### Data & Logic Checklist
