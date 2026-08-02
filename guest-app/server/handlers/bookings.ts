@@ -740,6 +740,23 @@ const lookupSchema = z.preprocess(
     )
 );
 
+// Per MRB-13 (2026-08-02, per decision #166): the
+// guest cancel schema gains an optional `scope`
+// (`"room"` | `"reservation"`). Default `"room"`
+// preserves byte-compatible single-child behavior —
+// every existing caller that omits `scope` lands on
+// the legacy per-child branch. The guest lookup page
+// (per MRB-10) sends `"reservation"` when the looked-
+// up booking is part of a multi-room reservation, and
+// the admin BookingsPage cancel modal surfaces a
+// `This room` / `All N rooms` selector when the
+// selected booking has `reservationRoomCount > 1`.
+// When `"reservation"` is set, the server cancels
+// every cancellable child in one transaction (see
+// `handleCancelBooking`) — the dedup rule (one
+// decrement per shared voucher / corporate code) and
+// the per-child loyalty clawback (MRB-05) are owned
+// by that branch, not by the schema.
 const guestCancelSchema = z
   .object({
     bookingRef: z
@@ -754,7 +771,8 @@ const guestCancelSchema = z
       .max(64)
       .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
       .optional(),
-    reason: z.string().trim().max(500).optional().default("")
+    reason: z.string().trim().max(500).optional().default(""),
+    scope: z.enum(["room", "reservation"]).optional().default("room")
   })
   .refine(
     (data) => Boolean(data.guestEmail) !== Boolean(data.token),
@@ -4980,7 +4998,249 @@ export async function handleCancelBooking(req: any, res: any) {
       });
     }
 
-    await adminDb.runTransaction(async (transaction) => {
+    // Per MRB-13 (2026-08-02, per decision #166): the
+    // scope selector. The schema default (`"room"`)
+    // preserves byte-compatible single-child behavior for
+    // every existing caller. The admin BookingsPage cancel
+    // modal passes `scope` via `updateBookingStatus`; the
+    // guest `/my-booking` page (per MRB-10) sends
+    // `"reservation"` when the looked-up booking is part of
+    // a multi-room reservation. The dispatch below honours
+    // `scope === "reservation"` only when the looked-up
+    // booking has a `reservationId` — a legacy pre-MRB-01
+    // booking (no `reservationId`) carrying
+    // `scope === "reservation"` silently falls back to the
+    // per-child branch (a "reservation" of size 1 is
+    // byte-equivalent to the per-child cancel).
+    const requestedScope: "room" | "reservation" = isStaffCancellation
+      ? (String((req.body || {}).scope || "").trim().toLowerCase() === "reservation"
+        ? "reservation"
+        : "room")
+      : parsed.data.scope;
+    const lookedUpReservationId = String(bookingData.reservationId || "").trim();
+    const isReservationScope = requestedScope === "reservation" && lookedUpReservationId.length > 0;
+    // Per MRB-13: the post-transaction email action depends
+    // on the branch. The reservation-scope path fires the
+    // `booking-cancelled-reservation` action (the
+    // multi-room template added in MRB-09). The per-child
+    // path keeps the legacy `booking-cancelled` action
+    // (which MRB-09 already taught to render the full
+    // reservation view when the booking has a
+    // `reservationId`).
+    const postTransactionAction: "booking-cancelled" | "booking-cancelled-reservation" = isReservationScope
+      ? "booking-cancelled-reservation"
+      : "booking-cancelled";
+
+    if (isReservationScope) {
+      // Per MRB-13 (2026-08-02, per decision #166):
+      // the reservation-scope cancel. One transaction
+      // cancels every cancellable child of the
+      // reservation, decrements voucher + corporate
+      // code `usageCount` exactly once per shared code
+      // (deduped by the number of children that use
+      // each code), runs the per-child MRB-05 loyalty
+      // clawback for each cancelled child, and updates
+      // the reservation header
+      // (`cancelledRoomCount`, `activeRoomCount`, and
+      // `paymentStatus` from the post-cancellation
+      // state of every child). Children that are
+      // already terminal (`checked-in` /
+      // `cancelled`) or that fall outside the source-
+      // specific cancellable set (guest path) are
+      // skipped — "cancels every cancellable child"
+      // per the spec body. The first-created child has
+      // no special financial consequence because the
+      // reservation folio (`reservations/{id}/payments`
+      // and `refunds/`) is the source of truth, not
+      // any individual booking doc.
+      await adminDb.runTransaction(async (transaction) => {
+        const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
+        const reservationDoc = await transaction.get(reservationRef);
+        if (!reservationDoc.exists) {
+          throw new Error("Reservation not found.");
+        }
+        const reservationData = reservationDoc.data() || {};
+
+        // Per MRB-13: read every child of the
+        // reservation in one query. The query is
+        // ordered by `reservationPosition` (the 1-
+        // indexed position the create handler stamps
+        // per MRB-01) so the surviving order matches
+        // the on-reservation layout. Same shape as the
+        // MRB-10 lookup child read.
+        const childrenSnap = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", lookedUpReservationId)
+        );
+        const children: Array<{ id: string; ref: any; data: any }> = childrenSnap.docs.map((d: any) => ({
+          id: d.id,
+          ref: d.ref,
+          data: d.data() || {}
+        }));
+
+        // Per MRB-13: split the children into
+        // cancellable + skipped. The terminal-status
+        // set is universal; the source-specific
+        // cancellable set mirrors the per-child
+        // pre-transaction reject above. The same
+        // `checked-out` exclusion that MRB-05 PR #2
+        // added to the per-child path applies here
+        // — a settled stay is still cancellable for
+        // the clawback scenario, the reservation
+        // remains the audit/financial record.
+        const cancellableIds = new Set<string>();
+        for (const child of children) {
+          const status = String(child.data.status || "");
+          if (status === "checked-in" || status === "cancelled") continue;
+          if (
+            !isStaffCancellation
+            && !(GUEST_CANCELLABLE_STATUSES as readonly string[]).includes(status)
+          ) {
+            continue;
+          }
+          cancellableIds.add(child.id);
+        }
+        const cancelledCount = cancellableIds.size;
+
+        // Per MRB-13: dedup the voucher + corporate
+        // code decrements. Each cancelled child
+        // contributes its `voucherCode` (if any) and
+        // `corporateCode` (if any). A code shared
+        // across N children decrements `usageCount`
+        // by N (the per-child `usageCount` was
+        // incremented by N at create per MRB-08
+        // decision #167). The dedup map's count is
+        // the number of cancelled children using
+        // that code, not 1. Same shape as the per-
+        // child decrement (lines ~5240) but
+        // deduped + scaled.
+        const voucherCounts = new Map<string, number>();
+        const corporateCounts = new Map<string, number>();
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          const v = String(child.data.voucherCode || "").trim().toUpperCase();
+          if (v) voucherCounts.set(v, (voucherCounts.get(v) || 0) + 1);
+          const cp = String(child.data.corporateCode || "").trim().toUpperCase();
+          if (cp) corporateCounts.set(cp, (corporateCounts.get(cp) || 0) + 1);
+        }
+
+        // Per MRB-13: per-child status flip + audit
+        // stamps + loyalty clawback. The audit
+        // metadata is the same shape the per-child
+        // branch stamps (CRL-02 decision #159):
+        // `cancelledAt`, `cancelledBy`,
+        // `cancellationSource`, and `updatedAt`
+        // share the `now` value captured at the
+        // top of the handler. The loyalty clawback
+        // mirrors MRB-05's per-child pattern: a
+        // negative `pointsHistory` entry keyed
+        // `clawback-${bookingId}` for each cancelled
+        // child with `loyaltyAwardStatus ===
+        // "awarded"` and a positive `pointsAwarded`.
+        // The `rewardsPoints` field is NOT
+        // decremented in place; the negative ledger
+        // entry preserves the invariant
+        // `rewardsPoints == sum(pointsHistory.points)`.
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          transaction.update(child.ref, {
+            status: "cancelled",
+            cancellationReason: validReason,
+            cancelledAt: now,
+            cancelledBy,
+            cancellationSource,
+            updatedAt: now
+          });
+          if (
+            child.data.loyaltyAwardStatus === "awarded"
+            && Number(child.data.pointsAwarded || 0) > 0
+          ) {
+            const memberId = String(child.data.memberId || "").trim();
+            if (memberId) {
+              const memberRef = adminDb.collection("members").doc(memberId);
+              const memberDoc = await transaction.get(memberRef);
+              if (memberDoc.exists) {
+                const clawbackPoints = -Number(child.data.pointsAwarded || 0);
+                const clawbackHistoryRef = memberRef.collection("pointsHistory").doc(`clawback-${child.id}`);
+                transaction.set(clawbackHistoryRef, {
+                  type: "clawback",
+                  points: clawbackPoints,
+                  bookingId: child.id,
+                  bookingRef: child.data.bookingRef,
+                  description: `Cancellation clawback for cancelled stay (${child.data.bookingRef})`,
+                  by: cancelledBy,
+                  createdAt: now
+                });
+                transaction.update(child.ref, {
+                  pointsAwarded: 0,
+                  loyaltyAwardStatus: "clawback-recorded",
+                  pointsAwardedAt: null
+                });
+              }
+            }
+          }
+        }
+
+        // Per MRB-13: deduped voucher decrements.
+        // One `transaction.update` per unique
+        // voucher code, decremented by the count
+        // of cancelled children that used it.
+        for (const [code, count] of voucherCounts.entries()) {
+          const vRef = adminDb.collection("vouchers").doc(code);
+          const vDoc = await transaction.get(vRef);
+          if (vDoc.exists) {
+            const vData = vDoc.data() || {};
+            transaction.update(vRef, {
+              usageCount: Math.max((Number(vData.usageCount) || 0) - count, 0),
+              updatedAt: now
+            });
+          }
+        }
+        for (const [code, count] of corporateCounts.entries()) {
+          const cpRef = adminDb.collection("corporateCodes").doc(code);
+          const cpDoc = await transaction.get(cpRef);
+          if (cpDoc.exists) {
+            const cpData = cpDoc.data() || {};
+            transaction.update(cpRef, {
+              usageCount: Math.max((Number(cpData.usageCount) || 0) - count, 0),
+              updatedAt: now
+            });
+          }
+        }
+
+        // Per MRB-13: the reservation header mirror.
+        // `cancelledRoomCount` is incremented by the
+        // number of children we just cancelled in
+        // this transaction (NOT by `children.length`
+        // — a partial cancel only bumps the counter
+        // for the children we actually flipped).
+        // `activeRoomCount` is decremented by the
+        // same count, floored at 0 (the helper
+        // already floors, the explicit `Math.max`
+        // makes the invariant obvious to a future
+        // reader). `paymentStatus` is the aggregate
+        // from the post-cancellation state of every
+        // child (cancelled children report
+        // `"cancelled"`, survivors report their
+        // current status). When every child is
+        // cancelled the aggregate is `"cancelled"`
+        // — same as the per-child N=1 case.
+        const newActiveRoomCount = Math.max(
+          (Number(reservationData.activeRoomCount) || 0) - cancelledCount,
+          0
+        );
+        const newCancelledRoomCount = (Number(reservationData.cancelledRoomCount) || 0) + cancelledCount;
+        const postStatuses = children.map((c) =>
+          cancellableIds.has(c.id) ? "cancelled" : String(c.data.status || "")
+        );
+        transaction.update(reservationRef, {
+          cancelledRoomCount: newCancelledRoomCount,
+          activeRoomCount: newActiveRoomCount,
+          paymentStatus: computeReservationAggregatePaymentStatus(postStatuses),
+          updatedAt: now
+        });
+      });
+    } else {
+      await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingDocumentRef);
       if (!freshBookingDoc.exists) {
         throw new Error("Booking not found.");
@@ -5225,25 +5485,32 @@ export async function handleCancelBooking(req: any, res: any) {
         });
       }
     });
+    }
 
     try {
-      // Per MRB-09 (2026-08-02, per decision #168): the
+      // Per MRB-09 (2026-08-02, per decision #168) +
+      // MRB-13 (2026-08-02, per decision #166): the
       // reservation-scope email view. The pre-MRB-09
       // per-child path stayed correct (one email per
       // cancelled child), but the body rendered only
       // the single room. The view loader reads the
       // reservation header + sibling children and
-      // hands the multi-room view to the template. The
-      // subject + body now show the reservation ref +
-      // every room in the reservation, with the
-      // cancelled room's row marked as such. The
-      // single-room booking-cancelled path is
-      // preserved (legacy pre-MRB-01 callers).
+      // hands the multi-room view to the template.
+      // The reservation-scope path fires
+      // `booking-cancelled-reservation` (the
+      // `rooms[]`-aware template added in MRB-09);
+      // the per-child path keeps `booking-cancelled`
+      // (which MRB-09 already taught to render the
+      // full reservation view when the booking has a
+      // `reservationId`).
       const reservationView = await loadReservationEmailView(bookingId);
+      const cancellationSourceForEmail: "guest" | "staff" | "system" = cancelledBy === "guest"
+        ? "guest"
+        : (cancelledBy === "system" ? "system" : "staff");
       await sendBookingTrigger(
-        "booking-cancelled",
+        postTransactionAction,
         reservationView
-          ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff" }
+          ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancellationSourceForEmail }
           : { ...bookingData, cancellationReason: validReason }
       );
     } catch (emailErr) {
