@@ -224951,6 +224951,103 @@ function sumBilledAddToBillOrders(snapshot) {
     return order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled ? sum + Number(order.totalAmount || 0) : sum;
   }, 0);
 }
+async function readTransactionalFolioSnapshot(input) {
+  const { transaction, bookingRef, bookingId, bookingData: bookingData2 } = input;
+  const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
+  if (!bookingReservationId2) {
+    const paymentsRef = bookingRef.collection("payments");
+    const chargesRef = bookingRef.collection("charges");
+    const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+    const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
+      transaction.get(paymentsRef),
+      transaction.get(chargesRef),
+      transaction.get(storeOrdersQuery)
+    ]);
+    const collectedTotal2 = sumLedgerAmounts(paymentsSnapshot);
+    const incidentalTotal2 = sumLedgerAmounts(chargesSnapshot);
+    const addToBillTotal2 = sumBilledAddToBillOrders(storeOrdersSnapshot);
+    const totals2 = computeServerFolioTotals({
+      totalPrice: Number(bookingData2.totalPrice) || 0,
+      incidentalTotal: incidentalTotal2,
+      addToBillTotal: addToBillTotal2,
+      collectedTotal: collectedTotal2
+    });
+    return {
+      reservationId: "",
+      totalPrice: Number(bookingData2.totalPrice) || 0,
+      collectedTotal: collectedTotal2,
+      incidentalTotal: incidentalTotal2,
+      addToBillTotal: addToBillTotal2,
+      ...totals2,
+      source: "booking-subcollection-legacy"
+    };
+  }
+  const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+  const reservationPaymentsRef = reservationRef.collection("payments");
+  const reservationRefundsRef = reservationRef.collection("refunds");
+  const reservationChargesRef = reservationRef.collection("charges");
+  const childBookingsQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
+  const [
+    reservationDoc,
+    reservationPaymentsSnapshot,
+    reservationRefundsSnapshot,
+    reservationChargesSnapshot,
+    childBookingsSnapshot
+  ] = await Promise.all([
+    transaction.get(reservationRef),
+    transaction.get(reservationPaymentsRef),
+    transaction.get(reservationRefundsRef),
+    transaction.get(reservationChargesRef),
+    transaction.get(childBookingsQuery)
+  ]);
+  if (!reservationDoc.exists) {
+    throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+  }
+  const childBookingIds = /* @__PURE__ */ new Set([bookingId]);
+  childBookingsSnapshot.docs.forEach((docSnap) => childBookingIds.add(String(docSnap.id)));
+  const childLedgerSnapshots = await Promise.all(
+    Array.from(childBookingIds).map(async (childBookingId) => {
+      const childRef = adminDb.collection("bookings").doc(childBookingId);
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", childBookingId);
+      const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
+        transaction.get(childRef.collection("payments")),
+        transaction.get(childRef.collection("charges")),
+        transaction.get(storeOrdersQuery)
+      ]);
+      return { paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot };
+    })
+  );
+  const transitionalCollectedTotal = childLedgerSnapshots.reduce(
+    (sum, snapshots) => sum + sumLedgerAmounts(snapshots.paymentsSnapshot),
+    0
+  );
+  const transitionalIncidentalTotal = childLedgerSnapshots.reduce(
+    (sum, snapshots) => sum + sumLedgerAmounts(snapshots.chargesSnapshot),
+    0
+  );
+  const addToBillTotal = childLedgerSnapshots.reduce(
+    (sum, snapshots) => sum + sumBilledAddToBillOrders(snapshots.storeOrdersSnapshot),
+    0
+  );
+  const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumLedgerAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
+  const incidentalTotal = sumLedgerAmounts(reservationChargesSnapshot) + transitionalIncidentalTotal;
+  const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
+  const totals = computeServerFolioTotals({
+    totalPrice,
+    incidentalTotal,
+    addToBillTotal,
+    collectedTotal
+  });
+  return {
+    reservationId: bookingReservationId2,
+    totalPrice,
+    collectedTotal,
+    incidentalTotal,
+    addToBillTotal,
+    ...totals,
+    source: "reservation-subcollection"
+  };
+}
 function calculateCheckoutPoints(totalPrice, rewardsConfig) {
   if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
   if ((rewardsConfig.earningMode || "per-spend") === "per-booking") {
@@ -228127,25 +228224,13 @@ async function handleConfirmBookingWithBalance(req, res) {
       const txHotelConfig = txHotelConfigDoc.exists ? txHotelConfigDoc.data() : {};
       const txThreshold = Number(txHotelConfig.unpaidCheckoutApprovalThreshold) || 5e3;
       balanceThreshold = txThreshold;
-      const paymentsRef = bookingRef.collection("payments");
-      const chargesRef = bookingRef.collection("charges");
-      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
-      const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
-        transaction.get(paymentsRef),
-        transaction.get(chargesRef),
-        transaction.get(storeOrdersQuery)
-      ]);
-      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
-      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
-      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
-      const serverFolio = computeServerFolioTotals({
-        totalPrice: Number(data.totalPrice) || 0,
-        incidentalTotal,
-        addToBillTotal,
-        collectedTotal
+      const folioSnapshot = await readTransactionalFolioSnapshot({
+        transaction,
+        bookingRef,
+        bookingId,
+        bookingData: data
       });
-      const folioTotal = serverFolio.folioTotal;
-      const computedBalance = serverFolio.computedBalance;
+      const computedBalance = folioSnapshot.computedBalance;
       balance = computedBalance;
       if (computedBalance > txThreshold && staffRole !== "admin") {
         needsAdminApproval = true;
@@ -228375,17 +228460,15 @@ async function handleCheckoutBooking(req, res) {
       if (freshBookingData.status !== "checked-in") {
         throw new Error(`Booking can only be checked out from 'checked-in' status (current: ${freshBookingData.status}).`);
       }
-      const paymentsRef = bookingRef.collection("payments");
-      const chargesRef = bookingRef.collection("charges");
-      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
-      const paymentsSnapshot = await transaction.get(paymentsRef);
-      const chargesSnapshot = await transaction.get(chargesRef);
-      const storeOrdersSnapshot = await transaction.get(storeOrdersQuery);
-      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
-      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
-      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
-      const checkoutFolioTotal = Number(freshBookingData.totalPrice || 0) + incidentalTotal + addToBillTotal;
-      checkedOutWithBalance = Math.max(checkoutFolioTotal - collectedTotal, 0);
+      const folioSnapshot = await readTransactionalFolioSnapshot({
+        transaction,
+        bookingRef,
+        bookingId,
+        bookingData: freshBookingData
+      });
+      const collectedTotal = folioSnapshot.collectedTotal;
+      const checkoutFolioTotal = folioSnapshot.folioTotal;
+      checkedOutWithBalance = folioSnapshot.computedBalance;
       eligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
         throw new Error("UNPAID_REASON_REQUIRED");
