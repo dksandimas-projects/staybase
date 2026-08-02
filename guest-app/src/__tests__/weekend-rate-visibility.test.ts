@@ -55,7 +55,7 @@ describe("WRV — weekend rate visibility on Step 1 room cards", () => {
   it("WRV-02 — Room + Breakfast also uses the single source's nightly amount when applicable", () => {
     // The breakfast option's nightly amount is room rate + breakfast
     // contribution. The room rate portion follows the WRV-02 rule.
-    expect(bookingPageSrc).toMatch(/priceLabel=\{`\$\{optionRatePrefix\}\$\{formatPrice\(optionNightlyRate\s*\+\s*liveBreakfastRate\s*\*\s*effectiveBreakfastOccupancy\)\} \/ night`\}/);
+    expect(bookingPageSrc).toMatch(/priceLabel=\{`\$\{optionRatePrefix\}\$\{formatPrice\(optionNightlyRate\s*\+\s*liveBreakfastRate\s*\*\s*previewBreakfastOccupancy\)\} \/ night`\}/);
   });
 
   it("WRV-02 — multi-source stays prefix the option price with 'From' (the headline hedges; the breakdown + total reconcile)", () => {

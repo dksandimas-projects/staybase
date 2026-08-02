@@ -25,8 +25,8 @@ describe("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment + head
     });
   });
 
-  describe("Fingerprint — uses roomCount as roomLines[0].quantity", () => {
-    it("echoes the request roomCount in the fingerprint's roomLines[0].quantity", () => {
+  describe("Fingerprint — uses the normalized room selections", () => {
+    it("fingerprints one canonical line per requested room", () => {
       // The fingerprint is N-aware — a retry with
       // a different `roomCount` is a different
       // request (409 conflict), a retry with the
@@ -36,13 +36,13 @@ describe("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment + head
       // For N=1 (the default) this is byte-equivalent
       // to the pre-MRB-06 `quantity: 1`.
       expect(handlers).toMatch(
-        /quantity: Math\.max\(1, Math\.floor\(Number\(roomCount\) \|\| 1\)\)/
+        /roomLines: normalizedRoomSelections\.map\(\(selection\) => \(\{\s*type: String\(selection\.roomType \|\| ""\)\.trim\(\),\s*quantity: 1,\s*adults: selection\.numAdults,\s*children: selection\.numChildren,\s*extraBeds: selection\.extraBedCount/
       );
     });
   });
 
   describe("Auto-assignment — picks N distinct rooms (same-room-twice guard)", () => {
-    it("iterates the candidates loop Math.max(1, floor(roomCount)) times", () => {
+    it("iterates once for every normalized room selection", () => {
       // The outer loop iterates `roomCount` times
       // to assign N distinct rooms of the requested
       // `roomType`. For N=1 (the default) the outer
@@ -51,7 +51,7 @@ describe("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment + head
       // the candidates in `roomNumber` order and
       // picks the first non-conflicting one.
       expect(handlers).toMatch(
-        /for \(let outerIdx = 0; outerIdx < Math\.max\(1, Math\.floor\(Number\(roomCount\) \|\| 1\)\); outerIdx\+\+\)/
+        /for \(const selection of resolvedRoomSelections\) \{\s*const candidates = candidatesByType\.get\(selection\.roomType\) \|\| \[\];/
       );
     });
 

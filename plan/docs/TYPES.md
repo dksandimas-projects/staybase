@@ -125,6 +125,16 @@ DiscountType = "" | "senior" | "pwd"
 
 PaymentMethod = "pay-at-hotel" | "gcash" | "paypal" | string
 
+PublicRoomSelection {
+  bookingId?: string                     // first selection uses the public flow's preallocated upload ID
+  roomType: string
+  numAdults: number                      // at least one adult per room
+  numChildren: number
+  extraBedCount: number
+  hasBreakfast: boolean
+  breakfastIncludesChildren: boolean
+}
+
 Reservation {
   // Per MRB-01 (2026-08-02, per decision #159): the reservation
   // header. Every new booking (including a one-room stay) is
@@ -181,7 +191,7 @@ Reservation {
 
   holdExpiresAt: Date | null              // unified PEX hold (no separate large-group timer, per MRB-08)
 
-  requestFingerprint: string              // server-only; canonical SHA-256 of the create request
+  requestFingerprint: string              // server-only; includes every room's type, occupancy, extra beds, and breakfast choices
 
   createdAt: Date
   updatedAt: Date

@@ -221828,7 +221828,9 @@ function normalizeRoomLine(line) {
     quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
     adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
     children: Math.max(0, Math.floor(Number(line.children) || 0)),
-    extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0))
+    extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0)),
+    hasBreakfast: Boolean(line.hasBreakfast),
+    breakfastIncludesChildren: Boolean(line.breakfastIncludesChildren)
   };
 }
 function normalizeDiscountScope2(scope) {
@@ -221858,8 +221860,9 @@ function normalizeDiscountScope2(scope) {
 }
 function buildCanonicalPayload(req) {
   const roomLines = (Array.isArray(req.roomLines) ? req.roomLines : []).map(normalizeRoomLine).sort((a, b3) => {
-    if (a.type !== b3.type) return a.type < b3.type ? -1 : 1;
-    return a.quantity - b3.quantity;
+    const aKey = JSON.stringify(a);
+    const bKey = JSON.stringify(b3);
+    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
   });
   const payload = {
     reservationId: String(req.reservationId || "").trim(),
@@ -225191,6 +225194,38 @@ var storageUrlRefiner = (val) => {
   if (!storageBucketUrl) return true;
   return val.startsWith(storageBucketUrl);
 };
+var publicRoomSelectionSchema = external_exports.object({
+  bookingId: external_exports.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX).optional(),
+  roomType: external_exports.string().trim().min(1).max(120),
+  numAdults: external_exports.coerce.number().int().min(0).max(100),
+  numChildren: external_exports.coerce.number().int().min(0).max(100),
+  extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
+  hasBreakfast: external_exports.boolean(),
+  breakfastIncludesChildren: external_exports.boolean().optional()
+}).strict().superRefine((selection, ctx) => {
+  if (selection.numAdults + selection.numChildren < 1) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      message: "Each room must have at least one guest."
+    });
+  }
+});
+function allocateRoundedAmount(total, weights) {
+  if (weights.length === 0) return [];
+  const safeTotal = Math.max(0, Math.round(Number(total) || 0));
+  const safeWeights = weights.map((weight) => Math.max(0, Number(weight) || 0));
+  const weightTotal = safeWeights.reduce((sum, weight) => sum + weight, 0);
+  if (weightTotal <= 0) {
+    return safeWeights.map((_2, index) => index === 0 ? safeTotal : 0);
+  }
+  const allocations = safeWeights.map((weight) => Math.floor(safeTotal * weight / weightTotal));
+  let remainder = safeTotal - allocations.reduce((sum, amount) => sum + amount, 0);
+  for (let index = 0; remainder > 0; index = (index + 1) % allocations.length) {
+    allocations[index] += 1;
+    remainder -= 1;
+  }
+  return allocations;
+}
 var createBookingSchema = external_exports.object({
   bookingId: external_exports.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
   roomType: external_exports.string().trim().min(1).max(120),
@@ -225256,6 +225291,11 @@ var createBookingSchema = external_exports.object({
   // occupancy check is designed for; larger would
   // stress the transaction's read set).
   roomCount: external_exports.coerce.number().int().min(1).max(50).optional().default(1),
+  // MRB-06 Phase 3: the guest cart sends one explicit entry per
+  // room stay so mixed room types and uneven guest distribution
+  // remain unambiguous. Legacy callers may omit this array and
+  // continue using roomType + roomCount + the top-level occupancy.
+  roomSelections: external_exports.array(publicRoomSelectionSchema).min(1).max(50).optional(),
   testToken: external_exports.string().trim().max(512).optional(),
   turnstileToken: external_exports.string().max(4096).optional(),
   // Per MRB-02 (2026-08-02, per decision #159): optional client
@@ -225332,9 +225372,38 @@ async function handleCreateBooking(req, res) {
     // single-room case) so existing callers don't need
     // to send the field.
     roomCount,
+    roomSelections: requestedRoomSelections,
     testToken
   } = body;
   const guestDetails = rawGuestDetails;
+  const normalizedRoomSelections = requestedRoomSelections?.length ? requestedRoomSelections.map((selection, index) => ({
+    bookingId: index === 0 ? bookingId : selection.bookingId || adminDb.collection("bookings").doc().id,
+    roomType: selection.roomType,
+    numAdults: selection.numAdults,
+    numChildren: selection.numChildren,
+    extraBedCount: selection.extraBedCount || 0,
+    hasBreakfast: selection.hasBreakfast,
+    breakfastIncludesChildren: selection.breakfastIncludesChildren
+  })) : Array.from({ length: roomCount }, (_2, index) => ({
+    bookingId: index === 0 ? bookingId : adminDb.collection("bookings").doc().id,
+    roomType,
+    numAdults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
+    numChildren: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
+    extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0)),
+    hasBreakfast,
+    breakfastIncludesChildren: requestedBreakfastIncludesChildren
+  }));
+  const requestedRoomCount = normalizedRoomSelections.length;
+  const requestedGuestCount = normalizedRoomSelections.reduce(
+    (sum, selection) => sum + selection.numAdults + selection.numChildren,
+    0
+  );
+  if (requestedRoomSelections?.length && requestedGuestCount !== guests) {
+    return res.status(400).json({
+      success: false,
+      error: `Guest distribution mismatch: the room assignments contain ${requestedGuestCount} guests, but the reservation total is ${guests}.`
+    });
+  }
   if (!isExpectedBookingUploadPath(discountIdPhotoPath, bookingId, "discount-id") || !isExpectedBookingUploadPath(paymentProofPath, bookingId, "payment-proof")) {
     return res.status(400).json({ success: false, error: "Invalid booking upload path." });
   }
@@ -225396,24 +225465,15 @@ async function handleCreateBooking(req, res) {
   const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
   const reservationRequestFingerprint = computeRequestFingerprint({
     reservationId: String(body.reservationId || "").trim(),
-    roomLines: [{
-      type: String(roomType || "").trim(),
-      // Per MRB-06 (2026-08-02, per decision #159): the
-      // N>1 generalization. `quantity` is the number of
-      // rooms of this type the client requested. The
-      // fingerprint is N-aware — a retry with a
-      // different `roomCount` is a different request
-      // (409 conflict), a retry with the same
-      // `roomCount` is the same request (replay). The
-      // `roomLines` array can grow in MRB-06's N>1 +
-      // multi-type generalization (a follow-up lifts
-      // the single-type constraint and accepts multiple
-      // lines, one per type with its own `quantity`).
-      quantity: Math.max(1, Math.floor(Number(roomCount) || 1)),
-      adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
-      children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
-      extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
-    }],
+    roomLines: normalizedRoomSelections.map((selection) => ({
+      type: String(selection.roomType || "").trim(),
+      quantity: 1,
+      adults: selection.numAdults,
+      children: selection.numChildren,
+      extraBeds: selection.extraBedCount,
+      hasBreakfast: selection.hasBreakfast,
+      breakfastIncludesChildren: selection.breakfastIncludesChildren
+    })),
     checkIn: String(checkIn || "").trim(),
     checkOut: String(checkOut || "").trim(),
     leadGuestName: guestNameForFingerprint,
@@ -225448,6 +225508,7 @@ async function handleCreateBooking(req, res) {
     let finalTotalPrice = 0;
     let finalRateBreakdown = null;
     let finalReservationRef = "";
+    let finalRooms = [];
     let computedData = {};
     let alreadyExistingBookingResponse = null;
     let bookingHoldExpiresAt = null;
@@ -225506,7 +225567,7 @@ async function handleCreateBooking(req, res) {
             reservationRef: String(existingData.reservationRef || ""),
             roomId: String(existingChild.roomId || ""),
             roomNumber: String(existingChild.roomNumber || ""),
-            totalPrice: Number(existingChild.totalPrice || 0),
+            totalPrice: Number(existingData.totalPrice || existingChild.totalPrice || 0),
             bookingRef: String(existingChild.bookingRef || ""),
             rateBreakdown: existingChild.rateBreakdown || null,
             holdExpiresAt: existingChild.holdExpiresAt ? existingChild.holdExpiresAt.toDate ? existingChild.holdExpiresAt.toDate() : existingChild.holdExpiresAt : null
@@ -225559,7 +225620,20 @@ async function handleCreateBooking(req, res) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
       }
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
+      const resolvedRoomSelections = normalizedRoomSelections.map((selection) => {
+        const rawSelectionType = roomTypesArr.find(
+          (entry) => entry && entry.value === selection.roomType
+        );
+        if (!rawSelectionType) {
+          throw new Error(requestedRoomSelections?.length ? `Selected room type is not available: ${selection.roomType}.` : "Selected room type is not available.");
+        }
+        return {
+          ...selection,
+          typeEntry: applyRoomTypeDefaults(rawSelectionType)
+        };
+      });
+      const primaryRoomType = resolvedRoomSelections[0]?.roomType || roomType;
+      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === primaryRoomType);
       if (!rawTypeEntry) {
         throw new Error("Selected room type is not available.");
       }
@@ -225569,20 +225643,22 @@ async function handleCreateBooking(req, res) {
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      const candidatesQuery = adminDb.collection("rooms").where("type", "==", roomType).where("isActive", "==", true);
-      const candidatesSnapshot = await transaction.get(candidatesQuery);
-      const candidates = candidatesSnapshot.docs.map((d) => ({ id: d.id, data: d.data() })).filter((c2) => c2.data).sort((a, b3) => {
-        const an3 = String(a.data.roomNumber || a.id);
-        const bn3 = String(b3.data.roomNumber || b3.id);
-        return an3.localeCompare(bn3, void 0, { numeric: true });
-      });
-      if (candidates.length === 0) {
-        throw new Error("Room no longer available");
+      const candidatesByType = /* @__PURE__ */ new Map();
+      for (const typeValue of [...new Set(resolvedRoomSelections.map((selection) => selection.roomType))]) {
+        const candidatesQuery = adminDb.collection("rooms").where("type", "==", typeValue).where("isActive", "==", true);
+        const candidatesSnapshot = await transaction.get(candidatesQuery);
+        const candidates = candidatesSnapshot.docs.map((d) => ({ id: d.id, data: d.data() })).filter((candidate) => candidate.data).sort((a, b3) => {
+          const an3 = String(a.data.roomNumber || a.id);
+          const bn3 = String(b3.data.roomNumber || b3.id);
+          return an3.localeCompare(bn3, void 0, { numeric: true });
+        });
+        candidatesByType.set(typeValue, candidates);
       }
       let sawLingeringCheckedInConflict = false;
-      const assignedRooms2 = [];
+      const assignedRooms = [];
       const assignedRoomIds = [];
-      for (let outerIdx = 0; outerIdx < Math.max(1, Math.floor(Number(roomCount) || 1)); outerIdx++) {
+      for (const selection of resolvedRoomSelections) {
+        const candidates = candidatesByType.get(selection.roomType) || [];
         let foundThisRound = null;
         for (const candidate of candidates) {
           if (assignedRoomIds.includes(candidate.id)) {
@@ -225648,14 +225724,14 @@ async function handleCreateBooking(req, res) {
         if (!foundThisRound) {
           throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-        assignedRooms2.push(foundThisRound);
+        assignedRooms.push({ ...foundThisRound, selection });
         assignedRoomIds.push(foundThisRound.id);
       }
-      if (assignedRooms2.length === 0) {
+      if (assignedRooms.length === 0) {
         throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
-      const roomId = assignedRooms2[0].id;
-      const roomData = assignedRooms2[0].data;
+      const roomId = assignedRooms[0].id;
+      const roomData = assignedRooms[0].data;
       assignedRoomId = roomId;
       assignedRoomNumber = String(roomData.roomNumber || "");
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
@@ -225664,35 +225740,58 @@ async function handleCreateBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
       const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== void 0 ? requestedBreakfastIncludesChildren : breakfastIncludesChildrenDefault;
-      const numAdults = Number.isFinite(Number(requestedNumAdults)) ? Math.max(0, Math.floor(Number(requestedNumAdults))) : guests;
-      const numChildren = Number.isFinite(Number(requestedNumChildren)) ? Math.max(0, Math.floor(Number(requestedNumChildren))) : 0;
-      if (numAdults + numChildren !== guests) {
-        throw new Error(
-          `Occupancy split mismatch: numAdults (${numAdults}) + numChildren (${numChildren}) must equal guests (${guests}).`
-        );
-      }
-      const typeMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
-      const extraBedCount = Math.max(0, Number(requestedExtraBedCount) || 0);
-      const typeMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
-      const typeExtraBedRate = Math.max(0, Number(typeEntry.extraBedRate) || 0);
-      if (extraBedCount > typeMaxExtraBeds) {
-        throw new Error(
-          `Extra bed count (${extraBedCount}) exceeds the room type's allowance (${typeMaxExtraBeds}).`
-        );
-      }
-      const extraBedRate = extraBedCount > 0 ? typeExtraBedRate : 0;
-      const overflow = requiredExtraBedsFor({
-        numAdults,
-        numChildren,
-        maxCapacity: typeMaxCapacity,
-        maxChildren: typeMaxChildren
+      const validatedRoomStays = assignedRooms.map((assignedRoom, index) => {
+        const selection = assignedRoom.selection;
+        const selectionType = selection.typeEntry;
+        const numAdults2 = selection.numAdults;
+        const numChildren2 = selection.numChildren;
+        const extraBedCount2 = selection.extraBedCount;
+        if (!requestedRoomSelections?.length && index === 0 && numAdults2 + numChildren2 !== guests) {
+          throw new Error(
+            `Occupancy split mismatch: numAdults (${numAdults2}) + numChildren (${numChildren2}) must equal guests (${guests}).`
+          );
+        }
+        if (numAdults2 < 1) {
+          throw new Error(`Room ${index + 1} must include at least one adult.`);
+        }
+        const maxCapacity = Math.max(0, Number(selectionType.maxCapacity) || 0);
+        const maxChildren = Math.max(0, Number(selectionType.maxChildren) || 0);
+        const maxExtraBeds = Math.max(0, Number(selectionType.maxExtraBeds) || 0);
+        if (extraBedCount2 > maxExtraBeds) {
+          throw new Error(
+            `Extra bed count (${extraBedCount2}) exceeds ${selectionType.label || selection.roomType}'s allowance (${maxExtraBeds}).`
+          );
+        }
+        const overflow = requiredExtraBedsFor({
+          numAdults: numAdults2,
+          numChildren: numChildren2,
+          maxCapacity,
+          maxChildren
+        });
+        if (overflow.requiredExtraBeds > extraBedCount2) {
+          throw new Error(
+            requestedRoomSelections?.length ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra bed(s), but only ${extraBedCount2} selected.` : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount2} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
+          );
+        }
+        return {
+          ...assignedRoom,
+          numAdults: numAdults2,
+          numChildren: numChildren2,
+          numGuests: numAdults2 + numChildren2,
+          extraBedCount: extraBedCount2,
+          extraBedRate: extraBedCount2 > 0 ? Math.max(0, Number(selectionType.extraBedRate) || 0) : 0,
+          breakfastIncludesChildren: selection.breakfastIncludesChildren !== void 0 ? selection.breakfastIncludesChildren : breakfastIncludesChildrenDefault
+        };
       });
-      if (overflow.requiredExtraBeds > extraBedCount) {
-        throw new Error(
-          `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${typeMaxExtraBeds} extra bed(s).`
-        );
-      }
-      if (extraBedCount > 0) {
+      const numAdults = validatedRoomStays[0].numAdults;
+      const numChildren = validatedRoomStays[0].numChildren;
+      const extraBedCount = validatedRoomStays[0].extraBedCount;
+      const extraBedRate = validatedRoomStays[0].extraBedRate;
+      const totalExtraBeds = validatedRoomStays.reduce(
+        (sum, stay) => sum + stay.extraBedCount,
+        0
+      );
+      if (totalExtraBeds > 0) {
         const extraBedOverlapQuery = adminDb.collection("bookings").where("status", "in", ROOM_OCCUPYING_STATUSES);
         const extraBedOverlapSnapshot = await transaction.get(extraBedOverlapQuery);
         const extraBedInUse = countExtraBedsInUse(
@@ -225700,7 +225799,6 @@ async function handleCreateBooking(req, res) {
           checkInDate,
           checkOutDate
         );
-        const totalExtraBeds = extraBedCount * assignedRooms2.length;
         const inventoryResult = checkExtraBedInventory(
           Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
           extraBedInUse,
@@ -225769,42 +225867,70 @@ async function handleCreateBooking(req, res) {
         corporateDetails.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
         activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : typeBaseRate;
       }
-      const roomBreakdown = corporateDetails.isCorporate ? {
-        roomSubtotal: activeRoomRate * numNights,
-        roomLines: [{
-          source: "corporate",
-          label: corporateDetails.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
-          startDate: checkIn,
-          endDate: checkOut,
-          nights: numNights,
-          nightlyRate: activeRoomRate,
-          subtotal: activeRoomRate * numNights
-        }]
-      } : calculateSeasonalAwareRoomBreakdown({
-        checkIn: checkInDate,
-        checkOut: checkOutDate,
-        roomType,
-        baseRate: activeRoomRate,
-        weekendRate: typeWeekendRate,
-        seasonalRateOverrides
+      const roomStayPricing = validatedRoomStays.map((stay, index) => {
+        const stayType = stay.selection.typeEntry;
+        const baseRate = Number(stayType.pricePerNight) || 0;
+        const stayCorporateRate = Number(stayType.corporateRate) || 0;
+        const stayActiveRate = corporateDetails.isCorporate ? index === 0 ? activeRoomRate : stayCorporateRate > 0 ? stayCorporateRate : baseRate : baseRate;
+        const stayRoomBreakdown = corporateDetails.isCorporate ? {
+          roomSubtotal: stayActiveRate * numNights,
+          roomLines: [{
+            source: "corporate",
+            label: corporateDetails.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
+            startDate: checkIn,
+            endDate: checkOut,
+            nights: numNights,
+            nightlyRate: stayActiveRate,
+            subtotal: stayActiveRate * numNights
+          }]
+        } : calculateSeasonalAwareRoomBreakdown({
+          checkIn: checkInDate,
+          checkOut: checkOutDate,
+          roomType: stay.selection.roomType,
+          baseRate: stayActiveRate,
+          weekendRate: Number(stayType.weekendRate) || 0,
+          seasonalRateOverrides
+        });
+        const stayHasBreakfast = breakfastConfig.isEnabled && stay.selection.hasBreakfast;
+        const stayBreakfastTotal = calculateBreakfastAddOn({
+          hasBreakfast: stayHasBreakfast,
+          breakfastRate: actualBreakfastRate,
+          numGuests: stay.numGuests,
+          numAdults: stay.numAdults,
+          numChildren: stay.numChildren,
+          numNights,
+          breakfastIncludesChildren: stay.breakfastIncludesChildren
+        });
+        const stayExtraBedTotal = calculateExtraBedAddOn({
+          extraBedCount: stay.extraBedCount,
+          extraBedRate: stay.extraBedRate,
+          numNights
+        });
+        return {
+          ...stay,
+          activeRoomRate: stayActiveRate,
+          roomBreakdown: stayRoomBreakdown,
+          roomTotal: stayRoomBreakdown.roomSubtotal,
+          finalHasBreakfast: stayHasBreakfast,
+          breakfastTotal: stayBreakfastTotal,
+          extraBedTotal: stayExtraBedTotal,
+          subtotal: stayRoomBreakdown.roomSubtotal + stayBreakfastTotal + stayExtraBedTotal
+        };
       });
+      const roomBreakdown = {
+        roomSubtotal: roomStayPricing.reduce((sum, stay) => sum + stay.roomTotal, 0),
+        roomLines: roomStayPricing.flatMap(
+          (stay, index) => stay.roomBreakdown.roomLines.map((line) => ({
+            ...line,
+            label: requestedRoomCount > 1 ? `${stay.selection.typeEntry.label || stay.selection.roomType} ${index + 1} \u2014 ${line.label}` : line.label
+          }))
+        )
+      };
       const roomTotal = roomBreakdown.roomSubtotal;
-      const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: actualBreakfastRate,
-        numGuests: guests,
-        numAdults,
-        numChildren,
-        numNights,
-        breakfastIncludesChildren
-      });
-      const extraBedTotal = calculateExtraBedAddOn({
-        extraBedCount,
-        extraBedRate,
-        numNights
-      });
+      const breakfastTotal = roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
+      const extraBedTotal = roomStayPricing.reduce((sum, stay) => sum + stay.extraBedTotal, 0);
       const subtotal = roomTotal + breakfastTotal + extraBedTotal;
+      const finalHasBreakfast = roomStayPricing[0].finalHasBreakfast;
       let discountPct = 0;
       if (discountType === "senior" || discountType === "pwd") {
         discountPct = 20;
@@ -225831,13 +225957,17 @@ async function handleCreateBooking(req, res) {
           const vData = voucherDoc.data();
           const now2 = /* @__PURE__ */ new Date();
           const voucherExpiresAt = toDateOrNull(vData.expiresAt);
-          const assignedTypeMatchesChosen = !roomType || roomData.type === roomType;
+          const assignedTypesMatchChosen = assignedRooms.every(
+            (assignedRoom) => assignedRoom.data.type === assignedRoom.selection.roomType
+          );
+          const applicableTypes = Array.isArray(vData.applicableRoomTypes) ? vData.applicableRoomTypes : [];
+          const allSelectedTypesApplicable = applicableTypes.length === 0 || resolvedRoomSelections.every((selection) => applicableTypes.includes(selection.roomType));
           const isValid2 = vData.isActive !== false && (!voucherExpiresAt || voucherExpiresAt >= now2) && (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) && // Per BF-19 (booking-flow audit 2026-06-26): the
           // empty-or-undefined case is covered by the optional
           // chaining below; drop the redundant `!vData.applicableRoomTypes`
           // short-circuit. The `length === 0` covers both the
           // "empty array" and "falsy" cases via `?.length ?? 0`.
-          ((vData.applicableRoomTypes?.length ?? 0) === 0 || vData.applicableRoomTypes.includes(roomData.type)) && assignedTypeMatchesChosen;
+          allSelectedTypesApplicable && assignedTypesMatchChosen;
           if (isValid2) {
             appliedVoucherCode = formattedCode;
             const seniorPwdDiscountForVoucher = Math.round(calculatePercentDiscount(subtotal, discountPct));
@@ -225907,6 +226037,33 @@ async function handleCreateBooking(req, res) {
         memberDiscountPct: appliedMemberDiscountPct,
         finalTotal: totalPrice
       });
+      const roomStayWeights = roomStayPricing.map((stay) => stay.subtotal);
+      const allocatedChildTotals = allocateRoundedAmount(totalPrice, roomStayWeights);
+      const allocatedVoucherDiscounts = allocateRoundedAmount(voucherDiscount, roomStayWeights);
+      const allocatedDeductions = rateBreakdown.deductions.map((deduction) => ({
+        label: deduction.label,
+        amounts: allocateRoundedAmount(deduction.amount, roomStayWeights)
+      }));
+      const childPricing = roomStayPricing.map((stay, index) => ({
+        ...stay,
+        totalPrice: allocatedChildTotals[index],
+        voucherDiscount: allocatedVoucherDiscounts[index],
+        rateBreakdown: {
+          roomSubtotal: stay.roomTotal,
+          roomLines: stay.roomBreakdown.roomLines,
+          addOns: [
+            ...stay.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }] : [],
+            ...stay.extraBedTotal > 0 ? [{
+              label: stay.extraBedCount > 1 ? `Extra bed add-on (${stay.extraBedCount} beds \xD7 ${numNights} ${numNights === 1 ? "night" : "nights"})` : "Extra bed add-on",
+              amount: stay.extraBedTotal
+            }] : []
+          ],
+          deductions: allocatedDeductions.flatMap(
+            (deduction) => deduction.amounts[index] > 0 ? [{ label: deduction.label, amount: deduction.amounts[index] }] : []
+          ),
+          finalTotal: allocatedChildTotals[index]
+        }
+      }));
       const { todayStr, todayCompact } = getManilaDateInfo();
       const counterRef = adminDb.collection("counters").doc(`bookings-${todayStr}`);
       const counterDoc = await transaction.get(counterRef);
@@ -226099,7 +226256,7 @@ async function handleCreateBooking(req, res) {
         reservationId: effectiveReservationId,
         reservationRef: finalReservationRef,
         reservationPosition: 1,
-        reservationRoomCount: assignedRooms2.length,
+        reservationRoomCount: assignedRooms.length,
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -226124,12 +226281,10 @@ async function handleCreateBooking(req, res) {
         // room of the same `roomType` + same dates +
         // same guest inputs, so the sum is
         // `roomCount * per-room value`).
-        originalSubtotal: totalPrice * assignedRooms2.length,
-        // MRB-04: the proper originalSubtotal computation
+        originalSubtotal: subtotal,
         discountScopeSnapshot: snapshottedDiscountScope,
-        subtotal: totalPrice * assignedRooms2.length,
-        // MRB-04: the proper subtotal after add-on math
-        totalPrice: totalPrice * assignedRooms2.length,
+        subtotal,
+        totalPrice,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
         corporateCode: corporateDetails.corporateCode,
@@ -226146,9 +226301,8 @@ async function handleCreateBooking(req, res) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: termsConsentVersion,
-        roomCount: 1,
-        // MRB-06: matches the room-line count for N>1
-        activeRoomCount: 1,
+        roomCount: assignedRooms.length,
+        activeRoomCount: assignedRooms.length,
         cancelledRoomCount: 0,
         checkedInRoomCount: 0,
         checkedOutRoomCount: 0,
@@ -226159,12 +226313,13 @@ async function handleCreateBooking(req, res) {
         createdBy: "guest"
       };
       transaction.set(reservationDocRef, newReservation);
-      const bookingWriteRefs2 = [];
-      for (let bookingIdx = 0; bookingIdx < assignedRooms2.length; bookingIdx++) {
-        const assignedRoomForBooking = assignedRooms2[bookingIdx];
-        const bookingIdForThisRoom = bookingIdx === 0 ? bookingId : adminDb.collection("bookings").doc().id;
+      const bookingWriteRefs = [];
+      for (let bookingIdx = 0; bookingIdx < assignedRooms.length; bookingIdx++) {
+        const assignedRoomForBooking = assignedRooms[bookingIdx];
+        const pricingForRoom = childPricing[bookingIdx];
+        const bookingIdForThisRoom = assignedRoomForBooking.selection.bookingId;
         const perRoomBookingDocRef = adminDb.collection("bookings").doc(bookingIdForThisRoom);
-        bookingWriteRefs2.push({
+        bookingWriteRefs.push({
           ref: perRoomBookingDocRef,
           data: {
             ...newBooking,
@@ -226179,8 +226334,22 @@ async function handleCreateBooking(req, res) {
             // per-room field).
             roomId: assignedRoomForBooking.id,
             roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
+            roomType: assignedRoomForBooking.selection.roomType,
+            numGuests: pricingForRoom.numGuests,
+            numAdults: pricingForRoom.numAdults,
+            numChildren: pricingForRoom.numChildren,
+            ratePerNight: pricingForRoom.activeRoomRate,
+            totalPrice: pricingForRoom.totalPrice,
+            originalTotalPrice: pricingForRoom.subtotal,
+            rateBreakdown: pricingForRoom.rateBreakdown,
+            voucherDiscount: pricingForRoom.voucherDiscount,
+            hasBreakfast: pricingForRoom.finalHasBreakfast,
+            breakfastRate: pricingForRoom.finalHasBreakfast ? actualBreakfastRate : 0,
+            breakfastIncludesChildren: pricingForRoom.finalHasBreakfast ? pricingForRoom.breakfastIncludesChildren : false,
+            extraBedCount: pricingForRoom.extraBedCount,
+            extraBedRate: pricingForRoom.extraBedRate,
             reservationPosition: bookingIdx + 1,
-            reservationRoomCount: assignedRooms2.length,
+            reservationRoomCount: assignedRooms.length,
             // Per-booking lookup token. The
             // pre-MRB-02 code generated a single
             // token per booking; for N>1 each
@@ -226195,9 +226364,25 @@ async function handleCreateBooking(req, res) {
           }
         });
       }
-      for (const { ref: writeRef, data: writeData } of bookingWriteRefs2) {
+      for (const { ref: writeRef, data: writeData } of bookingWriteRefs) {
         transaction.set(writeRef, writeData);
       }
+      finalRooms = bookingWriteRefs.map((write, index) => {
+        const assigned = assignedRooms[index];
+        const pricing = childPricing[index];
+        return {
+          bookingId: write.ref.id,
+          roomId: assigned.id,
+          roomNumber: String(assigned.data.roomNumber || ""),
+          roomType: assigned.selection.roomType,
+          reservationPosition: index + 1,
+          numAdults: pricing.numAdults,
+          numChildren: pricing.numChildren,
+          extraBedCount: pricing.extraBedCount,
+          hasBreakfast: pricing.finalHasBreakfast,
+          totalPrice: pricing.totalPrice
+        };
+      });
       if (newBooking && newBooking.holdExpiresAt) {
         const he3 = newBooking.holdExpiresAt;
         bookingHoldExpiresAt = he3 instanceof Date ? he3 : he3.toDate ? he3.toDate() : null;
@@ -226338,15 +226523,7 @@ async function handleCreateBooking(req, res) {
         // `rooms` is a single-element array —
         // byte-equivalent to the pre-MRB-06 single
         // fields.
-        rooms: (typeof bookingWriteRefs === "undefined" ? [] : bookingWriteRefs).map((w3, idx) => {
-          const r3 = assignedRooms[idx];
-          return {
-            bookingId: w3.ref.id,
-            roomId: r3.id,
-            roomNumber: String(r3.data.roomNumber || ""),
-            reservationPosition: idx + 1
-          };
-        }),
+        rooms: finalRooms,
         // Per PEX-05 (2026-08-01, per decision #147): the
         // snapshotted deadline. `null` for `payment-uploaded`
         // bookings (no auto-expiry, staff-review state). The

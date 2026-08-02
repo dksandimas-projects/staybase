@@ -72,6 +72,12 @@ import { useTurnstileToken } from "../hooks/useTurnstileToken";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
+import {
+  parseBookingRoomCart,
+  rebalanceGuestDistribution,
+  serializeBookingRoomCart,
+  type BookingRoomCartItem
+} from "../utils/bookingRoomCart";
 
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -226,6 +232,10 @@ export function BookingPage() {
   // the server auto-assigns a physical room of that type inside
   // the availability transaction.
   const [selectedRoomType, setSelectedRoomType] = useState(searchParams.get("roomType") ?? "");
+  const [roomCart, setRoomCart] = useState<BookingRoomCartItem[]>(() => {
+    const fromUrl = parseBookingRoomCart(searchParams.get("rooms"));
+    return fromUrl.length > 0 ? fromUrl : [];
+  });
   
   // RateChoice initially set based on query search params
   const [rateChoice, setRateChoice] = useState<RateChoice>(() =>
@@ -362,33 +372,21 @@ export function BookingPage() {
   const availableRoomTypes = useMemo(
     () =>
       typeAvailability.filter(
-        (entry) => {
-          const overflow = requiredExtraBedsFor({
-            numAdults,
-            numChildren,
-            maxCapacity: Number(entry.type.maxCapacity) || 0,
-            maxChildren: Number(entry.type.maxChildren) || 0
-          });
-          return (
-            overflow.requiredExtraBeds <= (Number(entry.type.maxExtraBeds) || 0)
-            && entry.availableCount > 0
-          );
-        }
+        (entry) => entry.availableCount > 0
       ),
-    [typeAvailability, numAdults, numChildren]
+    [typeAvailability]
   );
   const maxGuestCapacity = useMemo(
     () =>
-      Math.max(
-        1,
-        ...roomTypes.map(
-          (type) =>
-            (Number(type.maxCapacity) || 0)
-            + (Number(type.maxChildren) || 0)
-            + (Number(type.maxExtraBeds) || 0)
-        )
-      ),
-    [roomTypes]
+      Math.max(1, typeAvailability.reduce(
+        (sum, entry) => sum + entry.availableCount * (
+          (Number(entry.type.maxCapacity) || 0)
+          + (Number(entry.type.maxChildren) || 0)
+          + (Number(entry.type.maxExtraBeds) || 0)
+        ),
+        0
+      )),
+    [typeAvailability]
   );
 
   // Per `plan/features/SETTINGS.md §Payment Methods` — the booking
@@ -422,6 +420,28 @@ export function BookingPage() {
   const selectedTypeEntry = roomTypes.find((type) => type.value === selectedRoomType)
     ?? availableRoomTypes[0]?.type
     ?? null;
+  const cartDistribution = useMemo(
+    () => rebalanceGuestDistribution(roomCart, roomTypes, numAdults, numChildren),
+    [roomCart, roomTypes, numAdults, numChildren]
+  );
+  const distributedRoomCart = cartDistribution.rooms;
+  const cartQuantityByType = useMemo(() => {
+    const quantities = new Map<string, number>();
+    for (const room of distributedRoomCart) {
+      quantities.set(room.roomType, (quantities.get(room.roomType) || 0) + 1);
+    }
+    return quantities;
+  }, [distributedRoomCart]);
+  const cartHasAvailability = typeAvailability.every((entry) => {
+    const quantity = cartQuantityByType.get(entry.type.value) || 0;
+    return quantity <= entry.availableCount;
+  });
+  const cartDistributionComplete =
+    distributedRoomCart.length > 0
+    && cartDistribution.unassignedAdults === 0
+    && cartDistribution.unassignedChildren === 0
+    && distributedRoomCart.every((room) => room.numAdults >= 1);
+  const cartIsReady = cartHasAvailability && cartDistributionComplete;
   const selectedTypeIsAvailable = Boolean(
     selectedTypeEntry
     && availableRoomTypes.some((entry) => entry.type.value === selectedTypeEntry.value)
@@ -465,16 +485,19 @@ export function BookingPage() {
 
   // Calculate room total client-side, incorporating weekend rates (Saturdays and Sundays)
   const roomTotal = useMemo(() => {
-    if (!selectedTypeEntry || !selectedRoomRates) return 0;
-    return calculateSeasonalAwareRoomTotal({
-      checkIn: `${checkIn}T00:00:00Z`,
-      checkOut: `${checkOut}T00:00:00Z`,
-      roomType: selectedTypeEntry.value,
-      baseRate: selectedRoomRates.pricePerNight,
-      weekendRate: selectedRoomRates.weekendRate,
-      seasonalRateOverrides
-    });
-  }, [selectedTypeEntry, selectedRoomRates, checkIn, checkOut, seasonalRateOverrides]);
+    return distributedRoomCart.reduce((sum, room) => {
+      const type = roomTypes.find((entry) => entry.value === room.roomType);
+      if (!type) return sum;
+      return sum + calculateSeasonalAwareRoomTotal({
+        checkIn: `${checkIn}T00:00:00Z`,
+        checkOut: `${checkOut}T00:00:00Z`,
+        roomType: type.value,
+        baseRate: Number(type.pricePerNight) || 0,
+        weekendRate: Number(type.weekendRate) || 0,
+        seasonalRateOverrides
+      });
+    }, 0);
+  }, [distributedRoomCart, roomTypes, checkIn, checkOut, seasonalRateOverrides]);
 
   const discountPct = discountType === "none" ? 0 : 20;
   // Per CHD-10 (2026-07-31, per CVQ-01): the inline
@@ -483,15 +506,15 @@ export function BookingPage() {
   // children and the toggle is off, the helper uses `numAdults`
   // (the cheaper line). The `breakfastIncludesChildren` default
   // (true) matches the historical "children pay the full rate" math.
-  const breakfastTotal = calculateBreakfastAddOn({
-    hasBreakfast,
+  const breakfastTotal = distributedRoomCart.reduce((sum, room) => sum + calculateBreakfastAddOn({
+    hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
     breakfastRate,
-    numGuests: guests,
-    numAdults,
-    numChildren,
+    numGuests: room.numAdults + room.numChildren,
+    numAdults: room.numAdults,
+    numChildren: room.numChildren,
     numNights: nights,
     breakfastIncludesChildren
-  });
+  }), 0);
   // Per CHD-10: the effective breakfast occupancy, exposed for
   // the rate-card per-night label. When the toggle is on, this
   // equals `guests`; when off, it equals `numAdults`. Matches
@@ -503,11 +526,14 @@ export function BookingPage() {
   // rate from the selected room type; nullish / 0 inputs
   // short-circuit to 0 via the helper.
   const extraBedRate = selectedTypeEntry ? Number(selectedTypeEntry.extraBedRate) || 0 : 0;
-  const extraBedTotal = calculateExtraBedAddOn({
-    extraBedCount,
-    extraBedRate,
-    numNights: nights
-  });
+  const extraBedTotal = distributedRoomCart.reduce((sum, room) => {
+    const type = roomTypes.find((entry) => entry.value === room.roomType);
+    return sum + calculateExtraBedAddOn({
+      extraBedCount: room.extraBedCount,
+      extraBedRate: Number(type?.extraBedRate) || 0,
+      numNights: nights
+    });
+  }, 0);
   const subtotal = roomTotal + breakfastTotal + extraBedTotal;
 
   const voucherDiscount = useMemo(() => {
@@ -524,30 +550,31 @@ export function BookingPage() {
     return Math.min(voucherDiscountValue, voucherBase);
   }, [voucherApplied, voucherDiscountType, voucherDiscountValue, subtotal, discountPct]);
 
-  const total = selectedTypeEntry && selectedRoomRates
-    ? calculateBookingTotal({
-        ratePerNight: selectedRoomRates.pricePerNight,
-        numNights: nights,
-        // Per BF-08 (booking-flow audit 2026-06-26): pass the
-        // weekend-aware per-night breakdown so the displayed
-        // total matches the server's `totalPrice` (the server
-        // walks each night and substitutes the weekend rate).
-        roomTotal,
-        numGuests: guests,
-        breakfastRate,
-        hasBreakfast,
-        discountPct,
-        voucherDiscount,
-        memberDiscountPct
-      })
+  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+  const afterSeniorPwd = calculateVoucherBase(subtotal, seniorPwdDiscount);
+  const afterVoucher = calculateVoucherBase(afterSeniorPwd, voucherDiscount);
+  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
+  const total = distributedRoomCart.length > 0
+    ? Math.max(afterVoucher - memberDiscount, 0)
     : 0;
 
   const rateBreakdown = useMemo(() => {
-    if (!selectedTypeEntry || !selectedRoomRates) return null;
+    if (distributedRoomCart.length === 0) return null;
+    const cartRoomLines = distributedRoomCart.flatMap((room, index) => {
+      const type = roomTypes.find((entry) => entry.value === room.roomType);
+      if (!type) return [];
+      return calculateTypeRoomBreakdown(type, checkIn, checkOut, seasonalRateOverrides).roomLines.map((line) => ({
+        ...line,
+        label: distributedRoomCart.length > 1
+          ? `${type.label} ${index + 1} — ${line.label}`
+          : line.label
+      }));
+    });
     return buildGuestRateBreakdown({
-      roomLines: calculateTypeRoomBreakdown(selectedTypeEntry, checkIn, checkOut, seasonalRateOverrides).roomLines,
+      roomLines: cartRoomLines,
       roomSubtotal: roomTotal,
       breakfastTotal,
+      extraBedTotal,
       discountType,
       discountPct,
       voucherApplied,
@@ -556,13 +583,14 @@ export function BookingPage() {
       finalTotal: total
     });
   }, [
-    selectedTypeEntry,
-    selectedRoomRates,
+    distributedRoomCart,
+    roomTypes,
     checkIn,
     checkOut,
     seasonalRateOverrides,
     roomTotal,
     breakfastTotal,
+    extraBedTotal,
     discountType,
     discountPct,
     voucherApplied,
@@ -581,6 +609,7 @@ export function BookingPage() {
     roomType: selectedTypeEntry?.value ?? "",
     breakfast: hasBreakfast ? "yes" : "no"
   });
+  continueParams.set("rooms", serializeBookingRoomCart(distributedRoomCart));
   const reviewParams = new URLSearchParams(continueParams);
   reviewParams.set("step", "review");
   reviewParams.set("firstName", guestDetails.firstName);
@@ -605,15 +634,12 @@ export function BookingPage() {
     guestCount:
       Number(guestDetails.guestCount) >= 1
       && numAdults >= 1
-      && selectedTypeIsAvailable
-      && missingExtraBeds === 0
+      && cartIsReady
         ? ""
-        : missingExtraBeds > 0
-          ? `Add ${missingExtraBeds} more extra bed${missingExtraBeds === 1 ? "" : "s"} for this room type, or reduce the group.`
-          : "Keep at least one adult and choose a room type that fits the adult and child counts."
+        : "Choose enough rooms to assign every adult and child, with at least one adult in each room."
   };
   const canContinueToReview =
-    Object.values(guestErrors).every((error) => !error) && guestDetails.consent && Boolean(selectedTypeEntry);
+    Object.values(guestErrors).every((error) => !error) && guestDetails.consent && cartIsReady;
   const nightlyTotal = selectedRoomRates
     ? selectedRoomRates.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0)
     : 0;
@@ -693,21 +719,34 @@ export function BookingPage() {
   }, [checkIn, checkOut]);
 
   useEffect(() => {
-    if (!selectedRoomType && availableRoomTypes[0]) {
-      setSelectedRoomType(availableRoomTypes[0].type.value);
-      setExtraBedCount(0);
+    if (roomCart.length === 0 && availableRoomTypes[0]) {
+      const defaultType = availableRoomTypes[0].type.value;
+      setSelectedRoomType(defaultType);
+      setRoomCart([{
+        bookingId,
+        roomType: defaultType,
+        rateChoice,
+        numAdults,
+        numChildren,
+        extraBedCount: 0
+      }]);
       return;
     }
 
-    if (
-      selectedRoomType
-      && !availableRoomTypes.some((entry) => entry.type.value === selectedRoomType)
-      && availableRoomTypes[0]
-    ) {
-      setSelectedRoomType(availableRoomTypes[0].type.value);
-      setExtraBedCount(0);
+    if (!roomCart.some((room) => room.roomType === selectedRoomType) && roomCart[0]) {
+      setSelectedRoomType(roomCart[0].roomType);
+      setRateChoice(roomCart[0].rateChoice);
     }
-  }, [availableRoomTypes, selectedRoomType]);
+  }, [
+    availableRoomTypes,
+    bookingId,
+    extraBedCount,
+    numAdults,
+    numChildren,
+    rateChoice,
+    roomCart,
+    selectedRoomType
+  ]);
 
   function updateDateParams(nextCheckIn = checkIn, nextCheckOut = checkOut, nextGuests = guests) {
     const next = new URLSearchParams(searchParams);
@@ -793,18 +832,54 @@ export function BookingPage() {
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
     setSelectedRoomType(typeValue);
     setRateChoice(nextRateChoice);
-    // Per EXB-01 (2026-07-31): reset the extra-bed count when the
-    // room type changes — the new type may have a different
-    // `maxExtraBeds` (e.g. switching from Family to Single).
-    setExtraBedCount(0);
-    const next = new URLSearchParams(searchParams);
-    next.set("roomType", typeValue);
-    next.set("checkIn", checkIn);
-    next.set("checkOut", checkOut);
-    next.set("guests", String(guests));
-    next.set("children", String(numChildren));
-    next.set("extraBeds", "0");
-    setSearchParams(next, { replace: true });
+    setRoomCart((current) => {
+      const hasType = current.some((room) => room.roomType === typeValue);
+      const next = hasType
+        ? current.map((room) => room.roomType === typeValue
+            ? { ...room, rateChoice: nextRateChoice }
+            : room)
+        : [
+            ...current,
+            {
+              bookingId: doc(collection(db, "bookings")).id,
+              roomType: typeValue,
+              rateChoice: nextRateChoice,
+              numAdults: 0,
+              numChildren: 0,
+              extraBedCount: 0
+            }
+          ];
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("rooms", serializeBookingRoomCart(next));
+      setSearchParams(nextParams, { replace: true });
+      return next;
+    });
+  }
+
+  function updateRoomQuantity(typeValue: string, nextQuantity: number, maxQuantity: number) {
+    const safeQuantity = Math.min(Math.max(Math.floor(nextQuantity), 0), maxQuantity);
+    setSelectedRoomType(typeValue);
+    setRoomCart((current) => {
+      const matching = current.filter((room) => room.roomType === typeValue);
+      const other = current.filter((room) => room.roomType !== typeValue);
+      const templateChoice = matching[0]?.rateChoice ?? rateChoice;
+      const resized = Array.from({ length: safeQuantity }, (_, index) =>
+        matching[index] ?? {
+          bookingId: doc(collection(db, "bookings")).id,
+          roomType: typeValue,
+          rateChoice: templateChoice,
+          numAdults: 0,
+          numChildren: 0,
+          extraBedCount: 0
+        }
+      );
+      const next = [...other, ...resized];
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("rooms", serializeBookingRoomCart(next));
+      nextParams.set("roomType", typeValue);
+      setSearchParams(nextParams, { replace: true });
+      return next;
+    });
   }
 
   function updateGuestDetail(field: keyof typeof guestDetails, value: string | boolean) {
@@ -977,6 +1052,10 @@ export function BookingPage() {
     // enforced only on the staff verify endpoint.
 
     try {
+      const firstRoomSelection = distributedRoomCart[0];
+      if (!firstRoomSelection || !cartIsReady) {
+        throw new Error("Please return to Step 1 and assign every guest to an available room.");
+      }
       const response = await fetch("/api/bookings/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -993,7 +1072,17 @@ export function BookingPage() {
           // `handleCreateBooking` in
           // `guest-app/server/handlers/bookings.ts`.
           reservationId,
-          roomType: selectedTypeEntry?.value,
+          roomType: firstRoomSelection.roomType,
+          roomCount: distributedRoomCart.length,
+          roomSelections: distributedRoomCart.map((room, index) => ({
+            bookingId: index === 0 ? bookingId : room.bookingId,
+            roomType: room.roomType,
+            numAdults: room.numAdults,
+            numChildren: room.numChildren,
+            extraBedCount: room.extraBedCount,
+            hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
+            breakfastIncludesChildren
+          })),
           checkIn,
           checkOut,
           // Per BI-09 (booking-intercom audit 2026-07-06): the
@@ -1003,7 +1092,7 @@ export function BookingPage() {
           // prefer the parsed Step 2 value, falling back to the
           // Step 1 stepper for guests who never reached Step 2.
           guests: Number(guestDetails.guestCount) || guests,
-          hasBreakfast,
+          hasBreakfast: breakfastConfig.isEnabled && firstRoomSelection.rateChoice === "room-breakfast",
           // Per CHD-10 (2026-07-31, per CVQ-01): the per-booking
           // override for "include children in the breakfast
           // charge". The server snapshots this onto the booking
@@ -1016,12 +1105,12 @@ export function BookingPage() {
           // The server uses these to compute the breakfast total
           // when the toggle is off; otherwise it falls back to
           // `numGuests` (the historical path).
-          numAdults,
-          numChildren,
+          numAdults: firstRoomSelection.numAdults,
+          numChildren: firstRoomSelection.numChildren,
           // Per EXB-01 (2026-07-31): extra-bed count. The server
           // validates against the room type's `maxExtraBeds` and
           // snapshots the rate onto the booking doc.
-          extraBedCount,
+          extraBedCount: firstRoomSelection.extraBedCount,
           guestDetails: {
             firstName: guestDetails.firstName,
             lastName: guestDetails.lastName,
@@ -1062,7 +1151,7 @@ export function BookingPage() {
         : null;
       const confirmedGuests = Number(guestDetails.guestCount) || guests;
       const confirmParams = new URLSearchParams({
-        bookingRef: result.data.bookingRef,
+        bookingRef: result.data.reservationRef || result.data.bookingRef,
         roomType: result.data.roomType || selectedTypeEntry?.value || "",
         roomId: result.data.roomId || "",
         roomNumber: result.data.roomNumber || "",
@@ -1072,6 +1161,9 @@ export function BookingPage() {
         paymentMethod,
         total: String(serverTotal ?? total)
       });
+      if (Array.isArray(result.data?.rooms)) {
+        confirmParams.set("rooms", encodeURIComponent(JSON.stringify(result.data.rooms)));
+      }
       const confirmedBreakdown = result.data?.rateBreakdown || rateBreakdown;
       if (confirmedBreakdown) {
         confirmParams.set("rateBreakdown", encodeURIComponent(JSON.stringify(confirmedBreakdown)));
@@ -1311,7 +1403,15 @@ export function BookingPage() {
             // thread through to the aside.
             extraBedCount={extraBedCount}
             extraBedRate={extraBedRate}
-            typeLabel={selectedTypeEntry?.label ?? ""}
+            typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
+            roomSummary={distributedRoomCart.map((room, index) => ({
+              label: roomTypes.find((type) => type.value === room.roomType)?.label || room.roomType,
+              position: index + 1,
+              numAdults: room.numAdults,
+              numChildren: room.numChildren,
+              extraBedCount: room.extraBedCount,
+              hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast"
+            }))}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
@@ -1359,7 +1459,7 @@ export function BookingPage() {
     // until the Turnstile token has been received — submitting
     // without one is a guaranteed 400 now that the server bypass
     // is gone (BI-02).
-    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry) && Boolean(turnstileToken);
+    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
 
     return bookingShell(
       <>
@@ -1793,7 +1893,15 @@ export function BookingPage() {
             // thread through to the aside.
             extraBedCount={extraBedCount}
             extraBedRate={extraBedRate}
-            typeLabel={selectedTypeEntry?.label ?? ""}
+            typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
+            roomSummary={distributedRoomCart.map((room, index) => ({
+              label: roomTypes.find((type) => type.value === room.roomType)?.label || room.roomType,
+              position: index + 1,
+              numAdults: room.numAdults,
+              numChildren: room.numChildren,
+              extraBedCount: room.extraBedCount,
+              hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast"
+            }))}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
@@ -1892,7 +2000,9 @@ export function BookingPage() {
                 Guests
                 <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
                   <button
-                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    aria-label="Remove one guest"
+                    className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={guests <= 1}
                     type="button"
                     onClick={() => updateGuests(guests - 1)}
                   >
@@ -1903,7 +2013,9 @@ export function BookingPage() {
                     {guests} {guests === 1 ? "guest" : "guests"}
                   </span>
                   <button
-                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                    aria-label="Add one guest"
+                    className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={guests >= maxGuestCapacity}
                     type="button"
                     onClick={() => updateGuests(guests + 1)}
                   >
@@ -1974,58 +2086,39 @@ export function BookingPage() {
                 </span>
               </label>
 
-              {/* Per EXB-01 (2026-07-31): the extra-bed selector.
-                  Only renders when the selected room type has
-                  `maxExtraBeds > 0` (per the spec's "no separate
-                  `allowsExtraBed` boolean" rule). The price
-                  impact is shown in the summary panel. */}
-              {selectedTypeEntry && Number(selectedTypeEntry.maxExtraBeds) > 0 ? (
-                <label className="grid gap-2 text-sm font-medium text-gray-700">
-                  Extra bed{Number(selectedTypeEntry.maxExtraBeds) > 1 ? "s" : ""} ({formatPrice(Number(selectedTypeEntry.extraBedRate) || 0)} / bed / night)
-                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-                    <button
-                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
-                      type="button"
-                      aria-label="Decrease extra bed count"
-                      onClick={() => updateExtraBeds(extraBedCount - 1)}
-                      disabled={extraBedCount <= 0}
-                    >
-                      <Minus size={16} />
-                    </button>
-                    <span className="flex items-center gap-2 text-sm text-gray-700">
-                      {extraBedCount} extra bed{extraBedCount === 1 ? "" : "s"}
-                      <span className="text-xs text-gray-500">
-                        (up to {selectedTypeEntry.maxExtraBeds} allowed)
-                      </span>
-                    </span>
-                    <button
-                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
-                      type="button"
-                      aria-label="Increase extra bed count"
-                      onClick={() => updateExtraBeds(extraBedCount + 1)}
-                      disabled={extraBedCount >= Number(selectedTypeEntry.maxExtraBeds)}
-                    >
-                      <Plus size={16} />
-                    </button>
+              <div className="rounded-card border border-gray-200 bg-gray-50 p-4">
+                <p className="text-sm font-semibold text-gray-950">Guest distribution</p>
+                {distributedRoomCart.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {distributedRoomCart.map((room, index) => {
+                      const type = roomTypes.find((entry) => entry.value === room.roomType);
+                      return (
+                        <div key={room.bookingId} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
+                          <span>
+                            <span className="block font-semibold text-gray-900">
+                              Room {index + 1} · {type?.label || room.roomType}
+                            </span>
+                            {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
+                            {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
+                          </span>
+                          {room.extraBedCount > 0 ? (
+                            <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
+                              {room.extraBedCount} extra bed{room.extraBedCount === 1 ? "" : "s"}
+                            </span>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
-                </label>
-              ) : null}
-
-              {selectedTypeEntry && missingExtraBeds > 0 ? (
-                <div
-                  className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <Info size={18} className="mt-0.5 shrink-0 text-amber-600" />
-                  <p>
-                    This room includes space for up to {selectedMaxCapacity} adult{selectedMaxCapacity === 1 ? "" : "s"} and{" "}
-                    {selectedMaxChildren} child{selectedMaxChildren === 1 ? "" : "ren"}.
-                    Add {missingExtraBeds} more extra bed{missingExtraBeds === 1 ? "" : "s"} to fit your group,
-                    or choose a different room type.
+                ) : (
+                  <p className="mt-2 text-xs text-gray-500">Add at least one room to begin.</p>
+                )}
+                {!cartDistributionComplete ? (
+                  <p className="mt-3 text-xs font-medium text-amber-700" role="status" aria-live="polite">
+                    Add enough rooms to place every guest. Each room must include at least one adult.
                   </p>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
 
               <div className="flex gap-3 rounded-lg bg-primary-light p-4 text-sm text-gray-700">
                 <Info size={18} className="mt-0.5 shrink-0 text-primary" />
@@ -2052,7 +2145,10 @@ export function BookingPage() {
             >
               {availableRoomTypes.map((entry, index) => {
                 const type = entry.type;
-                const isSelected = type.value === selectedRoomType;
+                const typeQuantity = cartQuantityByType.get(type.value) || 0;
+                const selectedTypeRooms = distributedRoomCart.filter((room) => room.roomType === type.value);
+                const isSelected = typeQuantity > 0;
+                const selectedTypeRateChoice = selectedTypeRooms[0]?.rateChoice ?? rateChoice;
                 // Per W3.6 — pricing + max capacity live on the type.
                 const typePricePerNight = type.pricePerNight ?? 0;
                 const typeMaxCapacity = type.maxCapacity ?? 0;
@@ -2087,13 +2183,21 @@ export function BookingPage() {
                   numNights: nights,
                   roomTotal: typeRoomBreakdown.roomSubtotal
                 });
-                const breakfastTotal = calculateBookingTotal({
-                  ratePerNight: typePricePerNight,
-                  numNights: nights,
-                  roomTotal: typeRoomBreakdown.roomSubtotal,
-                  numGuests: guests,
+                const previewChildren = selectedTypeRooms[0]?.numChildren
+                  ?? Math.min(numChildren, type.maxChildren ?? 0, Math.max(typeMaxCapacity - 1, 0));
+                const previewAdults = selectedTypeRooms[0]?.numAdults
+                  ?? Math.min(Math.max(numAdults, 1), Math.max(typeMaxCapacity - previewChildren, 1));
+                const previewBreakfastOccupancy = breakfastIncludesChildren
+                  ? previewAdults + previewChildren
+                  : previewAdults;
+                const breakfastOptionTotal = roomOnlyTotal + calculateBreakfastAddOn({
+                  hasBreakfast: true,
                   breakfastRate: liveBreakfastRate,
-                  hasBreakfast: true
+                  numGuests: previewAdults + previewChildren,
+                  numAdults: previewAdults,
+                  numChildren: previewChildren,
+                  numNights: nights,
+                  breakfastIncludesChildren
                 });
 
                 return (
@@ -2157,8 +2261,37 @@ export function BookingPage() {
                         </div>
 
                         <div className="mt-6 grid gap-3">
+                          <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
+                            <span>
+                              <span className="block text-sm font-semibold text-gray-950">Rooms</span>
+                              <span className="block text-xs text-gray-500">Up to {entry.availableCount} available</span>
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                aria-label={`Remove one ${type.label} room`}
+                                className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                disabled={typeQuantity === 0}
+                                onClick={() => updateRoomQuantity(type.value, typeQuantity - 1, entry.availableCount)}
+                              >
+                                <Minus size={16} />
+                              </button>
+                              <span className="min-w-8 text-center text-lg font-semibold text-gray-950" aria-live="polite">
+                                {typeQuantity}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={`Add one ${type.label} room`}
+                                className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                disabled={typeQuantity >= entry.availableCount}
+                                onClick={() => updateRoomQuantity(type.value, typeQuantity + 1, entry.availableCount)}
+                              >
+                                <Plus size={16} />
+                              </button>
+                            </span>
+                          </div>
                           <RateOption
-                            active={isSelected && rateChoice === "room-only"}
+                            active={isSelected && selectedTypeRateChoice === "room-only"}
                             label="Room Only"
                             helper="Simple stay, flexible payment at the hotel"
                             // Per WRV-02: the option price matches the
@@ -2171,7 +2304,7 @@ export function BookingPage() {
                           />
                           {breakfastConfig.isEnabled ? (
                             <RateOption
-                              active={isSelected && rateChoice === "room-breakfast"}
+                              active={isSelected && selectedTypeRateChoice === "room-breakfast"}
                               label="Room + Breakfast"
                               helper={
                                 numChildren > 0 && !breakfastIncludesChildren
@@ -2181,8 +2314,8 @@ export function BookingPage() {
                               // Per BF-26: live rate + (per-CHD-10) the
                               // effective breakfast occupancy. Per WRV-02:
                               // option price tracks the selected stay.
-                              priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate + liveBreakfastRate * effectiveBreakfastOccupancy)} / night`}
-                              totalLabel={`${formatPrice(breakfastTotal)} total`}
+                              priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate + liveBreakfastRate * previewBreakfastOccupancy)} / night`}
+                              totalLabel={`${formatPrice(breakfastOptionTotal)} per room`}
                               onSelect={() => selectRoomType(type.value, "room-breakfast")}
                             />
                           ) : null}
@@ -2235,13 +2368,14 @@ export function BookingPage() {
         <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm text-gray-600">
-              Total for {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
+              Total for {distributedRoomCart.length} {distributedRoomCart.length === 1 ? "room" : "rooms"},{" "}
+              {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
             </p>
             <p className="text-2xl font-semibold text-gray-950">
               {formatPrice(total)} <span className="text-sm font-normal text-gray-500">including selected options</span>
             </p>
           </div>
-	          {selectedTypeIsAvailable && missingExtraBeds === 0 ? (
+	          {cartIsReady ? (
 	            <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
 	              Continue to Step 2
 	            </PrimaryButton>
@@ -2252,17 +2386,13 @@ export function BookingPage() {
 	              aria-describedby="step-one-occupancy-error"
 	              className="sm:min-w-56"
 	            >
-	              {selectedTypeIsAvailable ? "Add the required extra bed" : "Choose an available room type"}
+	              {distributedRoomCart.length > 0 ? "Assign every guest" : "Add at least one room"}
 	            </PrimaryButton>
 	          )}
 	        </div>
-	        {selectedTypeIsAvailable && missingExtraBeds > 0 ? (
+	        {!cartIsReady ? (
 	          <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
-	            Your selected room needs {missingExtraBeds} more extra bed{missingExtraBeds === 1 ? "" : "s"} before you continue.
-	          </p>
-	        ) : !selectedTypeIsAvailable ? (
-	          <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
-	            Choose an available room type for this adult and child count before you continue.
+	            Add enough available rooms to fit every guest, with at least one adult assigned to each room.
 	          </p>
 	        ) : null}
 	      </div>
@@ -2290,6 +2420,7 @@ function buildGuestRateBreakdown(input: {
   roomLines: BookingRateLine[];
   roomSubtotal: number;
   breakfastTotal: number;
+  extraBedTotal: number;
   discountType: "none" | "senior" | "pwd";
   discountPct: number;
   voucherApplied: boolean;
@@ -2297,10 +2428,15 @@ function buildGuestRateBreakdown(input: {
   memberDiscountPct: number;
   finalTotal: number;
 }): BookingRateBreakdown {
-  const addOns = input.breakfastTotal > 0
-    ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
-    : [];
-  const subtotal = input.roomSubtotal + input.breakfastTotal;
+  const addOns = [
+    ...(input.breakfastTotal > 0
+      ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
+      : []),
+    ...(input.extraBedTotal > 0
+      ? [{ label: "Extra bed add-on", amount: input.extraBedTotal }]
+      : [])
+  ];
+  const subtotal = input.roomSubtotal + input.breakfastTotal + input.extraBedTotal;
   // Per DSC (2026-07-31): the two percentage steps now route through
   // the shared `calculatePercentDiscount` helper. The afterVoucher
   // step is intentionally NOT clamped (matches the original pattern).
@@ -2417,6 +2553,14 @@ interface BookingReviewAsideProps {
   // type label + (once assigned by the server) the physical room
   // number. Pre-assignment, `assignedRoomNumber` is empty.
   typeLabel: string;
+  roomSummary?: Array<{
+    label: string;
+    position: number;
+    numAdults: number;
+    numChildren: number;
+    extraBedCount: number;
+    hasBreakfast: boolean;
+  }>;
   typeValue: string;
   assignedRoomNumber?: string;
   typeImageUrls?: string[];
@@ -2443,6 +2587,7 @@ function BookingReviewAside({
   hasBreakfast,
   nights,
   typeLabel,
+  roomSummary = [],
   typeValue,
   assignedRoomNumber = "",
   typeImageUrls = [],
@@ -2528,6 +2673,21 @@ function BookingReviewAside({
             <p className="mt-1 text-sm font-medium text-primary">Room {assignedRoomNumber}</p>
           ) : null}
           <p className="mt-2 text-sm leading-6 text-gray-600">{typeDescription}</p>
+          {roomSummary.length > 1 ? (
+            <div className="mt-4 space-y-2">
+              {roomSummary.map((room) => (
+                <div key={room.position} className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  <span className="font-semibold text-gray-900">Room {room.position} · {room.label}</span>
+                  <span className="mt-1 block">
+                    {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
+                    {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
+                    {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
+                    {room.hasBreakfast ? " · Breakfast" : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="mt-5 grid grid-cols-2 gap-3 border-y border-gray-200 py-4 text-sm">
             <SummaryCell label="Check-in" value={formatStayDate(checkIn)} />
             <SummaryCell alignEnd label="Check-out" value={formatStayDate(checkOut)} />

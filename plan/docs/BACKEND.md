@@ -85,6 +85,8 @@ See `plan/docs/API-ROUTES.md` for API layer.
 
 *Detailed MRB implementation narratives archived in [`plan/project/archive/BACKEND-ARCHIVE-2026-08-02.md`](plan/project/archive/BACKEND-ARCHIVE-2026-08-02.md).*
 
+MRB-06 public creates may contain an explicit room selection for each requested stay. The create transaction resolves and locks one distinct physical room per selection, validates occupancy against that selection's room type, computes each room's nightly and add-on pricing, applies reservation-level deductions once to the aggregate, then allocates exact rounded totals back to the child bookings. One reservation header continues to own the lead guest, consent, payment proof/state, and group totals.
+
 ---
 
 ### `bookings/{bookingId}`
