@@ -47,7 +47,7 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
 
     it("uses jsPDF in a4 mm mode (matches registration PDF style)", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
-      const funcBody = bookingsPageSrc.slice(funcStart, funcStart + 800);
+      const funcBody = bookingsPageSrc.slice(funcStart, funcStart + 2200);
       expect(funcBody).toMatch(/new\s+jsPDF\(\s*\{\s*unit:\s*["']mm["']\s*,\s*format:\s*["']a4["']/);
     });
 
@@ -66,7 +66,8 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const selectedBookingCheckInReadiness", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/Booking Reference:\s*\$\{b\.bookingRef\}/);
+      expect(funcBody).toMatch(/receiptReferenceLabel = isReservationReceipt \? "Reservation Reference" : "Booking Reference"/);
+      expect(funcBody).toMatch(/subtitle: `\$\{receiptReferenceLabel\}: \$\{receiptReference\}`/);
       expect(funcBody).toMatch(/Generated:/);
     });
 
@@ -83,7 +84,8 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const selectedBookingCheckInReadiness", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/\{ label:\s*["']Room["'],\s*value:\s*`\$\{b\.roomNumber\}\s*\(\$\{b\.roomType\}\)` \}/);
+      expect(funcBody).toMatch(/label: isReservationReceipt \? "Rooms" : "Room"/);
+      expect(funcBody).toMatch(/: `\$\{b\.roomNumber\} \(\$\{b\.roomType\}\)`/);
       expect(funcBody).toMatch(/\{ label:\s*["']Dates["'],\s*value:\s*`\$\{b\.checkIn\}\s*to\s*\$\{b\.checkOut\}` \}/);
       // Per EXB-08 (2026-08-01, per decision #156): the
       // Stay line now uses a multi-line IIFE that
@@ -96,7 +98,7 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       expect(funcBody).toMatch(/numAdults/);
       expect(funcBody).toMatch(/numChildren/);
       expect(funcBody).toMatch(/extraBedCount/);
-      expect(funcBody).toMatch(/formatAmount\(b\.ratePerNight\)\}\s*\/ night/);
+      expect(funcBody).toMatch(/isReservationReceipt \? "See room allocations" : `\$\{formatAmount\(b\.ratePerNight\)\} \/ night`/);
       expect(funcBody).toMatch(/drawInfoCard\("Guest"/);
       expect(funcBody).toMatch(/drawInfoCard\("Stay"/);
     });
@@ -109,7 +111,7 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       expect(funcBody).toMatch(/Senior Citizen Discount|PWD Discount/);
       expect(funcBody).toMatch(/Voucher\s*\(\$\{b\.voucherCode\}\)/);
       expect(funcBody).toMatch(/\$\{b\.pointsRedeemed\}\s*pts redeemed/);
-      expect(funcBody).toMatch(/pdf\.text\(\s*["']Booking Total["']/);
+      expect(funcBody).toMatch(/"Reservation Total" : "Booking Total"/);
       expect(funcBody).toMatch(/drawAmountRow/);
     });
 
@@ -154,7 +156,7 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
       expect(funcBody).toMatch(/Amount to collect/);
       expect(funcBody).toMatch(/amountDueForSummary/);
-      expect(funcBody).toMatch(/Booking \$\{b\.bookingRef\} • Generated/);
+      expect(funcBody).toMatch(/\$\{isReservationReceipt \? "Reservation" : "Booking"\} \$\{receiptReference\} • Generated/);
     });
 
     it("pulls the footer up beneath the receipt content instead of pinning it to the page bottom", () => {
