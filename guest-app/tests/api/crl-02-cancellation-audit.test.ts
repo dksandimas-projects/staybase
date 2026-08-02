@@ -48,10 +48,10 @@ describe("CRL-02 cancellation audit metadata", () => {
       const block = updateBlock![0];
       expect(block).toMatch(/status:\s*"cancelled"/);
       expect(block).toMatch(/cancellationReason:\s*validReason/);
-      expect(block).toMatch(/cancelledAt:\s*new Date\(\)/);
+      expect(block).toMatch(/cancelledAt:\s*(?:new Date\(\)|now)/);
       expect(block).toMatch(/cancelledBy/);
       expect(block).toMatch(/cancellationSource/);
-      expect(block).toMatch(/updatedAt:\s*new Date\(\)/);
+      expect(block).toMatch(/updatedAt:\s*(?:new Date\(\)|now)/);
     });
 
     it("preserves the bounded cancellationReason contract (reason is sliced to 500 chars)", () => {

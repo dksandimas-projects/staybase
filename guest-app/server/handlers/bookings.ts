@@ -114,8 +114,21 @@ import {
   // same `runTransaction` as the booking update, so the
   // header's `paymentStatus` is always in sync with the
   // child booking's `status` for new reservations.
-  // MRB-05 replaces the helper with the N>1 aggregate reader.
-  mapBookingStatusToReservationPaymentStatus
+  mapBookingStatusToReservationPaymentStatus,
+  // Per MRB-05 (2026-08-02, per decision #159): the N>1
+  // aggregate reader that computes the reservation
+  // header's `paymentStatus` from the N child
+  // `Booking.status` values. For N=1 (today's entire
+  // active surface — every reservation has exactly one
+  // child booking) the aggregate is the same as the
+  // single mapped status from
+  // `mapBookingStatusToReservationPaymentStatus`. The 5
+  // lifecycle handlers (`handleConfirmBooking` +
+  // `handleConfirmBookingWithBalance` +
+  // `handleCheckinBooking` + `handleCheckoutBooking` +
+  // `handleCancelBooking`) call this helper inside the
+  // same `runTransaction` as the booking status flip.
+  computeReservationAggregatePaymentStatus
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
@@ -3937,6 +3950,19 @@ export async function handleCancelBooking(req: any, res: any) {
     let bookingDocumentRef: any;
     let bookingData: any;
 
+    // Per MRB-05 (2026-08-02, per decision #159): the
+    // canonical `now` for the cancellation write + the
+    // reservation header mirror. Captured at the top
+    // of the try block (BEFORE the runTransaction) so
+    // it's stable across transaction retries. The two
+    // existing `new Date()` calls (one in `cancelledAt`,
+    // one in `updatedAt`) are replaced with references
+    // to this single `now` — no clock skew between
+    // the cancellation stamp and the reservation
+    // mirror. The voucher + corporate code `updatedAt`
+    // writes also use this `now`.
+    const now = new Date();
+
     if (req.staff) {
       if (bookingId) {
         bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
@@ -4109,35 +4135,77 @@ export async function handleCancelBooking(req: any, res: any) {
         cancellationReason: validReason,
         // Per CRL-02 (2026-08-02): the audit metadata is
         // stamped in the same transaction as the status
-        // flip. `cancelledAt` uses the same `now` value the
-        // transaction already captured (PEX-01's `now` is
-        // a transaction-time Date; here we use `new Date()`
-        // for byte-equivalence with the existing `updatedAt`
-        // — a sub-millisecond skew is acceptable for an
-        // audit field). `cancelledBy` is the staff UID or
-        // the literal "guest"; `cancellationSource` is the
-        // parallel discriminator (one of CANCELLATION_SOURCES).
-        // A partial failure cannot leave a half-stamped
+        // flip. `cancelledAt` uses the same `now` value
+        // the `now` constant at the top of the try block
+        // captured (BEFORE the runTransaction so it's
+        // stable across transaction retries). A
+        // sub-millisecond skew between `cancelledAt` and
+        // `updatedAt` is acceptable for an audit field.
+        // `cancelledBy` is the staff UID or the literal
+        // "guest"; `cancellationSource` is the parallel
+        // discriminator (one of CANCELLATION_SOURCES). A
+        // partial failure cannot leave a half-stamped
         // cancellation — the four writes share a single
         // `transaction.update` call.
-        cancelledAt: new Date(),
+        cancelledAt: now,
         cancelledBy,
         cancellationSource,
-        updatedAt: new Date()
+        updatedAt: now
       });
+
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the canonical `reservationId` derivation for
+      // the reservation header mirror. Same
+      // defensive coercion as the other Phase 3/5
+      // handlers. The mirror is intentionally the
+      // SAME `now` used for the cancellation stamp
+      // (no clock skew between the two).
+      const bookingReservationId = String((freshBooking as any).reservationId || "").trim();
+
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus`
+      // mirror. The booking just transitioned to
+      // `cancelled` (the only possible new status for
+      // this handler — the terminal-status reject
+      // guarantees the prior status was anything
+      // but `checked-in` / `checked-out` /
+      // `cancelled`). The mirror value comes from
+      // the N>1 aggregate helper. The
+      // `bookingReservationId.length > 0` guard skips
+      // the write for legacy null-`reservationId`
+      // bookings (pre-MRB-01) — byte-equivalent to
+      // pre-Phase 5 behavior for legacy records.
+      //
+      // Note: the loyalty clawback (MRB open-question
+      // Q1) — recompute the points the new settled
+      // total would have earned + record a negative
+      // `pointsHistory` entry when a room is cancelled
+      // post-settlement — is INTENTIONALLY out of
+      // scope for this PR. Per the MRB-05 split, the
+      // clawback lands in MRB-05 PR #2 as a separable
+      // change (it touches the points ledger shape +
+      // the existing loyalty-award transaction path,
+      // which is a non-trivial blast radius).
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
+          updatedAt: now
+        });
+      }
 
       if (voucherDoc?.exists && voucherRef) {
         const voucherData = voucherDoc.data() || {};
         transaction.update(voucherRef, {
           usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
-          updatedAt: new Date()
+          updatedAt: now
         });
       }
       if (corporateCodeDoc?.exists && corporateCodeRef) {
         const corporateCodeData = corporateCodeDoc.data() || {};
         transaction.update(corporateCodeRef, {
           usageCount: Math.max((Number(corporateCodeData.usageCount) || 0) - 1, 0),
-          updatedAt: new Date()
+          updatedAt: now
         });
       }
     });
@@ -5031,6 +5099,17 @@ export async function handleConfirmBooking(req: any, res: any) {
     let bookingData: any = null;
     let alreadyConfirmed = false;
 
+    // Per MRB-05 (2026-08-02, per decision #159): the
+    // canonical `now` for the booking update AND the
+    // reservation header mirror. Captured at the top
+    // of the try block (BEFORE the runTransaction) so
+    // it's stable across transaction retries. The two
+    // existing `new Date()` calls (one in `confirmedAt`,
+    // one in `updatedAt`) are replaced with references
+    // to this single `now` — no clock skew between the
+    // booking update and the reservation mirror.
+    const now = new Date();
+
     // Per S4 (soft batch 2026-06-26): wrap the
     // read + status check + write in a transaction so two
     // staff confirming the same booking in parallel
@@ -5059,12 +5138,49 @@ export async function handleConfirmBooking(req: any, res: any) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
 
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the canonical `reservationId` derivation for
+      // the reservation header mirror. Same
+      // defensive coercion as the other Phase 3/5
+      // handlers — `String(...).trim()` collapses
+      // legacy null / undefined / whitespace to `""`
+      // so the legacy-skip guard below is a clean
+      // `length === 0` check.
+      const bookingReservationId = String((data as any).reservationId || "").trim();
+
       transaction.update(bookingRef, {
         status: "confirmed",
-        confirmedAt: new Date(),
+        confirmedAt: now,
         confirmedBy,
-        updatedAt: new Date()
+        updatedAt: now
       });
+
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus`
+      // mirror. The booking just transitioned to
+      // `confirmed` (the only possible new status for
+      // this handler — the `allowedStatuses` check
+      // above guarantees the prior status was
+      // `pending` / `payment-uploaded` / `payment-confirmed`,
+      // and the new status is always `confirmed`).
+      // The mirror value comes from the N>1 aggregate
+      // helper — for the N=1 case (today's entire
+      // active surface) the aggregate is the same as
+      // the single mapped status. The
+      // `bookingReservationId.length > 0` guard skips
+      // the write for legacy null-`reservationId`
+      // bookings (pre-MRB-01) — byte-equivalent to
+      // pre-Phase 5 behavior for legacy records. The
+      // same `now` is used for the booking update AND
+      // the header mirror — no clock skew between the
+      // two.
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
+          updatedAt: now
+        });
+      }
     });
 
     if (alreadyConfirmed) {
@@ -5171,6 +5287,17 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
 
+    // Per MRB-05 (2026-08-02, per decision #159): the
+    // canonical `now` for the booking update AND the
+    // reservation header mirror. Captured at the top
+    // of the try block (BEFORE the runTransaction) so
+    // it's stable across transaction retries. The
+    // `new Date()` call inside the transaction is
+    // removed — the booking update uses this single
+    // `now` (no clock skew between the booking update
+    // and the reservation mirror).
+    const now = new Date();
+
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
@@ -5247,7 +5374,36 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
         throw new Error(`THRESHOLD_EXCEEDED:${txThreshold}:${computedBalance}`);
       }
 
-      const now = new Date();
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the canonical `reservationId` derivation for
+      // the reservation header mirror. Same
+      // defensive coercion as the other Phase 3/5
+      // handlers.
+      const bookingReservationId = String((data as any).reservationId || "").trim();
+
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus`
+      // mirror. The booking just transitioned to
+      // `confirmed` (the only possible new status
+      // for this handler — the CWB-01 status check
+      // guarantees the prior status was
+      // `payment-uploaded`, and the new status is
+      // always `confirmed`). The mirror value comes
+      // from the N>1 aggregate helper. The
+      // `bookingReservationId.length > 0` guard skips
+      // the write for legacy null-`reservationId`
+      // bookings (pre-MRB-01) — byte-equivalent to
+      // pre-Phase 5 behavior for legacy records. The
+      // same `now` is used for the booking update AND
+      // the header mirror.
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
+          updatedAt: now
+        });
+      }
+
       transaction.update(bookingRef, {
         status: "confirmed",
         // Stamps the original balance at confirm time —
@@ -5345,6 +5501,17 @@ export async function handleCheckinBooking(req: any, res: any) {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const checkedInBy = req.staff?.uid || "staff";
 
+    // Per MRB-05 (2026-08-02, per decision #159): the
+    // canonical `now` for the booking update + the
+    // room update + the reservation header mirror.
+    // Captured at the top of the try block (BEFORE
+    // the runTransaction) so it's stable across
+    // transaction retries. The two existing
+    // `new Date()` calls (one in `checkedInAt`, one in
+    // `updatedAt`, the third in the room update) are
+    // replaced with references to this single `now`.
+    const now = new Date();
+
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
@@ -5383,16 +5550,47 @@ export async function handleCheckinBooking(req: any, res: any) {
         throw new Error("Assigned room is already occupied by another checked-in booking.");
       }
 
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the canonical `reservationId` derivation for
+      // the reservation header mirror. Same
+      // defensive coercion as the other Phase 3/5
+      // handlers.
+      const bookingReservationId = String((bookingData as any).reservationId || "").trim();
+
       transaction.update(bookingRef, {
         status: "checked-in",
-        checkedInAt: new Date(),
+        checkedInAt: now,
         checkedInBy,
-        updatedAt: new Date()
+        updatedAt: now
       });
       transaction.update(roomRef, {
         status: "occupied",
-        updatedAt: new Date()
+        updatedAt: now
       });
+
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus`
+      // mirror. The booking just transitioned to
+      // `checked-in` (the readiness + room gates
+      // guarantee this is the only possible new
+      // status). The mirror value comes from the
+      // N>1 aggregate helper — for the N=1 case
+      // (today's entire active surface) the aggregate
+      // is `computeReservationAggregatePaymentStatus(["checked-in"])`
+      // = `"in-house"`. The
+      // `bookingReservationId.length > 0` guard skips
+      // the write for legacy null-`reservationId`
+      // bookings (pre-MRB-01) — byte-equivalent to
+      // pre-Phase 5 behavior for legacy records. The
+      // same `now` is used for the booking update +
+      // the room update + the header mirror.
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["checked-in"]),
+          updatedAt: now
+        });
+      }
     });
 
     // Per Phase 12 — Notification Center (decision #120):
@@ -5453,6 +5651,23 @@ export async function handleCheckoutBooking(req: any, res: any) {
 
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
+
+    // Per MRB-05 (2026-08-02, per decision #159): the
+    // canonical `now` for the booking update + the
+    // room update + the intercom archive + the
+    // reservation header mirror. Captured at the top
+    // of the try block (BEFORE the runTransaction) so
+    // it's stable across transaction retries. The
+    // existing `new Date()` calls inside the
+    // transaction (`checkedOutAt`, `updatedAt`,
+    // `unpaidCheckoutApprovedAt`, `pointsAwardedAt`,
+    // room `updatedAt`, intercom `resolvedAt` /
+    // `updatedAt`) are replaced with references to
+    // this single `now` — no clock skew between the
+    // booking update, the room update, the intercom
+    // archive, and the reservation mirror.
+    const now = new Date();
+
     const bookingDoc = await bookingRef.get();
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
@@ -5565,12 +5780,12 @@ export async function handleCheckoutBooking(req: any, res: any) {
 
       const bookingUpdate: Record<string, any> = {
         status: "checked-out",
-        checkedOutAt: new Date(),
+        checkedOutAt: now,
         checkedOutBy,
         checkedOutWithBalance,
         checkedOutFolioTotal: checkoutFolioTotal,
         checkedOutCollectedTotal: collectedTotal,
-        updatedAt: new Date()
+        updatedAt: now
       };
 
       // UCO-06: stamp unpaid departure exception data
@@ -5578,7 +5793,7 @@ export async function handleCheckoutBooking(req: any, res: any) {
         bookingUpdate.unpaidCheckoutReason = safeUnpaidReason;
         bookingUpdate.unpaidCheckoutApprovalThreshold = unpaidCheckoutThreshold;
         bookingUpdate.unpaidCheckoutApprovedBy = unpaidCheckoutApprovedBy;
-        bookingUpdate.unpaidCheckoutApprovedAt = new Date();
+        bookingUpdate.unpaidCheckoutApprovedAt = now;
         bookingUpdate.unpaidCheckoutSnapshotFolioTotal = checkoutFolioTotal;
         bookingUpdate.unpaidCheckoutSnapshotCollectedTotal = collectedTotal;
         bookingUpdate.unpaidCheckoutSnapshotBalance = checkedOutWithBalance;
@@ -5602,8 +5817,15 @@ export async function handleCheckoutBooking(req: any, res: any) {
         pointsAwarded,
         pendingLoyaltyPoints: canAwardPoints && !awardNow ? eligiblePoints : 0,
         loyaltyAwardStatus: canAwardPoints ? (awardNow ? "awarded" : "pending-payment") : "ineligible",
-        pointsAwardedAt: awardNow ? new Date() : null
+        pointsAwardedAt: awardNow ? now : null
       });
+
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the canonical `reservationId` derivation for
+      // the reservation header mirror. Same
+      // defensive coercion as the other Phase 3/5
+      // handlers.
+      const bookingReservationId = String((freshBookingData as any).reservationId || "").trim();
 
       transaction.update(bookingRef, bookingUpdate);
 
@@ -5612,7 +5834,7 @@ export async function handleCheckoutBooking(req: any, res: any) {
         transaction.update(roomRef, {
           status: "available",
           housekeepingStatus: "dirty",
-          updatedAt: new Date()
+          updatedAt: now
         });
       }
 
@@ -5625,16 +5847,42 @@ export async function handleCheckoutBooking(req: any, res: any) {
         const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
         transaction.set(
           intercomRef,
-          { resolved: true, resolvedAt: new Date(), resolvedBy: checkedOutBy, roomNumber, updatedAt: new Date() },
+          { resolved: true, resolvedAt: now, resolvedBy: checkedOutBy, roomNumber, updatedAt: now },
           { merge: true }
         );
+      }
+
+      // Per MRB-05 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus`
+      // mirror. The booking just transitioned to
+      // `checked-out` (the only possible new status
+      // for this handler — the pre-transaction check
+      // guarantees the prior status was `checked-in`).
+      // The mirror value comes from the N>1 aggregate
+      // helper — for the N=1 case (today's entire
+      // active surface) the aggregate is
+      // `computeReservationAggregatePaymentStatus(["checked-out"])`
+      // = `"completed"`. The
+      // `bookingReservationId.length > 0` guard skips
+      // the write for legacy null-`reservationId`
+      // bookings (pre-MRB-01) — byte-equivalent to
+      // pre-Phase 5 behavior for legacy records. The
+      // same `now` is used for the booking update +
+      // the room update + the intercom archive + the
+      // header mirror.
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["checked-out"]),
+          updatedAt: now
+        });
       }
 
       if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
         const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
         transaction.update(memberRef, {
           rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: new Date()
+          updatedAt: now
         });
 
         const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);

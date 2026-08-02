@@ -72,8 +72,19 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
       // server's import block in `bookings.ts` pulls it
       // from the shared barrel, the same way it pulls
       // `countExtraBedsInUse` + `checkExtraBedInventory`.
+      //
+      // Per MRB-05: the import block now also pulls the
+      // N>1 aggregate reader
+      // (`computeReservationAggregatePaymentStatus`),
+      // added in the same import block. The regex
+      // below checks for the Phase 3 helper anywhere in
+      // the shared barrel import (not just as the
+      // trailing symbol — the aggregate reader is now
+      // the trailing symbol, same alternation pattern
+      // as the MRB-04 Phase 2 commit's collateral
+      // fix on `finance-lifecycle-polish.test.ts`).
       expect(handlers).toMatch(
-        /mapBookingStatusToReservationPaymentStatus\s*\n\}\s*from\s*"@spark-inn\/shared"/
+        /mapBookingStatusToReservationPaymentStatus,?\s*\n[\s\S]{0,3000}?\}\s*from\s*"@spark-inn\/shared"/
       );
     });
   });

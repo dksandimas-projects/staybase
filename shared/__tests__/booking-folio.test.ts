@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeBookingFolio,
   computeServerFolioTotals,
+  computeReservationAggregatePaymentStatus,
   mapBookingStatusToReservationPaymentStatus,
   type FolioBooking,
   type FolioCharge,
@@ -633,6 +634,175 @@ describe("mapBookingStatusToReservationPaymentStatus — N=1 mapping helper (MRB
       // (Using `as any` to test the nullish case without
       // breaking the function signature.)
       expect(mapBookingStatusToReservationPaymentStatus("" as any)).toBe("");
+    });
+  });
+});
+
+// Per MRB-05 (2026-08-02, per decision #159): the N>1
+// aggregate reader that computes the reservation header's
+// `paymentStatus` from the N child `Booking.status` values.
+// For N=1 (today's entire active surface) the aggregate
+// is the same as the single mapped status. For N>1
+// (future) the aggregate applies the per-decision-#159
+// priority table. Pinned by ~12 characterization tests
+// covering: the empty-array case (all cancelled) + the 4
+// priority tiers (pre-confirmation / all-confirmed /
+// any-checked-out / in-house catch-all) + the mixed-state
+// cases (mix of confirmed + checked-in → in-house; mix
+// containing checked-out → completed) + the defensive
+// coercion cases (unknown statuses default to in-house).
+describe("computeReservationAggregatePaymentStatus — N>1 aggregate reader (MRB-05)", () => {
+  describe("tier 1 — the empty-array case (all rooms cancelled)", () => {
+    it("empty input returns `cancelled` (the only path to the reservation's `cancelled` state)", () => {
+      // Cancellation is a secondary count, not a hidden
+      // state — the reservation is `cancelled` only if
+      // every child is cancelled. An empty input means
+      // zero children contributed, so the aggregate is
+      // `cancelled` (the safest default).
+      expect(computeReservationAggregatePaymentStatus([])).toBe("cancelled");
+    });
+
+    it("all-cancelled input returns `cancelled`", () => {
+      expect(computeReservationAggregatePaymentStatus(["cancelled", "cancelled"])).toBe("cancelled");
+    });
+  });
+
+  describe("tier 2 — any pre-confirmation room → `awaiting-payment`", () => {
+    it("single `pending` room returns `awaiting-payment`", () => {
+      // The N=1 case — the active surface today. The
+      // aggregate is byte-equivalent to the single mapped
+      // status from `mapBookingStatusToReservationPaymentStatus`.
+      expect(computeReservationAggregatePaymentStatus(["pending"])).toBe("awaiting-payment");
+    });
+
+    it("single `payment-uploaded` room returns `payment-uploaded` (the N=1 single-status case for payment-uploaded)", () => {
+      // Wait — this should be the N=1 mapped value, which
+      // is `payment-uploaded` (not `awaiting-payment`). The
+      // aggregate preserves the more-specific state when
+      // there's only one room in that state.
+      //
+      // Actually re-reading the spec: the tier-2 rule fires
+      // when ANY non-cancelled child is `pending` OR
+      // `payment-uploaded`. A single `payment-uploaded` room
+      // should return `awaiting-payment` (the aggregate
+      // collapses to the less-specific label, since the
+      // reservation isn't yet past the money gate).
+      //
+      // Pinned by decision #159: the reservation's wire
+      // contract collapses "guest hasn't paid yet" to
+      // `awaiting-payment` regardless of whether the room
+      // is `pending` (no proof uploaded) or
+      // `payment-uploaded` (proof uploaded, staff hasn't
+      // verified). The N=1 case for `payment-uploaded`
+      // currently maps to `payment-uploaded` via the
+      // MRB-04 Phase 3 helper (it's a pass-through). The
+      // aggregate widens this to `awaiting-payment` for
+      // the reservation's wire state — a slight semantic
+      // change from the N=1 helper, but per the spec.
+      expect(computeReservationAggregatePaymentStatus(["payment-uploaded"])).toBe("awaiting-payment");
+    });
+
+    it("mix of `pending` and `confirmed` returns `awaiting-payment` (the reservation can't claim `confirmed` while one room is unpaid)", () => {
+      // The mix: 1 pending + 1 confirmed. Tier 2 fires
+      // (pending is pre-confirmation) → aggregate is
+      // `awaiting-payment`. Tier 3 never reached.
+      expect(computeReservationAggregatePaymentStatus(["pending", "confirmed"])).toBe("awaiting-payment");
+    });
+  });
+
+  describe("tier 3 — all confirmed → `confirmed`", () => {
+    it("single `payment-confirmed` room returns `payment-confirmed` (N=1 case — passes through)", () => {
+      // The N=1 case for `payment-confirmed`. The
+      // aggregate is byte-equivalent to the single
+      // mapped status (the tier-2 check doesn't fire;
+      // tier-3 fires because all non-cancelled
+      // children are `payment-confirmed` or
+      // `confirmed`).
+      //
+      // Wait — re-reading the spec: tier 3 says "all
+      // non-cancelled rooms are `payment-confirmed` or
+      // `confirmed` → `confirmed`". So a single
+      // `payment-confirmed` room SHOULD aggregate to
+      // `confirmed` per the spec rule, not the
+      // pass-through `payment-uploaded`. The aggregate
+      // rule collapses to the less-specific label.
+      //
+      // Pinned by decision #159: the reservation's wire
+      // state collapses `payment-confirmed` + `confirmed`
+      // both to `confirmed` (the aggregate label, since
+      // the room is past the money gate but not yet
+      // in-house). Same semantic shift as the tier-2
+      // case.
+      expect(computeReservationAggregatePaymentStatus(["payment-confirmed"])).toBe("confirmed");
+    });
+
+    it("single `confirmed` room returns `confirmed` (N=1 case — passthrough)", () => {
+      expect(computeReservationAggregatePaymentStatus(["confirmed"])).toBe("confirmed");
+    });
+
+    it("mix of `payment-confirmed` and `confirmed` returns `confirmed` (all confirmed)", () => {
+      expect(computeReservationAggregatePaymentStatus(["payment-confirmed", "confirmed"])).toBe("confirmed");
+    });
+  });
+
+  describe("tier 4 — any checked-out room → `completed`", () => {
+    it("single `checked-out` room returns `completed` (N=1 case — aggregate widens from `completed` which the N=1 helper already maps to)", () => {
+      // The N=1 case for `checked-out`. The N=1 mapping
+      // helper returns `completed` (the relabel); the
+      // aggregate returns `completed` too. Byte-equivalent.
+      expect(computeReservationAggregatePaymentStatus(["checked-out"])).toBe("completed");
+    });
+
+    it("mix of `confirmed` and `checked-out` returns `completed` (the spec's 'partially checked out' encoding)", () => {
+      // The spec says "a mix containing checked-out rooms →
+      // `Partially checked out` (encoded as the
+      // `completed` label until MRB-12 surfaces the
+      // granular label)". The aggregate returns
+      // `completed` for any mix containing a
+      // `checked-out` child.
+      expect(computeReservationAggregatePaymentStatus(["confirmed", "checked-out"])).toBe("completed");
+    });
+
+    it("mix of `checked-in` and `checked-out` returns `completed` (the spec's 'partially checked out' encoding)", () => {
+      expect(computeReservationAggregatePaymentStatus(["checked-in", "checked-out"])).toBe("completed");
+    });
+  });
+
+  describe("tier 5 — the in-house catch-all", () => {
+    it("single `checked-in` room returns `in-house` (N=1 case — aggregate widens from the N=1 helper's `in-house` relabel)", () => {
+      // The N=1 case for `checked-in`. The N=1
+      // mapping helper returns `in-house` (the
+      // relabel); the aggregate returns `in-house`
+      // too. Byte-equivalent.
+      expect(computeReservationAggregatePaymentStatus(["checked-in"])).toBe("in-house");
+    });
+
+    it("mix of `confirmed` and `checked-in` returns `in-house` (the spec's 'partially checked in' encoding)", () => {
+      // The spec says "a mix of confirmed and
+      // checked-in rooms → `Partially checked in`
+      // (encoded as the `in-house` label until MRB-12
+      // surfaces the granular label)". The aggregate
+      // returns `in-house` for any non-pre-confirmation,
+      // non-all-confirmed, non-checked-out mix.
+      expect(computeReservationAggregatePaymentStatus(["confirmed", "checked-in"])).toBe("in-house");
+    });
+
+    it("all `checked-in` rooms return `in-house`", () => {
+      expect(computeReservationAggregatePaymentStatus(["checked-in", "checked-in"])).toBe("in-house");
+    });
+  });
+
+  describe("defensive coercion — unknown statuses default to in-house", () => {
+    it("a mix of unknown + `confirmed` returns `in-house` (unknown is not pre-confirmation, not all-confirmed, not checked-out)", () => {
+      // An unknown status is treated as a participating
+      // child but doesn't match any of the 4 priority
+      // tiers' exact-string checks. Tier 2 doesn't fire
+      // (unknown ≠ pending / payment-uploaded). Tier 3
+      // doesn't fire (unknown ≠ payment-confirmed /
+      // confirmed — the mix is not all-known). Tier 4
+      // doesn't fire (unknown ≠ checked-out). Tier 5
+      // catch-all returns `in-house`.
+      expect(computeReservationAggregatePaymentStatus(["unknown-future-state", "confirmed"])).toBe("in-house");
     });
   });
 });

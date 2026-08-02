@@ -207,8 +207,23 @@ describe("Phase 12 — Notification Center (decision #120)", () => {
       // sitting AFTER the res.status(200).json(...) call.
       // The fix moves the block above res.json so the
       // instance can't be frozen before the write runs.
+      //
+      // The block slices from the FUNCTION DECLARATION
+      // `export async function handleCheckoutBooking`
+      // (not just the substring `handleCheckoutBooking`
+      // which could match a JSDoc comment in the
+      // MRB-05 helper description added by this PR) to
+      // the next `export async function` (the next
+      // handler, `handleLookupBooking`). The previous
+      // slice extended to `handleMarkPaymentConfirmed`
+      // which is BEFORE `handleCheckoutBooking` in the
+      // file — the regex matched the JSDoc comment
+      // instead of the function, producing a 218K-char
+      // block that broke the position assertion. The
+      // `export async function` prefix anchors the slice
+      // to the actual declaration.
       const block = bookingsHandlerSrc.match(
-        /handleCheckoutBooking[\s\S]*?export async function handleLookupBooking/
+        /export async function handleCheckoutBooking[\s\S]*?export async function handleLookupBooking/
       );
       expect(block).toBeTruthy();
       expect(block![0]).toMatch(/await\s+writeNotification\(/);
