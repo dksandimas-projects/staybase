@@ -260,7 +260,7 @@ If a new feature or concern warrants a new MD:
 | Any single `plan/docs/*.md` (domain doc) | 10,000 |
 | **Ratchet exceptions** (oversized contract docs — ceiling set just above current size so further growth fails; compact toward the standard ceiling next time the feature is materially touched): `ADMIN-MOBILE.md` 10,500 · `SETTINGS.md` 9,000 · `BACKEND.md` 12,500 (grew for the 2026-07-17 PRC/UCO/ETR schema sync). `BOOKINGS-MANAGEMENT.md` was compacted back under the standard ceiling on 2026-07-17 and no longer has an exception. | — |
 | Combined always-read (`CLAUDE.md` + `GOTCHAS.md`) | 10,000 |
-| Entire active MD system | warn above 120,000 |
+| Entire active MD system | warn above 230,000 — a **ratchet** set 2026-08-02, just above the then-current ~224,000. The previous 120,000 figure was written on 2026-07-17 in the same commit that added `docs:audit`, when the corpus already measured ~212,000; it warned on every run from day one and so never signalled anything. Treat this ceiling the same way as the per-file ratchet exceptions below: further **growth** fails, and the number is lowered deliberately when a restructure actually shrinks the corpus — never raised to accommodate growth without a compaction review. |
 
 **Excluded from active totals:** `plan/project/archive/`, `plan/project/AUDIT-*.md`, `plan/project/AI-MD-SYSTEM-PROMPT.md`, `plan/project/context/spark-inn-MD-PLAN.md`, `plan/stitch/`, `node_modules`/build output.
 
