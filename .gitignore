@@ -29,3 +29,8 @@ yarn-debug.log*
 yarn-error.log*
 .vercel
 .env*
+
+# Git worktrees checked out inside the repo (see scripts/docs-audit.mjs SKIP_DIRS).
+# Without this a stray `git add -A` commits another branch's entire checkout as an
+# embedded repository — which happened on 2026-08-02.
+.worktrees/
