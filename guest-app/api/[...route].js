@@ -225435,7 +225435,7 @@ async function handleCreateBooking(req, res) {
         throw new Error("Room no longer available");
       }
       let sawLingeringCheckedInConflict = false;
-      const assignedRooms = [];
+      const assignedRooms2 = [];
       const assignedRoomIds = [];
       for (let outerIdx = 0; outerIdx < Math.max(1, Math.floor(Number(roomCount) || 1)); outerIdx++) {
         let foundThisRound = null;
@@ -225503,14 +225503,14 @@ async function handleCreateBooking(req, res) {
         if (!foundThisRound) {
           throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-        assignedRooms.push(foundThisRound);
+        assignedRooms2.push(foundThisRound);
         assignedRoomIds.push(foundThisRound.id);
       }
-      if (assignedRooms.length === 0) {
+      if (assignedRooms2.length === 0) {
         throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
-      const roomId = assignedRooms[0].id;
-      const roomData = assignedRooms[0].data;
+      const roomId = assignedRooms2[0].id;
+      const roomData = assignedRooms2[0].data;
       assignedRoomId = roomId;
       assignedRoomNumber = String(roomData.roomNumber || "");
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
@@ -225555,14 +225555,15 @@ async function handleCreateBooking(req, res) {
           checkInDate,
           checkOutDate
         );
+        const totalExtraBeds = extraBedCount * assignedRooms2.length;
         const inventoryResult = checkExtraBedInventory(
           Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
           extraBedInUse,
-          extraBedCount
+          totalExtraBeds
         );
         if (!inventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${extraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${totalExtraBeds} requested = ${extraBedInUse + totalExtraBeds}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -225953,7 +225954,7 @@ async function handleCreateBooking(req, res) {
         reservationId: effectiveReservationId,
         reservationRef: finalReservationRef,
         reservationPosition: 1,
-        reservationRoomCount: assignedRooms.length,
+        reservationRoomCount: assignedRooms2.length,
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -225967,12 +225968,23 @@ async function handleCreateBooking(req, res) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        originalSubtotal: totalPrice,
+        // Per MRB-06 Phase 2 (2026-08-02, per decision
+        // #159): the N>1 group totals. For N=1 (the
+        // default) `assignedRooms.length` is 1, so the
+        // header's `totalPrice` + `originalSubtotal` +
+        // `subtotal` are byte-equivalent to the
+        // pre-MRB-06 single-room values. For N>1 the
+        // header aggregates the N per-room totals
+        // (the per-type math is the same for every
+        // room of the same `roomType` + same dates +
+        // same guest inputs, so the sum is
+        // `roomCount * per-room value`).
+        originalSubtotal: totalPrice * assignedRooms2.length,
         // MRB-04: the proper originalSubtotal computation
         discountScopeSnapshot: snapshottedDiscountScope,
-        subtotal: totalPrice,
+        subtotal: totalPrice * assignedRooms2.length,
         // MRB-04: the proper subtotal after add-on math
-        totalPrice,
+        totalPrice: totalPrice * assignedRooms2.length,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
         corporateCode: corporateDetails.corporateCode,
@@ -226002,7 +226014,45 @@ async function handleCreateBooking(req, res) {
         createdBy: "guest"
       };
       transaction.set(reservationDocRef, newReservation);
-      transaction.set(bookingDocRef, newBooking);
+      const bookingWriteRefs2 = [];
+      for (let bookingIdx = 0; bookingIdx < assignedRooms2.length; bookingIdx++) {
+        const assignedRoomForBooking = assignedRooms2[bookingIdx];
+        const bookingIdForThisRoom = bookingIdx === 0 ? bookingId : adminDb.collection("bookings").doc().id;
+        const perRoomBookingDocRef = adminDb.collection("bookings").doc(bookingIdForThisRoom);
+        bookingWriteRefs2.push({
+          ref: perRoomBookingDocRef,
+          data: {
+            ...newBooking,
+            // Per-room fields. `roomId` + `roomNumber`
+            // are the assigned room's data; the
+            // `reservationPosition` is the 1-indexed
+            // position in the assigned-rooms list;
+            // `reservationRoomCount` is the total N
+            // (same for every booking doc in the
+            // reservation — the room count is a
+            // reservation-level aggregate, not a
+            // per-room field).
+            roomId: assignedRoomForBooking.id,
+            roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
+            reservationPosition: bookingIdx + 1,
+            reservationRoomCount: assignedRooms2.length,
+            // Per-booking lookup token. The
+            // pre-MRB-02 code generated a single
+            // token per booking; for N>1 each
+            // booking doc gets its own token (so
+            // each magic link works independently).
+            // A future MRB-04 follow-up can
+            // refactor to a per-reservation token
+            // (one magic link for the whole group,
+            // resolving to the reservation header
+            // first).
+            lookupToken: generateLookupToken()
+          }
+        });
+      }
+      for (const { ref: writeRef, data: writeData } of bookingWriteRefs2) {
+        transaction.set(writeRef, writeData);
+      }
       if (newBooking && newBooking.holdExpiresAt) {
         const he3 = newBooking.holdExpiresAt;
         bookingHoldExpiresAt = he3 instanceof Date ? he3 : he3.toDate ? he3.toDate() : null;
@@ -226131,6 +226181,27 @@ async function handleCreateBooking(req, res) {
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
         roomType,
+        // Per MRB-06 Phase 2 (2026-08-02, per decision
+        // #159): the N>1 response shape. The first
+        // room's id + number are echoed in the legacy
+        // fields (`roomId` + `roomNumber`) for
+        // backward compat with the N=1 confirmation
+        // page. The `rooms` array carries ALL N
+        // assignments (id + number + position per
+        // room) so the N>1 confirmation can render
+        // the full group view. For N=1 (the default)
+        // `rooms` is a single-element array —
+        // byte-equivalent to the pre-MRB-06 single
+        // fields.
+        rooms: (typeof bookingWriteRefs === "undefined" ? [] : bookingWriteRefs).map((w3, idx) => {
+          const r3 = assignedRooms[idx];
+          return {
+            bookingId: w3.ref.id,
+            roomId: r3.id,
+            roomNumber: String(r3.data.roomNumber || ""),
+            reservationPosition: idx + 1
+          };
+        }),
         // Per PEX-05 (2026-08-01, per decision #147): the
         // snapshotted deadline. `null` for `payment-uploaded`
         // bookings (no auto-expiry, staff-review state). The

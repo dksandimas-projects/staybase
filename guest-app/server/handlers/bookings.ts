@@ -1410,14 +1410,24 @@ export async function handleCreateBooking(req: any, res: any) {
           checkInDate,
           checkOutDate
         );
+        // Per MRB-06 Phase 2 (2026-08-02, per decision
+        // #159): the N>1 extra-bed inventory check. The
+        // per-room `extraBedCount` is the count per
+        // room; for N=1 (the default) the total
+        // `extraBedCount * 1` is byte-equivalent to
+        // pre-MRB-06. For N>1 the reservation uses
+        // `extraBedCount * assignedRooms.length` extra
+        // beds in total (e.g. N=2 rooms with
+        // extraBedCount=1 per room = 2 extra beds).
+        const totalExtraBeds = extraBedCount * assignedRooms.length;
         const inventoryResult = checkExtraBedInventory(
           Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
           extraBedInUse,
-          extraBedCount
+          totalExtraBeds
         );
         if (!inventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${extraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${totalExtraBeds} requested = ${extraBedInUse + totalExtraBeds}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -2053,10 +2063,21 @@ export async function handleCreateBooking(req: any, res: any) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        originalSubtotal: totalPrice,  // MRB-04: the proper originalSubtotal computation
+        // Per MRB-06 Phase 2 (2026-08-02, per decision
+        // #159): the N>1 group totals. For N=1 (the
+        // default) `assignedRooms.length` is 1, so the
+        // header's `totalPrice` + `originalSubtotal` +
+        // `subtotal` are byte-equivalent to the
+        // pre-MRB-06 single-room values. For N>1 the
+        // header aggregates the N per-room totals
+        // (the per-type math is the same for every
+        // room of the same `roomType` + same dates +
+        // same guest inputs, so the sum is
+        // `roomCount * per-room value`).
+        originalSubtotal: totalPrice * assignedRooms.length,  // MRB-04: the proper originalSubtotal computation
         discountScopeSnapshot: snapshottedDiscountScope,
-        subtotal: totalPrice,          // MRB-04: the proper subtotal after add-on math
-        totalPrice,
+        subtotal: totalPrice * assignedRooms.length,          // MRB-04: the proper subtotal after add-on math
+        totalPrice: totalPrice * assignedRooms.length,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
         corporateCode: corporateDetails.corporateCode,
@@ -2087,7 +2108,76 @@ export async function handleCreateBooking(req: any, res: any) {
         createdBy: "guest"
       };
       transaction.set(reservationDocRef, newReservation);
-      transaction.set(bookingDocRef, newBooking);
+      // Per MRB-06 Phase 2 (2026-08-02, per decision #159):
+      // the N>1 booking write loop. For each assigned
+      // room, write a `bookings/{id}` doc with per-room
+      // `roomId` + `roomNumber` + `reservationPosition`
+      // (1..N). The first room uses the client's
+      // preallocated `bookingId`; the other N-1 rooms
+      // auto-mint fresh ids (the `adminDb.collection("bookings").doc().id`
+      // pattern — same shape as the walk-in path's
+      // `generateReservationId` auto-mint, but the
+      // client doesn't preallocate the booking ids for
+      // the additional rooms in this iteration; a
+      // follow-up can switch the client to
+      // preallocating N ids once the N>1 client
+      // surface lands). The per-type fields
+      // (totalPrice, rateBreakdown, holdExpiresAt,
+      // etc.) are the SAME for all rooms of the
+      // same `roomType` + same dates + same guest
+      // inputs — the spread of `newBooking` carries
+      // the per-type fields, and the per-room fields
+      // are overridden in the loop body. For N=1
+      // (the default) the loop runs once with
+      // `i = 0`, byte-equivalent to the pre-MRB-06
+      // single write to `bookingDocRef = newBooking`.
+      const bookingWriteRefs: Array<{ ref: FirebaseFirestore.DocumentReference; data: any }> = [];
+      for (let bookingIdx = 0; bookingIdx < assignedRooms.length; bookingIdx++) {
+        const assignedRoomForBooking = assignedRooms[bookingIdx];
+        // Auto-mint the booking id for rooms 2..N.
+        // The first room uses the client's preallocated
+        // id (the historical contract). When the client
+        // upgrades to preallocating N ids (a follow-up
+        // for the N>1 client surface), this becomes a
+        // `body.bookingIds[bookingIdx]` lookup.
+        const bookingIdForThisRoom = bookingIdx === 0
+          ? bookingId
+          : adminDb.collection("bookings").doc().id;
+        const perRoomBookingDocRef = adminDb.collection("bookings").doc(bookingIdForThisRoom);
+        bookingWriteRefs.push({
+          ref: perRoomBookingDocRef,
+          data: {
+            ...newBooking,
+            // Per-room fields. `roomId` + `roomNumber`
+            // are the assigned room's data; the
+            // `reservationPosition` is the 1-indexed
+            // position in the assigned-rooms list;
+            // `reservationRoomCount` is the total N
+            // (same for every booking doc in the
+            // reservation — the room count is a
+            // reservation-level aggregate, not a
+            // per-room field).
+            roomId: assignedRoomForBooking.id,
+            roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
+            reservationPosition: bookingIdx + 1,
+            reservationRoomCount: assignedRooms.length,
+            // Per-booking lookup token. The
+            // pre-MRB-02 code generated a single
+            // token per booking; for N>1 each
+            // booking doc gets its own token (so
+            // each magic link works independently).
+            // A future MRB-04 follow-up can
+            // refactor to a per-reservation token
+            // (one magic link for the whole group,
+            // resolving to the reservation header
+            // first).
+            lookupToken: generateLookupToken()
+          }
+        });
+      }
+      for (const { ref: writeRef, data: writeData } of bookingWriteRefs) {
+        transaction.set(writeRef, writeData);
+      }
       // Per PEX-05 (2026-08-01, per decision #147): capture
       // the snapshotted deadline for the post-transaction
       // response payload + the booking-submitted email. The
@@ -2281,6 +2371,27 @@ export async function handleCreateBooking(req: any, res: any) {
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
         roomType,
+        // Per MRB-06 Phase 2 (2026-08-02, per decision
+        // #159): the N>1 response shape. The first
+        // room's id + number are echoed in the legacy
+        // fields (`roomId` + `roomNumber`) for
+        // backward compat with the N=1 confirmation
+        // page. The `rooms` array carries ALL N
+        // assignments (id + number + position per
+        // room) so the N>1 confirmation can render
+        // the full group view. For N=1 (the default)
+        // `rooms` is a single-element array —
+        // byte-equivalent to the pre-MRB-06 single
+        // fields.
+        rooms: (typeof bookingWriteRefs === "undefined" ? [] : bookingWriteRefs).map((w, idx) => {
+          const r = assignedRooms[idx];
+          return {
+            bookingId: w.ref.id,
+            roomId: r.id,
+            roomNumber: String(r.data.roomNumber || ""),
+            reservationPosition: idx + 1
+          };
+        }),
         // Per PEX-05 (2026-08-01, per decision #147): the
         // snapshotted deadline. `null` for `payment-uploaded`
         // bookings (no auto-expiry, staff-review state). The
