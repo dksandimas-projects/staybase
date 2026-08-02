@@ -231,7 +231,7 @@ Block specced → items ship (`⬜` → `✅`) → when every item is done, move
 
 ### Block code registry
 
-Keep codes unique. In use as of 2026-07-31 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
+Keep codes unique. In use as of 2026-07-31 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
 
 ---
 
@@ -264,10 +264,13 @@ If a new feature or concern warrants a new MD:
 
 **Excluded from active totals:** `plan/project/archive/`, `plan/project/AUDIT-*.md`, `plan/project/AI-MD-SYSTEM-PROMPT.md`, `plan/project/context/spark-inn-MD-PLAN.md`, `plan/stitch/`, `node_modules`/build output.
 
-**Compaction rules:**
-- One fact, one home — everything else links to it (see §MD Ownership Rules).
-- When a phase, audit batch, or feature fully ships, move its diary/detail to `plan/project/archive/` (with a `HISTORICAL ARCHIVE` marker) and keep a one-line ✅ status in the active doc. Take an archive snapshot **before** materially compacting any large active doc.
-- Keep active: current behavior, requirements, acceptance criteria, unresolved risks, security/data invariants, deferral decisions with their triggers. Move out: branch/commit diaries, passing test logs, completed walkthroughs, superseded proposals.
+**Compaction & Archive Verbatim Invariant Rules:**
+- **Verbatim Text & Technical Context Preservation:** When compacting active documentation, NEVER summarize, shorten, or delete open task specifications or drop technical context details. Retain exact verbatim task descriptions for all open items in active docs.
+- **Historical Archive Full Detail Rule:** For shipped phases, completed audit batches, and historical feature blocks moved to `plan/project/archive/` (with a `HISTORICAL ARCHIVE` marker), ALWAYS retain 100% of the exact verbatim text, detailed multi-paragraph implementation narratives, decision records, and code specs from pre-compaction sources without truncating or summarizing them. Because archive files are excluded from token budget limits, they preserve full historical fidelity.
+- **One fact, one home:** Everything else links to the primary owner MD (see §MD Ownership Rules).
+- **Timing:** Take an archive snapshot **before** materially compacting any large active doc.
+- **Keep active:** Current behavior, requirements, acceptance criteria, open task specifications with their verbatim technical context, unresolved risks, security/data invariants, and deferral decisions with their triggers.
+- **Move out:** Branch/commit diaries, passing test logs, completed walkthroughs, and superseded proposals.
 - Archives and historical audits are never part of a normal implementation read bundle.
 
 **Review triggers** — run a documentation review (inventory, dedupe, compact/archive):
