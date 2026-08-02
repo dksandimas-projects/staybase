@@ -17,7 +17,17 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".vercel", ".firebase"]);
+// `.worktrees` / `.claude` hold git worktrees checked out INSIDE the repo.
+// Each contains a full copy of `plan/`, so without these the audit walks
+// every branch's docs at once: measured from the main checkout on
+// 2026-08-02 that reported 250 files, ~1.2M tokens and 31 "broken
+// reference" errors that were really just cross-worktree paths. The audit
+// must describe THIS checkout only, or it reports garbage from whichever
+// directory it happens to be run in.
+const SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", ".vercel", ".firebase",
+  ".worktrees", ".claude"
+]);
 
 // Historical / generated / template sources — excluded from active totals and budgets.
 // Markers inside them are still verified.
