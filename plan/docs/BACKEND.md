@@ -136,6 +136,8 @@ Per decision #159: the reservation header. Server-authoritative — staff can re
 
 ---
 
+**Per MRB-04 Phase 4 (2026-08-02, per decision #159) — transactional operational folio resolver:** confirm-with-balance and checkout now resolve money from the reservation header and reservation-owned payment/refund/charge ledgers whenever the selected room has a `reservationId`. The resolver reads every child room so delivered Add-to-Bill store orders remain attributable to rooms while contributing to one reservation balance. It also includes transitional child-owned payment and charge entries created between the reservation-header cutover and the remaining admin-folio migration; these entries are read in place and never copied or rewritten. A child pointing to a missing reservation header fails closed. Legacy null-`reservationId` bookings keep the historical single-booking payment, charge, store-order, and total paths. Both callers perform the read inside the same Firestore transaction as their status/audit writes, so a concurrent ledger change forces a retry before the approval threshold or checkout decision commits. Remaining MRB-04 work includes moving the admin charge surface, receipt/Reports/FIN readers, persistent header balance projections, partial-cancellation adjustments, and rounding-remainder coverage.
+
 ### `bookings/{bookingId}`
 
 `bookingId` is the Firestore document ID. Guest and corporate booking flows preallocate this ID before payment-proof or discount-ID uploads so Firebase Storage paths can be created before the booking document exists. `/api/bookings/create` must create the booking document at this supplied ID inside the availability-locking transaction. The guest-facing `bookingRef` is generated separately inside the transaction.

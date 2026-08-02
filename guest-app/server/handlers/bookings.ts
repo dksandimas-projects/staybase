@@ -210,6 +210,147 @@ function sumBilledAddToBillOrders(snapshot: any): number {
   }, 0);
 }
 
+interface TransactionalFolioSnapshot {
+  reservationId: string;
+  totalPrice: number;
+  collectedTotal: number;
+  incidentalTotal: number;
+  addToBillTotal: number;
+  folioTotal: number;
+  computedBalance: number;
+  source: "reservation-subcollection" | "booking-subcollection-legacy";
+}
+
+/**
+ * MRB-04 Phase 4: resolve the authoritative folio inside the caller's
+ * Firestore transaction.
+ *
+ * New reservations read the reservation-owned payments/refunds/charges
+ * plus every child room's transitional booking-owned ledgers. The latter
+ * preserves entries created between MRB-01 and the admin folio migration;
+ * no money disappears merely because a reservation header now exists.
+ * Add-to-bill store orders retain their room bookingId, so they are summed
+ * across every child room. Legacy null-reservationId bookings keep the
+ * historical single-booking paths byte-for-byte.
+ */
+async function readTransactionalFolioSnapshot(input: {
+  transaction: any;
+  bookingRef: any;
+  bookingId: string;
+  bookingData: any;
+}): Promise<TransactionalFolioSnapshot> {
+  const { transaction, bookingRef, bookingId, bookingData } = input;
+  const bookingReservationId = String((bookingData as any).reservationId || "").trim();
+
+  if (!bookingReservationId) {
+    const paymentsRef = bookingRef.collection("payments");
+    const chargesRef = bookingRef.collection("charges");
+    const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+    const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
+      transaction.get(paymentsRef),
+      transaction.get(chargesRef),
+      transaction.get(storeOrdersQuery)
+    ]);
+    const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
+    const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
+    const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+    const totals = computeServerFolioTotals({
+      totalPrice: Number(bookingData.totalPrice) || 0,
+      incidentalTotal,
+      addToBillTotal,
+      collectedTotal
+    });
+    return {
+      reservationId: "",
+      totalPrice: Number(bookingData.totalPrice) || 0,
+      collectedTotal,
+      incidentalTotal,
+      addToBillTotal,
+      ...totals,
+      source: "booking-subcollection-legacy"
+    };
+  }
+
+  const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+  const reservationPaymentsRef = reservationRef.collection("payments");
+  const reservationRefundsRef = reservationRef.collection("refunds");
+  const reservationChargesRef = reservationRef.collection("charges");
+  const childBookingsQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId);
+  const [
+    reservationDoc,
+    reservationPaymentsSnapshot,
+    reservationRefundsSnapshot,
+    reservationChargesSnapshot,
+    childBookingsSnapshot
+  ] = await Promise.all([
+    transaction.get(reservationRef),
+    transaction.get(reservationPaymentsRef),
+    transaction.get(reservationRefundsRef),
+    transaction.get(reservationChargesRef),
+    transaction.get(childBookingsQuery)
+  ]);
+
+  if (!reservationDoc.exists) {
+    throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+  }
+
+  const childBookingIds = new Set<string>([bookingId]);
+  childBookingsSnapshot.docs.forEach((docSnap: any) => childBookingIds.add(String(docSnap.id)));
+
+  // Transitional compatibility: before the admin folio surface moves to
+  // reservation-owned charges, reservation-linked child bookings may still
+  // carry payment/charge entries. Read them without copying or rewriting.
+  const childLedgerSnapshots = await Promise.all(
+    Array.from(childBookingIds).map(async (childBookingId) => {
+      const childRef = adminDb.collection("bookings").doc(childBookingId);
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", childBookingId);
+      const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
+        transaction.get(childRef.collection("payments")),
+        transaction.get(childRef.collection("charges")),
+        transaction.get(storeOrdersQuery)
+      ]);
+      return { paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot };
+    })
+  );
+
+  const transitionalCollectedTotal = childLedgerSnapshots.reduce(
+    (sum, snapshots) => sum + sumLedgerAmounts(snapshots.paymentsSnapshot),
+    0
+  );
+  const transitionalIncidentalTotal = childLedgerSnapshots.reduce(
+    (sum, snapshots) => sum + sumLedgerAmounts(snapshots.chargesSnapshot),
+    0
+  );
+  const addToBillTotal = childLedgerSnapshots.reduce(
+    (sum, snapshots) => sum + sumBilledAddToBillOrders(snapshots.storeOrdersSnapshot),
+    0
+  );
+  const collectedTotal =
+    sumLedgerAmounts(reservationPaymentsSnapshot)
+    + sumLedgerAmounts(reservationRefundsSnapshot)
+    + transitionalCollectedTotal;
+  const incidentalTotal =
+    sumLedgerAmounts(reservationChargesSnapshot)
+    + transitionalIncidentalTotal;
+  const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
+  const totals = computeServerFolioTotals({
+    totalPrice,
+    incidentalTotal,
+    addToBillTotal,
+    collectedTotal
+  });
+
+  return {
+    reservationId: bookingReservationId,
+    totalPrice,
+    collectedTotal,
+    incidentalTotal,
+    addToBillTotal,
+    ...totals,
+    source: "reservation-subcollection"
+  };
+}
+
 function calculateCheckoutPoints(totalPrice: number, rewardsConfig: any): number {
   if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
   if ((rewardsConfig.earningMode || "per-spend") === "per-booking") {
@@ -5445,35 +5586,18 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
       const txThreshold = Number(txHotelConfig.unpaidCheckoutApprovalThreshold) || 5000;
       balanceThreshold = txThreshold;
 
-      // Compute the charge-inclusive balance inside the
-      // transaction so we read the same ledger state we
-      // stamp. Mirrors the checkout transaction's helpers.
-      const paymentsRef = bookingRef.collection("payments");
-      const chargesRef = bookingRef.collection("charges");
-      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
-      const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
-        transaction.get(paymentsRef),
-        transaction.get(chargesRef),
-        transaction.get(storeOrdersQuery)
-      ]);
-      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
-      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
-      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
-      // Per PMH-02 (2026-07-31): the inline `folioTotal` /
-      // `computedBalance` math lived in three places (this
-      // transaction, the create transaction, the post-checkout
-      // transaction). All three now route through the shared
-      // `computeServerFolioTotals` helper in `shared/utils/bookingFolio.ts`
-      // so MRB-04 (the group folio) edits one function instead
-      // of three.
-      const serverFolio = computeServerFolioTotals({
-        totalPrice: Number(data.totalPrice) || 0,
-        incidentalTotal,
-        addToBillTotal,
-        collectedTotal
+      // MRB-04 Phase 4: the balance gate resolves the reservation
+      // folio for new reservations and the historical booking folio
+      // for legacy null-reservationId bookings. The resolver runs
+      // inside this transaction so the threshold decision and the
+      // confirmedWithBalance snapshot observe the same ledger state.
+      const folioSnapshot = await readTransactionalFolioSnapshot({
+        transaction,
+        bookingRef,
+        bookingId,
+        bookingData: data
       });
-      const folioTotal = serverFolio.folioTotal;
-      const computedBalance = serverFolio.computedBalance;
+      const computedBalance = folioSnapshot.computedBalance;
       balance = computedBalance;
 
       // CWB-01: threshold gate — front-desk is capped at the
@@ -5858,17 +5982,20 @@ export async function handleCheckoutBooking(req: any, res: any) {
         throw new Error(`Booking can only be checked out from 'checked-in' status (current: ${freshBookingData.status}).`);
       }
 
-      const paymentsRef = bookingRef.collection("payments");
-      const chargesRef = bookingRef.collection("charges");
-      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
-      const paymentsSnapshot = await transaction.get(paymentsRef);
-      const chargesSnapshot = await transaction.get(chargesRef);
-      const storeOrdersSnapshot = await transaction.get(storeOrdersQuery);
-      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
-      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
-      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
-      const checkoutFolioTotal = Number(freshBookingData.totalPrice || 0) + incidentalTotal + addToBillTotal;
-      checkedOutWithBalance = Math.max(checkoutFolioTotal - collectedTotal, 0);
+      // MRB-04 Phase 4: a room may check out only against the
+      // authoritative reservation balance. For new reservations
+      // this includes payments/refunds/charges and add-to-bill store
+      // orders across every child room. Legacy bookings retain their
+      // historical single-booking folio path.
+      const folioSnapshot = await readTransactionalFolioSnapshot({
+        transaction,
+        bookingRef,
+        bookingId,
+        bookingData: freshBookingData
+      });
+      const collectedTotal = folioSnapshot.collectedTotal;
+      const checkoutFolioTotal = folioSnapshot.folioTotal;
+      checkedOutWithBalance = folioSnapshot.computedBalance;
       eligiblePoints = memberId
         ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
         : 0;
