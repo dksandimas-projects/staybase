@@ -18,7 +18,7 @@
 
 | Phase | Status | Remaining / Notes |
 |---|---|---|
-| 0 — Foundation · 0.5 — Wireframes · 1 — Guest Shell · 2 — Admin Shell & Auth · 3 — Rooms · 4 — Booking Flow · 5 — Admin Bookings · 6 — Email · 7 — Corporate & Vouchers · 9 — Remaining Features | ✅ All shipped | 0 — details in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) |
+| 0 — Foundation · 0.5 — Wireframes · 1 — Guest Shell · 2 — Admin Shell & Auth · 3 — Rooms · 4 — Guest Booking · 5 — Admin Bookings · 6 — Email · 7 — Corporate & Vouchers · 9 — Remaining Features | ✅ All shipped | 0 — details in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) |
 | 8 — Intercom | ✅ Built (19/29) | 10 manual E2E QA items (§Phase 8 QA below) |
 | 10 — Security & Polish | 🔄 7/12 | 5 operational/QA items (§Phase 10 below) |
 | 10B — Spark Rewards | 🔄 13/14 | 1 operational item (§Phase 10B below) |
@@ -27,7 +27,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Enhancements | 🔄 Active | Pre-launch blocks shipped; deferred items remain post-launch (§Phase 12 below) |
+| 12 — Enhancements & Multi-Room | 🔄 Active (MRB-01..05 shipped) | Open MRB-06..15 items + Phase 12 follow-ups (§Phase 12 below) |
 | Plan Audits (FIN, FR, FL, PF, QA, NC, AUD, SA, FLR, PC, INC) | ✅ Closed / In Prod | 0 — details in archive |
 
 ---
@@ -110,7 +110,7 @@
 
 ---
 
-## Phase 12 — Enhancements
+## Phase 12 — Enhancements & Multi-Room Bookings (MRB)
 
 ### Deferred features
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
@@ -118,7 +118,7 @@
 - ⏸ Additional hotel client deployments (white-label)
 
 ### Shipped in Phase 12 (Summary)
-> Full implementation detail archived in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) and `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`.
+> Full implementation detail archived in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) and `ROADMAP-ARCHIVE-2026-07-17.md`.
 
 - ✅ **GCR** — Guest check-in registration purpose of stay (#121)
 - ✅ **CWB** — Confirm with balance for partial-payment bookings (#122)
@@ -135,9 +135,21 @@
 - ✅ **NBS** — New Booking & Customizable Booking Sources (#142, 2026-07-31/08-01)
 - ✅ **PEX** — Pending Booking Expiry & Hold Window (#147, 2026-08-01)
 - ✅ **DSC** — Discount Scope Configuration & VAT Breakdown (#146/#148/#149/#150, 2026-07-31/08-01)
-- ✅ **MRB** — Multi-Room Bookings & Reservation Header (#159/#164, 2026-08-02)
+- ✅ **MRB (Phase 1)** — Multi-Room Bookings foundation: `reservations/{id}` header, reservationRef (`R-YYYYMMDD-NNNNN`), transactional create & idempotency for single-room, walk-in, reschedule, corporate, N-booking assignment (MRB-01..05, 2026-08-02)
 
-### Open follow-ups from Phase 12 blocks
+### Open Multi-Room Booking (MRB) Tasks
+- ⬜ **MRB-06 Phase 3 / MRB-07** — Group folio & per-room charge attribution on multi-room reservations.
+- ⬜ **MRB-08** — Multi-room booking flow UI on `/book` (room-count selector, multi-room date picker, multi-room occupancy allocation).
+- ⬜ **MRB-09** — Multi-room confirmation page & multi-room booking confirmation email template.
+- ⬜ **MRB-10** — Guest lookup resolves a reservation with nested rooms on `/my-booking` (returning nested room card projections with privacy masking).
+- ⬜ **MRB-11** — Reports use correct owner for each metric (reservation-level vs room-stay level: reservation count vs room nights & ADR).
+- ⬜ **MRB-12** — Admin reservation + room affordance in drawer & table (reservation summary headers & room-stay navigators).
+- ⬜ **MRB-13** — Cancellation options: cancel single room vs cancel full reservation with pre-confirmation financial breakdown.
+- ⬜ **MRB-14** — Post-create room changes (add room to pre-arrival reservation, modify stay dates per child room).
+- ⬜ **MRB-15** — Integration & end-to-end lifecycle test coverage across multi-room create → cancel → checkout flow.
+
+### Other Open Follow-ups from Phase 12 Blocks
 - ⬜ **BSP-03 — Manual QA** — multi-guest breakfast served toggle persistence check across multi-session admin view.
 - ⬜ **HSD-05 — Manual QA on real devices** — iPhone HEIC upload verification across Chrome, Firefox, and Safari.
 - ⬜ **PEX-07 — Java Emulator Behavioral Tests** — real-device / emulator write-path testing for auto-expiry transaction.
+- 🔄 **ETR-R — Production-to-Staging Refresh** — Open tasks: R02 (multiple modes), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement).
