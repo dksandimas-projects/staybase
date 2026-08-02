@@ -1,224 +1,57 @@
 # Bookings Management
-> App: admin-app
-> Phase: Phase 5 — Admin Bookings Management (extended through Phase 12: drawer IA refactor, unpaid checkout, payment reference semantics, filtering — all shipped 2026-07-16; payment reference unified 2026-07-24 per `refactor/unify-payment-reference-fields`)
-> Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, docs/API-ROUTES.md, plan/admin-app/CLAUDE.md
-> Design ref: spark-inn-design-spec.md §Bookings Management
-> Pre-compaction snapshot (original implementation plans + prior-state narratives): `plan/project/archive/BOOKINGS-MANAGEMENT-ARCHIVE-2026-07-17.md`
+> Requires: CLAUDE.md, plan/docs/FRONTEND.md, plan/docs/BACKEND.md, plan/docs/API-ROUTES.md, plan/admin-app/CLAUDE.md
 
 ## Overview
 
-The primary operational tool for front desk staff at `/bookings`. Displays all bookings in a filterable, sortable table. Staff view and work bookings in a status-aware four-section drawer workspace, advance booking status, manage the folio (payments, refunds, discounts, incidental charges, store charges), generate receipts, log cancellations, and create walk-in or manual bookings directly from the dashboard.
+The primary operational tool for front desk staff at `/bookings`. Displays all bookings in a filterable, sortable table. Staff view and work bookings in a status-aware four-section drawer workspace, advance booking status, manage the folio (payments, refunds, discounts, incidental charges, store charges), generate receipts, log cancellations, and create walk-in or manual bookings.
 
 ---
 
-## UX Checklist
-> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+## Workspace Layout & BDUX Contract
 
-- [x] Most common action is reachable in ≤ 2 clicks from the sidebar
-- [x] Loading state uses skeleton, not spinner
-- [x] Drawers save without full page reload — optimistic update, toast on success
-- [x] Every error state has a plain-language message and a next step — no dead ends
-- [x] Destructive actions have a single confirmation step — not buried in menus
-- [x] Empty states explain why data is missing and what to do
+The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 
----
-
-## Booking Drawer Workspace (BDUX contract, shipped 2026-07-16)
-
-The drawer is a status-aware workspace, not a continuous stack of forms. These rules constrain any future drawer change:
-
-- **Sticky header** — compact booking context (guest, room, stay, status, source), lifecycle indicator, Total/Paid/Balance summary, and actionable alerts (payment proof awaiting verification, early check-in request, check-in readiness). Guest contact + payment method/reference context stay above the section tabs.
-- **Four task-based sections** — **Overview** (guest info, room/dates, breakfast inclusion, compact payment status, financial summary), **Check-in** (readiness checklist, registration, signature, guest ID, discount verification, breakfast selections), **Folio** (all money: ledgers, discounts, receipts), **Activity & More** (email actions/history, move/upgrade/reschedule, audit detail, cancellation). Panels stay mounted while hidden so switching sections never discards form input.
-- **Sticky status-aware footer** — one primary action for the current status plus a **More actions** menu. Cancellation lives in More, never beside the normal workflow.
-- **Progressive disclosure** — completed registration collapses to a summary card with Edit; nightly rate breakdown is collapsible; payment/refund history and incidental charges auto-collapse at 4+ entries; email actions sit behind a disclosure.
-- **Focused task modals** — apply discount/voucher, record payment, record refund, add/void charge, and cancel booking each open one bounded responsive modal (full-screen sheet on mobile) with only that task's fields, validation, financial context, and confirm/cancel. No always-open inline data-entry forms.
-- **Folio read-first rules** — Folio opens with Total / Paid / Balance and a visible category breakdown (booking/add-ons, billed-to-room store, incidentals) before any line items; detailed nightly rates stay behind a disclosure. Desktop uses independent columns (ledger/history main, sticky financial summary side); mobile stacks the same content. **Collect** is the only primary action while an eligible booking has a balance, rendered through the sticky footer — no duplicate inline Collect rows.
-- **Payment proof lives in Folio** — full proof-review card (image, method, reference, upload time, **Verify & Record Payment** action) is canonical in Folio; Overview shows only a compact status badge; the sticky header shows a pending-verification alert that navigates to Folio. After verification/rejection the card collapses to a compact immutable evidence row with a **View proof** button.
-- Unresolved operational items get emphasis; completed/historical information is quiet and collapsible. Existing status eligibility, server-authoritative pricing, check-in/checkout gates, role restrictions, PII protections, and append-only ledger behavior never change through UI refactors.
-- Components: `BookingDrawerWorkspace.tsx` (header/tabs/readiness/footer), `BookingRegistrationForm.tsx`, `BookingEmailActions.tsx`, `IncidentalChargeList.tsx`.
-- Remaining verification: manual/visual QA matrix — tracked in `plan/project/ROADMAP.md §Phase 12 →Booking Drawer UX Refactor`.
+- **Sticky Header:** Booking context (guest, room, stay, status, source), lifecycle indicator, Total/Paid/Balance summary, and actionable alerts.
+- **Four Task-Based Sections:**
+  - **Overview:** Guest info, room/dates, breakfast inclusion, compact payment status, financial summary.
+  - **Check-in:** Readiness checklist, registration, signature, guest ID photo, discount verification, breakfast selections.
+  - **Folio:** Money ledgers, discounts, payment proofs, receipts, incidental & store charges.
+  - **Activity & More:** Email actions/history, move/upgrade/reschedule, audit detail, cancellation.
+- **Sticky Footer:** Context-aware primary action button for the current status plus a **More actions** dropdown menu.
+- **Focused Task Modals:** Bounded responsive modals for discount verification, payment recording, refund recording, charge adding/voiding, and cancellation.
 
 ---
 
-## Table Filtering & Search (FSO contract, Phase 1 shipped 2026-07-16)
+## Table Filtering & Search (FSO Contract)
 
-Applies to both the Bookings tab and the Store Orders tab; each holds independent filter state.
-
-- **Two-level controls** — toolbar with search, count-bearing quick-view chips, result count (`n of total`), and **Clear all**. Advanced filter panel (grouped controls, Apply/Cancel) opens via a **Filters** button showing the active-filter count. (Mobile advanced sheet is Phase 2 — see ROADMAP.)
-- **Visible active state** — every active quick view, search query, and status filter renders as a removable chip; **Clear all** resets everything.
-- **Canonical URL state** — search (`bq`/`sq`), quick view (`bqv`/`sqv`), status (`bs`/`ss`), and main tab (`tab`) live in normalized URL params; refresh, Back/Forward, and deep links restore the view. Legacy `?filter=` and `?orderRef=` auto-migrate on load.
-- **AND composition** — search, status filter, and quick view combine with AND semantics; results default to attention-needed first, then check-in date.
-- **Booking quick views** — Needs attention, Arrivals today, Departures today, In house, Upcoming, Balance due, Cancelled, All bookings. **Needs attention** = `payment-uploaded`, overdue confirmed/pending arrivals, unresolved early check-in request, overdue in-house departures, checked-out receivable with positive balance — computed with the same `getBookingFolio` helper as the drawer alerts.
-- **Store quick views** — Needs action (placed awaiting confirmation + unverified payment proof), Placed, Preparing, Out for delivery, Delivered today, Add to room bill, Payment pending, Cancelled, All orders.
-- **Search coverage** — bookings: guest name, ref, room, email, phone, payment-ledger transaction references. Store: guest name, order ref, room, booking ID, notes, item names. Per 2026-07-24, the previous "original booking-payment reference" search predicate was retired along with the top-level `Booking.paymentReferenceNumber` field — searches now hit only the canonical per-payment `transactionReference` on the booking's onsitePayments[] ledger.
-- **Performance** — `filteredRows`/`filteredOrders` are `useMemo`-wrapped; quick-view counts use inline predicates.
+- **Two-Level Controls:** Quick-view chips, search input, result counts (`n of total`), and advanced filter panel.
+- **URL Parameter Sync:** Search query (`bq`), quick view (`bqv`), status (`bs`), and main tab (`tab`) live in normalized URL parameters.
+- **Quick Views:** Needs attention, Arrivals today, Departures today, In house, Upcoming, Balance due, Cancelled, All bookings.
+- **Search Coverage:** Guest name, booking ref, room number, email, phone, transaction references (`transactionReference`).
 
 ---
 
-## UI Checklist
+## Key Workflows & Rules
 
-- [x] Booking table — columns: Booking Ref, Guest Name, Room, Check-in, Check-out, Source, Payment Method, Status badge, Actions; mobile card view via `renderMobileCard` (`plan/features/ADMIN-MOBILE.md`)
-- [x] Booking detail drawer — opens on row click into the four-section workspace above
-- [x] Discount ID photo — shown in Check-in section when `booking.discountType != ""`:
-  - [x] Thumbnail with "View Full Size" link (opens Firebase Storage URL in new tab)
-  - [x] Label: "OSCA Card" or "PWD ID" depending on `discountType`
-  - [x] Three-state verification control — **Pending** (yellow badge, default) / **Verified** (green; stores `discountVerified: true`, `discountVerifiedBy`) / **Rejected** (red; discount removed, rejection email sent — see `plan/features/EMAIL-PDF-STORAGE.md §Discount Rejected`; stores `discountRejected: true`, `discountRejectedBy`, `discountRejectionReason`)
-  - [x] Reject opens a confirmation modal with optional reason input — reason stored and included in the rejection email
-  - [x] On rejection: `totalPrice` restored to pre-discount amount (only the Senior/PWD deduction is removed; voucher/member/points deductions and the rate breakdown are preserved and rebuilt server-side); guest pays full amount at check-in
-  - [x] Once rejected, discount cannot be re-applied from the drawer
-- [x] **Folio — Payments Collected Onsite** — shown for `confirmed` / `checked-in` / `checked-out`
-  - [x] Ledger rows: amount (₱), method, transaction reference, internal note, recorded by, timestamp; **Total Collected** and **Outstanding Balance** (charge-inclusive) in the sticky summary
-  - [x] **Record Payment** button opens the focused modal — amount (defaults to outstanding balance, editable for partial payments), method selector, **Transaction reference** + **Internal note** as separate fields (see §Payment Reference Semantics)
-  - [x] Payments are immutable once saved — no editing, no deletion (audit trail)
-  - [x] "Fully Settled" badge at ₱0 balance; walk-in Pay-at-Hotel cash confirmation happens through this panel
-- [x] **Refund workflow (FIN-03 + CRL-01)** — Admin-only focused modal appends a negative immutable refund entry with required method/reason, approver, and timestamp via authenticated `/api/bookings/add-refund`; server rejects refunds above current net collected. **Idempotent (CRL-01, 2026-08-01; reservation-aware 2026-08-02)** — the client preallocates a Firestore refund ID from the reservation refunds ledger for linked bookings or the historical booking payments ledger for legacy bookings, then holds it across uncertain responses. Exact retries replay the original commit; conflicting reuse returns 409 and clears the held ID.
-- [x] Status action buttons — context-aware in the sticky footer, only valid next transitions
-- [x] Notes field — staff internal notes saved to booking
-- [x] Receipt button — printable/downloadable PDF (jsPDF), consumes the authoritative Folio summary
-- [x] Resend Transactional Email panel (Activity & More, behind a disclosure) — Booking Submitted, Booking Confirmed, Payment Confirmed, Check-in Reminder, Booking Cancelled, Discount Rejected; recommends templates based on booking/discount status
-- [x] Check-in registration workstation — Check-in section for `confirmed` / `checked-in`: registry fields (nationality, address, DOB, gender, **purpose of stay** (Decision #121, defaults to `Leisure`, requires free-text `otherPurpose` reason when staff picks `Other`), ID type + number, emergency contact, vehicle plate), signature status toggle, registration PDF action; check-in disabled until required fields + guest ID photo are saved
-- [x] Breakfast selections panel — only if `booking.hasBreakfast: true`; dates × guests grid of active silog items from `settings/breakfastConfig.silogItems`; saved to `breakfastSelections` map; collapsible with recorded-count badge
-- [x] Guest ID upload — `confirmed` / `checked-in`; jpg/png/webp via shared `compressImageFile()`; HEIC/HEIF auto-converted client-side to JPEG before the compression step (see HEIC handling below); thumbnail preview; re-upload overwrites; `guestIdPhotoUrl` staff-only, stored at `bookings/{bookingId}/guest-id/{filename}`
-  - [x] **Format guard at upload** — the file picker is locked to `accept="image/jpeg,image/png,image/webp,image/heic,image/heif"` and `handleGuestIdUpload` rejects any non-allowlist MIME type with a clear "re-capture or convert" message before `compressImageFile` runs. AVIF/TIFF/BMP and other browser-undecodable formats must never reach Storage: the `compressImageFile` fallback would upload the original file, and the registration PDF generator downstream cannot rasterize them, leaving the "Preparing registration PDF..." placeholder tab open forever. (`fix/guest-id-pdf-stuck`; updated for HEIC in HSD-03)
-  - [x] **HEIC handling at upload (HSD-02, decision #125)** — the upload handler branches on `HEIC_INPUT_MIME_TYPES = { image/heic, image/heif }` BEFORE the allowlist + compress path. The branch dynamic-imports `heic-to@1.5.2` (LGPL-3.0, tracks libheif 1.20.2), converts the blob to JPEG at quality 0.92, wraps the result in `new File([converted], "...jpg", { type: "image/jpeg" })`, and feeds it into the standard compress + upload flow. Conversion uses Web Workers internally (per the library README) so the UI thread is not blocked. The lib is loaded only on HEIC detection — JPEG/PNG/WebP uploads never pay the ~735 KB gzipped lazy-chunk cost. Initial bundle delta: +0.6 KB gzipped (just the import statement). Conversion errors (corrupt HEIC, oversized, WASM init failure) fall through to a user-facing toast with a "re-capture or convert manually" next step. Fallback: if the dynamic import ever fails, the existing 5s decode-timeout in the PDF generator catches the resulting bad blob.
-  - [x] **Bounded image decode in the registration PDF** — `normalizePdfImageToJpeg` rejects with a timeout if `<img>.onload`/`.onerror` does not fire within 5s. Defense in depth in case a non-decodable file slips through legacy data or another upload path; the outer PDF try/catch then closes the placeholder tab and surfaces a friendly toast. (`fix/guest-id-pdf-stuck`)
-- [x] **Spark Rewards — Points Redemption panel** (Folio) — when status is `confirmed`/`checked-in`/`checked-out` AND `booking.memberId` set: member row (name, `memberNumber`, balance); redeem form with live ₱ preview from `settings/rewardsConfig.pointsRedemptionRate`; one redemption per booking; undo is admin-only and only on `confirmed`
-- [x] Cancellation — confirmation modal with reason input, isolated in **More actions**; **CRL-02 (2026-08-02)** extends the same transaction to stamp `cancelledAt` + `cancelledBy` + `cancellationSource` alongside the status flip — `cancellationSource` is `"staff"` (with `cancelledBy` = staff UID) for the drawer + Calendar actions, or `"guest"` (with `cancelledBy` = the literal `"guest"`, no PII) for the `/my-booking` self-service path. Cancellation records remain permanent: no path deletes a booking or rewrites collected-money entries. **CRL-03 (2026-08-02)** — the staff path can cancel any pre-arrival status (`pending` / `payment-uploaded` / `payment-confirmed` / `confirmed`); the guest self-service path is server-restricted to `pending` / `payment-uploaded` so a paid booking cannot be silently dropped by the guest. A guest attempting to cancel a paid booking is funnelled to the front desk with a 400 ("Your booking is past the self-service cancellation window. Please contact the front desk..."). **CRL-04 (2026-08-02)** — the staff confirm modal message says: "Cancellation is permanent and the guest will be notified by email. The booking record is kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action." The corresponding `booking-cancelled` email renders the same rule in a warm "What happens next" callout.
-- [x] Checkout folio review — room/add-ons, incidental charges, billed store charges, payments collected, balance state — single authoritative summary (no duplicated checkout-review block)
-- [x] Walk-in / manual booking — "New Booking" CTA opens full-screen-on-mobile modal; standard walk-in fields, discount-type + voucher-code fields, optional test-run selector, immediate check-in option
-- [x] Calendar view — `/calendar` renders a live room × date grid; click ranges to block or book; booked ranges open a booking drawer with move/reschedule; blocked ranges open a block drawer; active `roomBlocks` render with strikethrough
-- [x] No pagination — all active bookings loaded in one real-time snapshot (fits property size)
-- [x] Loading skeleton on initial data fetch
+### Discount Verification (Senior/PWD)
+- Uploaded OSCA/PWD ID photo thumbnail displayed in Check-in section.
+- Verification actions: **Verified** (`discountVerified: true`), **Rejected** (`discountRejected: true`, requires staff reason).
+- Rejection restores `totalPrice` to pre-discount amount, triggers rejection email, and requires guest to pay full balance.
 
-## Data & Logic Checklist
+### Onsite Payments & Refunds
+- **Record Payment:** Collects payment amount, method (from `hotelConfig.paymentMethods`), and tender reference (`transactionReference`). Append-only ledger in `payments` subcollection.
+- **Refunds:** Admin-only, requires method and reason. Appends immutable negative refund record. Idempotent via client-preallocated doc ID.
 
-- [x] `onSnapshot` on `bookings` collection — real-time updates
-- [x] Status transition rules:
-  - `pending` → `payment-uploaded` (auto on screenshot), `confirmed` (pay-at-hotel), `cancelled`
-  - `payment-uploaded` → `payment-confirmed`, `cancelled`
-  - `payment-confirmed` → `confirmed`
-  - `confirmed` → `checked-in`, `cancelled`
-  - `checked-in` → `checked-out`
-  - `checked-out` / `cancelled` → no further transitions
-- [x] Check-in gate: `/api/bookings/checkin` rejects check-in unless status is `confirmed` or `payment-confirmed`, `guestIdPhotoUrl` is present, required `guestRegistration` fields are saved (nationality, address, DOB, gender, ID type + number, emergency contact), and signature status is `signed`; vehicle plate optional. The drawer mirrors the same rule via the shared readiness helper — disabled CTA + plain-language missing-items checklist. Direct check-in from `payment-confirmed` is a documented supported path.
-- [x] Status updates are server-authoritative: cancellation, uploaded-payment verification, confirmation, check-in, and checkout use authenticated `/api/bookings/*` routes; Firestore client rules exclude `status` from the staff update allowlist
-- [x] Uploaded-payment verification: **Verify & Record Payment** (Folio proof card + Dashboard) → `handleVerifyAndRecordPayment` atomically creates the payment ledger entry and transitions `payment-uploaded` → `payment-confirmed` in one transaction (see §Payment Reference Semantics); legacy `/api/bookings/mark-payment-confirmed` is kept only for in-flight backward compatibility and is unreachable from the UI. `/api/bookings/confirm` owns the confirmed transition and email
-- [x] Cancellation: POST `/api/bookings/cancel` — owner/staff authorization, status validation, `cancellationReason`, cancellation email all server-side
-- [x] Walk-in creation: POST authenticated `/api/bookings/create-walkin` — strict full-body Zod validation before the availability-locking transaction, finite manual override capped at 1,000,000, `source: "walk-in"`, defaults to `confirmed` unless immediate check-in, `handledBy` from the verified staff token; booking ref generated inside the same transaction
-- [x] Points redemption: POST `/api/members/redeem-points` — validates balance, computes value from `settings/rewardsConfig.pointsRedemptionRate` (never hardcoded), updates booking + member, logs to `pointsHistory`; undo via `/api/members/undo-redemption` (admin, `confirmed` only) — both rebuild the locked rate breakdown server-side
-- [x] Receipt PDF generated client-side with jsPDF — see `plan/features/EMAIL-PDF-STORAGE.md`
-- [x] Additional payments: POST `/api/bookings/add-payment` with client-preallocated `paymentId` — API creates that exact immutable document, safely replays exact retries, rejects conflicting ID reuse, and atomically advances `pending`/`payment-uploaded` to `payment-confirmed` when the running total reaches `totalPrice`; the committed transition gates the one-time guest email
-- [x] Reservation-aware drawer snapshots: linked bookings listen to the reservation header plus canonical payments/refunds/charges and transitional child booking ledgers; legacy bookings listen to their historical booking-owned ledgers. Balance uses the charge-inclusive folio and every listener is unsubscribed on cleanup.
-- [x] Discount verification/rejection: verify via `updateDoc` (`discountVerified` + `discountVerifiedBy`); rejection via POST `/api/bookings/reject-discount` — staff role required, removes only the rejected deduction, rebuilds the breakdown, triggers the rejection email
+### Unpaid Checkout (UCO) & Confirm with Balance (CWB)
+- **Unpaid Checkout:** Requires staff reason; balances above `unpaidCheckoutApprovalThreshold` (default ₱5,000) require `admin` authorization. Stamped immutably on departure.
+- **Confirm with Balance:** Staff can confirm a `payment-uploaded` booking with an intentional partial balance via `/api/bookings/confirm-with-balance`.
 
-## Payment Reference Semantics (PRC contract, shipped 2026-07-16; unified 2026-07-24)
+### Guest ID Upload & HEIC Conversion
+- Accepts JPEG, PNG, WebP, HEIC, HEIF.
+- HEIC files auto-converted client-side via `heic-to@1.5.2` Web Worker before compression.
+- Bounded 5s decode timeout in PDF generator prevents stuck UI.
 
-**As of 2026-07-24 (`refactor/unify-payment-reference-fields`) there is a single concept: the payment reference for any given transaction lives on the corresponding entry in the booking's `bookings/{id}/payments/` ledger as `transactionReference`. The previous top-level `Booking.paymentReferenceNumber` (guest-entered at booking time) is retired.** Legacy bookings that still carry the field render unchanged — no inference, no migration.
-
-- **One field, one place.** The `OnsitePayment` entry's `transactionReference` is the only canonical reference. Required when the method's `requireReferenceNumber` config says so, resolved server-side from `settings/hotelConfig.paymentMethods[].requireReferenceNumber` — cash may omit it; digital/bank methods enforce it on the staff verify/add-payment endpoints. Idempotency compares amount + method + transaction reference + note. Schema: `plan/docs/BACKEND.md §bookings — payments subcollection`.
-- **Guests never set a reference.** The `/book` and `/corporate/book` flows no longer collect a payment reference number at booking time. The booking create + walkin handlers dropped the `requireReferenceNumber` server-side check and the payload field. The flag's enforcement is now scoped exclusively to the staff verify/add-payment endpoints (`handleVerifyAndRecordPayment`, `handleAddPayment`).
-- **Staff record the reference at verify time.** **Verify & Record Payment** (uploaded-proof verification) opens with an empty `transactionReference` input that staff fill from the GCash app / bank record / proof screenshot. The server transaction re-reads booking + ledger, validates against payment-method config, creates one immutable idempotent payment record (client-preallocated ID), and transitions to `payment-confirmed` only when collected total satisfies the booking total; a partial verified payment is recorded without falsely marking the booking paid. No separate confirm-then-record double entry, no duplicate emails/notifications on retries. **Record Payment** (Folio) takes the same `transactionReference` + `note` pair for any later deposit, partial payment, onsite collection, or post-checkout settlement.
-- **Drawer display.** The booking drawer's sticky header surfaces a read-only **"Reference"** cell that resolves the latest `transactionReference` from `onsitePayments[]` (helper: `getLatestPaymentReference(booking)` in both `BookingsPage.tsx` and `BookingDrawerWorkspace.tsx`). The previous inline "Original booking payment reference" edit input was removed. The Folio ledger rows, Reports Collections, Daily Close, and export sheets show `transactionReference` separately from `note`. The pre-2026-07-24 search predicate over the top-level field was dropped; the search now hits the ledger entries only.
-- **Payment rejection** (bounce → `pending`, room held) stays available from Dashboard pending-payment cards: `/api/bookings/reject-payment` stamps `paymentRejectionReason`/`paymentRejectedAt`/`paymentRejectedBy`, keeps stale `paymentProofUrl` for audit, and emails the guest. The rejection email surfaces the **"Reference on file"** callout (sourced from the latest `transactionReference` of `onsitePayments[]`, if any) so the guest can re-upload with the matching ref.
-
-## Unpaid Checkout & Post-Stay Settlement (UCO contract, shipped 2026-07-16)
-
-- Only `checked-in` bookings can check out. Zero/overpaid balance → normal confirmation; a **positive server-calculated folio balance** enters the controlled unpaid-checkout flow — it is no longer a warning staff can click through.
-- The confirmation form shows Total/Paid/Balance and requires a reason (max 500 chars; shortcuts: company billing, bank transfer pending, payment failure, disputed charge, other) plus an editable audit note.
-- **Approval threshold:** admin-configurable `hotelConfig.unpaidCheckoutApprovalThreshold` (default 5,000). Front Desk may approve up to it; above it requires an authenticated `admin` claim — enforced server-side inside the checkout transaction (client mirrors for guidance only). Blocked checkouts stay `checked-in` with an explanation of amount, limit, and next step.
-- The checkout API recalculates the balance at commit time. Reservation-linked bookings use the reservation total plus reservation payments/refunds/charges, transitional child-room ledgers, and delivered Add-to-Bill orders across every room; legacy null-`reservationId` bookings retain the historical single-booking calculation. Settings and all ledgers are read inside the same transaction that stamps the normalized reason, departure balance, folio total, collected total, threshold snapshot, elevated-approval flag, staff UIDs, and timestamp. Room release, housekeeping-dirty, intercom resolution, and loyalty award stay in that transaction; concurrent money changes force a retry before checkout commits.
-- **Post-checkout collection:** a checked-out booking with balance shows a **Balance due** alert (sticky header + Folio); Record Payment defaults to the outstanding amount, appends to the immutable ledger, booking stays `checked-out`. At zero balance the alert becomes **Settled after checkout**; the original departure snapshot/reason/approver is retained; loyalty points award exactly once via the final-payment transaction. The booking stays in Receivables until settled; later payments hit Collections/Daily Close on actual receipt date, never backdated.
-- **Early-departure policy:** retain the contracted total, shorten the operational stay, preserve the original checkout timestamp, rebuild the receipt with an explicit retained-total adjustment.
-
-## Staff Discount / Voucher Application (shipped 2026-07-11)
-
-- **"Apply discount / voucher"** drawer action — available for `pending` / `payment-*` / `confirmed` / `checked-in`; blocked after checkout; hidden once a voucher is applied (compact read-only summary shown instead).
-- **Senior/PWD path:** staff sights the physical ID (optional photo into `discountIdPhotoUrl`); a server route snapshots `originalTotalPrice`, re-prices with the canonical stacking order (Senior/PWD → voucher → member), stamps `discountVerified` + `discountVerifiedBy`. **Never gated by `seniorPwdOnlineEnabled`** — the front-desk path is the legally mandated one (RA 9994 / RA 10754).
-- **Voucher path:** server validates the same rules as online (active, expiry, usage cap, room-type scope) and increments `usageCount` atomically in the re-pricing transaction. Never trust the client.
-- Walk-in modal carries the same discount/voucher fields through the same server logic. If collected payments exceed the new total, surface "guest is owed ₱X" (refund entry per FIN-03); reports need no changes — `discountPct`/`voucherDiscount`/`originalTotalPrice` are already what exports and the FIN-05 bridge read.
-
-## Incidental Charges — Folio Charge Ledger (FIN-14, shipped 2026-07-11; reservation owner migrated 2026-08-02)
-
-- Schema (canonical: `plan/docs/BACKEND.md`): new reservation-linked charges live under the reservation and carry the selected child `bookingId`; legacy charges remain under the booking. Transitional booking-owned charges are dual-read and reversed in place. Records contain `label`, signed `amount`, category, optional note, creator/time audit fields, and `voidOf`.
-- **Append-only at the rules level** (`allow read, create: if isStaff(); update/delete: false`); amounts capped at 1,000,000 absolute; voiding requires the deterministic document ID `void-{voidOf}` so rules enforce exactly one reversal per charge. Never edit or delete — corrections stay auditable.
-- **Add charge** (focused modal from Folio): category, label, amount, optional note; available from `checked-in` (and `confirmed` for pre-arrival fees); blocked after checkout. **Void** per row with required-reason confirmation (reason → reversal `note`).
-- Charges flow through every money surface: `getBookingFolio` grand total/balance, checkout gate, receipt PDF (itemized, voided pairs netted), Reports Sales tab (4th revenue stream + Incidentals sub-table), Sales XLSX + Full Backup "Charges" sheets, FIN-01 billed-side reconciliation, FIN-04 receivables. A voided charge is a charge-ledger reversal, not a payment refund — the two ledgers stay separate (charges = what's owed, payments = what moved).
-
-## Room Move / Upgrade (current behavior + open considerations)
-
-Current behavior (verified in code 2026-07-17):
-
-- **Move / Upgrade Room workstation** exists in both the `/bookings` drawer (Activity & More) and the `/calendar` drawer. Staff pick any room of any type (labelled), with new dates.
-- `POST /api/bookings/reschedule` runs in a Firestore transaction: capacity check against the target RoomType entry, conflict + `roomBlocks` checks, re-pricing (standard/corporate recompute; locked manual walk-in rates preserved and rescaled by night count, with the manual basis identified in the form), `deltaTotalPrice` + `pricingBasis` recorded in `rescheduleHistory`, and the `booking-rescheduled` email sent after commit.
-- A live **price-delta estimate** renders in the move form before confirming.
-- **In-house moves (`checked-in`) sync room statuses in the transaction** — vacated room → `available`, target room → `occupied`.
-
-Open considerations (small, not blocking):
-
-- ⬜ The vacated room's `housekeepingStatus` is not set to `dirty` on an in-house move — staff must toggle it manually on the Dashboard grid.
-- ⬜ No prompt walks staff from the shown price delta into Record Payment / refund; staff act on the new balance via the Folio manually.
-- ⬜ No dedicated guest-initiated "request room change" flow — a quick-request chip is admin-configurable in Settings → Intercom, but there's no structured handling beyond the chat thread.
-
-## Edge Cases & States
-
-- [x] Empty state (no bookings matching filters) — "No bookings found" with reset filters option
-- [x] Booking updated by another session while drawer is open — refresh data, notify staff
-- [x] Walk-in date conflict — show conflict error returned by `/api/bookings/create-walkin`
-- [x] Receipt generation fails — show error, allow retry
-- [x] ₱0 payment prevented by validation; overpayment shows "Overpaid by ₱X" in amber (staff handles manually)
-- [x] Focused modals: submit disabled while saving; server errors shown inside the modal with retry; close only on confirmed success or explicit cancel
-
-## Manual QA
-
-- [x] All bookings appear with correct data; filters, quick views, and search return correct results; URL state survives refresh/back
-- [x] Drawer opens with complete information; payment proof loads; status buttons show only valid next states; changes reflect in real time
-- [x] Status change emails sent for confirmed/payment-confirmed transitions; cancellation email sent with reason
-- [x] Receipt PDF generates with correct booking data
-- [x] Walk-in created with source "walk-in"; onsite cash payment appears in ledger and updates balance
-- [x] Record payment after discount rejection — balance to ₱0, "Fully Settled" shown
-- [x] Verify & Record Payment: full and partial verification, idempotent retry, no duplicate email
-- [x] Unpaid checkout: reason required; Front Desk blocked above threshold; post-checkout payment settles the receivable
-- [x] **Post-verify success modal** (`PaymentSuccessModal`, shipped 2026-07-23) — after a successful verify, surface a closing-the-loop modal in the BookingsPage drawer AND the dashboard's pending-payments list. Celebratory variant for full payment (emerald check, "Confirm Booking" primary CTA + "Later" secondary), amber-warning variant for partial payment. Full-payment CTA wires to `updateBookingStatus(id, "confirmed")`; the partial variant now ships with **"Confirm with Balance"** as the primary CTA (CWB-01, `feat/confirm-with-balance`) which opens `ConfirmWithBalanceForm` to record the outstanding balance. The onSnapshot listener (per `fix/bookings-drawer-stale-state`) refreshes the drawer's `selectedBooking` so the verify buttons disappear immediately. See `feat/payment-success-modal` + `feat/confirm-with-balance` branches for the implementations.
-
-## Confirm with Balance (CWB, shipping 2026-07-23)
-
-Lets staff transition a `payment-uploaded` booking to `confirmed` when the partial payment is intentional and the rest will be collected at check-in. Decision #122 — reuses the same `hotelConfig.unpaidCheckoutApprovalThreshold` (default 5,000) as the unpaid-checkout flow, mirroring its admin-gating rules so the "four-eyes" principle applies consistently.
-
-- **Trigger paths** — (1) post-verify partial-payment `PaymentSuccessModal` shows **"Confirm with Balance"** as the primary CTA (replaces the prior "Got it" dismiss). (2) The booking drawer's "Confirm with Balance" action (More actions menu) on `payment-uploaded` rows in the bookings table. Both open `ConfirmWithBalanceForm`.
-- **Form** (`admin-app/src/components/ConfirmWithBalanceForm.tsx`) — modal with: persistent **threshold info banner** at the top stating the current `unpaidCheckoutApprovalThreshold` (always visible, not a tooltip — staff are guided/reminded by the limit before they type the reason), the Total/Paid/Balance breakdown, a required reason textarea (≤500 chars with live counter), and a primary submit. When the current balance exceeds the threshold AND the operator is `front-desk`, the submit button is disabled with a plain-language message ("This balance (₱X) exceeds your ₱5,000 approval limit. An admin must approve."). Admins see the same banner but the button stays enabled.
-- **Server** — `POST /api/bookings/confirm-with-balance` (rate-limited 30/min/IP, staff-authenticated). The atomic transaction validates `status === "payment-uploaded"` and resolves the authoritative charge-inclusive folio. Reservation-linked bookings use the reservation total, reservation payment/refund/charge ledgers, transitional child-room ledgers, and delivered Add-to-Bill orders across every child; legacy null-`reservationId` bookings keep the historical single-booking calculation. The transaction re-reads `hotelConfig.unpaidCheckoutApprovalThreshold`, enforces the same `front-desk`/`admin` gate as unpaid checkout, stamps the four `confirmedWithBalance*` fields, flips `status` to `confirmed`, and writes the normal confirmation audit fields. Side-effects remain the dedicated guest email and persistent staff notification.
-- **Indicator visible through `checked-out`** — the booking drawer shows a **Balance owed** panel above the Folio section whenever `booking.confirmedWithBalance != null && getBookingFolio(b).balance > 0`. The panel shows: original balance at confirm, current balance, the reason, and "Settle on check-in" guidance. Auto-hides at ₱0. Reachable from the bookings list via the existing **Balance due** quick-view chip (FSO-06) — no new chip is added because that chip already filters to `folio.balance > 0`, which is exactly the same predicate (avoid duplicating UI surface).
-- **Threshold info banner** is the explicit user-facing guide — the staff member should not be surprised by a 403 after typing a reason. Banner copy: "Approval limit: ₱{threshold}. Front Desk may confirm balances up to that amount; balances above require admin approval." Contextual warning beneath the balance preview when the current balance exceeds the threshold for the current role.
-- **No migration** — the four new fields are nullable; existing bookings have all four as `null` and the indicator never shows.
-- **Scope** — MVP only. No auto-collection, no partial-settlement after the fact (onsite payment ledger already covers settlement), no separate "balance adjustment" entry. `~250 server + ~300 client lines`.
-- [ ] Full drawer visual QA matrix across statuses/breakpoints — tracked in `plan/project/ROADMAP.md §Phase 12 →Booking Drawer UX Refactor`
-
-## Walk-in Name Split (WSN, shipping 2026-07-25)
-
-The walk-in modal (and the `/calendar` "Create Calendar Booking" modal, which also calls `addWalkinBooking`) now mirrors the guest `/book` page: it collects **first name** + **last name** as separate fields, both required, sent over the wire as `{ firstName, lastName }` inside `guestDetails`. The server combines them into `Booking.guestName` for storage (matching the guest page's wire shape exactly).
-
-- **Why the previous shape was wrong** — the modal used to collect a single `guestName` string ("Guest Full Name", placeholder "Maria Santos"). On submit, the client did `booking.guestName.split(" ")[0]` + `booking.guestName.split(" ").slice(1).join(" ") || "Walkin"`. That kludge silently produced `lastName: "Walkin"` for any single-name guest ("Cher"), mangled compound names ("Maria Teresa Santos" → firstName="Maria", lastName="Teresa Santos"), and reversed "Last, First" inputs. The `firstName/lastName` server schema (`WalkinGuestDetailsSchema`) was already correct — the modal was the only outlier.
-- **The fix** — the modal renders a two-input row (flex on sm+, stacks on mobile so the Phase 11.7 single-column-on-mobile rule stays intact). Both inputs are `required` with `autoComplete="given-name"` / `"family-name"` so the browser's address-book fill drives them. `addWalkinBooking` accepts `{ firstName, lastName }` directly (the `Omit<Booking, …, "guestName">` type expresses the contract — the input is no longer required to carry a `guestName` field). If either name is empty, the context returns `{ success: false, error: "First name and last name are required." }` before any network call. The booking doc still stores `guestName` as the source of truth for every reader (drawer, table, PDF, email) — that field is unchanged.
-- **Calendar modal matches.** `CalendarPage.tsx` has its own walk-in form (for the `Create Calendar Booking` modal opened from `/calendar` range clicks). It had the same single-name bug and now has the same fix: firstName + lastName state, two-field form, `firstName` + `lastName` sent to `addWalkinBooking`.
-- **No migration.** Existing walk-in bookings still carry `guestName` exactly as they did. New walk-ins write `guestName = \`${firstName} ${lastName}\`` server-side (same logic the guest `/book` flow has always used). The split kludge was a client-side concern only.
-- **Tests** — `admin-app/src/__tests__/walkin-split-name.test.ts` (12 tests) pins: (1) the `addWalkinBooking` type signature omits `guestName` and requires `firstName + lastName`; (2) the wire payload sends `firstName` + `lastName` from the input (no split-on-space); (3) the context refuses empty inputs before the network; (4) the old `"Walkin"` / `split(" ")` patterns are gone; (5) both `BookingsPage` and `CalendarPage` modals have the two-field state and form; (6) submit handlers pass firstName + lastName (not guestName) to `addWalkinBooking`. The existing `phase-11.7-bookings-cleanup` single-column-on-mobile test is preserved (we use a flex wrapper, not a grid). `phase-12-discount-controls` is updated to assert the new `input.discountType` / `input.voucherCode` parameter naming.
-
-## Walk-in Payment Method from Settings (WPM, shipped 2026-07-31)
-
-The walk-in modal's **Payment Method** dropdown is the one payment selector in the admin app that was hardcoded. It used to render three literal `<option>` tags (`pay-at-hotel` / `Cash on Hand` / `Onsite Card Reader`) while the bookings filter, store filter, **Record Payment**, and **Verify & Record Payment** all mapped `onsitePaymentMethodOptions` — derived live from `settings/hotelConfig.paymentMethods[]`. The same hardcoded list also appeared in `CalendarPage`'s "Create Calendar Booking" modal. The two lists shared a keyspace but not a source.
-
-- **The fix** — both modals now source their option list from the same Settings memo the other four selectors use, with `pay-at-hotel` **prepended** (the memo deliberately excludes it via `NON_TENDER_ONSITE_PAYMENT_METHODS` because it is a booking-time *intent*, not a settlement tender, and including it would pollute Daily Close reconciliation; walk-in creation genuinely needs it as a choice, so it is prepended at the call site rather than the memo). Field label changed from "Payment Term" → "Payment Method" for consistency with the other selectors. The state variable (`walkinPayment`) and the persisted field (`booking.paymentMethod`) are unchanged — no server change. `WalkinBookingSchema` already accepted `paymentMethod: z.string().trim().min(1).max(80)`.
-- **Booking drawer** — the three raw `selectedBooking.paymentMethod` renderings in `BookingsPage` (the in-drawer credit-card row, the "no proof uploaded" line, the "Method:" cell) and the one in `BookingDrawerWorkspaceHeader` (the "Payment method" cell) now route through the existing `getOnsitePaymentMethodLabel` helper. Staff see "GCash" instead of `gcash`. The header takes `paymentMethodLabel: string` as a prop (resolved by the parent) — it is a presentational component, so the lookup happens in `BookingsPage`.
-- **Front desk is a fourth consumer of `paymentMethods[]`, governed by no surface flag** (per #111 + WPM-03) — `onsitePaymentMethodOptions` deliberately ignores `isEnabled` so the desk can record a tender the hotel does not offer online. A method switched off for guests still appears at the desk. Explicitly decided NOT to add a `showAtFrontDesk` pill — the desk is a staff surface where over-restricting costs more than over-offering, and a fourth flag means a Settings UI change, a schema field, a migration-free default, and four more code paths reading it. Record as `DECISIONS-FEATURES.md #141`.
-- **`card` moves from hardcoded to configured (WPM-04 + CVQ-07 resolved: the hotel DOES take cards)** — after the fix, the desk can no longer file a walk-in as "Onsite Card Reader" unless a `card` method exists under Settings → Payment Methods. Since the hotel takes cards, adding that method is part of shipping WPM, not an optional follow-up. `AdminContext` gains a third backfill category, `STAFF_ONSITE_TENDER_BACKFILL_DEFAULTS` (alongside `PROTECTED_PAYMENT_METHODS` for `pay-at-hotel`/`add-to-bill` and `STORE_PAYMENT_BACKFILL_DEFAULTS` for `cod`). `card` is backfilled with `{ method: "card", label: "Credit Card", isEnabled: true, showInStore: false, showInCorporate: false }` if missing. Unlike protected methods, the admin can delete it from Settings. Existing `card` bookings still render via `LEGACY_ONSITE_PAYMENT_METHOD_LABELS` ("Credit Card") without the backfill, so historical records are safe. No migration, no backfill of existing docs — the backfill runs once per session client-side, gated by a `useRef` like the other backfills.
-- **Tests** — `admin-app/src/__tests__/walkin-payment-method-from-settings.test.ts` (13 source-text guards) pins: (1) the walk-in selector maps the memo (guard against re-introducing literal `<option value="card">`); (2) `pay-at-hotel` is prepended exactly once; (3) the memo still excludes non-tender keys; (4) `card` backfill exists and is wired into the `useEffect`; (5) the field label reads "Payment Method"; (6) the drawer uses the label helper (3 sites in `BookingsPage` + the `paymentMethodLabel` prop on `BookingDrawerWorkspaceHeader`); (7) `CalendarPage` destructures `paymentMethods` and builds its memo with the same shape. `firebase/tests/payment-methods-array-write.emulator.test.ts` (the PMH-05 generalization of the PMH-03 `roomTypes[]` test) pins the array-write hazard on `paymentMethods[]` — N concurrent per-method writes lose all but the last, single batched `setDoc` persists every change. Together these prevent the "wrong list, no error" class of bug from shipping again on the same field the spec author flagged.
-- **No server change** — `WalkinBookingSchema` is unchanged. The dynamic value flows through the existing string field.
-- **Related MDs** — `SETTINGS.md §Payment Methods` notes the front desk as a fourth consumer governed by no surface flag; `DECISIONS-FEATURES.md #141` records the WPM-03 decision (no `showAtFrontDesk` pill).
-
----
-
-## Extra Bed (EXB-01..10)
-
-The walk-in form uses adult, child, and extra-bed steppers and previews the shared occupancy rule before submission. The booking table and reports use compact occupancy text; the drawer and receipt use the expanded adult/child split and show extra beds when present. Legacy bookings without the split retain the historical guest-count fallback.
-
-Walk-in creation validates the derived total (`numAdults + numChildren === numGuests`) and evaluates the adult and child caps independently through the shared overflow helper. It never compares total guests directly with `maxCapacity`, because that field is the adult cap. Walk-in creation and rescheduling enforce per-type capacity and hotel-wide inventory inside their server transactions. Rescheduling preserves the booking's snapshotted `extraBedRate` and excludes the booking itself from inventory-in-use calculations. See `plan/features/BOOKING-FLOW.md §Extra Bed` for the shared rules.
+### Cancellation Rules (CRL)
+- Staff can cancel any pre-arrival status (`pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`).
+- Stamps `cancelledAt`, `cancelledBy`, and `cancellationSource` (`"staff"` vs `"guest"`) atomically inside transaction.
+- Guest self-service cancellation restricted to `pending` and `payment-uploaded`.
