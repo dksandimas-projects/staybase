@@ -281,6 +281,83 @@ export interface Reservation {
   createdBy: string;
 }
 
+// Per MRB-04 (2026-08-02, per decision #159): the
+// reservation-level folio. New payments and financial
+// adjustments live under `reservations/{id}/payments`
+// and `reservations/{id}/charges`; child-specific
+// entries carry `bookingId` for per-room attribution.
+// The reservation header is the single source of
+// truth for the reservation's money state; the legacy
+// `bookings/{id}/payments` + `bookings/{id}/charges`
+// subcollections remain for legacy bookings (those
+// pre-date the reservation-header model — pre-MRB-01,
+// i.e. created before 2026-08-02). The behavior-frozen
+// `getReservationFolioSummary` helper in
+// `shared/utils/bookingFolio.ts` is the canonical
+// resolver: it reads from the new subcollections for
+// reservations with a `reservationId`, and falls back
+// to the legacy `bookings/{id}/payments` +
+// `bookings/{id}/charges` for legacy null-`reservationId`
+// bookings. The "money state mirror" rule — the
+// reservation header's `paymentStatus` + `totalPrice`
+// + `subtotal` MUST match the sum of the per-room
+// payment + charge entries — is enforced transactionally
+// in MRB-04's payment write paths (the create handler
+// seeds the header; subsequent writes recompute the
+// header in the same `runTransaction`).
+
+/** A payment entry on the reservation folio. Positive amount for a payment collected; negative for a refund. Lives at `reservations/{id}/payments/{paymentId}`. */
+export interface ReservationPayment {
+  id: string;
+  reservationId: string;
+  /** Optional — for per-room attribution (e.g. a payment that pays for a specific room's add-on). Most reservation-level payments leave this null. */
+  bookingId: string | null;
+  type: "payment" | "refund";
+  /** Positive for a payment collected, negative for a refund. The negative-amount convention is the same as the existing `bookings/{id}/payments/` ledger — see CRL-01's refund-idempotency contract. */
+  amount: number;
+  method: string;
+  note: string;
+  /** Tender-specific identifier (GCash ref, bank trace). Per the 2026-07-24 payment-reference unification, this is the canonical reference — the legacy `Booking.paymentReferenceNumber` was retired. */
+  transactionReference: string | null;
+  reason: string | null;
+  approvedBy: string | null;
+  recordedBy: string;
+  recordedAt: Date;
+}
+
+/** A charge (incidental or adjustment) on the reservation folio. Lives at `reservations/{id}/charges/{chargeId}`. The `voidOf` field mirrors the existing `bookings/{id}/charges` ledger — a non-null `voidOf` voids a prior charge. */
+export interface ReservationCharge {
+  id: string;
+  reservationId: string;
+  /** Optional — for per-room attribution. Most reservation-level charges leave this null; per-room charges (e.g. a room-specific minibar) carry the bookingId. */
+  bookingId: string | null;
+  label: string;
+  amount: number;
+  category: IncidentalChargeCategory;
+  note: string;
+  addedBy: string;
+  addedAt: Date;
+  /** Mirrors the existing `bookings/{id}/charges.voidOf` — a non-null `voidOf` voids the prior charge with the same id. Per the existing per-creator + bounds + void semantics. */
+  voidOf: string | null;
+}
+
+/** Per MRB-04 (2026-08-02, per decision #159): the behavior-frozen folio summary returned by `getReservationFolioSummary`. The balance invariant is `reservation balance == sum(charges) − sum(payments)`. The `chargesTotal` + `paymentsTotal` are signed sums (refunds are negative, voids are zeroed). */
+export interface ReservationFolioSummary {
+  reservationId: string;
+  /** Reservation total — the sum of per-room `totalPrice`. Set at create time; recomputed transactionally in MRB-04's payment write paths. */
+  reservationTotal: number;
+  /** Sum of every charge (positive for charges, zero for voided). */
+  chargesTotal: number;
+  /** Sum of every payment (positive for payments, negative for refunds). */
+  paymentsTotal: number;
+  /** Outstanding balance: `reservationTotal + chargesTotal − paymentsTotal`. Positive = guest owes money. Negative = overpaid (refunds pending). */
+  balance: number;
+  /** Derived status — mirrors the header's `paymentStatus` derivation but at folio scope. */
+  status: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled";
+  /** Whether the source is the new reservation subcollections or the legacy `bookings/{id}/payments` + `bookings/{id}/charges`. The legacy adapter is for null-`reservationId` bookings (pre-MRB-01). */
+  source: "reservation-subcollection" | "booking-subcollection-legacy";
+}
+
 export interface Booking {
   id: string;
   bookingRef: string;

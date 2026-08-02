@@ -225,3 +225,172 @@ describe("computeServerFolioTotals — the server inline-math replacement", () =
     expect(result.computedBalance).toBe(0);
   });
 });
+
+// Per MRB-04 (2026-08-02, per decision #159): the
+// behavior-frozen balance invariant for the reservation
+// folio. The invariant is `reservation balance ==
+// reservationTotal + chargesTotal − paymentsTotal`. A
+// positive balance means the guest owes money; a negative
+// balance means the guest is overpaid (refund pending).
+// The helper enforces this with a single-pass sign-aware
+// sum so the invariant is preserved at the math level —
+// no separate derivation that could drift. The test pins
+// the invariant for a representative range of inputs
+// (zero, positive-only, mixed signs, edge cases like NaN
+// inputs that normalize to 0).
+import { getReservationFolioSummary } from "../utils/bookingFolio";
+
+describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => {
+  it("zero balance when total = payments (fully paid)", () => {
+    const summary = getReservationFolioSummary({
+      reservationId: "res_test_1",
+      reservationTotal: 5000,
+      payments: [{ amount: 5000 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(summary.balance).toBe(0);
+    expect(summary.paymentsTotal).toBe(5000);
+    expect(summary.chargesTotal).toBe(0);
+  });
+
+  it("positive balance when total > payments (guest owes money)", () => {
+    const summary = getReservationFolioSummary({
+      reservationId: "res_test_2",
+      reservationTotal: 5000,
+      payments: [{ amount: 3000 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(summary.balance).toBe(2000);
+  });
+
+  it("negative balance when total < payments (guest overpaid)", () => {
+    const summary = getReservationFolioSummary({
+      reservationId: "res_test_3",
+      reservationTotal: 5000,
+      payments: [{ amount: 6000 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(summary.balance).toBe(-1000);
+  });
+
+  it("refund contributes a negative amount to paymentsTotal (sign-aware)", () => {
+    // The CRL-01 negative-amount convention: refunds
+    // are negative entries on the payments ledger. A
+    // 5000 payment + 1000 refund = 4000 total. The
+    // balance = total + charges − payments = 5000 -
+    // 4000 = 1000. The single-pass sign-aware sum
+    // preserves the invariant.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_test_4",
+      reservationTotal: 5000,
+      payments: [{ amount: 5000 }, { amount: -1000 }],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(summary.paymentsTotal).toBe(4000);
+    expect(summary.balance).toBe(1000);
+  });
+
+  it("charges contribute to the balance (charges add to the total)", () => {
+    // A 1000 charge + 5000 payment on a 3000 total
+    // = balance of 3000 + 1000 - 5000 = -1000 (the
+    // guest overpaid by 1000 after the charge).
+    const summary = getReservationFolioSummary({
+      reservationId: "res_test_5",
+      reservationTotal: 3000,
+      payments: [{ amount: 5000 }],
+      charges: [{ amount: 1000 }],
+      source: "reservation-subcollection"
+    });
+    expect(summary.chargesTotal).toBe(1000);
+    expect(summary.paymentsTotal).toBe(5000);
+    expect(summary.balance).toBe(-1000);
+  });
+
+  it("defensive coercion: NaN / undefined amounts normalize to 0", () => {
+    // The helper uses `Number(amount) || 0` so NaN,
+    // undefined, or string amounts normalize to 0.
+    // The balance invariant holds for any mix of
+    // malformed inputs.
+    const summary = getReservationFolioSummary({
+      reservationId: "res_test_6",
+      reservationTotal: 1000,
+      payments: [{ amount: NaN }, { amount: undefined as any }, { amount: 500 }],
+      charges: [{ amount: "garbage" as any }, { amount: 200 }],
+      source: "reservation-subcollection"
+    });
+    expect(summary.paymentsTotal).toBe(500);
+    expect(summary.chargesTotal).toBe(200);
+    expect(summary.balance).toBe(700);  // 1000 + 200 - 500 = 700
+  });
+
+  it("echoes the source flag on the returned summary", () => {
+    // The `source` field is the canonical "did this
+    // data come from the new reservation subcollections
+    // or the legacy booking subcollections" marker.
+    // The admin UI uses this to render a "legacy
+    // booking" badge; the receipt path renders the
+    // same shape regardless of source. The flag
+    // must round-trip through the helper.
+    const newSummary = getReservationFolioSummary({
+      reservationId: "res_test_7",
+      reservationTotal: 0,
+      payments: [],
+      charges: [],
+      source: "reservation-subcollection"
+    });
+    expect(newSummary.source).toBe("reservation-subcollection");
+
+    const legacySummary = getReservationFolioSummary({
+      reservationId: "res_test_8",
+      reservationTotal: 0,
+      payments: [],
+      charges: [],
+      source: "booking-subcollection-legacy"
+    });
+    expect(legacySummary.source).toBe("booking-subcollection-legacy");
+  });
+
+  it("the balance invariant is preserved for a randomized property check (the MRB-04 PMH-05 shape)", () => {
+    // Per the MRB-04 spec: the balance invariant is
+    // the canonical money rule. The property test
+    // verifies the invariant holds for any mix of
+    // random reservation totals, payments, and
+    // charges. A future refactor that breaks the
+    // invariant fails this test.
+    const iterations = 50;
+    for (let i = 0; i < iterations; i++) {
+      const reservationTotal = Math.floor(Math.random() * 100000) - 10000;
+      const numPayments = Math.floor(Math.random() * 5);
+      const numCharges = Math.floor(Math.random() * 5);
+      const payments = Array.from({ length: numPayments }, () => ({
+        amount: Math.floor(Math.random() * 20000) - 5000
+      }));
+      const charges = Array.from({ length: numCharges }, () => ({
+        amount: Math.floor(Math.random() * 10000) - 2000
+      }));
+      const summary = getReservationFolioSummary({
+        reservationId: `res_prop_${i}`,
+        reservationTotal,
+        payments,
+        charges,
+        source: "reservation-subcollection"
+      });
+      const expectedPaymentsTotal = payments.reduce(
+        (sum, p) => sum + (Number(p.amount) || 0),
+        0
+      );
+      const expectedChargesTotal = charges.reduce(
+        (sum, c) => sum + (Number(c.amount) || 0),
+        0
+      );
+      const expectedBalance = reservationTotal + expectedChargesTotal - expectedPaymentsTotal;
+      expect(summary.paymentsTotal).toBe(expectedPaymentsTotal);
+      expect(summary.chargesTotal).toBe(expectedChargesTotal);
+      expect(summary.balance).toBe(expectedBalance);
+    }
+  });
+});
