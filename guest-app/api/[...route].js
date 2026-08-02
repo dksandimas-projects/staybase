@@ -225798,7 +225798,7 @@ async function handleCreateBooking(req, res) {
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
-      finalReservationRef = `R-${getManilaDateInfo().todayCompact}-${String(1).padStart(5, "0")}`;
+      finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
       }

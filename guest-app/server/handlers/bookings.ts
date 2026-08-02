@@ -1845,13 +1845,27 @@ export async function handleCreateBooking(req: any, res: any) {
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
-      // Per MRB-02 (2026-08-02, per decision #164): capture
-      // the public reservation ref so the post-transaction
-      // success response can echo it. The ref is minted
-      // alongside `newBooking` below (the
-      // `R-{dateCompact}-{seq}` shape) and the same
-      // counter transaction sequences both refs.
-      finalReservationRef = `R-${getManilaDateInfo().todayCompact}-${String(1).padStart(5, "0")}`;
+      // Per MRB-03 (2026-08-02, per decision #159): the
+      // public reservation ref (`R-YYYYMMDD-NNNNN`) uses
+      // the SAME counter as the booking ref — one counter
+      // increment per create transaction, regardless of
+      // how many rooms (N=1 today; the same pattern holds
+      // for N>1 in MRB-06 Phase 2's booking write loop).
+      // Sharing the counter with the booking ref means a
+      // reservation and its booking have adjacent seq
+      // numbers (a small "they belong together" affordance
+      // for staff skimming the admin list) AND avoids a
+      // second counter doc that would need the same
+      // atomic-increment machinery. The 5-digit pad matches
+      // the booking-ref widening from the H3 hardening
+      // batch — same per-day namespace, same brute-force
+      // ceiling. Captured at function scope so the
+      // post-transaction success response can echo it
+      // back. Same `finalReservationRef` pattern as the
+      // walk-in path (line 3155) — both surfaces share the
+      // counter, both mint in the same transaction, both
+      // capture the value for the response.
+      finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
 
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
