@@ -225657,6 +225657,16 @@ async function handleCreateBooking(req, res) {
         transaction.update(retirement.ref, {
           status: "cancelled",
           cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          // Per CRL-02 (2026-08-02): the in-transaction retirement
+          // is a server-initiated cancellation, so the audit
+          // metadata is `cancelledBy: "system"` +
+          // `cancellationSource: "system"`. The canonical
+          // EXPIRED_HOLD_CANCELLATION_REASON stays as the reason
+          // string — CRL-02 adds the parallel discriminator, it
+          // does not replace the existing one. Reports + emails
+          // can switch on either field.
+          cancelledBy: "system",
+          cancellationSource: "system",
           cancelledAt: now,
           updatedAt: now
         });
@@ -226256,6 +226266,16 @@ async function handleCreateWalkin(req, res) {
         transaction.update(retirement.ref, {
           status: "cancelled",
           cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          // Per CRL-02 (2026-08-02): the in-transaction retirement
+          // is a server-initiated cancellation, so the audit
+          // metadata is `cancelledBy: "system"` +
+          // `cancellationSource: "system"`. The canonical
+          // EXPIRED_HOLD_CANCELLATION_REASON stays as the reason
+          // string — CRL-02 adds the parallel discriminator, it
+          // does not replace the existing one. Reports + emails
+          // can switch on either field.
+          cancelledBy: "system",
+          cancellationSource: "system",
           cancelledAt: now,
           updatedAt: now
         });
@@ -226562,6 +226582,9 @@ async function handleRejectPayment(req, res) {
 async function handleCancelBooking(req, res) {
   const { bookingId, bookingRef, guestEmail, reason } = req.body;
   let validReason = typeof reason === "string" ? reason.slice(0, 500) : "";
+  const isStaffCancellation = Boolean(req.staff?.uid);
+  const cancellationSource = isStaffCancellation ? "staff" : "guest";
+  const cancelledBy = isStaffCancellation ? String(req.staff.uid) : "guest";
   try {
     let bookingDocumentRef;
     let bookingData2;
@@ -226652,6 +226675,22 @@ async function handleCancelBooking(req, res) {
       transaction.update(bookingDocumentRef, {
         status: "cancelled",
         cancellationReason: validReason,
+        // Per CRL-02 (2026-08-02): the audit metadata is
+        // stamped in the same transaction as the status
+        // flip. `cancelledAt` uses the same `now` value the
+        // transaction already captured (PEX-01's `now` is
+        // a transaction-time Date; here we use `new Date()`
+        // for byte-equivalence with the existing `updatedAt`
+        // — a sub-millisecond skew is acceptable for an
+        // audit field). `cancelledBy` is the staff UID or
+        // the literal "guest"; `cancellationSource` is the
+        // parallel discriminator (one of CANCELLATION_SOURCES).
+        // A partial failure cannot leave a half-stamped
+        // cancellation — the four writes share a single
+        // `transaction.update` call.
+        cancelledAt: /* @__PURE__ */ new Date(),
+        cancelledBy,
+        cancellationSource,
         updatedAt: /* @__PURE__ */ new Date()
       });
       if (voucherDoc?.exists && voucherRef) {
@@ -228156,6 +228195,16 @@ async function handleRescheduleBooking(req, res) {
         transaction.update(retirement.ref, {
           status: "cancelled",
           cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+          // Per CRL-02 (2026-08-02): the in-transaction retirement
+          // is a server-initiated cancellation, so the audit
+          // metadata is `cancelledBy: "system"` +
+          // `cancellationSource: "system"`. The canonical
+          // EXPIRED_HOLD_CANCELLATION_REASON stays as the reason
+          // string — CRL-02 adds the parallel discriminator, it
+          // does not replace the existing one. Reports + emails
+          // can switch on either field.
+          cancelledBy: "system",
+          cancellationSource: "system",
           cancelledAt: now,
           updatedAt: now
         });
@@ -231087,6 +231136,7 @@ async function handleNotificationsPrune(req, res) {
 }
 
 // server/handlers/hold-expiry.ts
+var SYSTEM_CANCELLATION_SOURCE = "system";
 var EXPIRY_BATCH_SIZE = 200;
 function isAuthorizedCronRequest3(req) {
   const expected = process.env.CRON_SECRET;
@@ -231133,6 +231183,15 @@ async function handleHoldExpiryCron(req, res) {
           transaction.update(doc.ref, {
             status: "cancelled",
             cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+            // Per CRL-02 (2026-08-02): the cron-driven retirement is
+            // a server-initiated cancellation, so the audit metadata
+            // is `cancelledBy: "system"` + `cancellationSource: "system"`.
+            // Same shape as the in-transaction retirement at the create
+            // / walkin / reschedule sites. Reports + emails can switch
+            // on either field; the canonical EXPIRED_HOLD_CANCELLATION_REASON
+            // is preserved as the reason.
+            cancelledBy: SYSTEM_CANCELLATION_SOURCE,
+            cancellationSource: SYSTEM_CANCELLATION_SOURCE,
             cancelledAt: now,
             updatedAt: now
           });

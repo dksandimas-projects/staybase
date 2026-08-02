@@ -145,7 +145,7 @@ The 4-eyes pattern from the email-only path is unchanged: Turnstile + 10/min/IP 
 - [x] **Response payload is PII-safe** — never returns `paymentProofUrl`, `discountIdPhotoUrl`, `paymentProofPath`, `discountIdPhotoPath`, `lookupToken`, internal `notes`, or staff-only `remarks` (per BF-21 / RA 10173). The response is the same shape regardless of which key the caller used to look up.
 - [x] Cancellation allowed only when status is `"pending"` or `"payment-uploaded"` — not after payment confirmed
 - [x] Cancel action calls `/api/bookings/cancel` with `bookingRef` + `(guestEmail OR token)` for server-side auth
-- [x] Cancellation sets status to `"cancelled"`, records `cancellationReason`, triggers `/api/email/booking-cancelled`
+- [x] Cancellation sets status to `"cancelled"`, records `cancellationReason`, triggers `/api/email/booking-cancelled`; **CRL-02 (2026-08-02)** stamps `cancelledAt` + `cancelledBy: "guest"` + `cancellationSource: "guest"` in the same transaction (no PII — the lookupToken / email are not stored on the booking). Server derives the source from the auth check; a client cannot forge `"system"` or `"staff"`.
 - [x] Resend email calls `/api/email/booking-submitted` for `pending`/`payment-uploaded` bookings or `/api/email/booking-confirmed` for confirmed/checked-in bookings, with a 60s client cooldown + server-side rate limit (3/ref/hour)
 - [x] Rate and total display the values stored on the booking document — never recomputed
 

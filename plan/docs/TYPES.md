@@ -218,6 +218,17 @@ Booking {
   breakfastServed?: Record<string, boolean>
   handledBy: string
   cancellationReason: string
+  // Per CRL-02 (2026-08-02): the full cancellation audit metadata.
+  // All three fields are nullable on legacy bookings; CRL-02 stamps
+  // them in the same Firestore transaction as the status flip, so a
+  // partial failure cannot leave a half-stamped cancellation. The
+  // parallel `cancellationSource` discriminator supersedes the
+  // earlier "read the reason string" pattern; both are preserved
+  // (the `cancellationReason` field stays for backwards-compatibility
+  // with PEX-05's email-template switch + Reports' legacy grouping).
+  cancelledAt: string | null
+  cancelledBy: string | null
+  cancellationSource: "guest" | "staff" | "system" | null
   // Per BF-37 (booking-flow audit 2026-06-26) and W4.4 /
   // decision #104: per-booking email idempotency markers.
   // Written by the server when a transactional email fires so

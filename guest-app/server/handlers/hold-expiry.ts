@@ -23,6 +23,10 @@ import {
   isBookingOccupyingRoom,
   EXPIRED_HOLD_CANCELLATION_REASON
 } from "@spark-inn/shared";
+// Per CRL-02 (2026-08-02): the cron-driven retirement is a
+// server-initiated cancellation, so the audit metadata is
+// `cancelledBy: "system"` + `cancellationSource: "system"`.
+const SYSTEM_CANCELLATION_SOURCE = "system" as const;
 
 const EXPIRY_BATCH_SIZE = 200;
 
@@ -122,6 +126,15 @@ export async function handleHoldExpiryCron(
           transaction.update(doc.ref, {
             status: "cancelled",
             cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+            // Per CRL-02 (2026-08-02): the cron-driven retirement is
+            // a server-initiated cancellation, so the audit metadata
+            // is `cancelledBy: "system"` + `cancellationSource: "system"`.
+            // Same shape as the in-transaction retirement at the create
+            // / walkin / reschedule sites. Reports + emails can switch
+            // on either field; the canonical EXPIRED_HOLD_CANCELLATION_REASON
+            // is preserved as the reason.
+            cancelledBy: SYSTEM_CANCELLATION_SOURCE,
+            cancellationSource: SYSTEM_CANCELLATION_SOURCE,
             cancelledAt: now,
             updatedAt: now
           });
