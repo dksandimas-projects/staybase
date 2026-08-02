@@ -227433,7 +227433,8 @@ async function handleAddPayment(req, res) {
           throw new Error("Transaction reference is required for this payment method.");
         }
       }
-      const paymentsRef = bookingRef.collection("payments");
+      const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
+      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         const data = docSnap.data();
@@ -227507,7 +227508,8 @@ async function handleAddPayment(req, res) {
         transaction.update(bookingRef, bookingUpdates);
       }
       const newPaymentRef = paymentsRef.doc(paymentId);
-      transaction.create(newPaymentRef, paymentRecord);
+      const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
+      transaction.create(newPaymentRef, recordWithReservation);
     });
   } catch (error) {
     if (error.message === "Booking not found") {

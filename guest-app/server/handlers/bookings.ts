@@ -4208,7 +4208,24 @@ export async function handleAddPayment(req: any, res: any) {
         }
       }
 
-      const paymentsRef = bookingRef.collection("payments");
+      // Per MRB-04 Phase 2 (2026-08-02, per decision
+      // #159): the reservation-owned payment subcollection
+      // path. For new reservations (post-MRB-01, i.e.
+      // `bookingData.reservationId` is non-null), the
+      // payment record lives at
+      // `reservations/{reservationId}/payments/{paymentId}`
+      // (the reservation header is the canonical money
+      // source). For legacy null-`reservationId` bookings
+      // (pre-MRB-01), the payment record stays at
+      // `bookings/{bookingId}/payments/{paymentId}` (the
+      // historical contract). The status transitions on the
+      // booking doc (`payment-confirmed` + the loyalty
+      // award) stay the same for both paths — only the
+      // payment RECORD moves to the new subcollection.
+      const bookingReservationId = String((bookingData as any).reservationId || "").trim();
+      const paymentsRef = bookingReservationId.length > 0
+        ? adminDb.collection("reservations").doc(bookingReservationId).collection("payments")
+        : bookingRef.collection("payments");
       // Read existing payments before queuing writes. Firestore
       // transactions reject reads after writes, and the final
       // total is the current sum plus this new payment.
@@ -4310,9 +4327,20 @@ export async function handleAddPayment(req: any, res: any) {
       }
 
       // Append the payment record inside the transaction after
-      // all reads have completed.
+      // all reads have completed. Per MRB-04 Phase 2: for
+      // new reservations the record carries `reservationId`
+      // (canonical linkage to the parent reservation) +
+      // `bookingId` (per-room attribution — `null` for
+      // reservation-level payments; non-null when the staff
+      // ties a payment to a specific room's add-on). For
+      // legacy null-`reservationId` bookings the record
+      // shape is byte-equivalent to the historical
+      // `OnsitePayment` shape (no `reservationId` field).
       const newPaymentRef = paymentsRef.doc(paymentId);
-      transaction.create(newPaymentRef, paymentRecord);
+      const recordWithReservation = bookingReservationId.length > 0
+        ? { ...paymentRecord, reservationId: bookingReservationId, bookingId: bookingId }
+        : paymentRecord;
+      transaction.create(newPaymentRef, recordWithReservation);
     });
   } catch (error: any) {
     if (error.message === "Booking not found") {
