@@ -150,6 +150,9 @@ export interface IncidentalCharge {
   addedBy: string;
   addedAt: string;
   voidOf: string | null;
+  bookingId?: string | null;
+  ledgerOwner?: "booking" | "reservation";
+  ledgerOwnerId?: string;
 }
 
 export interface Booking {

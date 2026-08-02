@@ -38,8 +38,10 @@ describe("CRL-01 refund idempotency (client)", () => {
     expect(bookings).toMatch(/refundSubmissionIdRef = useRef<string \| null>\(null\)/);
   });
 
-  it("preallocates the refundId before the request using a Firestore-generated payments doc ID", () => {
-    expect(bookings).toMatch(/refundSubmissionIdRef\.current[\s\S]+?doc\(collection\(db, "bookings", selectedBooking\.id, "payments"\)\)\.id/);
+  it("preallocates the refundId in the selected canonical or legacy ledger", () => {
+    expect(bookings).toMatch(/createSelectedLedgerEntryId = \(kind: "payment" \| "refund"\)/);
+    expect(bookings).toMatch(/kind === "refund" \? "refunds" : "payments"/);
+    expect(bookings).toMatch(/refundSubmissionIdRef\.current[\s\S]+?createSelectedLedgerEntryId\("refund"\)/);
   });
 
   it("sends the preallocated refundId in the request body", () => {
