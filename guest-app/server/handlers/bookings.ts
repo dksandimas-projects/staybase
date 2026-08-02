@@ -104,7 +104,18 @@ import {
   // `shared/utils/extraBedInventory.ts` for the exact
   // rule + the edge cases the test pins.
   countExtraBedsInUse,
-  checkExtraBedInventory
+  checkExtraBedInventory,
+  // Per MRB-04 Phase 3 (2026-08-02, per decision #159): the
+  // N=1 mapping helper that closes the money-state-mirror
+  // rule. The reservation header's `paymentStatus` MUST
+  // match the per-room money state. The 3 payment write
+  // paths (`handleAddPayment` + `handleVerifyAndRecordPayment`
+  // + `handleRejectPayment`) call this helper inside the
+  // same `runTransaction` as the booking update, so the
+  // header's `paymentStatus` is always in sync with the
+  // child booking's `status` for new reservations.
+  // MRB-05 replaces the helper with the N>1 aggregate reader.
+  mapBookingStatusToReservationPaymentStatus
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
@@ -3790,6 +3801,17 @@ export async function handleRejectPayment(req: any, res: any) {
       }
       bookingData = data;
 
+      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
+      // the canonical `reservationId` derivation for the
+      // reservation header mirror. Same pattern as
+      // `handleAddPayment` + `handleVerifyAndRecordPayment` —
+      // `String((data as any).reservationId || "").trim()`
+      // collapses legacy null / undefined / whitespace to
+      // `""` so the legacy adapter (booking without a
+      // reservation header) is a clean `length === 0` skip
+      // below.
+      const bookingReservationId = String((data as any).reservationId || "").trim();
+
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
       // `normalizePaymentHoldWindowHours` clamps legacy or
@@ -3824,6 +3846,28 @@ export async function handleRejectPayment(req: any, res: any) {
         // the existing `pending` UI on the lookup page.
         updatedAt
       });
+
+      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus` mirror.
+      // The booking just transitioned from `payment-uploaded`
+      // back to `pending` (the check at the top of the
+      // transaction guarantees this is the only possible
+      // transition), so the mirror value is
+      // `mapBookingStatusToReservationPaymentStatus("pending")`
+      // = `"awaiting-payment"`. The
+      // `bookingReservationId.length > 0` guard skips the
+      // write for legacy null-`reservationId` bookings
+      // (pre-MRB-01) — byte-equivalent to pre-Phase 3
+      // behavior for legacy records. The same `updatedAt`
+      // is used for the booking update AND the header
+      // mirror — no clock skew between the two.
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: mapBookingStatusToReservationPaymentStatus("pending"),
+          updatedAt
+        });
+      }
     });
 
     return res.status(200).json({
@@ -4184,6 +4228,18 @@ export async function handleAddPayment(req: any, res: any) {
   let loyaltyPointsAwarded = 0;
   let idempotentReplay = false;
 
+  // Per MRB-04 Phase 3 (2026-08-02, per decision #159): the
+  // canonical `now` for both the booking update AND the
+  // reservation header mirror. Captured OUTSIDE the
+  // `runTransaction` so it's stable across transaction
+  // retries (Firestore may re-run a transaction up to a few
+  // times; capturing `now` inside the closure would produce a
+  // new Date on every retry and skew the `updatedAt` audit
+  // trail). Used in the booking update + the reservation
+  // header mirror — one Date per request, no second `new Date()`
+  // call inside the transaction.
+  const now = new Date();
+
   try {
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -4283,7 +4339,12 @@ export async function handleAddPayment(req: any, res: any) {
       // the same transaction as the payment append makes the status itself
       // the guest-email idempotency guard under concurrent submissions.
       if (fullyPaid && isConfirmableStatus) {
-        const updatedAt = new Date();
+        // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
+        // the same `now` is used for the booking update +
+        // the reservation header mirror (no second `new Date()`
+        // call inside the transaction — captured at the top
+        // of the try block, stable across transaction retries).
+        const updatedAt = now;
         Object.assign(bookingUpdates, {
           status: "payment-confirmed",
           handledBy: staffUid,
@@ -4324,6 +4385,28 @@ export async function handleAddPayment(req: any, res: any) {
 
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
+      }
+
+      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus` mirror.
+      // Only fires when the booking just transitioned to
+      // `payment-confirmed` (the `transitionedToPaymentConfirmed`
+      // guard prevents touching the header on idempotent
+      // replays or partial-payment writes that didn't change
+      // the status). The mirror value comes from
+      // `mapBookingStatusToReservationPaymentStatus` (the
+      // N=1 mapping helper in `shared/utils/bookingFolio.ts`).
+      // The `bookingReservationId.length > 0` guard skips the
+      // write for legacy null-`reservationId` bookings (pre-MRB-01)
+      // — byte-equivalent to pre-Phase 3 behavior for legacy
+      // records. The same `now` is used for the booking update
+      // AND the header mirror — no clock skew between the two.
+      if (transitionedToPaymentConfirmed && bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingDataSnapshot.status),
+          updatedAt: now
+        });
       }
 
       // Append the payment record inside the transaction after
@@ -4693,6 +4776,19 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
     let fullyPaid = false;
     let idempotentReplay = false;
 
+    // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
+    // the canonical `now` for both the booking update AND
+    // the reservation header mirror. Captured at the top
+    // of the try block (BEFORE the runTransaction) so it's
+    // stable across transaction retries. The existing two
+    // `new Date()` calls (one in `bookingUpdates.updatedAt`,
+    // one in `bookingUpdates.paymentConfirmedAt`) are
+    // replaced with references to this single `now` — no
+    // clock skew between the booking update and the
+    // reservation mirror, and no second Date allocation
+    // inside the transaction.
+    const now = new Date();
+
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
@@ -4801,15 +4897,37 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
 
       // Transition to payment-confirmed only when fully paid
       const bookingUpdates: Record<string, any> = {
-        updatedAt: new Date()
+        updatedAt: now
       };
       if (fullyPaid) {
         bookingUpdates.status = "payment-confirmed";
         bookingUpdates.handledBy = staffUid;
-        bookingUpdates.paymentConfirmedAt = new Date();
+        bookingUpdates.paymentConfirmedAt = now;
       }
       transaction.update(bookingRef, bookingUpdates);
       bookingData = { ...data, ...bookingUpdates };
+
+      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
+      // the reservation header's `paymentStatus` mirror.
+      // Only fires when the booking just transitioned to
+      // `payment-confirmed` (the `fullyPaid` guard prevents
+      // touching the header on partial payments that didn't
+      // change the status). The mirror value comes from
+      // `mapBookingStatusToReservationPaymentStatus` (the
+      // N=1 mapping helper in `shared/utils/bookingFolio.ts`).
+      // The `bookingReservationId.length > 0` guard skips the
+      // write for legacy null-`reservationId` bookings
+      // (pre-MRB-01) — byte-equivalent to pre-Phase 3
+      // behavior for legacy records. The same `now` is used
+      // for the booking update AND the header mirror — no
+      // clock skew between the two.
+      if (fullyPaid && bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        transaction.update(reservationRef, {
+          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingUpdates.status),
+          updatedAt: now
+        });
+      }
     });
 
     if (idempotentReplay) {

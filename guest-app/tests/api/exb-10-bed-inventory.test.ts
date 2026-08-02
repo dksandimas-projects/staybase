@@ -113,11 +113,16 @@ describe("EXB-10 — hotel-wide rollaway-bed inventory (helper + 3 server call s
     // The import line in `bookings.ts` is the contract
     // — pin the symbols so a rename in the shared
     // barrel surfaces here. The block is multi-line (per
-    // the EXB-03 + EXB-10 comment padding), so the regex
-    // anchors on the symbol + the closing `} from
-    // "@spark-inn/shared"`.
+    // the EXB-03 + EXB-10 + MRB-04 Phase 3 comment padding),
+    // so the regex anchors on the symbol + the closing
+    // `} from "@spark-inn/shared"`. The `{0,8000}` upper
+    // bound was raised from `{0,500}` when the MRB-04
+    // Phase 3 commit added a 10-line JSDoc block between
+    // `checkExtraBedInventory,` and the closing brace
+    // (same precedent as the EXB-10 commit's 5000-char
+    // bump for the helper-import JSDoc).
     expect(bookingsHandlerSrc).toMatch(
-      /countExtraBedsInUse[\s\S]{0,800}checkExtraBedInventory[\s\S]{0,500}\}\s*from\s*"@spark-inn\/shared"/
+      /countExtraBedsInUse[\s\S]{0,800}checkExtraBedInventory[\s\S]{0,8000}\}\s*from\s*"@spark-inn\/shared"/
     );
   });
 

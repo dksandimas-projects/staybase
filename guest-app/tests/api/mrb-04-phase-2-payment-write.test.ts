@@ -157,7 +157,7 @@ describe("MRB-04 Phase 2 — handleAddPayment writes to reservations/{id}/paymen
       // also gets the `paymentStatus` update
       // in MRB-04 Phase 3 (a follow-up).
       expect(handler).toMatch(
-        /if \(fullyPaid && isConfirmableStatus\) \{\s*\n\s*const updatedAt = new Date\(\);\s*\n\s*Object\.assign\(bookingUpdates, \{\s*\n\s*status: "payment-confirmed",/
+        /if \(fullyPaid && isConfirmableStatus\) \{[\s\S]{0,500}?const updatedAt = (?:new Date\(\)|now);[\s\S]{0,80}?Object\.assign\(bookingUpdates, \{[\s\S]{0,80}?status: "payment-confirmed",/
       );
     });
 
