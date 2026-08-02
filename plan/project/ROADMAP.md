@@ -22,7 +22,7 @@
 | 8 — Intercom | ✅ Built (19/29) | 10 manual E2E QA items (§Phase 8 QA below) |
 | 10 — Security & Polish | 🔄 7/12 | 5 operational/QA items (§Phase 10 below) |
 | 10B — Spark Rewards | 🔄 13/14 | 1 operational item (§Phase 10B below) |
-| 11 — Staging & Launch | 🔄 2/16 | 14 operational items (§Phase 11 below) |
+| 11 — Staging & Launch | 🔄 2/16 | 14 operational items + production cutover (§Phase 11 below) |
 | 11.5/11.6 — Audit Fixes & Launch-Readiness (50 items) | ✅ All 50 shipped 2026-06-16 | 0 — details in archive |
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
@@ -75,7 +75,7 @@
 - ✅ Production launch procedure documented — `plan/project/DEPLOY.md`
 - ✅ Pre-launch verification script — `npm run preflight`
 
-### Production Launch
+### Production Launch & Cutover (PC-05..06)
 - ⬜ Domain `sparkinnbohol.com` purchased and configured — operational
 - ⬜ Vercel custom domains set (`www.sparkinnbohol.com`, `admin.sparkinnbohol.com`) — operational
 - ⬜ VERSION bumped to `v1.0.0` via `release:` commit — operational
@@ -85,6 +85,10 @@
 - ⬜ First admin account created for hotel owner — operational
 - ⬜ Client training session (booking management, settings, intercom) — operational
 - ⬜ Deployment confirmed live on both domains — operational
+- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
+- ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
+- ⬜ Verify live: GCash test booking passes Step 3 with proof upload; guest intercom message + quick request deliver to admin inbox.
+- ⬜ Confirm no stuck bookings/guests during the breakage window.
 
 ---
 
@@ -112,33 +116,14 @@
 
 ## Phase 12 — Enhancements, Multi-Room Bookings (MRB) & Cancellation Lifecycle (CRL)
 
-### Deferred features
-- ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
-- ⏸ Automated test suite
-- ⏸ Additional hotel client deployments (white-label)
-
 ### Shipped in Phase 12 (Summary)
 > Full implementation detail archived in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) and `ROADMAP-ARCHIVE-2026-07-17.md`.
 
-- ✅ **GCR** — Guest check-in registration purpose of stay (#121)
-- ✅ **CWB** — Confirm with balance for partial-payment bookings (#122)
-- ✅ **LCE** — Editable Terms & Conditions & consent versioning (#137)
-- ✅ **ECE** — House Rules in confirmation emails (#139)
-- ✅ **GSD** — Guest store search & category browsing (#138)
-- ✅ **BSP** — Breakfast served persistence (#132)
-- ✅ **MBP** — Multi-booking picker & privacy protection (#126/#128/#131)
-- ✅ **WSN** — Walk-in first/last name split (#127)
-- ✅ **HSD** — HEIC support via `heic-to` (#125)
-- ✅ **MBZ** — Modal/drawer backdrop z-index two-tier model
-- ✅ **WRV** — Weekend Rate Visibility (#151, 2026-08-01)
-- ✅ **WPM** — Walk-in Payment Method from Settings (#141, 2026-07-31)
-- ✅ **NBS** — New Booking & Customizable Booking Sources (#142, 2026-07-31/08-01)
-- ✅ **PEX** — Pending Booking Expiry & Hold Window (#147, 2026-08-01)
-- ✅ **DSC** — Discount Scope Configuration & VAT Breakdown (#146/#148/#149/#150, 2026-07-31/08-01)
+- ✅ **GCR / CWB / LCE / ECE / GSD / BSP / MBP / WSN / HSD / MBZ / WRV / WPM / NBS / PEX / DSC** (Shipped 2026-06 to 2026-08)
 - ✅ **CRL (Phase 1)** — Cancellation & Refund Lifecycle foundation: refund idempotency (CRL-01), immutable cancellation audit stamps (`cancelledAt`/`cancelledBy`/`cancellationSource`, CRL-02), server status matrix dual gate (CRL-03), and truthful copy + staff paid-store cancel alert (CRL-04) (2026-08-01/02)
 - ✅ **MRB (Phase 1)** — Multi-Room Bookings foundation: `reservations/{id}` header, reservationRef (`R-YYYYMMDD-NNNNN`), transactional create & idempotency for single-room, walk-in, reschedule, corporate, N-booking assignment (MRB-01..05, 2026-08-02)
 
-### Open Cancellation & Refund Lifecycle (CRL) Follow-ups
+### Open Cancellation & Refund Lifecycle (CRL) Tasks
 - ⬜ **CRL-05 / CRL-06** — Policy-derived financial preview on `/my-booking` before cancellation submit & expanded guest cancellation window.
 - ⬜ **CRL-07** — Refund liability ledger & target account collection (GCash number/bank details) during cancellation.
 - ⬜ **CRL-08** — Notification Center queue integration for staff refund review alerts.
@@ -155,8 +140,19 @@
 - ⬜ **MRB-14** — Post-create room changes (add room to pre-arrival reservation, modify stay dates per child room).
 - ⬜ **MRB-15** — Integration & end-to-end lifecycle test coverage across multi-room create → cancel → checkout flow.
 
-### Other Open Follow-ups from Phase 12 Blocks
-- ⬜ **BSP-03 — Manual QA** — multi-guest breakfast served toggle persistence check across multi-session admin view.
-- ⬜ **HSD-05 — Manual QA on real devices** — iPhone HEIC upload verification across Chrome, Firefox, and Safari.
-- ⬜ **PEX-07 — Java Emulator Behavioral Tests** — real-device / emulator write-path testing for auto-expiry transaction.
-- 🔄 **ETR-R — Production-to-Staging Refresh** — Open tasks: R02 (multiple modes), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement).
+### Verification Checklists (BDUX, FSO, BSP, HSD, PEX, ETR)
+- ⬜ **BDUX Verification** — Booking Drawer UX checks: status/conditional combinations, 1440px overview, 375px mobile focus, Folio action entry forms, Total/Paid/Balance ledger updates, sticky header payment proof, 1-tap status actions.
+- ⬜ **FSO Verification** — 375px mobile filter chips & one-handed advanced filter sheet.
+- ⬜ **BSP-03 Manual QA** — Multi-guest breakfast served toggle persistence check across multi-session admin view.
+- ⬜ **HSD-05 Manual QA** — Real device iPhone HEIC upload verification across Chrome, Firefox, and Safari.
+- ⬜ **PEX-07 Emulator Tests** — Java Emulator write-path testing for auto-expiry transaction.
+- 🔄 **ETR-R Production-to-Staging Refresh** — Open tasks: R02 (multiple modes), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement).
+
+### Deferred Architecture, Finance & Audit Tasks
+- ⏸ Online payment gateway (PayMongo — GCash/PayMaya) — deferred.
+- ⏸ Expenses & P&L tracking — out of PMS scope (feed external bookkeeping).
+- ⏸ Day-locking / night-audit snapshots — deferred at 14-room scale.
+- ⏸ **FLR-03 — Bound Reports ledger listeners** — deferred with trigger (~1 year of operation).
+- 🔄 **FLR-05 — Operational handover** — accountant VAT review + owner sign-off before next `dev → main` milestone.
+- ⏸ **MED-3 — "Different email" reconciliation (guest self-service half)** — deferred per decision #135/#140 (front-desk manual link available).
+- ⏸ **LOW-3 — `linkBookingsByEmail` batch not chunked to 500 limit** — deferred theoretical.
