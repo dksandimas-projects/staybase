@@ -85,10 +85,10 @@
 - ⬜ First admin account created for hotel owner — operational
 - ⬜ Client training session (booking management, settings, intercom) — operational
 - ⬜ Deployment confirmed live on both domains — operational
-- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
-- ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
-- ⬜ Verify live: GCash test booking passes Step 3 with proof upload; guest intercom message + quick request deliver to admin inbox.
-- ⬜ Confirm no stuck bookings/guests during the breakage window.
+- ⬜ **PC-05 — Archive + Data Carry-Over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
+- ⬜ **PC-06 — Cutover + Smoke Test** — Freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
+- ⬜ **Live Verification** — GCash test booking passes Step 3 with proof upload; guest intercom message + quick request deliver to admin inbox.
+- ⬜ **Breakage Window Audit** — Confirm no stuck bookings/guests during the breakage window.
 
 ---
 
@@ -124,29 +124,29 @@
 - ✅ **MRB (Phase 1)** — Multi-Room Bookings foundation: `reservations/{id}` header, reservationRef (`R-YYYYMMDD-NNNNN`), transactional create & idempotency for single-room, walk-in, reschedule, corporate, N-booking assignment (MRB-01..05, 2026-08-02)
 
 ### Open Cancellation & Refund Lifecycle (CRL) Tasks
-- ⬜ **CRL-05 / CRL-06** — Policy-derived financial preview on `/my-booking` before cancellation submit & expanded guest cancellation window.
-- ⬜ **CRL-07** — Refund liability ledger & target account collection (GCash number/bank details) during cancellation.
-- ⬜ **CRL-08** — Notification Center queue integration for staff refund review alerts.
-- ⬜ **CRL-09** — Admin Cancellation Audit UI pass in Bookings Drawer (`cancelledAt`, `cancelledBy`, `cancellationSource`).
+- ⬜ **CRL-05 / CRL-06 — Policy-Derived Financial Preview & Expanded Guest Window** — Renders an interactive financial preview modal on `/my-booking` calculating statutory and hotel policy refund eligibility (e.g. 100% refund >72h prior to check-in, 50% <48h, non-refundable deposit) before a guest submits a cancellation request, then allows expanding self-service cancellations to paid bookings safely.
+- ⬜ **CRL-07 — Refund Liability Ledger & Target Account Collection** — Prompts guests during cancellation for refund target details (GCash mobile number / bank account name + number) and records unhandled refund liabilities in a dedicated admin ledger view.
+- ⬜ **CRL-08 — Notification Center Queue Integration** — Connects staff refund review triggers (`sendStaffRefundReviewTrigger`) to the Admin Notification Center (`notifications` collection), placing refund tasks into an actionable staff inbox queue.
+- ⬜ **CRL-09 — Admin Cancellation Audit UI Pass** — Displays `cancelledAt` timestamp, `cancelledBy` UID, and `cancellationSource` (`"guest"` | `"staff"` | `"system"`) in the Admin Booking Drawer header for full auditability.
 
 ### Open Multi-Room Booking (MRB) Tasks
-- ⬜ **MRB-06 Phase 3 / MRB-07** — Group folio & per-room charge attribution on multi-room reservations.
-- ⬜ **MRB-08** — Multi-room booking flow UI on `/book` (room-count selector, multi-room date picker, multi-room occupancy allocation).
-- ⬜ **MRB-09** — Multi-room confirmation page & multi-room booking confirmation email template.
-- ⬜ **MRB-10** — Guest lookup resolves a reservation with nested rooms on `/my-booking` (returning nested room card projections with privacy masking).
-- ⬜ **MRB-11** — Reports use correct owner for each metric (reservation-level vs room-stay level: reservation count vs room nights & ADR).
-- ⬜ **MRB-12** — Admin reservation + room affordance in drawer & table (reservation summary headers & room-stay navigators).
-- ⬜ **MRB-13** — Cancellation options: cancel single room vs cancel full reservation with pre-confirmation financial breakdown.
-- ⬜ **MRB-14** — Post-create room changes (add room to pre-arrival reservation, modify stay dates per child room).
-- ⬜ **MRB-15** — Integration & end-to-end lifecycle test coverage across multi-room create → cancel → checkout flow.
+- ⬜ **MRB-06 Phase 3 / MRB-07 — Group Folio & Charge Attribution** — Adds an optional `bookingId` field to payment and charge line items so staff can attribute charges to specific child room stays (e.g. Room 201 vs Room 202) while calculating both per-room sub-folios and the parent reservation total.
+- ⬜ **MRB-08 — Multi-Room Booking Flow UI (`/book`)** — Adds a room count selector (1..5 rooms), multi-room occupancy allocation (adults/children per room), multi-room availability checking (ensuring N rooms are available), and a multi-room type selection interface.
+- ⬜ **MRB-09 — Multi-Room Confirmation Page & Email** — Updates `/booking-confirmation` and email templates (`booking-confirmation`, `payment-received`, `check-in-reminder`) to render multi-room summary cards listing each allocated room number/type, per-room lead guests, and unified payment hold deadlines.
+- ⬜ **MRB-10 — Multi-Room Guest Lookup (`/my-booking`)** — Resolves parent reservation references (`R-YYYYMMDD-NNNNN`) and returns all nested child room cards in a single guest view with privacy masking preserved (`maskedEmail`). Actions like cancellation or resend act on the parent reservation.
+- ⬜ **MRB-11 — Reports Metric Owner Attribution** — Ensures analytics metrics attribute correctly: Reservation count, total payments, acquisition sources, and reservation cancellations come from `reservations` headers. Occupancy, room-nights sold, room cancellations, allocated room revenue, and ADR come from `bookings` child lines.
+- ⬜ **MRB-12 — Admin Reservation & Room Affordances in Drawer & Table** — Displays reservation header summaries (room count badge, aggregate reservation balance, lead guest name) alongside child room-stay navigators, allowing staff to jump between child room stays while keeping parent reservation financial totals pinned.
+- ⬜ **MRB-13 — Flexible Cancellation (Single Room vs Full Reservation)** — Staff can choose to cancel a single child room (releasing only that room's inventory and crediting its line cost to the reservation folio) or cancel the full multi-room reservation.
+- ⬜ **MRB-14 — Post-Create Room Modifications** — Allows staff to add a room to an existing pre-arrival reservation or adjust stay dates for individual child rooms. The public `reservationRef` stays unchanged, and an updated confirmation email fires.
+- ⬜ **MRB-15 — Full Lifecycle Integration Test Suite** — End-to-end integration test suite verifying no duplicate counters, correct loyalty points, payment status transitions, and report calculations across multi-room create → modify → cancel → checkout flows.
 
 ### Verification Checklists (BDUX, FSO, BSP, HSD, PEX, ETR)
-- ⬜ **BDUX Verification** — Booking Drawer UX checks: status/conditional combinations, 1440px overview, 375px mobile focus, Folio action entry forms, Total/Paid/Balance ledger updates, sticky header payment proof, 1-tap status actions.
-- ⬜ **FSO Verification** — 375px mobile filter chips & one-handed advanced filter sheet.
-- ⬜ **BSP-03 Manual QA** — Multi-guest breakfast served toggle persistence check across multi-session admin view.
-- ⬜ **HSD-05 Manual QA** — Real device iPhone HEIC upload verification across Chrome, Firefox, and Safari.
-- ⬜ **PEX-07 Emulator Tests** — Java Emulator write-path testing for auto-expiry transaction.
-- 🔄 **ETR-R Production-to-Staging Refresh** — Open tasks: R02 (multiple modes), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement).
+- ⬜ **BDUX Verification — Booking Drawer UX** — Verify Drawer across 1440px desktop & 375px mobile viewports: Overview layout readability without scrolling, Folio action entry forms, Total/Paid/Balance updates, sticky payment proof header, 1-tap status actions.
+- ⬜ **FSO Verification — Filtering UX** — Verify 375px mobile table filtering: filter chips, quick search, and one-handed advanced filter sheet.
+- ⬜ **BSP-03 — Breakfast Served Persistence Manual QA** — Verify multi-guest silog selection and daily breakfast-served toggle persistence across multi-session admin views.
+- ⬜ **HSD-05 — HEIC Photo Upload Manual QA** — Verify iPhone camera HEIC photo conversion via `heic-to` on physical iOS devices across Safari, Chrome, and Firefox.
+- ⬜ **PEX-07 — Java Emulator Tests** — Verify Firebase Emulator write-path behavior for auto-expiry hold drops (`/api/holds/expire` cron).
+- 🔄 **ETR-R — Production-to-Staging Refresh Engine (R02..R09)** — Implements remaining staging refresh modules: R02 mode toggles, R03 reviewable preservation, R05 asset sanitization, R06 relational integrity, R07 staging isolation, R08 pre-import scan, R09 controlled replacement.
 
 ### Deferred Architecture, Finance & Audit Tasks
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya) — deferred.
