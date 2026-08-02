@@ -73,10 +73,17 @@ describe("CRL-01 refund idempotency", () => {
 
   it("creates the ledger entry with the exact preallocated refundId (no overwrite path)", () => {
     const body = isolateHandleAddRefund();
-    expect(body).toMatch(/transaction\.create\(paymentsRef\.doc\(refundId\)/);
+    // Per MRB-04 Phase 2.x (2026-08-02, per decision #159):
+    // the conditional `refundsRef` resolves to
+    // `reservations/{reservationId}/refunds/{refundId}` for new
+    // reservations (the canonical source) and to
+    // `bookings/{bookingId}/payments/{refundId}` for legacy
+    // null-`reservationId` bookings. The preallocated `refundId`
+    // is still the doc id — retries can't overwrite.
+    expect(body).toMatch(/transaction\.create\(refundsRef\.doc\(refundId\)/);
     // transaction.set on a fresh doc is forbidden — set would overwrite a
     // previous server-side race winner, which would defeat the contract.
-    expect(body).not.toMatch(/transaction\.set\(paymentsRef\.doc\(refundId\)/);
+    expect(body).not.toMatch(/transaction\.set\(refundsRef\.doc\(refundId\)/);
   });
 
   it("preserves the existing admin gate, amount ceiling, and append-only ledger", () => {

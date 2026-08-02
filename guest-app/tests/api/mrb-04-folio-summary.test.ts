@@ -165,16 +165,20 @@ describe("MRB-04 folio migration — Phase 1 (types + subcollection rules + beha
       );
     });
 
-    it("computes paymentsTotal via a sign-aware reduce (refunds contribute negative amounts)", () => {
-      // The payments reduce is sign-aware: positive
-      // amounts (payments) add to the total; negative
-      // amounts (refunds) subtract. The single-pass
-      // sum preserves the invariant at the math
-      // level (a 1000 payment + 200 refund = 800
-      // total). The CRL-01 negative-amount convention
-      // is honored.
+    it("computes paymentsTotal via a sign-aware reduce on payments + refunds (the dual-read pattern)", () => {
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision #159):
+      // the helper sums BOTH `payments` (positive-amount
+      // entries) AND `refunds` (the canonical negative-amount
+      // refund source) into `paymentsTotal`. The reduces are
+      // sign-aware: positive amounts (payments) add to the
+      // total; negative amounts (refunds) subtract. The
+      // single-pass sum preserves the invariant at the math
+      // level (a 1000 payment + 200 refund = 800 total).
+      // The CRL-01 negative-amount convention is honored.
+      // The `refunds ?? []` default keeps Phase 1 callers
+      // backward-compatible.
       expect(folio).toMatch(
-        /const paymentsTotal = input\.payments\.reduce\(\s*\n\s*\(sum, p\) => sum \+ \(Number\(p\.amount\) \|\| 0\),\s*\n\s*0\s*\n\s*\);/
+        /const refunds = input\.refunds \?\? \[\];\s*\n\s*const paymentsTotal =\s*\n\s*input\.payments\.reduce\(\(sum, p\) => sum \+ \(Number\(p\.amount\) \|\| 0\), 0\) \+\s*\n\s*refunds\.reduce\(\(sum, r\) => sum \+ \(Number\(r\.amount\) \|\| 0\), 0\);/
       );
     });
 
