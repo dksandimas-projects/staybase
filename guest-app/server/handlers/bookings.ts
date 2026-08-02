@@ -51,6 +51,23 @@ import {
   GUEST_CANCELLABLE_STATUSES,
   STAFF_CANCELLABLE_STATUSES,
   TERMINAL_CANCELLATION_STATUSES,
+  // Per MRB-02 (2026-08-02, per decision #159): the
+  // reservation header linkage. The client may preallocate
+  // a `reservationId` (UUIDv4) to enable idempotency on
+  // retry-after-uncertain-response; the server auto-generates
+  // one when the field is absent (no retry guarantee, but
+  // the legacy null-reservationId path still works). The
+  // regex is the same one `RESERVATION_ID_REGEX` pins in
+  // `shared/utils/references.ts`; the server validates +
+  // auto-mints via the same helpers. The server computes
+  // a `requestFingerprint` (SHA-256 of a canonicalized JSON
+  // payload, same byte-equivalence rules as the client's
+  // preallocation) and uses it for the in-transaction
+  // idempotency replay / 409 conflict matrix.
+  RESERVATION_ID_REGEX,
+  generateReservationId,
+  computeRequestFingerprint,
+  type FingerprintableReservationRequest,
   // Per EXB-03 (2026-08-01, per decision #145): the
   // capacity overflow rule. Replaces the two CHD-04 hard
   // rejects (`numAdults > maxCapacity` +
@@ -528,6 +545,16 @@ const createBookingSchema = z.object({
   linkedInquiryId: z.string().trim().max(160).nullable().optional().default(null),
   testToken: z.string().trim().max(512).optional(),
   turnstileToken: z.string().max(4096).optional(),
+  // Per MRB-02 (2026-08-02, per decision #159): optional client
+  // preallocation of the reservationId. When present, the
+  // server's transactional create uses the same room for the
+  // idempotency replay / 409 conflict matrix. When absent,
+  // the server auto-mints a UUIDv4 (no retry guarantee; the
+  // legacy null-reservationId path still works for callers
+  // that have not been updated to preallocate). Validated
+  // against the same `RESERVATION_ID_REGEX` from
+  // `shared/utils/references.ts`.
+  reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional(),
   _hp: z.string().max(200).optional().default("")
 }).strict();
 
@@ -691,10 +718,58 @@ export async function handleCreateBooking(req: any, res: any) {
     validatedTestRunId = run.id;
   }
 
+  // Per MRB-02 (2026-08-02, per decision #159): the
+  // reservation header linkage. The client may preallocate a
+  // `reservationId` (UUIDv4) to enable idempotency on a
+  // retry-after-uncertain-response; the server auto-mints one
+  // when the field is absent (no retry guarantee, but the
+  // legacy null-reservationId path still works for callers
+  // that have not been updated). The `requestFingerprint` is
+  // computed from the same canonical payload the client's
+  // preallocation helper uses; the in-transaction check is
+  // the idempotency replay / 409 conflict matrix. The
+  // single-room case is `roomLines: [{ type: roomType,
+  // quantity: 1, adults: ..., children: ..., extraBeds: ... }]`
+  // — the helper is designed for the N>1 case that MRB-06
+  // will exercise.
+  const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
+  const reservationRequestFingerprint = computeRequestFingerprint({
+    reservationId: String(body.reservationId || "").trim(),
+    roomLines: [{
+      type: String(roomType || "").trim(),
+      quantity: 1,
+      adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
+      children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
+      extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
+    }],
+    checkIn: String(checkIn || "").trim(),
+    checkOut: String(checkOut || "").trim(),
+    leadGuestName: guestNameForFingerprint,
+    leadGuestEmail: String(rawGuestDetails.email || "").trim().toLowerCase(),
+    leadGuestPhone: String(rawGuestDetails.phone || "").trim(),
+    source: String(corporateCode ? "corporate" : "online").trim(),
+    isCorporate: Boolean(corporateCode),
+    corporateCode: String(corporateCode || "").trim().toUpperCase(),
+    companyName: String(corporateCode ? (rawGuestDetails.companyName || "") : "").trim(),
+    voucherCode: String(voucherCode || "").trim().toUpperCase(),
+    memberDiscountPct: 0,  // public path has no member discount; MRB-06's signed-in path resolves this from the verified email token
+    discountScope: normalizeDiscountScope(null),  // server-resolved DSC-01 scope lands in MRB-04
+    termsVersion: DEFAULT_TERMS_VERSION,
+    privacyVersion: DEFAULT_TERMS_VERSION
+  });
+
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let finalRateBreakdown: BookingRateBreakdown | null = null;
+    // Per MRB-02 (2026-08-02, per decision #164): the public
+    // reservation ref (e.g. `R-20260802-00001`) is minted inside
+    // the transaction (so it shares the same `now` + counter
+    // transaction as the booking ref) and read in the
+    // post-transaction success response. Same `finalX`
+    // capture pattern as `finalBookingRef` /
+    // `finalTotalPrice` / `finalRateBreakdown`.
+    let finalReservationRef = "";
     let computedData: any = {};
     let alreadyExistingBookingResponse: any = null;
     // Per PEX-05 (2026-08-01, per decision #147): the snapshotted
@@ -777,6 +852,30 @@ export async function handleCreateBooking(req: any, res: any) {
       console.warn("ID token verify failed; continuing as anonymous booking:", memberTokenError.message);
     }
 
+    // Per MRB-02 (2026-08-02, per decision #164): the canonical
+    // reservation id for this create. Client may have
+    // preallocated a `reservationId` (UUIDv4); when absent the
+    // server auto-mints one (preserves the legacy
+    // null-reservationId path for callers that have not been
+    // updated). The first read inside the transaction below is
+    // the idempotency check: same `reservationId` + same
+    // `requestFingerprint` replays the original commit (returns
+    // the existing booking's response shape); same
+    // `reservationId` + different `requestFingerprint` is a 409
+    // conflict. The header is then created (or re-verified)
+    // inside the same transaction as the child booking so a
+    // partial failure cannot leave a reservation header without
+    // its child or vice versa.
+    //
+    // Declared at function scope (not inside the transaction
+    // callback) so the post-transaction success response can
+    // echo it back to the client — see the `res.status(200)`
+    // payload at the end of the handler.
+    const effectiveReservationId: string = (body.reservationId && RESERVATION_ID_REGEX.test(body.reservationId))
+      ? body.reservationId
+      : generateReservationId();
+    const reservationDocRef = adminDb.collection("reservations").doc(effectiveReservationId);
+
     // Run Firestore Transaction
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
@@ -792,6 +891,73 @@ export async function handleCreateBooking(req: any, res: any) {
       // transaction (no separate write) so a partial failure
       // cannot leave the expired hold in the booking's room.
       const now = new Date();
+
+      // Per MRB-02 (2026-08-02, per decision #164): the
+      // idempotency check on the reservation header. Both
+      // `effectiveReservationId` + `reservationDocRef` are
+      // declared at function scope (just above the
+      // `runTransaction` call) so the post-transaction
+      // success response can echo the id back to the client.
+      // Inside the transaction, the first read is the
+      // idempotency check: same `reservationId` + same
+      // `requestFingerprint` replays the original commit
+      // (returns the existing booking's response shape);
+      // same `reservationId` + different `requestFingerprint`
+      // is a 409 conflict. The header is then created (or
+      // re-verified) inside the same transaction as the child
+      // booking so a partial failure cannot leave a
+      // reservation header without its child or vice versa.
+      const existingReservationSnap = await transaction.get(reservationDocRef);
+      if (existingReservationSnap.exists) {
+        const existingData = existingReservationSnap.data() || {};
+        const sameRequest = String(existingData.requestFingerprint || "") === reservationRequestFingerprint;
+        if (!sameRequest) {
+          throw new Error("RESERVATION_ID_FINGERPRINT_CONFLICT");
+        }
+        // Idempotent replay: the existing reservation header
+        // already carries the canonical fields; just reuse it.
+        // The child booking's `reservationId` /
+        // `reservationRef` / `reservationPosition` /
+        // `reservationRoomCount` were stamped at the original
+        // create, so no per-child recompute is needed. The
+        // response is built from the existing reservation +
+        // the existing booking doc (re-read below the inner
+        // conflict short-circuits if the booking exists). For
+        // the public `/api/bookings/create` path the
+        // `bookingId` is also client-preallocated, so the
+        // same `bookingId` + same `reservationId` is the
+        // canonical idempotency key.
+        const existingChildSnap = await transaction.get(bookingDocRef);
+        if (existingChildSnap.exists) {
+          const existingChild = existingChildSnap.data() || {};
+          alreadyExistingBookingResponse = {
+            success: true,
+            idempotentReplay: true,
+            bookingId,
+            reservationId: String(existingData.id || effectiveReservationId),
+            reservationRef: String(existingData.reservationRef || ""),
+            roomId: String(existingChild.roomId || ""),
+            roomNumber: String(existingChild.roomNumber || ""),
+            totalPrice: Number(existingChild.totalPrice || 0),
+            bookingRef: String(existingChild.bookingRef || ""),
+            rateBreakdown: existingChild.rateBreakdown || null,
+            holdExpiresAt: (existingChild as any).holdExpiresAt
+              ? ((existingChild as any).holdExpiresAt.toDate
+                ? (existingChild as any).holdExpiresAt.toDate()
+                : (existingChild as any).holdExpiresAt)
+              : null
+          };
+          // Skip the rest of the create transaction — the
+          // existing reservation + booking are the
+          // canonical answer.
+          return;
+        }
+        // The reservation header exists but the child booking
+        // does not — a partially-applied create. Refuse rather
+        // than risk a half-stamped booking; the client retries
+        // the same `reservationId` and we recover the state.
+        throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+      }
       // Per PEX-01 + PEX-04 (2026-08-01, per decision #147): a
       // late payment proof or a late walk-in with `holdExpiresAt`
       // still in the past must not be allowed to occupy the
@@ -830,6 +996,16 @@ export async function handleCreateBooking(req: any, res: any) {
         alreadyExistingBookingResponse = {
           bookingId,
           bookingRef: finalBookingRef,
+          // Per MRB-02 (2026-08-02, per decision #164): echo
+          // the reservation linkage from the existing booking
+          // doc so the client gets a consistent payload shape
+          // across the fresh create, the reservation-level
+          // replay, and the legacy booking-level replay. The
+          // `idempotentReplay` flag discriminates the two
+          // replay paths.
+          reservationId: String(existing.reservationId || ""),
+          reservationRef: String(existing.reservationRef || ""),
+          idempotentReplay: true,
           totalPrice: finalTotalPrice,
           roomId: assignedRoomId,
           roomNumber: assignedRoomNumber,
@@ -1543,6 +1719,13 @@ export async function handleCreateBooking(req: any, res: any) {
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
+      // Per MRB-02 (2026-08-02, per decision #164): capture
+      // the public reservation ref so the post-transaction
+      // success response can echo it. The ref is minted
+      // alongside `newBooking` below (the
+      // `R-{dateCompact}-{seq}` shape) and the same
+      // counter transaction sequences both refs.
+      finalReservationRef = `R-${getManilaDateInfo().todayCompact}-${String(1).padStart(5, "0")}`;
 
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
@@ -1717,10 +1900,84 @@ export async function handleCreateBooking(req: any, res: any) {
         ...(validatedTestRunId
           ? { isTestData: true, testRunId: validatedTestRunId }
           : {}),
+        // Per MRB-02 (2026-08-02, per decision #159): the
+        // reservation header linkage. `reservationId` is
+        // the pre-allocated (or server-minted) UUID; the three
+        // compatibility copies are denormalized projections
+        // for fast admin search/display (per the decision
+        // table "Mint one public `reservationRef` per
+        // reservation and denormalize it onto child bookings
+        // for existing admin search/display compatibility").
+        // The single-room case is `position: 1` /
+        // `roomCount: 1`; MRB-06's N>1 case will assign
+        // sequential positions and a `roomCount` matching
+        // the room-line count. The same `reservationRef`
+        // is also written to the header so the response
+        // shape is symmetric.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        reservationPosition: 1,
+        reservationRoomCount: 1,
         createdAt: new Date(),
         updatedAt: new Date()
       };
 
+      // Per MRB-02 (2026-08-02, per decision #159): create
+      // the reservation header in the SAME transaction as the
+      // child booking. The header owns the public ref + the
+      // lead booker + the source/corporate context + the
+      // payment proof/state + the consent + the group totals
+      // + the snapshotted discount scope + the unified PEX
+      // hold + the canonical request fingerprint. Group
+      // totals are populated by the child write below; the
+      // MRB-04 folio migration is a follow-up. The header's
+      // `paymentStatus` is derived from the child's status
+      // ("awaiting-payment" while the child is `pending` or
+      // `payment-uploaded`).
+      const newReservation = {
+        id: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        leadGuestName: guestName,
+        leadGuestEmail: guestDetails.email.trim().toLowerCase(),
+        leadGuestPhone: guestDetails.phone.trim(),
+        memberId: detectedMemberId || null,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
+        numNights,
+        originalSubtotal: totalPrice,  // MRB-04: the proper originalSubtotal computation
+        discountScopeSnapshot: snapshottedDiscountScope,
+        subtotal: totalPrice,          // MRB-04: the proper subtotal after add-on math
+        totalPrice,
+        source: corporateDetails.isCorporate ? "corporate" : "online",
+        isCorporate: corporateDetails.isCorporate,
+        corporateCode: corporateDetails.corporateCode,
+        companyName: corporateDetails.companyName,
+        voucherCode: appliedVoucherCode,
+        memberDiscountPct: appliedMemberDiscountPct,
+        paymentStatus: (paymentProofPath || paymentProofUrl) ? "payment-uploaded" : "awaiting-payment",
+        paymentMethod,
+        paymentProofUrl: paymentProofUrl || null,
+        paymentProofPath: paymentProofPath || null,
+        termsAccepted: true,
+        termsAcceptedAt: now,
+        termsVersion: termsConsentVersion,
+        privacyAccepted: true,
+        privacyAcceptedAt: now,
+        privacyVersion: termsConsentVersion,
+        roomCount: 1,                  // MRB-06: matches the room-line count for N>1
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0,
+        holdExpiresAt: (newBooking as any).holdExpiresAt
+          ? (newBooking as any).holdExpiresAt
+          : null,
+        requestFingerprint: reservationRequestFingerprint,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "guest"
+      };
+      transaction.set(reservationDocRef, newReservation);
       transaction.set(bookingDocRef, newBooking);
       // Per PEX-05 (2026-08-01, per decision #147): capture
       // the snapshotted deadline for the post-transaction
@@ -1891,6 +2148,19 @@ export async function handleCreateBooking(req: any, res: any) {
       data: {
         bookingId,
         bookingRef: finalBookingRef,
+        // Per MRB-02 (2026-08-02, per decision #164): the
+        // canonical reservation id (client-preallocated or
+        // auto-minted) and the public reservation ref.
+        // Surfaced so the confirmation page can deep-link to
+        // `/manage?reservation=<id>` and the corporate
+        // confirmation step can render the group ref
+        // alongside the child booking ref. The shape mirrors
+        // `alreadyExistingBookingResponse` so the client
+        // gets the same fields whether the call is a fresh
+        // create or a reservation-level replay.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        idempotentReplay: false,
         // Per BF-39 (booking-flow audit 2026-06-26): surface the
         // server-computed `totalPrice` so the confirmation page
         // (and the corporate confirmation step) can display what
@@ -1929,6 +2199,28 @@ export async function handleCreateBooking(req: any, res: any) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
+    } else if (
+      // Per MRB-02 (2026-08-02, per decision #164): the client
+      // preallocated a `reservationId` that already carries a
+      // *different* request fingerprint. The reservation header
+      // is canonical for idempotency, so a re-use of the same id
+      // with a different request is a conflict — the client
+      // surfaces it as "duplicate reservation id with different
+      // request, please generate a new one". 409 keeps the
+      // booking from being retried with the stale id.
+      error.message === "RESERVATION_ID_FINGERPRINT_CONFLICT"
+    ) {
+      status = 409;
+    } else if (
+      // Per MRB-02 (2026-08-02, per decision #164): the
+      // reservation header exists but the child booking does
+      // not — a partially-applied create. We refuse to recover
+      // it from this request (a half-stamped booking would
+      // break audit invariants). 500 surfaces the bug to staff
+      // and signals the client to abandon the reservation id.
+      error.message === "RESERVATION_HEADER_WITHOUT_CHILD"
+    ) {
+      status = 500;
     } else if (
       // Per BI-10 (booking-intercom audit 2026-07-06): a
       // corporate code that failed re-validation between the

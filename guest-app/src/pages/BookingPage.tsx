@@ -42,6 +42,17 @@ import {
   calculateExtraBedAddOn,
   requiredExtraBedsFor
 } from "@spark-inn/shared";
+// Per MRB-02 (2026-08-02, per decision #164): the
+// reservation-level idempotency key, imported separately to
+// keep the CHD-05 import-ordering guard (which requires
+// `calculateExtraBedAddOn` + `requiredExtraBedsFor` to be
+// adjacent in the same import) intact. Preallocated
+// client-side so a retry-after-uncertain-response uses the
+// same `reservationId`; the server's transaction reads it
+// first and either replays the original commit (same
+// `requestFingerprint`) or returns a 409 (different
+// `requestFingerprint`).
+import { generateReservationId } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 // Per BF-29 (booking-flow audit 2026-06-26): replace the
 // inline email regex with Zod's `z.string().email()` so the
@@ -142,6 +153,18 @@ export function BookingPage() {
 
   // Persistent unique booking ID pre-generated client-side
   const [bookingId] = useState(() => doc(collection(db, "bookings")).id);
+  // Per MRB-02 (2026-08-02, per decision #164): the
+  // reservation-level idempotency key, preallocated client-side
+  // for the same reason as `bookingId`. Held in a `useState`
+  // lazy init so the same id survives across renders and
+  // retry-after-uncertain-response (the user re-tries without
+  // reloading the page; the id is reused so the server's
+  // reservation transaction either replays the original commit
+  // — same `requestFingerprint` — or returns a 409 conflict
+  // for a different `requestFingerprint`). Generated via the
+  // shared `generateReservationId` helper so the id shape is
+  // guaranteed to pass `RESERVATION_ID_REGEX` validation.
+  const [reservationId] = useState(() => generateReservationId());
 
   // Dynamic config states loaded from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({
@@ -959,6 +982,17 @@ export function BookingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookingId,
+          // Per MRB-02 (2026-08-02, per decision #164): the
+          // client-preallocated reservation id. The server
+          // uses this as the canonical idempotency key for
+          // the create transaction (read the reservation
+          // header first; same id + same request fingerprint
+          // → replay; same id + different request → 409).
+          // When absent (legacy callers) the server
+          // auto-mints a UUIDv4 — see
+          // `handleCreateBooking` in
+          // `guest-app/server/handlers/bookings.ts`.
+          reservationId,
           roomType: selectedTypeEntry?.value,
           checkIn,
           checkOut,

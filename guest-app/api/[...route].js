@@ -221704,6 +221704,25 @@ function generateStoreOrderRef(date, sequence) {
   return `SO-${compactDate(date)}-${pad(sequence, 5)}`;
 }
 var BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/;
+var RESERVATION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isValidReservationId(value) {
+  return typeof value === "string" && RESERVATION_ID_REGEX.test(value.trim());
+}
+function generateReservationId(randomUUID = defaultRandomUUID) {
+  const id = randomUUID();
+  if (!isValidReservationId(id)) {
+    throw new Error("Generated reservationId did not match the expected UUIDv4 shape.");
+  }
+  return id;
+}
+function defaultRandomUUID() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    return String(g.crypto.randomUUID());
+  }
+  const { randomUUID } = require("node:crypto");
+  return String(randomUUID());
+}
 var LOOKUP_TOKEN_HEX_LENGTH = 32;
 function generateLookupToken(randomBytes = defaultRandomBytes) {
   const bytes = randomBytes(LOOKUP_TOKEN_HEX_LENGTH / 2);
@@ -221716,6 +221735,75 @@ function generateLookupToken(randomBytes = defaultRandomBytes) {
 function defaultRandomBytes(n2) {
   const { randomBytes } = require("node:crypto");
   return new Uint8Array(randomBytes(n2));
+}
+
+// ../shared/utils/reservationFingerprint.ts
+function defaultHasher() {
+  const { createHash } = require("node:crypto");
+  return (input) => createHash("sha256").update(input).digest("hex");
+}
+function normalizeRoomLine(line) {
+  return {
+    type: String(line.type || "").trim(),
+    quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
+    adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
+    children: Math.max(0, Math.floor(Number(line.children) || 0)),
+    extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0))
+  };
+}
+function normalizeDiscountScope2(scope) {
+  const empty = {
+    senior: { room: false, breakfast: false, extraBed: false },
+    voucher: { room: false, breakfast: false, extraBed: false },
+    member: { room: false, breakfast: false, extraBed: false }
+  };
+  if (!scope) return empty;
+  return {
+    senior: {
+      room: Boolean(scope.senior?.room),
+      breakfast: Boolean(scope.senior?.breakfast),
+      extraBed: Boolean(scope.senior?.extraBed)
+    },
+    voucher: {
+      room: Boolean(scope.voucher?.room),
+      breakfast: Boolean(scope.voucher?.breakfast),
+      extraBed: Boolean(scope.voucher?.extraBed)
+    },
+    member: {
+      room: Boolean(scope.member?.room),
+      breakfast: Boolean(scope.member?.breakfast),
+      extraBed: Boolean(scope.member?.extraBed)
+    }
+  };
+}
+function buildCanonicalPayload(req) {
+  const roomLines = (Array.isArray(req.roomLines) ? req.roomLines : []).map(normalizeRoomLine).sort((a, b3) => {
+    if (a.type !== b3.type) return a.type < b3.type ? -1 : 1;
+    return a.quantity - b3.quantity;
+  });
+  const payload = {
+    reservationId: String(req.reservationId || "").trim(),
+    roomLines,
+    checkIn: String(req.checkIn || "").trim(),
+    checkOut: String(req.checkOut || "").trim(),
+    leadGuestName: String(req.leadGuestName || "").trim(),
+    leadGuestEmail: String(req.leadGuestEmail || "").trim().toLowerCase(),
+    leadGuestPhone: String(req.leadGuestPhone || "").trim(),
+    source: String(req.source || "").trim(),
+    isCorporate: Boolean(req.isCorporate),
+    corporateCode: String(req.corporateCode || "").trim().toUpperCase(),
+    companyName: String(req.companyName || "").trim(),
+    voucherCode: String(req.voucherCode || "").trim().toUpperCase(),
+    memberDiscountPct: Math.max(0, Number(req.memberDiscountPct) || 0),
+    discountScope: normalizeDiscountScope2(req.discountScope),
+    termsVersion: String(req.termsVersion || "").trim(),
+    privacyVersion: String(req.privacyVersion || "").trim()
+  };
+  return JSON.stringify(payload);
+}
+function computeRequestFingerprint(req, hasher = defaultHasher()) {
+  const canonical = buildCanonicalPayload(req);
+  return hasher(canonical);
 }
 
 // ../shared/utils/roomTypes.ts
@@ -224978,6 +225066,16 @@ var createBookingSchema = external_exports.object({
   linkedInquiryId: external_exports.string().trim().max(160).nullable().optional().default(null),
   testToken: external_exports.string().trim().max(512).optional(),
   turnstileToken: external_exports.string().max(4096).optional(),
+  // Per MRB-02 (2026-08-02, per decision #159): optional client
+  // preallocation of the reservationId. When present, the
+  // server's transactional create uses the same room for the
+  // idempotency replay / 409 conflict matrix. When absent,
+  // the server auto-mints a UUIDv4 (no retry guarantee; the
+  // legacy null-reservationId path still works for callers
+  // that have not been updated to preallocate). Validated
+  // against the same `RESERVATION_ID_REGEX` from
+  // `shared/utils/references.ts`.
+  reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
 async function handleCreateBooking(req, res) {
@@ -225097,10 +225195,38 @@ async function handleCreateBooking(req, res) {
     }
     validatedTestRunId = run.id;
   }
+  const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
+  const reservationRequestFingerprint = computeRequestFingerprint({
+    reservationId: String(body.reservationId || "").trim(),
+    roomLines: [{
+      type: String(roomType || "").trim(),
+      quantity: 1,
+      adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
+      children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
+      extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
+    }],
+    checkIn: String(checkIn || "").trim(),
+    checkOut: String(checkOut || "").trim(),
+    leadGuestName: guestNameForFingerprint,
+    leadGuestEmail: String(rawGuestDetails.email || "").trim().toLowerCase(),
+    leadGuestPhone: String(rawGuestDetails.phone || "").trim(),
+    source: String(corporateCode ? "corporate" : "online").trim(),
+    isCorporate: Boolean(corporateCode),
+    corporateCode: String(corporateCode || "").trim().toUpperCase(),
+    companyName: String(corporateCode ? rawGuestDetails.companyName || "" : "").trim(),
+    voucherCode: String(voucherCode || "").trim().toUpperCase(),
+    memberDiscountPct: 0,
+    // public path has no member discount; MRB-06's signed-in path resolves this from the verified email token
+    discountScope: normalizeDiscountScope(null),
+    // server-resolved DSC-01 scope lands in MRB-04
+    termsVersion: DEFAULT_TERMS_VERSION,
+    privacyVersion: DEFAULT_TERMS_VERSION
+  });
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let finalRateBreakdown = null;
+    let finalReservationRef = "";
     let computedData = {};
     let alreadyExistingBookingResponse = null;
     let bookingHoldExpiresAt = null;
@@ -225136,9 +225262,38 @@ async function handleCreateBooking(req, res) {
     if (memberTokenError) {
       console.warn("ID token verify failed; continuing as anonymous booking:", memberTokenError.message);
     }
+    const effectiveReservationId = body.reservationId && RESERVATION_ID_REGEX.test(body.reservationId) ? body.reservationId : generateReservationId();
+    const reservationDocRef = adminDb.collection("reservations").doc(effectiveReservationId);
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
       const now = /* @__PURE__ */ new Date();
+      const existingReservationSnap = await transaction.get(reservationDocRef);
+      if (existingReservationSnap.exists) {
+        const existingData = existingReservationSnap.data() || {};
+        const sameRequest = String(existingData.requestFingerprint || "") === reservationRequestFingerprint;
+        if (!sameRequest) {
+          throw new Error("RESERVATION_ID_FINGERPRINT_CONFLICT");
+        }
+        const existingChildSnap = await transaction.get(bookingDocRef);
+        if (existingChildSnap.exists) {
+          const existingChild = existingChildSnap.data() || {};
+          alreadyExistingBookingResponse = {
+            success: true,
+            idempotentReplay: true,
+            bookingId,
+            reservationId: String(existingData.id || effectiveReservationId),
+            reservationRef: String(existingData.reservationRef || ""),
+            roomId: String(existingChild.roomId || ""),
+            roomNumber: String(existingChild.roomNumber || ""),
+            totalPrice: Number(existingChild.totalPrice || 0),
+            bookingRef: String(existingChild.bookingRef || ""),
+            rateBreakdown: existingChild.rateBreakdown || null,
+            holdExpiresAt: existingChild.holdExpiresAt ? existingChild.holdExpiresAt.toDate ? existingChild.holdExpiresAt.toDate() : existingChild.holdExpiresAt : null
+          };
+          return;
+        }
+        throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+      }
       const websiteContentRef = adminDb.collection("settings").doc("websiteContent");
       const websiteContentDoc = await transaction.get(websiteContentRef);
       const termsConsentVersion = websiteContentDoc.exists && typeof websiteContentDoc.data()?.termsVersion === "string" ? String(websiteContentDoc.data().termsVersion) : DEFAULT_TERMS_VERSION;
@@ -225153,6 +225308,16 @@ async function handleCreateBooking(req, res) {
         alreadyExistingBookingResponse = {
           bookingId,
           bookingRef: finalBookingRef,
+          // Per MRB-02 (2026-08-02, per decision #164): echo
+          // the reservation linkage from the existing booking
+          // doc so the client gets a consistent payload shape
+          // across the fresh create, the reservation-level
+          // replay, and the legacy booking-level replay. The
+          // `idempotentReplay` flag discriminates the two
+          // replay paths.
+          reservationId: String(existing.reservationId || ""),
+          reservationRef: String(existing.reservationRef || ""),
+          idempotentReplay: true,
           totalPrice: finalTotalPrice,
           roomId: assignedRoomId,
           roomNumber: assignedRoomNumber,
@@ -225519,6 +225684,7 @@ async function handleCreateBooking(req, res) {
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
+      finalReservationRef = `R-${getManilaDateInfo().todayCompact}-${String(1).padStart(5, "0")}`;
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
       }
@@ -225678,9 +225844,72 @@ async function handleCreateBooking(req, res) {
           }
         } : {},
         ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId } : {},
+        // Per MRB-02 (2026-08-02, per decision #159): the
+        // reservation header linkage. `reservationId` is
+        // the pre-allocated (or server-minted) UUID; the three
+        // compatibility copies are denormalized projections
+        // for fast admin search/display (per the decision
+        // table "Mint one public `reservationRef` per
+        // reservation and denormalize it onto child bookings
+        // for existing admin search/display compatibility").
+        // The single-room case is `position: 1` /
+        // `roomCount: 1`; MRB-06's N>1 case will assign
+        // sequential positions and a `roomCount` matching
+        // the room-line count. The same `reservationRef`
+        // is also written to the header so the response
+        // shape is symmetric.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        reservationPosition: 1,
+        reservationRoomCount: 1,
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
+      const newReservation = {
+        id: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        leadGuestName: guestName,
+        leadGuestEmail: guestDetails.email.trim().toLowerCase(),
+        leadGuestPhone: guestDetails.phone.trim(),
+        memberId: detectedMemberId || null,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
+        numNights,
+        originalSubtotal: totalPrice,
+        // MRB-04: the proper originalSubtotal computation
+        discountScopeSnapshot: snapshottedDiscountScope,
+        subtotal: totalPrice,
+        // MRB-04: the proper subtotal after add-on math
+        totalPrice,
+        source: corporateDetails.isCorporate ? "corporate" : "online",
+        isCorporate: corporateDetails.isCorporate,
+        corporateCode: corporateDetails.corporateCode,
+        companyName: corporateDetails.companyName,
+        voucherCode: appliedVoucherCode,
+        memberDiscountPct: appliedMemberDiscountPct,
+        paymentStatus: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "awaiting-payment",
+        paymentMethod,
+        paymentProofUrl: paymentProofUrl || null,
+        paymentProofPath: paymentProofPath || null,
+        termsAccepted: true,
+        termsAcceptedAt: now,
+        termsVersion: termsConsentVersion,
+        privacyAccepted: true,
+        privacyAcceptedAt: now,
+        privacyVersion: termsConsentVersion,
+        roomCount: 1,
+        // MRB-06: matches the room-line count for N>1
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0,
+        holdExpiresAt: newBooking.holdExpiresAt ? newBooking.holdExpiresAt : null,
+        requestFingerprint: reservationRequestFingerprint,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "guest"
+      };
+      transaction.set(reservationDocRef, newReservation);
       transaction.set(bookingDocRef, newBooking);
       if (newBooking && newBooking.holdExpiresAt) {
         const he3 = newBooking.holdExpiresAt;
@@ -225786,6 +226015,19 @@ async function handleCreateBooking(req, res) {
       data: {
         bookingId,
         bookingRef: finalBookingRef,
+        // Per MRB-02 (2026-08-02, per decision #164): the
+        // canonical reservation id (client-preallocated or
+        // auto-minted) and the public reservation ref.
+        // Surfaced so the confirmation page can deep-link to
+        // `/manage?reservation=<id>` and the corporate
+        // confirmation step can render the group ref
+        // alongside the child booking ref. The shape mirrors
+        // `alreadyExistingBookingResponse` so the client
+        // gets the same fields whether the call is a fresh
+        // create or a reservation-level replay.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        idempotentReplay: false,
         // Per BF-39 (booking-flow audit 2026-06-26): surface the
         // server-computed `totalPrice` so the confirmation page
         // (and the corporate confirmation step) can display what
@@ -225814,6 +226056,28 @@ async function handleCreateBooking(req, res) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
+    } else if (
+      // Per MRB-02 (2026-08-02, per decision #164): the client
+      // preallocated a `reservationId` that already carries a
+      // *different* request fingerprint. The reservation header
+      // is canonical for idempotency, so a re-use of the same id
+      // with a different request is a conflict — the client
+      // surfaces it as "duplicate reservation id with different
+      // request, please generate a new one". 409 keeps the
+      // booking from being retried with the stale id.
+      error.message === "RESERVATION_ID_FINGERPRINT_CONFLICT"
+    ) {
+      status = 409;
+    } else if (
+      // Per MRB-02 (2026-08-02, per decision #164): the
+      // reservation header exists but the child booking does
+      // not — a partially-applied create. We refuse to recover
+      // it from this request (a half-stamped booking would
+      // break audit invariants). 500 surfaces the bug to staff
+      // and signals the client to abandon the reservation id.
+      error.message === "RESERVATION_HEADER_WITHOUT_CHILD"
+    ) {
+      status = 500;
     } else if (
       // Per BI-10 (booking-intercom audit 2026-07-06): a
       // corporate code that failed re-validation between the
