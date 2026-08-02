@@ -221116,6 +221116,59 @@ var PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1e3;
 var DEFAULT_TERMS_VERSION = "1.0.0";
 var TERMS_BODY_MAX_LENGTH = 5e4;
 
+// ../shared/utils/references.ts
+function pad(value, length) {
+  return String(value).padStart(length, "0");
+}
+function compactDate(value) {
+  const year = value.getFullYear();
+  const month = pad(value.getMonth() + 1, 2);
+  const day = pad(value.getDate(), 2);
+  return `${year}${month}${day}`;
+}
+function generateBookingRef(prefix, date, sequence) {
+  return `${prefix}-${compactDate(date)}-${pad(sequence, 5)}`;
+}
+function generateMemberNumber(prefix, sequence) {
+  return `${prefix}-${pad(sequence, 5)}`;
+}
+function generateStoreOrderRef(date, sequence) {
+  return `SO-${compactDate(date)}-${pad(sequence, 5)}`;
+}
+var BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/;
+var RESERVATION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isValidReservationId(value) {
+  return typeof value === "string" && RESERVATION_ID_REGEX.test(value.trim());
+}
+function generateReservationId(randomUUID = defaultRandomUUID) {
+  const id = randomUUID();
+  if (!isValidReservationId(id)) {
+    throw new Error("Generated reservationId did not match the expected UUIDv4 shape.");
+  }
+  return id;
+}
+function defaultRandomUUID() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    return String(g.crypto.randomUUID());
+  }
+  const { randomUUID } = require("node:crypto");
+  return String(randomUUID());
+}
+var LOOKUP_TOKEN_HEX_LENGTH = 32;
+function generateLookupToken(randomBytes = defaultRandomBytes) {
+  const bytes = randomBytes(LOOKUP_TOKEN_HEX_LENGTH / 2);
+  let hex = "";
+  for (let i2 = 0; i2 < bytes.length; i2++) {
+    hex += bytes[i2].toString(16).padStart(2, "0");
+  }
+  return hex;
+}
+function defaultRandomBytes(n2) {
+  const { randomBytes } = require("node:crypto");
+  return new Uint8Array(randomBytes(n2));
+}
+
 // ../shared/schemas/booking.ts
 var BookingDatesSchema = external_exports.object({
   checkIn: external_exports.string().min(1, "Choose a check-in date"),
@@ -221195,7 +221248,20 @@ var WalkinBookingSchema = external_exports.object({
   discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
   voucherCode: external_exports.string().trim().max(40).optional().default(""),
   linkedInquiryId: external_exports.string().trim().max(64).nullable().optional(),
-  testRunId: external_exports.string().trim().max(64).nullable().optional()
+  testRunId: external_exports.string().trim().max(64).nullable().optional(),
+  // Per MRB-02.x (2026-08-02, per decision #164): the
+  // optional client-preallocated `reservationId` (UUIDv4)
+  // for the reservation-level idempotency matrix. When
+  // absent (the current walk-in modal doesn't preallocate),
+  // the server auto-mints a UUIDv4 via `generateReservationId()`
+  // — same pattern as the public `/api/bookings/create` path.
+  // Walk-ins are staff-created, so the staff modal doesn't
+  // need to preallocate for retry-after-uncertain-response
+  // (the staff tab is open; the next submit starts a fresh
+  // form with a new `bookingId`); the optional field is here
+  // so a future walk-in client that does preallocate can
+  // ride the same idempotency contract.
+  reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
 }).strict();
 
 // ../shared/schemas/paymentMethod.ts
@@ -221682,59 +221748,6 @@ function getLockedManualNightlyRate(breakdown) {
   }
   const nightlyRate = Number(manualLine.nightlyRate);
   return Number.isFinite(nightlyRate) && nightlyRate >= 0 ? nightlyRate : null;
-}
-
-// ../shared/utils/references.ts
-function pad(value, length) {
-  return String(value).padStart(length, "0");
-}
-function compactDate(value) {
-  const year = value.getFullYear();
-  const month = pad(value.getMonth() + 1, 2);
-  const day = pad(value.getDate(), 2);
-  return `${year}${month}${day}`;
-}
-function generateBookingRef(prefix, date, sequence) {
-  return `${prefix}-${compactDate(date)}-${pad(sequence, 5)}`;
-}
-function generateMemberNumber(prefix, sequence) {
-  return `${prefix}-${pad(sequence, 5)}`;
-}
-function generateStoreOrderRef(date, sequence) {
-  return `SO-${compactDate(date)}-${pad(sequence, 5)}`;
-}
-var BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/;
-var RESERVATION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-function isValidReservationId(value) {
-  return typeof value === "string" && RESERVATION_ID_REGEX.test(value.trim());
-}
-function generateReservationId(randomUUID = defaultRandomUUID) {
-  const id = randomUUID();
-  if (!isValidReservationId(id)) {
-    throw new Error("Generated reservationId did not match the expected UUIDv4 shape.");
-  }
-  return id;
-}
-function defaultRandomUUID() {
-  const g = globalThis;
-  if (typeof g.crypto?.randomUUID === "function") {
-    return String(g.crypto.randomUUID());
-  }
-  const { randomUUID } = require("node:crypto");
-  return String(randomUUID());
-}
-var LOOKUP_TOKEN_HEX_LENGTH = 32;
-function generateLookupToken(randomBytes = defaultRandomBytes) {
-  const bytes = randomBytes(LOOKUP_TOKEN_HEX_LENGTH / 2);
-  let hex = "";
-  for (let i2 = 0; i2 < bytes.length; i2++) {
-    hex += bytes[i2].toString(16).padStart(2, "0");
-  }
-  return hex;
-}
-function defaultRandomBytes(n2) {
-  const { randomBytes } = require("node:crypto");
-  return new Uint8Array(randomBytes(n2));
 }
 
 // ../shared/utils/reservationFingerprint.ts
@@ -226143,7 +226156,15 @@ async function handleCreateWalkin(req, res) {
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
     linkedInquiryId,
-    testRunId: requestedTestRunId
+    testRunId: requestedTestRunId,
+    // Per MRB-02.x (2026-08-02, per decision #164): the
+    // optional client-preallocated `reservationId`. Walk-in
+    // callers don't currently preallocate, so the server
+    // auto-mints a UUIDv4 via `generateReservationId()` —
+    // the same pattern as the public `/api/bookings/create`
+    // path. When present, the server uses it as the
+    // canonical idempotency key for the create transaction.
+    reservationId: requestedReservationId
   } = parsedWalkin.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
@@ -226192,13 +226213,12 @@ async function handleCreateWalkin(req, res) {
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
+    const effectiveReservationId = requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId) ? requestedReservationId : generateReservationId();
+    const reservationDocRef = adminDb.collection("reservations").doc(effectiveReservationId);
+    let finalReservationRef = "";
     let newBooking = null;
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
-      const existingWalkin = await transaction.get(bookingDocRef);
-      if (existingWalkin.exists) {
-        throw new Error("Booking already exists");
-      }
       const roomRef = adminDb.collection("rooms").doc(roomId);
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) {
@@ -226215,6 +226235,59 @@ async function handleCreateWalkin(req, res) {
         if (windowActive) {
           throw new Error("Room no longer available");
         }
+      }
+      const existingReservationSnap = await transaction.get(reservationDocRef);
+      if (existingReservationSnap.exists) {
+        const existingData = existingReservationSnap.data() || {};
+        const walkinFingerprint = computeRequestFingerprint({
+          reservationId: effectiveReservationId,
+          roomLines: [{
+            type: String(roomData.type || "").trim(),
+            quantity: 1,
+            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
+            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
+            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
+          }],
+          checkIn: String(checkIn || "").trim(),
+          checkOut: String(checkOut || "").trim(),
+          leadGuestName: `${String(guestDetails.firstName || "").trim()} ${String(guestDetails.lastName || "").trim()}`,
+          leadGuestEmail: String(guestDetails.email || "").trim().toLowerCase(),
+          leadGuestPhone: String(guestDetails.phone || "").trim(),
+          source: "walk-in",
+          isCorporate: false,
+          corporateCode: "",
+          companyName: "",
+          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
+          memberDiscountPct: 0,
+          discountScope: normalizeDiscountScope(null),
+          // server-resolved DSC-01 scope lands in MRB-04
+          termsVersion: DEFAULT_TERMS_VERSION,
+          privacyVersion: DEFAULT_TERMS_VERSION
+        });
+        const sameRequest = String(existingData.requestFingerprint || "") === walkinFingerprint;
+        if (!sameRequest) {
+          throw new Error("RESERVATION_ID_FINGERPRINT_CONFLICT");
+        }
+        const existingChildSnap = await transaction.get(bookingDocRef);
+        if (existingChildSnap.exists) {
+          const existingChild = existingChildSnap.data() || {};
+          newBooking = {
+            ...existingChild,
+            bookingId,
+            reservationId: String(existingData.id || effectiveReservationId),
+            reservationRef: String(existingData.reservationRef || ""),
+            idempotentReplay: true
+          };
+          finalBookingRef = String(existingChild.bookingRef || "");
+          finalTotalPrice = Number(existingChild.totalPrice || 0);
+          finalReservationRef = String(existingData.reservationRef || "");
+          return;
+        }
+        throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+      }
+      const existingWalkin = await transaction.get(bookingDocRef);
+      if (existingWalkin.exists) {
+        throw new Error("Booking already exists");
       }
       const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
       const hotelConfigDoc = await transaction.get(hotelConfigRef);
@@ -226456,6 +226529,7 @@ async function handleCreateWalkin(req, res) {
       }
       const bookingRef = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef;
+      finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       newBooking = {
         bookingRef,
@@ -226546,9 +226620,101 @@ async function handleCreateWalkin(req, res) {
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
         ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId } : {},
+        // Per MRB-02.x (2026-08-02, per decision #164): the
+        // reservation header linkage. Same shape as the
+        // public path — `reservationId` is the
+        // (auto-minted or preallocated) UUID, the three
+        // compatibility copies are denormalized
+        // projections for fast admin search/display. The
+        // single-room walk-in case is `position: 1` /
+        // `roomCount: 1`; MRB-06's N>1 generalization
+        // will assign sequential positions.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        reservationPosition: 1,
+        reservationRoomCount: 1,
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
+      const newReservation = {
+        id: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        leadGuestName: guestName,
+        leadGuestEmail: guestDetails.email.trim().toLowerCase(),
+        leadGuestPhone: guestDetails.phone.trim(),
+        memberId: null,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
+        numNights,
+        originalSubtotal: pricingSubtotal,
+        discountScopeSnapshot: snapshottedDiscountScope,
+        subtotal: pricingSubtotal,
+        totalPrice: finalTotalPrice,
+        source: "walk-in",
+        isCorporate: false,
+        corporateCode: "",
+        companyName: "",
+        voucherCode,
+        memberDiscountPct: 0,
+        // Walk-in lands on `confirmed` or `checked-in`
+        // directly (no `pending` hold). The header
+        // mirrors the child's resolved status so a
+        // future read doesn't have to fan out to every
+        // child to derive the reservation-level money
+        // state. `awaiting-payment` is reserved for the
+        // `pending` child status the public create uses
+        // — the walk-in never lands on that state, so
+        // the header carries the resolved label
+        // directly.
+        paymentStatus: status === "checked-in" ? "in-house" : "confirmed",
+        paymentMethod,
+        paymentProofUrl: null,
+        paymentProofPath: null,
+        termsAccepted: true,
+        termsAcceptedAt: now,
+        termsVersion: DEFAULT_TERMS_VERSION,
+        privacyAccepted: true,
+        privacyAcceptedAt: now,
+        privacyVersion: DEFAULT_TERMS_VERSION,
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: status === "checked-in" ? 1 : 0,
+        checkedOutRoomCount: status === "checked-out" ? 1 : 0,
+        // Walk-ins have no auto-expiry hold (the staff is
+        // creating the booking, not waiting on a guest
+        // action) — `null` mirrors the public path's
+        // `payment-uploaded` case.
+        holdExpiresAt: null,
+        requestFingerprint: computeRequestFingerprint({
+          reservationId: effectiveReservationId,
+          roomLines: [{
+            type: String(roomData.type || "").trim(),
+            quantity: 1,
+            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
+            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
+            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
+          }],
+          checkIn: String(checkIn || "").trim(),
+          checkOut: String(checkOut || "").trim(),
+          leadGuestName: guestName,
+          leadGuestEmail: guestDetails.email.trim().toLowerCase(),
+          leadGuestPhone: guestDetails.phone.trim(),
+          source: "walk-in",
+          isCorporate: false,
+          corporateCode: "",
+          companyName: "",
+          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
+          memberDiscountPct: 0,
+          discountScope: normalizeDiscountScope(null),
+          termsVersion: DEFAULT_TERMS_VERSION,
+          privacyVersion: DEFAULT_TERMS_VERSION
+        }),
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "staff"
+      };
+      transaction.set(reservationDocRef, newReservation);
       if (status === "checked-in") {
         transaction.update(roomRef, { status: "occupied" });
       }
@@ -226614,16 +226780,39 @@ async function handleCreateWalkin(req, res) {
       data: {
         bookingId,
         bookingRef: finalBookingRef,
+        // Per MRB-02.x (2026-08-02, per decision #164):
+        // echo the reservation linkage in the walk-in
+        // success payload. Symmetric with the public
+        // path so a future walk-in modal that wants to
+        // display the group ref / open the booking in
+        // the admin view can deep-link to
+        // `/manage?reservation=<id>`. The replay path
+        // (set inside the transaction) carries
+        // `idempotentReplay: true`; the fresh create
+        // path stamps `false`.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        idempotentReplay: Boolean(newBooking?.idempotentReplay),
         totalPrice: finalTotalPrice,
         rateBreakdown: newBooking?.rateBreakdown ?? null
       }
     });
   } catch (error) {
     console.error("Walk-in booking creation failed:", error);
-    const status2 = error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR ? 409 : 500;
+    const errorMessage = typeof error?.message === "string" ? error.message : "";
+    let status2;
+    if (errorMessage === "Room no longer available" || errorMessage === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
+      status2 = 409;
+    } else if (errorMessage === "RESERVATION_ID_FINGERPRINT_CONFLICT") {
+      status2 = 409;
+    } else if (errorMessage === "RESERVATION_HEADER_WITHOUT_CHILD") {
+      status2 = 500;
+    } else {
+      status2 = 500;
+    }
     return res.status(status2).json({
       success: false,
-      error: error.message || "An unexpected error occurred during walk-in booking creation."
+      error: errorMessage || "An unexpected error occurred during walk-in booking creation."
     });
   }
 }

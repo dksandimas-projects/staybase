@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RESERVATION_ID_REGEX } from "../utils/references";
 
 export const BookingDatesSchema = z
   .object({
@@ -84,7 +85,20 @@ export const WalkinBookingSchema = z.object({
   discountType: z.enum(["", "senior", "pwd"]).optional().default(""),
   voucherCode: z.string().trim().max(40).optional().default(""),
   linkedInquiryId: z.string().trim().max(64).nullable().optional(),
-  testRunId: z.string().trim().max(64).nullable().optional()
+  testRunId: z.string().trim().max(64).nullable().optional(),
+  // Per MRB-02.x (2026-08-02, per decision #164): the
+  // optional client-preallocated `reservationId` (UUIDv4)
+  // for the reservation-level idempotency matrix. When
+  // absent (the current walk-in modal doesn't preallocate),
+  // the server auto-mints a UUIDv4 via `generateReservationId()`
+  // — same pattern as the public `/api/bookings/create` path.
+  // Walk-ins are staff-created, so the staff modal doesn't
+  // need to preallocate for retry-after-uncertain-response
+  // (the staff tab is open; the next submit starts a fresh
+  // form with a new `bookingId`); the optional field is here
+  // so a future walk-in client that does preallocate can
+  // ride the same idempotency contract.
+  reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional()
 }).strict();
 
 export type BookingDatesInput = z.infer<typeof BookingDatesSchema>;

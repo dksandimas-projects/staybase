@@ -2289,7 +2289,15 @@ export async function handleCreateWalkin(req: any, res: any) {
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
     linkedInquiryId,
-    testRunId: requestedTestRunId
+    testRunId: requestedTestRunId,
+    // Per MRB-02.x (2026-08-02, per decision #164): the
+    // optional client-preallocated `reservationId`. Walk-in
+    // callers don't currently preallocate, so the server
+    // auto-mints a UUIDv4 via `generateReservationId()` —
+    // the same pattern as the public `/api/bookings/create`
+    // path. When present, the server uses it as the
+    // canonical idempotency key for the create transaction.
+    reservationId: requestedReservationId
   } = parsedWalkin.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
@@ -2358,19 +2366,35 @@ export async function handleCreateWalkin(req: any, res: any) {
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
+    // Per MRB-02.x (2026-08-02, per decision #164): the
+    // canonical reservation id for this walk-in create.
+    // The walk-in modal doesn't currently preallocate a
+    // `reservationId`, so the server auto-mints one (same
+    // pattern as the public `/api/bookings/create` path).
+    // The walk-in flow gets the same idempotency matrix
+    // (replay / 409 / 500) on the same `reservationId` +
+    // `requestFingerprint` anchor; for walk-in the
+    // replay is rarely hit (staff re-submits generate a
+    // fresh `bookingId`, so the auto-mint `reservationId`
+    // also changes), but the contract is symmetric with
+    // the public path.
+    const effectiveReservationId: string = (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId))
+      ? requestedReservationId
+      : generateReservationId();
+    const reservationDocRef = adminDb.collection("reservations").doc(effectiveReservationId);
+    let finalReservationRef = "";
     let newBooking: Record<string, any> | null = null;
 
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
-      // Per LR-C1: Firestore requires all transaction reads before
-      // writes. Keep the idempotency read with the rest of the read
-      // phase so immediate-check-in walkins can safely update the room.
-      const existingWalkin = await transaction.get(bookingDocRef);
-      if (existingWalkin.exists) {
-        throw new Error("Booking already exists");
-      }
-
-      // 1. Fetch Room Details
+      // 1. Fetch Room Details. Read FIRST (before the
+      // reservation read) so the walk-in fingerprint has
+      // `roomData.type` available — the fingerprint's
+      // `type` field is the room's type label, not the
+      // roomId. The room doc also enforces the standard
+      // "is active" + "is blocked" gates the public
+      // create uses; failures here throw the canonical
+      // errors the catch block already maps.
       const roomRef = adminDb.collection("rooms").doc(roomId);
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) {
@@ -2389,6 +2413,97 @@ export async function handleCreateWalkin(req: any, res: any) {
         if (windowActive) {
           throw new Error("Room no longer available");
         }
+      }
+      // 2. Per MRB-02.x (2026-08-02, per decision #164):
+      // the reservation-level idempotency check runs
+      // after the room read (so the fingerprint has the
+      // room type) and before the booking doc read (so
+      // the canonical idempotency anchor is the
+      // reservation, not the booking). Walk-in callers
+      // don't currently preallocate `reservationId`, so
+      // the auto-mint means each request gets a fresh
+      // id — the conflict path is theoretically
+      // unreachable from the desk UI, but the contract
+      // is symmetric with the public path so a future
+      // walk-in client that does preallocate rides the
+      // same idempotency.
+      const existingReservationSnap = await transaction.get(reservationDocRef);
+      if (existingReservationSnap.exists) {
+        const existingData = existingReservationSnap.data() || {};
+        // Compute the per-walk-in fingerprint from the
+        // room's type + the body inputs. The walk-in
+        // fingerprint is the same canonical shape as the
+        // public path — same byte-equivalence rules, same
+        // placeholder for `discountScope` (the
+        // server-resolved DSC-01 scope is the MRB-04
+        // generalization; the walk-in snapshot reads the
+        // same `normalizeDiscountScope(null)` shape so a
+        // replay is byte-equivalent).
+        const walkinFingerprint = computeRequestFingerprint({
+          reservationId: effectiveReservationId,
+          roomLines: [{
+            type: String(roomData.type || "").trim(),
+            quantity: 1,
+            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
+            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
+            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
+          }],
+          checkIn: String(checkIn || "").trim(),
+          checkOut: String(checkOut || "").trim(),
+          leadGuestName: `${String((guestDetails as any).firstName || "").trim()} ${String((guestDetails as any).lastName || "").trim()}`,
+          leadGuestEmail: String((guestDetails as any).email || "").trim().toLowerCase(),
+          leadGuestPhone: String((guestDetails as any).phone || "").trim(),
+          source: "walk-in",
+          isCorporate: false,
+          corporateCode: "",
+          companyName: "",
+          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
+          memberDiscountPct: 0,
+          discountScope: normalizeDiscountScope(null),  // server-resolved DSC-01 scope lands in MRB-04
+          termsVersion: DEFAULT_TERMS_VERSION,
+          privacyVersion: DEFAULT_TERMS_VERSION
+        });
+        const sameRequest = String(existingData.requestFingerprint || "") === walkinFingerprint;
+        if (!sameRequest) {
+          throw new Error("RESERVATION_ID_FINGERPRINT_CONFLICT");
+        }
+        // Idempotent replay: same id + same fingerprint +
+        // child exists. Build a response shape from the
+        // existing docs and short-circuit. The walk-in
+        // caller doesn't need the full fresh-create
+        // payload (room assignment + rate breakdown); the
+        // legacy fields + the reservation linkage are
+        // sufficient.
+        const existingChildSnap = await transaction.get(bookingDocRef);
+        if (existingChildSnap.exists) {
+          const existingChild = existingChildSnap.data() || {};
+          newBooking = {
+            ...(existingChild as any),
+            bookingId,
+            reservationId: String(existingData.id || effectiveReservationId),
+            reservationRef: String(existingData.reservationRef || ""),
+            idempotentReplay: true
+          };
+          finalBookingRef = String(existingChild.bookingRef || "");
+          finalTotalPrice = Number(existingChild.totalPrice || 0);
+          finalReservationRef = String(existingData.reservationRef || "");
+          return;
+        }
+        throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+      }
+      // 3. Per LR-C1: Firestore requires all transaction
+      // reads before writes. The booking doc read is the
+      // legacy "Booking already exists" guard — defensive
+      // only. Walk-in callers don't currently preallocate
+      // `reservationId`, so a collision here is effectively
+      // impossible (each request gets a fresh
+      // auto-minted id), but the guard stays so a future
+      // caller that preallocates a stable `bookingId` AND
+      // a fresh `reservationId` doesn't accidentally
+      // double-write.
+      const existingWalkin = await transaction.get(bookingDocRef);
+      if (existingWalkin.exists) {
+        throw new Error("Booking already exists");
       }
 
       // 1b. Per W3.6 + W3.7: pricing + max capacity live on the
@@ -2797,6 +2912,16 @@ export async function handleCreateWalkin(req: any, res: any) {
       // share the same scope.
       const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef;
+      // Per MRB-02.x (2026-08-02, per decision #164): mint
+      // the public reservation ref (`R-YYYYMMDD-NNNNN`) in
+      // the same transaction so it shares the same `now` +
+      // counter transaction as the booking ref. The walk-in
+      // is always `position: 1` / `roomCount: 1` (single
+      // room), so the per-day seq is whatever the counter
+      // produced (the counter is global, not per-reservation).
+      // Captured at function scope so the post-transaction
+      // success response can echo it back.
+      finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
 
       // 7. Prepare Document Fields
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
@@ -2892,9 +3017,117 @@ export async function handleCreateWalkin(req: any, res: any) {
         ...(validatedTestRunId
           ? { isTestData: true, testRunId: validatedTestRunId }
           : {}),
+        // Per MRB-02.x (2026-08-02, per decision #164): the
+        // reservation header linkage. Same shape as the
+        // public path — `reservationId` is the
+        // (auto-minted or preallocated) UUID, the three
+        // compatibility copies are denormalized
+        // projections for fast admin search/display. The
+        // single-room walk-in case is `position: 1` /
+        // `roomCount: 1`; MRB-06's N>1 generalization
+        // will assign sequential positions.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        reservationPosition: 1,
+        reservationRoomCount: 1,
         createdAt: new Date(),
         updatedAt: new Date()
       };
+
+      // Per MRB-02.x (2026-08-02, per decision #164):
+      // create the reservation header in the SAME
+      // transaction as the child booking. The header owns
+      // the public ref + the lead booker + the
+      // source / corporate context + the money state (the
+      // walk-in has no `pending` → `confirmed` flip — it
+      // lands on `confirmed` or `checked-in` directly) +
+      // the snapshotted discount scope + the request
+      // fingerprint. The header's `paymentStatus`
+      // reflects the child status at commit time
+      // (`awaiting-payment` for `pending`, the resolved
+      // status otherwise). Walk-in callers don't have a
+      // member-from-Authorization-token path, so
+      // `memberId: null` + `memberDiscountPct: 0` (same
+      // shape as the public path's anonymous branch).
+      const newReservation = {
+        id: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        leadGuestName: guestName,
+        leadGuestEmail: guestDetails.email.trim().toLowerCase(),
+        leadGuestPhone: guestDetails.phone.trim(),
+        memberId: null,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
+        numNights,
+        originalSubtotal: pricingSubtotal,
+        discountScopeSnapshot: snapshottedDiscountScope,
+        subtotal: pricingSubtotal,
+        totalPrice: finalTotalPrice,
+        source: "walk-in",
+        isCorporate: false,
+        corporateCode: "",
+        companyName: "",
+        voucherCode,
+        memberDiscountPct: 0,
+        // Walk-in lands on `confirmed` or `checked-in`
+        // directly (no `pending` hold). The header
+        // mirrors the child's resolved status so a
+        // future read doesn't have to fan out to every
+        // child to derive the reservation-level money
+        // state. `awaiting-payment` is reserved for the
+        // `pending` child status the public create uses
+        // — the walk-in never lands on that state, so
+        // the header carries the resolved label
+        // directly.
+        paymentStatus: (status === "checked-in" ? "in-house" : "confirmed"),
+        paymentMethod,
+        paymentProofUrl: null,
+        paymentProofPath: null,
+        termsAccepted: true,
+        termsAcceptedAt: now,
+        termsVersion: DEFAULT_TERMS_VERSION,
+        privacyAccepted: true,
+        privacyAcceptedAt: now,
+        privacyVersion: DEFAULT_TERMS_VERSION,
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: status === "checked-in" ? 1 : 0,
+        checkedOutRoomCount: status === "checked-out" ? 1 : 0,
+        // Walk-ins have no auto-expiry hold (the staff is
+        // creating the booking, not waiting on a guest
+        // action) — `null` mirrors the public path's
+        // `payment-uploaded` case.
+        holdExpiresAt: null,
+        requestFingerprint: computeRequestFingerprint({
+          reservationId: effectiveReservationId,
+          roomLines: [{
+            type: String(roomData.type || "").trim(),
+            quantity: 1,
+            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
+            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
+            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
+          }],
+          checkIn: String(checkIn || "").trim(),
+          checkOut: String(checkOut || "").trim(),
+          leadGuestName: guestName,
+          leadGuestEmail: guestDetails.email.trim().toLowerCase(),
+          leadGuestPhone: guestDetails.phone.trim(),
+          source: "walk-in",
+          isCorporate: false,
+          corporateCode: "",
+          companyName: "",
+          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
+          memberDiscountPct: 0,
+          discountScope: normalizeDiscountScope(null),
+          termsVersion: DEFAULT_TERMS_VERSION,
+          privacyVersion: DEFAULT_TERMS_VERSION
+        }),
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "staff"
+      };
+      transaction.set(reservationDocRef, newReservation);
 
       // Auto update room status if immediate check-in
       if (status === "checked-in") {
@@ -2990,6 +3223,19 @@ export async function handleCreateWalkin(req: any, res: any) {
       data: {
         bookingId,
         bookingRef: finalBookingRef,
+        // Per MRB-02.x (2026-08-02, per decision #164):
+        // echo the reservation linkage in the walk-in
+        // success payload. Symmetric with the public
+        // path so a future walk-in modal that wants to
+        // display the group ref / open the booking in
+        // the admin view can deep-link to
+        // `/manage?reservation=<id>`. The replay path
+        // (set inside the transaction) carries
+        // `idempotentReplay: true`; the fresh create
+        // path stamps `false`.
+        reservationId: effectiveReservationId,
+        reservationRef: finalReservationRef,
+        idempotentReplay: Boolean((newBooking as any)?.idempotentReplay),
         totalPrice: finalTotalPrice,
         rateBreakdown: newBooking?.rateBreakdown ?? null
       }
@@ -2997,10 +3243,33 @@ export async function handleCreateWalkin(req: any, res: any) {
 
   } catch (error: any) {
     console.error("Walk-in booking creation failed:", error);
-    const status = error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR ? 409 : 500;
+    // Per MRB-02.x (2026-08-02, per decision #164):
+    // symmetric with `handleCreateBooking` — the same
+    // reservation-level error mappings. The walk-in's
+    // conflict path is theoretically unreachable from
+    // the desk UI (walk-in callers don't currently
+    // preallocate `reservationId`, so each request
+    // auto-mints a fresh id), but the contract is
+    // symmetric with the public path so a future
+    // walk-in client that does preallocate rides the
+    // same idempotency.
+    const errorMessage = typeof error?.message === "string" ? error.message : "";
+    let status: number;
+    if (
+      errorMessage === "Room no longer available"
+      || errorMessage === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR
+    ) {
+      status = 409;
+    } else if (errorMessage === "RESERVATION_ID_FINGERPRINT_CONFLICT") {
+      status = 409;
+    } else if (errorMessage === "RESERVATION_HEADER_WITHOUT_CHILD") {
+      status = 500;
+    } else {
+      status = 500;
+    }
     return res.status(status).json({
       success: false,
-      error: error.message || "An unexpected error occurred during walk-in booking creation."
+      error: errorMessage || "An unexpected error occurred during walk-in booking creation."
     });
   }
 }
