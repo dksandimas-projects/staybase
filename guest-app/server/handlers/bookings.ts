@@ -3496,23 +3496,42 @@ export async function handleAddRefund(req: any, res: any) {
   if (req.staff?.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only an administrator can approve refunds." });
   }
-  const { bookingId, amount, method, reason } = req.body || {};
-  const numericAmount = Number(amount);
-  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
-  const safeMethod = typeof method === "string" ? method.trim().slice(0, 80) : "";
+  // Per CRL-01 (Cancellation & Refund Lifecycle, 2026-08-01):
+  // the client preallocates the refundId so a retry-after-uncertain-response
+  // (network blip, the staff tab being closed mid-submit) cannot append a
+  // second refund entry. Mirrors the handleAddPayment contract (refundId
+  // validated against the same preallocated-ID regex). Exact replay with the
+  // same amount/method/reason/reference returns the existing record; same
+  // ID with different fields is a 409 conflict. The append-only ledger is
+  // preserved (server-authoritative create, no client-side rules allowlist).
+  const { bookingId, refundId, amount, method, reason, transactionReference } = req.body || {};
   if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
+  if (!refundId || !PREALLOCATED_PAYMENT_ID_REGEX.test(String(refundId))) {
+    return res.status(400).json({ success: false, error: "A valid refund ID is required." });
+  }
+  const numericAmount = Number(amount);
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const safeMethod = typeof method === "string" ? method.trim().slice(0, 80) : "";
   if (!Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 1_000_000) {
     return res.status(400).json({ success: false, error: "Refund amount must be between 0.01 and 1,000,000." });
   }
   if (!safeMethod || !safeReason) {
     return res.status(400).json({ success: false, error: "Refund method and reason are required." });
   }
+  // Optional per-tender reference (mirrors the handleAddPayment shape; the
+  // current UI does not collect one but the field is reserved for CRL-07's
+  // "Record processed refund" rename). Null/empty coerces to absent so the
+  // conflict check stays byte-equivalent to a UI that does not send it.
+  const safeTransactionReference = typeof transactionReference === "string"
+    ? transactionReference.trim().slice(0, 200) || null
+    : null;
 
   try {
     let refundRecord: Record<string, any> = {};
     let netCollected = 0;
+    let idempotentReplay = false;
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef);
@@ -3520,11 +3539,36 @@ export async function handleAddRefund(req: any, res: any) {
       const paymentsRef = bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       netCollected = paymentsSnapshot.docs.reduce((sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0), 0);
+
+      // Idempotency check: a refund with this exact refundId already exists.
+      // Same amount/method/reason/reference (or no-reference on both sides)
+      // replays the original commit. A mismatch on any field is a 409 — the
+      // client reused an ID it had already committed for a different refund,
+      // which would be a staff typo or a duplicate-form bug we want loud,
+      // not silent.
+      const existingRefund = paymentsSnapshot.docs.find((docSnap: any) => docSnap.id === refundId);
+      if (existingRefund) {
+        const existingData = existingRefund.data();
+        const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount
+          && String(existingData.method || "") === safeMethod
+          && String(existingData.note || "") === safeReason
+          && (existingData.transactionReference || null) === safeTransactionReference;
+        if (!sameRequest) {
+          throw new Error("Refund ID has already been used for a different refund.");
+        }
+        // Idempotent replay: re-read the cumulative net so the response
+        // reflects the post-refund balance (which is unchanged from the
+        // original commit but is the most truthful figure to surface).
+        refundRecord = existingData;
+        idempotentReplay = true;
+        return;
+      }
+
       if (numericAmount > netCollected) {
         throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
       }
       const approvedBy = req.staff.uid || "admin";
-      refundRecord = {
+      const newRecord: Record<string, any> = {
         type: "refund",
         amount: -numericAmount,
         method: safeMethod,
@@ -3534,11 +3578,26 @@ export async function handleAddRefund(req: any, res: any) {
         recordedBy: approvedBy,
         recordedAt: new Date()
       };
-      transaction.set(paymentsRef.doc(), refundRecord);
+      if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
+      refundRecord = newRecord;
+      // transaction.create (not set) so a server-side race that lost the
+      // existingRefund lookup still throws a clean ALREADY_EXISTS rather
+      // than overwriting the original ledger entry.
+      transaction.create(paymentsRef.doc(refundId), newRecord);
     });
-    return res.status(200).json({ success: true, data: { ...refundRecord, netCollected: netCollected - numericAmount } });
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...refundRecord,
+        netCollected: netCollected - numericAmount,
+        idempotentReplay
+      }
+    });
   } catch (error: any) {
     if (error.message === "Booking not found") return res.status(404).json({ success: false, error: "Booking not found." });
+    if (error.message === "Refund ID has already been used for a different refund.") {
+      return res.status(409).json({ success: false, error: error.message });
+    }
     const status = String(error.message || "").startsWith("Refund exceeds") ? 400 : 500;
     return res.status(status).json({ success: false, error: error.message || "Unable to record refund." });
   }

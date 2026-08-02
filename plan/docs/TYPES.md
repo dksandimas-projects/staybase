@@ -241,9 +241,9 @@ Booking {
 }
 
 OnsitePayment {
-  id: string              // client-preallocated for idempotent onsite payment creation
+  id: string              // client-preallocated for idempotent onsite payment OR refund creation (CRL-01, 2026-08-01: refundId shares the paymentId shape)
   type: "payment" | "refund"
-  amount: number          // absolute value capped at 1,000,000
+  amount: number          // absolute value capped at 1,000,000; refund entries are negative
   method: PaymentMethod
   note: string
   /** Tender-specific identifier for this individual ledger entry
@@ -253,7 +253,8 @@ OnsitePayment {
    *  top-level `Booking.paymentReferenceNumber` is retired.
    *  Required only when the method's `requireReferenceNumber`
    *  config says so; cash and legacy entries omit it. Part of
-   *  the idempotency comparison (amount + method + reference + note). */
+   *  the idempotency comparison for both payments and refunds
+   *  (amount + method + reference + note). */
   transactionReference: string | null
   reason: string | null
   approvedBy: string | null

@@ -210,7 +210,7 @@ rate breakdown.
 
 ### `bookings/{bookingId}/payments/{paymentId}`
 
-Subcollection — audit trail of all onsite payments, uploaded-payment verifications, and refunds. Append-only, never edited or deleted. Payment clients preallocate `paymentId`; the server creates that exact document so matching retries are idempotent. Equal-amount reference-free installments remain distinct when they intentionally use different IDs, and reusing an existing ID with different details is rejected. All writes use authenticated server routes; Firestore client creation is denied.
+Subcollection — audit trail of all onsite payments, uploaded-payment verifications, and refunds. Append-only, never edited or deleted. **Payments and refunds both use client-preallocated IDs** (`paymentId` for `/api/bookings/add-payment` and `/api/bookings/verify-and-record-payment`; `refundId` for `/api/bookings/add-refund` per CRL-01, 2026-08-01) so a retry after an uncertain response cannot append a duplicate entry. The server creates that exact document via `transaction.create` so a server-side race that lost the existing-ID lookup still throws `ALREADY_EXISTS` rather than overwriting the original. Equal-amount reference-free installments remain distinct when they intentionally use different IDs, and reusing an existing ID with different amount/method/reason/transactionReference is rejected (a payment mismatch is 409; a refund mismatch is 409 per CRL-01). All writes use authenticated server routes; Firestore client creation is denied.
 
 | Field | Type | Notes |
 |---|---|---|
