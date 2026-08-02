@@ -86,18 +86,20 @@ describe("EXB-03 — capacity overflow rule (helper + three call sites)", () => 
   });
 
   it("handleCreateWalkin calls the helper with the walkin-scoped variables", () => {
-    // The walk-in path uses the same helper, scoped to
-    // `walkinNumAdults` + `walkinNumChildren` +
-    // `walkinExtraBedCount` (the walkin transaction
-    // already validated `walkinNumAdults +
-    // walkinNumChildren === guests` + the per-type
-    // `maxExtraBeds` cap, so the overflow check is the
-    // last gate before the booking write).
+    // The walk-in path uses the same helper. The walk-in
+    // transaction already validated the reservation's total
+    // occupancy against `guests` and each room's per-type
+    // `maxExtraBeds` cap, so the overflow check is the last gate
+    // before the booking write.
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the check runs
+    // once per room stay, against that stay's own occupancy and
+    // its own type entry.
     expect(bookingsHandlerSrc).toMatch(
-      /const\s+walkinOverflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}walkinNumAdults,[\s\S]{0,200}walkinNumChildren,[\s\S]{0,200}maxCapacity:\s*typeMaxCapacity,[\s\S]{0,200}maxChildren:\s*walkinMaxChildren[\s\S]{0,200}\}\)/
+      /const\s+lineOverflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,300}numAdults:\s*assigned\.numAdults,[\s\S]{0,300}numChildren:\s*assigned\.numChildren,[\s\S]{0,300}maxCapacity:[\s\S]{0,300}lineTypeEntry\.maxCapacity[\s\S]{0,300}maxChildren:[\s\S]{0,300}lineTypeEntry\.maxChildren[\s\S]{0,300}\}\)/
     );
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*walkinOverflow\.requiredExtraBeds\s*>\s*walkinExtraBedCount\s*\)\s*\{[\s\S]{0,300}Not enough extra beds:/m
+      /if\s*\(\s*lineOverflow\.requiredExtraBeds\s*>\s*lineExtraBedCount\s*\)\s*\{[\s\S]{0,300}Not enough extra beds:/m
     );
   });
 
@@ -134,10 +136,15 @@ describe("EXB-03 — capacity overflow rule (helper + three call sites)", () => 
   it("handleCreateWalkin's per-type cap on `extraBedCount` is preserved", () => {
     // Same layered pattern as handleCreateBooking —
     // the per-type cap fires first, then the overflow
-    // check. Walkin derives `walkinTypeMaxExtraBeds`
-    // from the room type.
+    // check.
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the allowance is
+    // read from each room stay's own type entry
+    // (`lineMaxExtraBeds`), so a reservation mixing types caps
+    // each room correctly instead of measuring every room against
+    // the primary room's allowance.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*walkinExtraBedCount\s*>\s*walkinTypeMaxExtraBeds\s*\)\s*\{[\s\S]{0,200}Extra bed count \(\$\{walkinExtraBedCount\}\) exceeds the room type's allowance/
+      /if\s*\(\s*lineExtraBedCount\s*>\s*lineMaxExtraBeds\s*\)\s*\{[\s\S]{0,200}Extra bed count \(\$\{lineExtraBedCount\}\) exceeds the room type's allowance/
     );
   });
 

@@ -2670,6 +2670,11 @@ export async function handleCreateWalkin(req: any, res: any) {
   const {
     bookingId,
     roomId,
+    // Per MRB-07 (2026-08-02, per decision #159): the optional
+    // N-room room list. Absent for every pre-MRB-07 caller — the
+    // server then derives a single line from the top-level fields,
+    // which keeps the single-room walk-in byte-equivalent.
+    rooms: requestedRooms,
     checkIn,
     checkOut,
     guests,
@@ -2713,6 +2718,68 @@ export async function handleCreateWalkin(req: any, res: any) {
     // canonical idempotency key for the create transaction.
     reservationId: requestedReservationId
   } = parsedWalkin.data;
+
+  // Per MRB-07 (2026-08-02, per decision #159): resolve the canonical
+  // room lines. Absent `rooms` → one line derived from the top-level
+  // fields (the historical single-room shape, byte-equivalent). Present
+  // `rooms` → the array is canonical, and the top-level `roomId` +
+  // `guests` must agree with it. The agreement checks exist because the
+  // body carries the same facts in two places; per the "never trust a
+  // client-supplied total" rule the server refuses rather than picking
+  // a winner.
+  const walkinRoomLines: Array<{ roomId: string; numAdults: number; numChildren: number; extraBedCount: number }> =
+    Array.isArray(requestedRooms) && requestedRooms.length > 0
+      ? requestedRooms.map((line) => ({
+          roomId: String(line.roomId).trim(),
+          numAdults: Math.max(0, Math.floor(Number(line.numAdults) || 0)),
+          numChildren: Math.max(0, Math.floor(Number(line.numChildren) || 0)),
+          extraBedCount: Math.max(0, Math.floor(Number(line.extraBedCount) || 0))
+        }))
+      : [{
+          roomId,
+          numAdults: Number.isFinite(Number(requestedNumAdults))
+            ? Math.max(0, Math.floor(Number(requestedNumAdults)))
+            : guests,
+          numChildren: Number.isFinite(Number(requestedNumChildren))
+            ? Math.max(0, Math.floor(Number(requestedNumChildren)))
+            : 0,
+          extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount) || 0))
+        }];
+
+  if (Array.isArray(requestedRooms) && requestedRooms.length > 0) {
+    if (walkinRoomLines[0].roomId !== roomId) {
+      return res.status(400).json({
+        success: false,
+        error: "The first room in the reservation must match the primary room."
+      });
+    }
+    const lineGuestTotal = walkinRoomLines.reduce((sum, line) => sum + line.numAdults + line.numChildren, 0);
+    if (lineGuestTotal !== guests) {
+      return res.status(400).json({
+        success: false,
+        error: `Occupancy split mismatch: the rooms hold ${lineGuestTotal} guest(s) but the reservation says ${guests}.`
+      });
+    }
+    if (walkinRoomLines.some((line) => line.numAdults + line.numChildren < 1)) {
+      return res.status(400).json({
+        success: false,
+        error: "Every room in the reservation must have at least one guest."
+      });
+    }
+    // The same room cannot be sold twice inside one reservation.
+    // Rejected before the transaction so the desk gets an actionable
+    // message instead of an availability conflict against its own
+    // booking.
+    const distinctWalkinRoomIds = new Set(walkinRoomLines.map((line) => line.roomId));
+    if (distinctWalkinRoomIds.size !== walkinRoomLines.length) {
+      return res.status(400).json({
+        success: false,
+        error: "The same room was selected more than once. Each room in a reservation must be distinct."
+      });
+    }
+  }
+
+  const walkinRoomCount = walkinRoomLines.length;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
@@ -2809,25 +2876,56 @@ export async function handleCreateWalkin(req: any, res: any) {
       // "is active" + "is blocked" gates the public
       // create uses; failures here throw the canonical
       // errors the catch block already maps.
-      const roomRef = adminDb.collection("rooms").doc(roomId);
-      const roomDoc = await transaction.get(roomRef);
-      if (!roomDoc.exists) {
-        throw new Error("Room not found");
-      }
-      const roomData = roomDoc.data()!;
-      if (!roomData.isActive) {
-        throw new Error("Room is inactive");
-      }
-      if (roomData.status === "blocked") {
-        const blockedFrom = toDateOrNull(roomData.blockedFrom);
-        const blockedTo = toDateOrNull(roomData.blockedTo);
-        const windowActive = blockedFrom && blockedTo
-          ? checkInDate < blockedTo && checkOutDate > blockedFrom
-          : true;
-        if (windowActive) {
-          throw new Error("Room no longer available");
+      // Per MRB-07 (2026-08-02, per decision #159): read EVERY room in
+      // the reservation, not just the primary one. Each room runs the
+      // same "exists / active / not blocked in this window" gates the
+      // single-room path ran; a failure on any room aborts the whole
+      // transaction, so a multi-room walk-in is all-or-nothing (no
+      // partially-created reservation). For a single-line reservation
+      // this loop runs once and is byte-equivalent to the pre-MRB-07
+      // read.
+      const walkinAssignedRooms: Array<{
+        roomId: string;
+        ref: FirebaseFirestore.DocumentReference;
+        data: any;
+        numAdults: number;
+        numChildren: number;
+        extraBedCount: number;
+      }> = [];
+      for (const line of walkinRoomLines) {
+        const lineRoomRef = adminDb.collection("rooms").doc(line.roomId);
+        const lineRoomDoc = await transaction.get(lineRoomRef);
+        if (!lineRoomDoc.exists) {
+          throw new Error("Room not found");
         }
+        const lineRoomData = lineRoomDoc.data()!;
+        if (!lineRoomData.isActive) {
+          throw new Error("Room is inactive");
+        }
+        if (lineRoomData.status === "blocked") {
+          const blockedFrom = toDateOrNull(lineRoomData.blockedFrom);
+          const blockedTo = toDateOrNull(lineRoomData.blockedTo);
+          const windowActive = blockedFrom && blockedTo
+            ? checkInDate < blockedTo && checkOutDate > blockedFrom
+            : true;
+          if (windowActive) {
+            throw new Error("Room no longer available");
+          }
+        }
+        walkinAssignedRooms.push({
+          roomId: line.roomId,
+          ref: lineRoomRef,
+          data: lineRoomData,
+          numAdults: line.numAdults,
+          numChildren: line.numChildren,
+          extraBedCount: line.extraBedCount
+        });
       }
+      // The primary room stays exposed under the historical names so
+      // the downstream single-room code (fingerprint, response payload,
+      // confirmation email) keeps reading the first room.
+      const roomRef = walkinAssignedRooms[0].ref;
+      const roomData = walkinAssignedRooms[0].data;
       // 2. Per MRB-02.x (2026-08-02, per decision #164):
       // the reservation-level idempotency check runs
       // after the room read (so the fingerprint has the
@@ -2841,42 +2939,54 @@ export async function handleCreateWalkin(req: any, res: any) {
       // is symmetric with the public path so a future
       // walk-in client that does preallocate rides the
       // same idempotency.
+      //
+      // Per MRB-07 (2026-08-02, per decision #159): the canonical
+      // fingerprint room lines are now one entry per room stay
+      // (`quantity: 1` each), carrying that room's own type and
+      // occupancy. For a single-room walk-in this produces exactly
+      // the one-entry array the pre-MRB-07 code built, so an
+      // in-flight single-room replay still matches its stored
+      // fingerprint. The builder is hoisted here so the idempotency
+      // check below and the reservation header write further down
+      // cannot drift apart.
+      const walkinFingerprintRoomLines = walkinAssignedRooms.map((assigned) => ({
+        type: String(assigned.data.type || "").trim(),
+        quantity: 1,
+        adults: assigned.numAdults,
+        children: assigned.numChildren,
+        extraBeds: assigned.extraBedCount
+      }));
+      // The walk-in fingerprint is the same canonical shape as the
+      // public path — same byte-equivalence rules, same placeholder
+      // for `discountScope` (the server-resolved DSC-01 scope is the
+      // MRB-04 generalization; the walk-in snapshot reads the same
+      // `normalizeDiscountScope(null)` shape so a replay is
+      // byte-equivalent).
+      const buildWalkinFingerprint = (leadGuestName: string) => computeRequestFingerprint({
+        reservationId: effectiveReservationId,
+        roomLines: walkinFingerprintRoomLines,
+        checkIn: String(checkIn || "").trim(),
+        checkOut: String(checkOut || "").trim(),
+        leadGuestName,
+        leadGuestEmail: String((guestDetails as any).email || "").trim().toLowerCase(),
+        leadGuestPhone: String((guestDetails as any).phone || "").trim(),
+        source: "walk-in",
+        isCorporate: false,
+        corporateCode: "",
+        companyName: "",
+        voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
+        memberDiscountPct: 0,
+        discountScope: normalizeDiscountScope(null),
+        termsVersion: DEFAULT_TERMS_VERSION,
+        privacyVersion: DEFAULT_TERMS_VERSION
+      });
+
       const existingReservationSnap = await transaction.get(reservationDocRef);
       if (existingReservationSnap.exists) {
         const existingData = existingReservationSnap.data() || {};
-        // Compute the per-walk-in fingerprint from the
-        // room's type + the body inputs. The walk-in
-        // fingerprint is the same canonical shape as the
-        // public path — same byte-equivalence rules, same
-        // placeholder for `discountScope` (the
-        // server-resolved DSC-01 scope is the MRB-04
-        // generalization; the walk-in snapshot reads the
-        // same `normalizeDiscountScope(null)` shape so a
-        // replay is byte-equivalent).
-        const walkinFingerprint = computeRequestFingerprint({
-          reservationId: effectiveReservationId,
-          roomLines: [{
-            type: String(roomData.type || "").trim(),
-            quantity: 1,
-            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
-            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
-            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
-          }],
-          checkIn: String(checkIn || "").trim(),
-          checkOut: String(checkOut || "").trim(),
-          leadGuestName: `${String((guestDetails as any).firstName || "").trim()} ${String((guestDetails as any).lastName || "").trim()}`,
-          leadGuestEmail: String((guestDetails as any).email || "").trim().toLowerCase(),
-          leadGuestPhone: String((guestDetails as any).phone || "").trim(),
-          source: "walk-in",
-          isCorporate: false,
-          corporateCode: "",
-          companyName: "",
-          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
-          memberDiscountPct: 0,
-          discountScope: normalizeDiscountScope(null),  // server-resolved DSC-01 scope lands in MRB-04
-          termsVersion: DEFAULT_TERMS_VERSION,
-          privacyVersion: DEFAULT_TERMS_VERSION
-        });
+        const walkinFingerprint = buildWalkinFingerprint(
+          `${String((guestDetails as any).firstName || "").trim()} ${String((guestDetails as any).lastName || "").trim()}`
+        );
         const sameRequest = String(existingData.requestFingerprint || "") === walkinFingerprint;
         if (!sameRequest) {
           throw new Error("RESERVATION_ID_FINGERPRINT_CONFLICT");
@@ -2935,11 +3045,20 @@ export async function handleCreateWalkin(req: any, res: any) {
       const websiteContentDoc = await transaction.get(websiteContentRef);
       const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data()! : {};
       const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
-      if (!rawTypeEntry) {
-        throw new Error("Room type is not available.");
-      }
-      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
+      // Per MRB-07 (2026-08-02, per decision #159): every room in the
+      // reservation resolves its OWN type entry, so a reservation can
+      // mix room types and each stay is capped and priced against the
+      // type it actually is. `typeEntry` below stays the primary room's
+      // entry for the downstream single-room code.
+      const resolveWalkinTypeEntry = (typeValue: string) => {
+        const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === typeValue);
+        if (!rawTypeEntry) {
+          throw new Error("Room type is not available.");
+        }
+        return applyRoomTypeDefaults(rawTypeEntry);
+      };
+      const walkinTypeEntries = walkinAssignedRooms.map((assigned) => resolveWalkinTypeEntry(assigned.data.type));
+      const typeEntry = walkinTypeEntries[0];
 
       // Per DSC-01..05 (2026-08-01, per CVQ-06): snapshot the admin's
       // per-class discount scope at booking time (same pattern as
@@ -2981,15 +3100,29 @@ export async function handleCreateWalkin(req: any, res: any) {
       // each against the room type's `maxCapacity` (adult)
       // and `maxChildren` (per-CHD-02). The new walk-in
       // booking stores both fields on the doc.
-      const walkinNumAdults = Number.isFinite(Number(requestedNumAdults))
-        ? Math.max(0, Math.floor(Number(requestedNumAdults)))
-        : guests;
-      const walkinNumChildren = Number.isFinite(Number(requestedNumChildren))
-        ? Math.max(0, Math.floor(Number(requestedNumChildren)))
-        : 0;
-      if (walkinNumAdults + walkinNumChildren !== guests) {
+      // Per MRB-07 (2026-08-02, per decision #159): the split is now
+      // validated per room stay. `walkinRoomLines` already agrees with
+      // `guests` in aggregate (checked before the transaction); each
+      // line's own split is checked against ITS room type below, so a
+      // reservation may mix types (2 adults in a suite + 1 adult and 2
+      // children in a family room) and each room is capped by its own
+      // entry. The primary room's numbers stay exposed under the
+      // historical names for the downstream single-room code.
+      const walkinNumAdults = walkinRoomLines[0].numAdults;
+      const walkinNumChildren = walkinRoomLines[0].numChildren;
+      const walkinTotalOccupancy = walkinRoomLines.reduce(
+        (sum, line) => sum + line.numAdults + line.numChildren,
+        0
+      );
+      if (walkinTotalOccupancy !== guests) {
+        // A single-room reservation keeps the historical wording — the
+        // desk sees the same message it has always seen for the common
+        // case, and only a genuinely multi-room mismatch gets the
+        // reservation-level phrasing.
         throw new Error(
-          `Occupancy split mismatch: numAdults (${walkinNumAdults}) + numChildren (${walkinNumChildren}) must equal guests (${guests}).`
+          walkinRoomCount === 1
+            ? `Occupancy split mismatch: numAdults (${walkinNumAdults}) + numChildren (${walkinNumChildren}) must equal guests (${guests}).`
+            : `Occupancy split mismatch: the room stays hold ${walkinTotalOccupancy} guest(s) but the reservation says ${guests}.`
         );
       }
       const walkinMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
@@ -3008,63 +3141,68 @@ export async function handleCreateWalkin(req: any, res: any) {
       // are in the same scope.
 
       // 2. Overlapping Booking Check
-      const bookingsQuery = adminDb.collection("bookings")
-        .where("roomId", "==", roomId)
-        .where("status", "in", ROOM_OCCUPYING_STATUSES);
-      const bookingsSnapshot = await transaction.get(bookingsQuery);
-      // Per PEX-02 + PEX-03 (2026-08-01, per decision #147):
-      // same pattern as handleCreateBooking — split each
-      // conflicting doc into "active conflict" vs "expired
-      // `pending` hold to retire". A walk-in that displaces a
-      // stale expired hold is a real-world case the cron may
-      // not have caught yet (e.g. a `payment-hold-expired`
-      // hold from yesterday that nobody's cron has processed).
+      // Per MRB-07 (2026-08-02, per decision #159): every room in the
+      // reservation is checked, and the first conflict aborts the
+      // transaction — a multi-room walk-in never half-commits with one
+      // room double-sold. For a single-line reservation this loop runs
+      // once and is byte-equivalent to the pre-MRB-07 check.
       const now = new Date();
-      let sawConflict = false;
-      let sawLingering = false;
-      for (const doc of bookingsSnapshot.docs) {
-        const bookingData = doc.data();
-        if (isExpiredPendingHold(bookingData, now)) {
-          const existingCheckIn = toDateOrNull(bookingData.checkIn);
-          const existingCheckOut = toDateOrNull(bookingData.checkOut);
-          const dateOverlaps = existingCheckIn && existingCheckOut
-            ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate)
-            : false;
-          if (dateOverlaps) {
-            expiredHoldRetirements.push({
-              ref: doc.ref,
-              previousData: bookingData,
-              bookingRef: String(bookingData.bookingRef || doc.id),
-              guestEmail: String(bookingData.guestEmail || ""),
-              holdExpiresAt: toDateOrNull(bookingData.holdExpiresAt)
-            });
+      for (const assigned of walkinAssignedRooms) {
+        const bookingsQuery = adminDb.collection("bookings")
+          .where("roomId", "==", assigned.roomId)
+          .where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const bookingsSnapshot = await transaction.get(bookingsQuery);
+        // Per PEX-02 + PEX-03 (2026-08-01, per decision #147):
+        // same pattern as handleCreateBooking — split each
+        // conflicting doc into "active conflict" vs "expired
+        // `pending` hold to retire". A walk-in that displaces a
+        // stale expired hold is a real-world case the cron may
+        // not have caught yet (e.g. a `payment-hold-expired`
+        // hold from yesterday that nobody's cron has processed).
+        let sawConflict = false;
+        let sawLingering = false;
+        for (const doc of bookingsSnapshot.docs) {
+          const bookingData = doc.data();
+          if (isExpiredPendingHold(bookingData, now)) {
+            const existingCheckIn = toDateOrNull(bookingData.checkIn);
+            const existingCheckOut = toDateOrNull(bookingData.checkOut);
+            const dateOverlaps = existingCheckIn && existingCheckOut
+              ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate)
+              : false;
+            if (dateOverlaps) {
+              expiredHoldRetirements.push({
+                ref: doc.ref,
+                previousData: bookingData,
+                bookingRef: String(bookingData.bookingRef || doc.id),
+                guestEmail: String(bookingData.guestEmail || ""),
+                holdExpiresAt: toDateOrNull(bookingData.holdExpiresAt)
+              });
+            }
+            continue;
           }
-          continue;
+          const reason = getOccupancyConflictReason({
+            bookingData,
+            requestedCheckIn: checkInDate,
+            requestedCheckOut: checkOutDate,
+            requestedCheckInKey: checkIn,
+            todayKey,
+            currentMinutes: currentManilaMinutes,
+            checkOutTime: hotelConfig.checkOutTime,
+            now
+          });
+          if (reason === "overlap" || reason === "lingering-checked-in") {
+            if (reason === "lingering-checked-in") sawLingering = true;
+            sawConflict = true;
+            break;
+          }
         }
-        const reason = getOccupancyConflictReason({
-          bookingData,
-          requestedCheckIn: checkInDate,
-          requestedCheckOut: checkOutDate,
-          requestedCheckInKey: checkIn,
-          todayKey,
-          currentMinutes: currentManilaMinutes,
-          checkOutTime: hotelConfig.checkOutTime,
-          now
-        });
-        if (reason === "overlap" || reason === "lingering-checked-in") {
-          if (reason === "lingering-checked-in") sawLingering = true;
-          sawConflict = true;
-          break;
+        if (sawConflict) {
+          throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-      }
-      const hasConflict = sawConflict;
-
-      if (hasConflict) {
-        throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
-      }
-      const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
-      if (hasBlockConflict) {
-        throw new Error("Room no longer available");
+        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, assigned.roomId, checkInDate, checkOutDate);
+        if (hasBlockConflict) {
+          throw new Error("Room no longer available");
+        }
       }
 
       // 3. Fetch Breakfast Settings
@@ -3086,38 +3224,54 @@ export async function handleCreateWalkin(req: any, res: any) {
       // conversion — same staff surface). Staff-created, so the
       // extra-bed count comes from the body (validated against
       // the room type's `maxExtraBeds`). The rate is snapshotted.
-      const walkinExtraBedCount = Math.max(0, Number(requestedExtraBedCount) || 0);
-      const walkinTypeMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
-      const walkinTypeExtraBedRate = Math.max(0, Number(typeEntry.extraBedRate) || 0);
-      if (walkinExtraBedCount > walkinTypeMaxExtraBeds) {
-        throw new Error(
-          `Extra bed count (${walkinExtraBedCount}) exceeds the room type's allowance (${walkinTypeMaxExtraBeds}).`
-        );
-      }
-      const walkinExtraBedRate = walkinExtraBedCount > 0 ? walkinTypeExtraBedRate : 0;
-      // Per EXB-03 (2026-08-01, per decision #145): the
-      // overflow rule. Same shape as handleCreateBooking.
-      // `requiredExtraBedsFor` returns the number of
-      // extra people beyond the per-type cap, split into
-      // adult and child overflows. The check rejects
-      // when the required overflow exceeds the selected
-      // extra bed count. When
-      // `walkinExtraBedCount === 0`, the helper reduces
-      // to the two hard caps (CHD-04's original shape);
-      // when `> 0`, the rule allows overflow up to the
-      // extra bed count. See the JSDoc on
-      // `requiredExtraBedsFor` in `shared/utils/roomTypes.ts`.
-      const walkinOverflow = requiredExtraBedsFor({
-        numAdults: walkinNumAdults,
-        numChildren: walkinNumChildren,
-        maxCapacity: typeMaxCapacity,
-        maxChildren: walkinMaxChildren
+      //
+      // Per MRB-07 (2026-08-02, per decision #159): the allowance and
+      // the EXB-03 overflow rule are evaluated per room stay, against
+      // that stay's OWN type entry. A reservation that mixes types is
+      // therefore capped correctly room by room instead of measuring
+      // every room against the primary room's type.
+      const walkinPerRoomExtraBeds = walkinAssignedRooms.map((assigned, lineIdx) => {
+        const lineTypeEntry = walkinTypeEntries[lineIdx];
+        const lineExtraBedCount = assigned.extraBedCount;
+        const lineMaxExtraBeds = Math.max(0, Number(lineTypeEntry.maxExtraBeds) || 0);
+        const lineExtraBedRate = Math.max(0, Number(lineTypeEntry.extraBedRate) || 0);
+        if (lineExtraBedCount > lineMaxExtraBeds) {
+          throw new Error(
+            `Extra bed count (${lineExtraBedCount}) exceeds the room type's allowance (${lineMaxExtraBeds}).`
+          );
+        }
+        // Per EXB-03 (2026-08-01, per decision #145): the
+        // overflow rule. Same shape as handleCreateBooking.
+        // `requiredExtraBedsFor` returns the number of
+        // extra people beyond the per-type cap, split into
+        // adult and child overflows. The check rejects
+        // when the required overflow exceeds the selected
+        // extra bed count. When the count is 0 the helper
+        // reduces to the two hard caps (CHD-04's original
+        // shape); when > 0, the rule allows overflow up to
+        // the extra bed count. See the JSDoc on
+        // `requiredExtraBedsFor` in `shared/utils/roomTypes.ts`.
+        const lineOverflow = requiredExtraBedsFor({
+          numAdults: assigned.numAdults,
+          numChildren: assigned.numChildren,
+          maxCapacity: Number(lineTypeEntry.maxCapacity) || 0,
+          maxChildren: Math.max(0, Number(lineTypeEntry.maxChildren) || 0)
+        });
+        if (lineOverflow.requiredExtraBeds > lineExtraBedCount) {
+          throw new Error(
+            `Not enough extra beds: ${lineOverflow.overflowAdults} overflow adult(s) + ${lineOverflow.overflowChildren} overflow child(ren) = ${lineOverflow.requiredExtraBeds} extra bed(s) needed, but only ${lineExtraBedCount} extra bed(s) selected. The room type allows up to ${lineMaxExtraBeds} extra bed(s).`
+          );
+        }
+        return {
+          extraBedCount: lineExtraBedCount,
+          extraBedRate: lineExtraBedCount > 0 ? lineExtraBedRate : 0
+        };
       });
-      if (walkinOverflow.requiredExtraBeds > walkinExtraBedCount) {
-        throw new Error(
-          `Not enough extra beds: ${walkinOverflow.overflowAdults} overflow adult(s) + ${walkinOverflow.overflowChildren} overflow child(ren) = ${walkinOverflow.requiredExtraBeds} extra bed(s) needed, but only ${walkinExtraBedCount} extra bed(s) selected. The room type allows up to ${walkinTypeMaxExtraBeds} extra bed(s).`
-        );
-      }
+      // The primary room's snapshot stays under the historical names;
+      // the reservation-wide count is what the hotel-wide inventory
+      // check below must reserve against.
+      const walkinExtraBedRate = walkinPerRoomExtraBeds[0].extraBedRate;
+      const walkinExtraBedCount = walkinPerRoomExtraBeds.reduce((sum, line) => sum + line.extraBedCount, 0);
 
       // Per EXB-10 (2026-08-01, per decision #157): the
       // hotel-wide rollaway-bed inventory check. Same
@@ -3152,40 +3306,64 @@ export async function handleCreateWalkin(req: any, res: any) {
         }
       }
 
-      // 4. Calculate Nightly Rate Total. Seasonal overrides beat
-      // weekend rates for walk-ins unless staff enters a manual
-      // total override below.
-      const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
-        checkIn: checkInDate,
-        checkOut: checkOutDate,
-        roomType: roomData.type,
-        baseRate: typeBaseRate,
-        weekendRate: typeWeekendRate,
-        seasonalRateOverrides
-      });
-      const roomTotal = roomBreakdown.roomSubtotal;
-
-      // 5. Calculate Breakfast Add-on
+      // 4. + 5. Per-room-stay pricing.
+      // Per MRB-07 (2026-08-02, per decision #159): each room stay is
+      // priced against its own type (seasonal overrides beat weekend
+      // rates, unless staff enters a manual total override below) and
+      // its own occupancy. The reservation's room / breakfast /
+      // extra-bed terms are the sums of the per-room allocations, so
+      // every reservation total can be reconstructed exactly from the
+      // stored per-room lines (the MRB-11 reporting requirement) rather
+      // than divided back out heuristically. For a single-line
+      // reservation each sum has one term and the math is
+      // byte-equivalent to the pre-MRB-07 single-room pricing.
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
-      // Per CHD-10 (2026-07-31, per CVQ-01): the inline
-      // `actualBreakfastRate * guests * numNights` pattern now
-      // routes through the shared `calculateBreakfastAddOn` helper.
-      // The walk-in path snapshots the admin default (no
-      // per-booking override on this surface — staff-created).
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: actualBreakfastRate,
-        numGuests: guests,
-        numNights,
-        breakfastIncludesChildren
+      const walkinRoomStayPricing = walkinAssignedRooms.map((assigned, lineIdx) => {
+        const lineTypeEntry = walkinTypeEntries[lineIdx];
+        const lineRoomBreakdown = calculateSeasonalAwareRoomBreakdown({
+          checkIn: checkInDate,
+          checkOut: checkOutDate,
+          roomType: assigned.data.type,
+          baseRate: Number(lineTypeEntry.pricePerNight) || 0,
+          weekendRate: Number(lineTypeEntry.weekendRate) || 0,
+          seasonalRateOverrides
+        });
+        // Per CHD-10 (2026-07-31, per CVQ-01): the inline
+        // `actualBreakfastRate * guests * numNights` pattern
+        // routes through the shared `calculateBreakfastAddOn`
+        // helper. The walk-in path snapshots the admin default
+        // (no per-booking override on this surface —
+        // staff-created). The guest count is this room's own
+        // occupancy, so breakfast is charged once per guest
+        // across the reservation, never once per guest per room.
+        const lineBreakfastTotal = calculateBreakfastAddOn({
+          hasBreakfast: finalHasBreakfast,
+          breakfastRate: actualBreakfastRate,
+          numGuests: assigned.numAdults + assigned.numChildren,
+          numNights,
+          breakfastIncludesChildren
+        });
+        // Per EXB-01 (2026-07-31): the extra-bed add-on term.
+        // Same shape as the online-create path.
+        const lineExtraBedTotal = calculateExtraBedAddOn({
+          extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
+          extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
+          numNights
+        });
+        return {
+          roomBreakdown: lineRoomBreakdown,
+          roomTotal: lineRoomBreakdown.roomSubtotal,
+          breakfastTotal: lineBreakfastTotal,
+          extraBedTotal: lineExtraBedTotal,
+          extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
+          extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
+          subtotal: lineRoomBreakdown.roomSubtotal + lineBreakfastTotal + lineExtraBedTotal
+        };
       });
-      // Per EXB-01 (2026-07-31): the extra-bed add-on term for the
-      // walk-in. Same shape as the online-create path.
-      const walkinExtraBedTotal = calculateExtraBedAddOn({
-        extraBedCount: walkinExtraBedCount,
-        extraBedRate: walkinExtraBedRate,
-        numNights
-      });
+      const roomBreakdown = walkinRoomStayPricing[0].roomBreakdown;
+      const roomTotal = walkinRoomStayPricing.reduce((sum, line) => sum + line.roomTotal, 0);
+      const breakfastTotal = walkinRoomStayPricing.reduce((sum, line) => sum + line.breakfastTotal, 0);
+      const walkinExtraBedTotal = walkinRoomStayPricing.reduce((sum, line) => sum + line.extraBedTotal, 0);
       const subtotal = roomTotal + breakfastTotal + walkinExtraBedTotal;
 
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd"
@@ -3235,7 +3413,15 @@ export async function handleCreateWalkin(req: any, res: any) {
         const voucherIsValid = voucherData.isActive !== false
           && (!expiresAt || expiresAt >= new Date())
           && (voucherData.usageCap == null || Number(voucherData.usageCount || 0) < Number(voucherData.usageCap))
-          && ((voucherData.applicableRoomTypes?.length ?? 0) === 0 || voucherData.applicableRoomTypes.includes(roomData.type));
+          // Per MRB-07 (2026-08-02, per decision #159): a
+          // room-type-restricted voucher must cover EVERY room type in
+          // the reservation. The voucher is applied once at reservation
+          // level (per MRB-09), so accepting it while one room is
+          // ineligible would silently discount a room the promo never
+          // covered. For a single-room reservation this is the same
+          // check as before.
+          && ((voucherData.applicableRoomTypes?.length ?? 0) === 0
+            || walkinAssignedRooms.every((assigned) => voucherData.applicableRoomTypes.includes(assigned.data.type)));
         if (!voucherIsValid) throw new Error("Voucher is invalid or no longer available.");
         voucherCode = formattedCode;
         voucherDiscount = Math.round(calculateVoucherDiscount({
@@ -3250,68 +3436,119 @@ export async function handleCreateWalkin(req: any, res: any) {
 
       // Pricing Overrides: Use staff override if provided, otherwise standard computed.
       // Per DSC-01..05 (2026-08-01, per CVQ-06): the walk-in's
-      // senior + voucher chain now routes through the shared
+      // senior + voucher chain routes through the shared
       // `calculateDiscountChain` helper. For the broad default
       // scope, the helper's `total` is byte-equivalent to
       // `max(voucherBase − voucherDiscount, 0)`. When a manual
-      // `totalPriceOverride` is in play, we pass the override
+      // `totalPriceOverride` is in play, the override is passed
       // as the room term (breakfast + extra-bed = 0) so the
       // chain sees the override as the discountable base.
-      const walkinChainInput = totalPriceOverride !== undefined && totalPriceOverride !== null
-        ? {
-            roomTotal: pricingSubtotal,
-            breakfastTotal: 0,
-            extraBedTotal: 0,
-            seniorPct: discountPct,
-            voucherAmount: voucherDiscount,
-            memberPct: 0,
-            scope: snapshottedDiscountScope,
-            round: true
-          }
-        : {
-            roomTotal,
-            breakfastTotal,
-            extraBedTotal: walkinExtraBedTotal,
-            seniorPct: discountPct,
-            voucherAmount: voucherDiscount,
-            memberPct: 0,
-            scope: snapshottedDiscountScope,
-            round: true
-          };
-      finalTotalPrice = calculateDiscountChain(walkinChainInput).total;
-      const rateBreakdown = buildRateBreakdown({
-        roomLines: totalPriceOverride !== undefined && totalPriceOverride !== null
-          ? [{
-              source: "manual",
-              label: "Manual front-desk rate",
-              startDate: checkIn,
-              endDate: checkOut,
-              nights: numNights,
-              nightlyRate: numNights > 0 ? Math.round(pricingSubtotal / numNights) : pricingSubtotal,
-              subtotal: pricingSubtotal
-            }]
-          : roomBreakdown.roomLines,
-        roomSubtotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? pricingSubtotal : roomTotal,
-        breakfastTotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? 0 : breakfastTotal,
-        // Per EXB-08 (2026-08-01, per decision #156):
-        // the walk-in also surfaces the extra-bed
-        // add-on term. When `totalPriceOverride` is
-        // set, the manual rate collapses the extra
-        // bed into the room subtotal (the historical
-        // manual-rate shape) — so the add-on line is
-        // 0 in that path. When no override is set,
-        // the per-type `walkinExtraBedTotal` flows
-        // through to `addOns[]` exactly like the
-        // online create path.
-        extraBedTotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? 0 : walkinExtraBedTotal,
-        extraBedCount: walkinExtraBedCount,
-        extraBedRate: walkinExtraBedRate,
-        discountType,
-        discountPct,
-        voucherDiscount,
-        memberDiscountPct: 0,
-        finalTotal: finalTotalPrice
+      const hasManualOverride = totalPriceOverride !== undefined && totalPriceOverride !== null;
+
+      // Per MRB-07 (2026-08-02, per decision #159): allocate the
+      // reservation-level money terms back onto the individual room
+      // stays, then price each stay with the shared chain. Two terms
+      // need allocating because they are reservation-scoped by
+      // definition:
+      //   - a manual `totalPriceOverride` is a price for the whole
+      //     reservation, not for one room;
+      //   - a voucher applies once per reservation (per MRB-09), not
+      //     once per room.
+      // Both are split in proportion to each stay's own subtotal, with
+      // the rounding remainder landing on the first room so the room
+      // allocations always re-sum to the reservation figure exactly —
+      // no reconstructed report can drift from the stored total. The
+      // reservation `totalPrice` is then defined AS the sum of the room
+      // allocations rather than computed independently, which makes the
+      // invariant structural instead of coincidental.
+      const walkinAllocationBasis = walkinRoomStayPricing.reduce((sum, line) => sum + line.subtotal, 0);
+      const allocateAcrossRoomStays = (amount: number): number[] => {
+        if (walkinRoomCount === 1) return [amount];
+        if (walkinAllocationBasis <= 0) {
+          // Degenerate basis (an all-zero reservation): put the whole
+          // amount on the first room rather than dividing by zero.
+          return walkinRoomStayPricing.map((_, idx) => (idx === 0 ? amount : 0));
+        }
+        const shares = walkinRoomStayPricing.map((line) =>
+          Math.floor((amount * line.subtotal) / walkinAllocationBasis)
+        );
+        const allocated = shares.reduce((sum, share) => sum + share, 0);
+        shares[0] += amount - allocated;
+        return shares;
+      };
+      const walkinOverrideShares = hasManualOverride
+        ? allocateAcrossRoomStays(Number(totalPriceOverride))
+        : null;
+      const walkinVoucherShares = allocateAcrossRoomStays(voucherDiscount);
+
+      // Per DSC-01..05 (2026-08-01, per CVQ-06) + EXB-08 (2026-08-01,
+      // per decision #156): each room stay runs the same chain and
+      // builds the same rate breakdown the single-room walk-in built.
+      // When a manual override is in play the room term collapses to
+      // the allocated override and the breakfast / extra-bed add-on
+      // lines are 0 (the historical manual-rate shape).
+      const walkinRoomStayFinancials = walkinRoomStayPricing.map((line, lineIdx) => {
+        const linePricingSubtotal = walkinOverrideShares ? walkinOverrideShares[lineIdx] : line.subtotal;
+        const lineVoucherDiscount = walkinVoucherShares[lineIdx];
+        const lineChainInput = hasManualOverride
+          ? {
+              roomTotal: linePricingSubtotal,
+              breakfastTotal: 0,
+              extraBedTotal: 0,
+              seniorPct: discountPct,
+              voucherAmount: lineVoucherDiscount,
+              memberPct: 0,
+              scope: snapshottedDiscountScope,
+              round: true
+            }
+          : {
+              roomTotal: line.roomTotal,
+              breakfastTotal: line.breakfastTotal,
+              extraBedTotal: line.extraBedTotal,
+              seniorPct: discountPct,
+              voucherAmount: lineVoucherDiscount,
+              memberPct: 0,
+              scope: snapshottedDiscountScope,
+              round: true
+            };
+        const lineTotal = calculateDiscountChain(lineChainInput).total;
+        return {
+          ...line,
+          pricingSubtotal: linePricingSubtotal,
+          voucherDiscount: lineVoucherDiscount,
+          totalPrice: lineTotal,
+          rateBreakdown: buildRateBreakdown({
+            roomLines: hasManualOverride
+              ? [{
+                  source: "manual",
+                  label: "Manual front-desk rate",
+                  startDate: checkIn,
+                  endDate: checkOut,
+                  nights: numNights,
+                  nightlyRate: numNights > 0 ? Math.round(linePricingSubtotal / numNights) : linePricingSubtotal,
+                  subtotal: linePricingSubtotal
+                }]
+              : line.roomBreakdown.roomLines,
+            roomSubtotal: hasManualOverride ? linePricingSubtotal : line.roomTotal,
+            breakfastTotal: hasManualOverride ? 0 : line.breakfastTotal,
+            extraBedTotal: hasManualOverride ? 0 : line.extraBedTotal,
+            extraBedCount: line.extraBedCount,
+            extraBedRate: line.extraBedRate,
+            discountType,
+            discountPct,
+            voucherDiscount: lineVoucherDiscount,
+            memberDiscountPct: 0,
+            finalTotal: lineTotal
+          })
+        };
       });
+
+      finalTotalPrice = walkinRoomStayFinancials.reduce((sum, line) => sum + line.totalPrice, 0);
+      // The primary room's breakdown stays under the historical name
+      // for the downstream single-room code (response payload +
+      // confirmation email); the write loop below stamps each room's
+      // own breakdown onto its own booking doc.
+      const rateBreakdown = walkinRoomStayFinancials[0].rateBreakdown;
 
       // 6. Generate Reference Number
       const { todayStr, todayCompact } = getManilaDateInfo();
@@ -3327,17 +3564,27 @@ export async function handleCreateWalkin(req: any, res: any) {
       // `generateBookingRef` helper; the inline form is
       // kept here so the counter transaction + the ref
       // share the same scope.
-      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
+      // Per MRB-07 (2026-08-02, per decision #159): every room stay is
+      // its own booking with its own guest-facing reference, so the
+      // daily counter advances by N and the reservation consumes N
+      // consecutive sequence numbers. Reusing one ref across the N
+      // rooms would make the guest-facing ref ambiguous and break the
+      // "booking ref + email" lookup contract, which assumes a ref
+      // identifies exactly one room stay. For N=1 the counter advances
+      // by one, byte-equivalent to the pre-MRB-07 behavior.
+      const walkinBookingRefs = walkinAssignedRooms.map(
+        (_, lineIdx) => `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + lineIdx).padStart(5, "0")}`
+      );
+      const bookingRef = walkinBookingRefs[0];
       finalBookingRef = bookingRef;
       // Per MRB-02.x (2026-08-02, per decision #164): mint
       // the public reservation ref (`R-YYYYMMDD-NNNNN`) in
       // the same transaction so it shares the same `now` +
-      // counter transaction as the booking ref. The walk-in
-      // is always `position: 1` / `roomCount: 1` (single
-      // room), so the per-day seq is whatever the counter
-      // produced (the counter is global, not per-reservation).
-      // Captured at function scope so the post-transaction
-      // success response can echo it back.
+      // counter transaction as the booking ref. The
+      // reservation ref uses the FIRST sequence number the
+      // reservation consumed (the counter is global, not
+      // per-reservation). Captured at function scope so the
+      // post-transaction success response can echo it back.
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
 
       // 7. Prepare Document Fields
@@ -3515,58 +3762,86 @@ export async function handleCreateWalkin(req: any, res: any) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: DEFAULT_TERMS_VERSION,
-        roomCount: 1,
-        activeRoomCount: 1,
+        // Per MRB-07 (2026-08-02, per decision #159): the aggregate
+        // counters reflect the N room stays this reservation actually
+        // created, so the admin reservation row can show room count,
+        // status and balance without fanning out to the children.
+        roomCount: walkinRoomCount,
+        activeRoomCount: walkinRoomCount,
         cancelledRoomCount: 0,
-        checkedInRoomCount: status === "checked-in" ? 1 : 0,
-        checkedOutRoomCount: status === "checked-out" ? 1 : 0,
+        checkedInRoomCount: status === "checked-in" ? walkinRoomCount : 0,
+        checkedOutRoomCount: 0,
         // Walk-ins have no auto-expiry hold (the staff is
         // creating the booking, not waiting on a guest
         // action) — `null` mirrors the public path's
         // `payment-uploaded` case.
         holdExpiresAt: null,
-        requestFingerprint: computeRequestFingerprint({
-          reservationId: effectiveReservationId,
-          roomLines: [{
-            type: String(roomData.type || "").trim(),
-            quantity: 1,
-            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
-            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
-            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
-          }],
-          checkIn: String(checkIn || "").trim(),
-          checkOut: String(checkOut || "").trim(),
-          leadGuestName: guestName,
-          leadGuestEmail: guestDetails.email.trim().toLowerCase(),
-          leadGuestPhone: guestDetails.phone.trim(),
-          source: "walk-in",
-          isCorporate: false,
-          corporateCode: "",
-          companyName: "",
-          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
-          memberDiscountPct: 0,
-          discountScope: normalizeDiscountScope(null),
-          termsVersion: DEFAULT_TERMS_VERSION,
-          privacyVersion: DEFAULT_TERMS_VERSION
-        }),
+        // Per MRB-07 (2026-08-02, per decision #159): the stored
+        // fingerprint is built by the same hoisted builder the
+        // idempotency check above used, so a replay of an N-room
+        // walk-in compares like for like.
+        requestFingerprint: buildWalkinFingerprint(guestName),
         createdAt: now,
         updatedAt: now,
         createdBy: "staff"
       };
       transaction.set(reservationDocRef, newReservation);
 
-      // Auto update room status if immediate check-in
+      // Auto update room status if immediate check-in.
+      // Per MRB-07 (2026-08-02, per decision #159): every room in the
+      // reservation is occupied by an immediate check-in, not just the
+      // primary one.
       if (status === "checked-in") {
-        transaction.update(roomRef, { status: "occupied" });
+        for (const assigned of walkinAssignedRooms) {
+          transaction.update(assigned.ref, { status: "occupied" });
+        }
       }
 
+      // Per MRB-07 (2026-08-02, per decision #159): the counter
+      // advances past every sequence number this reservation consumed.
       if (counterDoc.exists) {
-        transaction.update(counterRef, { count: sequence });
+        transaction.update(counterRef, { count: sequence + walkinRoomCount - 1 });
       } else {
-        transaction.set(counterRef, { count: 1 });
+        transaction.set(counterRef, { count: walkinRoomCount });
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
-      transaction.set(bookingDocRef, newBooking);
+      // Per MRB-07 (2026-08-02, per decision #159): write one
+      // `bookings/{id}` doc per room stay. The first room uses the
+      // client's preallocated `bookingId` (the historical contract);
+      // rooms 2..N auto-mint fresh ids. Each doc carries its own room,
+      // occupancy, extra-bed snapshot, rate breakdown, money
+      // allocation, reference, lookup token, and 1-indexed
+      // `reservationPosition`; everything else is shared reservation
+      // context spread from `newBooking`. For N=1 the loop runs once
+      // and writes exactly the doc the pre-MRB-07 code wrote.
+      for (let lineIdx = 0; lineIdx < walkinRoomCount; lineIdx++) {
+        const assigned = walkinAssignedRooms[lineIdx];
+        const lineFinancials = walkinRoomStayFinancials[lineIdx];
+        const perRoomBookingDocRef = lineIdx === 0
+          ? bookingDocRef
+          : adminDb.collection("bookings").doc();
+        transaction.set(perRoomBookingDocRef, {
+          ...newBooking,
+          bookingRef: walkinBookingRefs[lineIdx],
+          roomId: assigned.roomId,
+          roomNumber: assigned.data.roomNumber,
+          roomType: assigned.data.type,
+          numGuests: assigned.numAdults + assigned.numChildren,
+          numAdults: assigned.numAdults,
+          numChildren: assigned.numChildren,
+          extraBedCount: lineFinancials.extraBedCount,
+          extraBedRate: lineFinancials.extraBedRate,
+          ratePerNight: Number(walkinTypeEntries[lineIdx].pricePerNight) || 0,
+          totalPrice: lineFinancials.totalPrice,
+          originalTotalPrice: lineFinancials.pricingSubtotal,
+          rateBreakdown: lineFinancials.rateBreakdown,
+          reservationPosition: lineIdx + 1,
+          reservationRoomCount: walkinRoomCount,
+          // Each room stay gets its own lookup token so its magic link
+          // resolves to that room independently.
+          lookupToken: lineIdx === 0 ? (newBooking as any).lookupToken : generateLookupToken()
+        });
+      }
       // Per PEX-03 (2026-08-01, per decision #147): same
       // in-transaction retirement as handleCreateBooking. The
       // walk-in covers a corner case the cron may not have

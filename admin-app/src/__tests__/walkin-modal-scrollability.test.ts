@@ -158,7 +158,11 @@ describe("Walk-in modal scrollability (regression for plan/bugs/walkin-booking-m
     expect(walkinModal, "expected to find the walk-in Modal block").not.toBeNull();
     expect(walkinModal?.[0]).toMatch(/footer=\{/);
     expect(walkinModal?.[0]).toMatch(/<button[\s\S]*?type="button"[\s\S]*?form="walkin-form"[\s\S]*?>\s*Cancel\s*<\/button>/);
-    expect(walkinModal?.[0]).toMatch(/<PrimaryButton[\s\S]*?type="submit"[\s\S]*?form="walkin-form"[\s\S]*?>\s*\{isWalkinSubmitting \? "Confirming\.\.\." : "Confirm Reservation"\}\s*<\/PrimaryButton>/);
+    // Per MRB-07 (2026-08-02, per decision #159): the submit label
+    // states the room count when the reservation covers more than one
+    // room, so the desk can see what it is about to commit from the
+    // pinned footer without scrolling back up to the room list.
+    expect(walkinModal?.[0]).toMatch(/<PrimaryButton[\s\S]*?type="submit"[\s\S]*?form="walkin-form"[\s\S]*?isWalkinSubmitting[\s\S]*?"Confirming\.\.\."[\s\S]*?"Confirm Reservation"[\s\S]*?<\/PrimaryButton>/);
   });
 
   it("Walk-in form is NOT followed by an inline action row inside the <form> (the old layout)", () => {

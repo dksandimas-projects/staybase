@@ -519,7 +519,21 @@ export interface AdminContextType {
   // page's wire shape). No more split-on-space kludge on the
   // client — single-name guests, compound names, and
   // non-Western name orders all round-trip cleanly.
-  addWalkinBooking: (input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & { firstName: string; lastName: string; totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
+  addWalkinBooking: (
+    input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & {
+      firstName: string;
+      lastName: string;
+      totalPriceOverride?: number;
+      // Per MRB-07 (2026-08-02, per decision #159): the reservation's
+      // room stays, when the desk booked more than one room.
+      rooms?: Array<{
+        roomId: string;
+        numAdults: number;
+        numChildren: number;
+        extraBedCount: number;
+      }>;
+    }
+  ) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15). Bounces a `payment-uploaded`
@@ -1699,7 +1713,21 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
-  const addWalkinBooking = async (input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & { firstName: string; lastName: string; totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
+  const addWalkinBooking = async (
+    input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & {
+      firstName: string;
+      lastName: string;
+      totalPriceOverride?: number;
+      // Per MRB-07 (2026-08-02, per decision #159): the reservation's
+      // room stays, when the desk booked more than one room.
+      rooms?: Array<{
+        roomId: string;
+        numAdults: number;
+        numChildren: number;
+        extraBedCount: number;
+      }>;
+    }
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const bookingId = doc(collection(db, "bookings")).id;
@@ -1729,9 +1757,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         body: JSON.stringify({
           bookingId,
           roomId: input.roomId,
+          // Per MRB-07 (2026-08-02, per decision #159): the New Booking
+          // modal can create a reservation covering N rooms. When
+          // present this is the canonical room list — the server prices
+          // each room against its own type and writes one booking doc
+          // per room under one reservation header. Omitted for a
+          // single-room booking, which keeps the historical body shape.
+          ...(input.rooms && input.rooms.length > 1 ? { rooms: input.rooms } : {}),
           checkIn: input.checkIn,
           checkOut: input.checkOut,
           guests: input.numGuests,
+          // Per CHD-01 + EXB-01: the desk's adult/child split and
+          // extra-bed count. These were collected by the modal but not
+          // forwarded, so the server fell back to "all adults, no extra
+          // beds" and priced every staff-created booking without them.
+          numAdults: input.numAdults,
+          numChildren: input.numChildren,
+          extraBedCount: input.extraBedCount,
           hasBreakfast: input.hasBreakfast,
           guestDetails: {
             firstName: trimmedFirst,

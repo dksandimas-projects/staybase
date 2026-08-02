@@ -11,7 +11,11 @@ describe("Phase 11.7 — Bookings per-page cleanup (P1)", () => {
   describe("Mobile booking card — 3-dot menu + PAID pill", () => {
     const cardBlock = (() => {
       const m = bookingsSrc.match(
-        /const renderBookingCard\s*=\s*\(row:\s*Booking\)\s*=>\s*\(\s*<div[\s\S]*?const renderOrderCard/
+        // Per MRB-07 (2026-08-02, per decision #159): the renderer now
+        // takes a `BookingListRow` and returns early for the
+        // reservation summary card before falling through to the room
+        // card asserted below.
+        /const renderBookingCard\s*=\s*\(row:\s*BookingListRow\)\s*=>\s*\{[\s\S]*?const renderOrderCard/
       );
       return m ? m[0] : "";
     })();

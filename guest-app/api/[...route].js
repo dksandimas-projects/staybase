@@ -221204,9 +221204,24 @@ var WalkinGuestDetailsSchema = external_exports.object({
   requests: external_exports.string().trim().max(1e3).optional().default(""),
   consent: external_exports.boolean().optional()
 }).strict();
+var WalkinRoomLineSchema = external_exports.object({
+  roomId: external_exports.string().trim().min(1).max(64),
+  numAdults: external_exports.coerce.number().int().min(0).max(100),
+  numChildren: external_exports.coerce.number().int().min(0).max(100),
+  extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0)
+}).strict();
 var WalkinBookingSchema = external_exports.object({
   bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
   roomId: external_exports.string().trim().min(1).max(64),
+  // Per MRB-07 (2026-08-02, per decision #159): the optional N-room
+  // room list. When absent (every pre-MRB-07 caller), the server
+  // derives a single line from the top-level `roomId` + `numAdults` +
+  // `numChildren` + `extraBedCount` — byte-equivalent to the
+  // single-room walk-in. When present, it is the canonical room list;
+  // the server rejects the request unless `roomId === rooms[0].roomId`
+  // and `guests` equals the summed per-line occupancy, so neither the
+  // room nor the guest total is trusted from two disagreeing places.
+  rooms: external_exports.array(WalkinRoomLineSchema).min(1).max(50).optional(),
   checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   guests: external_exports.coerce.number().int().min(1).max(100),
@@ -226540,6 +226555,11 @@ async function handleCreateWalkin(req, res) {
   const {
     bookingId,
     roomId,
+    // Per MRB-07 (2026-08-02, per decision #159): the optional
+    // N-room room list. Absent for every pre-MRB-07 caller — the
+    // server then derives a single line from the top-level fields,
+    // which keeps the single-room walk-in byte-equivalent.
+    rooms: requestedRooms,
     checkIn,
     checkOut,
     guests,
@@ -226583,6 +226603,46 @@ async function handleCreateWalkin(req, res) {
     // canonical idempotency key for the create transaction.
     reservationId: requestedReservationId
   } = parsedWalkin.data;
+  const walkinRoomLines = Array.isArray(requestedRooms) && requestedRooms.length > 0 ? requestedRooms.map((line) => ({
+    roomId: String(line.roomId).trim(),
+    numAdults: Math.max(0, Math.floor(Number(line.numAdults) || 0)),
+    numChildren: Math.max(0, Math.floor(Number(line.numChildren) || 0)),
+    extraBedCount: Math.max(0, Math.floor(Number(line.extraBedCount) || 0))
+  })) : [{
+    roomId,
+    numAdults: Number.isFinite(Number(requestedNumAdults)) ? Math.max(0, Math.floor(Number(requestedNumAdults))) : guests,
+    numChildren: Number.isFinite(Number(requestedNumChildren)) ? Math.max(0, Math.floor(Number(requestedNumChildren))) : 0,
+    extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount) || 0))
+  }];
+  if (Array.isArray(requestedRooms) && requestedRooms.length > 0) {
+    if (walkinRoomLines[0].roomId !== roomId) {
+      return res.status(400).json({
+        success: false,
+        error: "The first room in the reservation must match the primary room."
+      });
+    }
+    const lineGuestTotal = walkinRoomLines.reduce((sum, line) => sum + line.numAdults + line.numChildren, 0);
+    if (lineGuestTotal !== guests) {
+      return res.status(400).json({
+        success: false,
+        error: `Occupancy split mismatch: the rooms hold ${lineGuestTotal} guest(s) but the reservation says ${guests}.`
+      });
+    }
+    if (walkinRoomLines.some((line) => line.numAdults + line.numChildren < 1)) {
+      return res.status(400).json({
+        success: false,
+        error: "Every room in the reservation must have at least one guest."
+      });
+    }
+    const distinctWalkinRoomIds = new Set(walkinRoomLines.map((line) => line.roomId));
+    if (distinctWalkinRoomIds.size !== walkinRoomLines.length) {
+      return res.status(400).json({
+        success: false,
+        error: "The same room was selected more than once. Each room in a reservation must be distinct."
+      });
+    }
+  }
+  const walkinRoomCount = walkinRoomLines.length;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
@@ -226636,51 +226696,67 @@ async function handleCreateWalkin(req, res) {
     let newBooking = null;
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
-      const roomRef = adminDb.collection("rooms").doc(roomId);
-      const roomDoc = await transaction.get(roomRef);
-      if (!roomDoc.exists) {
-        throw new Error("Room not found");
-      }
-      const roomData = roomDoc.data();
-      if (!roomData.isActive) {
-        throw new Error("Room is inactive");
-      }
-      if (roomData.status === "blocked") {
-        const blockedFrom = toDateOrNull(roomData.blockedFrom);
-        const blockedTo = toDateOrNull(roomData.blockedTo);
-        const windowActive = blockedFrom && blockedTo ? checkInDate < blockedTo && checkOutDate > blockedFrom : true;
-        if (windowActive) {
-          throw new Error("Room no longer available");
+      const walkinAssignedRooms = [];
+      for (const line of walkinRoomLines) {
+        const lineRoomRef = adminDb.collection("rooms").doc(line.roomId);
+        const lineRoomDoc = await transaction.get(lineRoomRef);
+        if (!lineRoomDoc.exists) {
+          throw new Error("Room not found");
         }
+        const lineRoomData = lineRoomDoc.data();
+        if (!lineRoomData.isActive) {
+          throw new Error("Room is inactive");
+        }
+        if (lineRoomData.status === "blocked") {
+          const blockedFrom = toDateOrNull(lineRoomData.blockedFrom);
+          const blockedTo = toDateOrNull(lineRoomData.blockedTo);
+          const windowActive = blockedFrom && blockedTo ? checkInDate < blockedTo && checkOutDate > blockedFrom : true;
+          if (windowActive) {
+            throw new Error("Room no longer available");
+          }
+        }
+        walkinAssignedRooms.push({
+          roomId: line.roomId,
+          ref: lineRoomRef,
+          data: lineRoomData,
+          numAdults: line.numAdults,
+          numChildren: line.numChildren,
+          extraBedCount: line.extraBedCount
+        });
       }
+      const roomRef = walkinAssignedRooms[0].ref;
+      const roomData = walkinAssignedRooms[0].data;
+      const walkinFingerprintRoomLines = walkinAssignedRooms.map((assigned) => ({
+        type: String(assigned.data.type || "").trim(),
+        quantity: 1,
+        adults: assigned.numAdults,
+        children: assigned.numChildren,
+        extraBeds: assigned.extraBedCount
+      }));
+      const buildWalkinFingerprint = (leadGuestName) => computeRequestFingerprint({
+        reservationId: effectiveReservationId,
+        roomLines: walkinFingerprintRoomLines,
+        checkIn: String(checkIn || "").trim(),
+        checkOut: String(checkOut || "").trim(),
+        leadGuestName,
+        leadGuestEmail: String(guestDetails.email || "").trim().toLowerCase(),
+        leadGuestPhone: String(guestDetails.phone || "").trim(),
+        source: "walk-in",
+        isCorporate: false,
+        corporateCode: "",
+        companyName: "",
+        voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
+        memberDiscountPct: 0,
+        discountScope: normalizeDiscountScope(null),
+        termsVersion: DEFAULT_TERMS_VERSION,
+        privacyVersion: DEFAULT_TERMS_VERSION
+      });
       const existingReservationSnap = await transaction.get(reservationDocRef);
       if (existingReservationSnap.exists) {
         const existingData = existingReservationSnap.data() || {};
-        const walkinFingerprint = computeRequestFingerprint({
-          reservationId: effectiveReservationId,
-          roomLines: [{
-            type: String(roomData.type || "").trim(),
-            quantity: 1,
-            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
-            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
-            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
-          }],
-          checkIn: String(checkIn || "").trim(),
-          checkOut: String(checkOut || "").trim(),
-          leadGuestName: `${String(guestDetails.firstName || "").trim()} ${String(guestDetails.lastName || "").trim()}`,
-          leadGuestEmail: String(guestDetails.email || "").trim().toLowerCase(),
-          leadGuestPhone: String(guestDetails.phone || "").trim(),
-          source: "walk-in",
-          isCorporate: false,
-          corporateCode: "",
-          companyName: "",
-          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
-          memberDiscountPct: 0,
-          discountScope: normalizeDiscountScope(null),
-          // server-resolved DSC-01 scope lands in MRB-04
-          termsVersion: DEFAULT_TERMS_VERSION,
-          privacyVersion: DEFAULT_TERMS_VERSION
-        });
+        const walkinFingerprint = buildWalkinFingerprint(
+          `${String(guestDetails.firstName || "").trim()} ${String(guestDetails.lastName || "").trim()}`
+        );
         const sameRequest = String(existingData.requestFingerprint || "") === walkinFingerprint;
         if (!sameRequest) {
           throw new Error("RESERVATION_ID_FINGERPRINT_CONFLICT");
@@ -226716,11 +226792,15 @@ async function handleCreateWalkin(req, res) {
       const websiteContentDoc = await transaction.get(websiteContentRef);
       const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data() : {};
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
-      if (!rawTypeEntry) {
-        throw new Error("Room type is not available.");
-      }
-      const typeEntry = applyRoomTypeDefaults(rawTypeEntry);
+      const resolveWalkinTypeEntry = (typeValue) => {
+        const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === typeValue);
+        if (!rawTypeEntry) {
+          throw new Error("Room type is not available.");
+        }
+        return applyRoomTypeDefaults(rawTypeEntry);
+      };
+      const walkinTypeEntries = walkinAssignedRooms.map((assigned) => resolveWalkinTypeEntry(assigned.data.type));
+      const typeEntry = walkinTypeEntries[0];
       const snapshottedDiscountScope = normalizeDiscountScope(hotelConfig.discountScope);
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
@@ -226732,59 +226812,64 @@ async function handleCreateWalkin(req, res) {
       if (resolvedSource !== requestedSource) {
         console.warn(`[handleCreateWalkinBooking] unknown source "${requestedSource}" \u2014 falling back to "walk-in"`);
       }
-      const walkinNumAdults = Number.isFinite(Number(requestedNumAdults)) ? Math.max(0, Math.floor(Number(requestedNumAdults))) : guests;
-      const walkinNumChildren = Number.isFinite(Number(requestedNumChildren)) ? Math.max(0, Math.floor(Number(requestedNumChildren))) : 0;
-      if (walkinNumAdults + walkinNumChildren !== guests) {
+      const walkinNumAdults = walkinRoomLines[0].numAdults;
+      const walkinNumChildren = walkinRoomLines[0].numChildren;
+      const walkinTotalOccupancy = walkinRoomLines.reduce(
+        (sum, line) => sum + line.numAdults + line.numChildren,
+        0
+      );
+      if (walkinTotalOccupancy !== guests) {
         throw new Error(
-          `Occupancy split mismatch: numAdults (${walkinNumAdults}) + numChildren (${walkinNumChildren}) must equal guests (${guests}).`
+          walkinRoomCount === 1 ? `Occupancy split mismatch: numAdults (${walkinNumAdults}) + numChildren (${walkinNumChildren}) must equal guests (${guests}).` : `Occupancy split mismatch: the room stays hold ${walkinTotalOccupancy} guest(s) but the reservation says ${guests}.`
         );
       }
       const walkinMaxChildren = Math.max(0, Number(typeEntry.maxChildren) || 0);
-      const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", roomId).where("status", "in", ROOM_OCCUPYING_STATUSES);
-      const bookingsSnapshot = await transaction.get(bookingsQuery);
       const now = /* @__PURE__ */ new Date();
-      let sawConflict = false;
-      let sawLingering = false;
-      for (const doc of bookingsSnapshot.docs) {
-        const bookingData2 = doc.data();
-        if (isExpiredPendingHold(bookingData2, now)) {
-          const existingCheckIn = toDateOrNull(bookingData2.checkIn);
-          const existingCheckOut = toDateOrNull(bookingData2.checkOut);
-          const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
-          if (dateOverlaps) {
-            expiredHoldRetirements.push({
-              ref: doc.ref,
-              previousData: bookingData2,
-              bookingRef: String(bookingData2.bookingRef || doc.id),
-              guestEmail: String(bookingData2.guestEmail || ""),
-              holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
-            });
+      for (const assigned of walkinAssignedRooms) {
+        const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", assigned.roomId).where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const bookingsSnapshot = await transaction.get(bookingsQuery);
+        let sawConflict = false;
+        let sawLingering = false;
+        for (const doc of bookingsSnapshot.docs) {
+          const bookingData2 = doc.data();
+          if (isExpiredPendingHold(bookingData2, now)) {
+            const existingCheckIn = toDateOrNull(bookingData2.checkIn);
+            const existingCheckOut = toDateOrNull(bookingData2.checkOut);
+            const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+            if (dateOverlaps) {
+              expiredHoldRetirements.push({
+                ref: doc.ref,
+                previousData: bookingData2,
+                bookingRef: String(bookingData2.bookingRef || doc.id),
+                guestEmail: String(bookingData2.guestEmail || ""),
+                holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
+              });
+            }
+            continue;
           }
-          continue;
+          const reason = getOccupancyConflictReason({
+            bookingData: bookingData2,
+            requestedCheckIn: checkInDate,
+            requestedCheckOut: checkOutDate,
+            requestedCheckInKey: checkIn,
+            todayKey,
+            currentMinutes: currentManilaMinutes,
+            checkOutTime: hotelConfig.checkOutTime,
+            now
+          });
+          if (reason === "overlap" || reason === "lingering-checked-in") {
+            if (reason === "lingering-checked-in") sawLingering = true;
+            sawConflict = true;
+            break;
+          }
         }
-        const reason = getOccupancyConflictReason({
-          bookingData: bookingData2,
-          requestedCheckIn: checkInDate,
-          requestedCheckOut: checkOutDate,
-          requestedCheckInKey: checkIn,
-          todayKey,
-          currentMinutes: currentManilaMinutes,
-          checkOutTime: hotelConfig.checkOutTime,
-          now
-        });
-        if (reason === "overlap" || reason === "lingering-checked-in") {
-          if (reason === "lingering-checked-in") sawLingering = true;
-          sawConflict = true;
-          break;
+        if (sawConflict) {
+          throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-      }
-      const hasConflict = sawConflict;
-      if (hasConflict) {
-        throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
-      }
-      const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
-      if (hasBlockConflict) {
-        throw new Error("Room no longer available");
+        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, assigned.roomId, checkInDate, checkOutDate);
+        if (hasBlockConflict) {
+          throw new Error("Room no longer available");
+        }
       }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
@@ -226792,26 +226877,34 @@ async function handleCreateWalkin(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
-      const walkinExtraBedCount = Math.max(0, Number(requestedExtraBedCount) || 0);
-      const walkinTypeMaxExtraBeds = Math.max(0, Number(typeEntry.maxExtraBeds) || 0);
-      const walkinTypeExtraBedRate = Math.max(0, Number(typeEntry.extraBedRate) || 0);
-      if (walkinExtraBedCount > walkinTypeMaxExtraBeds) {
-        throw new Error(
-          `Extra bed count (${walkinExtraBedCount}) exceeds the room type's allowance (${walkinTypeMaxExtraBeds}).`
-        );
-      }
-      const walkinExtraBedRate = walkinExtraBedCount > 0 ? walkinTypeExtraBedRate : 0;
-      const walkinOverflow = requiredExtraBedsFor({
-        numAdults: walkinNumAdults,
-        numChildren: walkinNumChildren,
-        maxCapacity: typeMaxCapacity,
-        maxChildren: walkinMaxChildren
+      const walkinPerRoomExtraBeds = walkinAssignedRooms.map((assigned, lineIdx) => {
+        const lineTypeEntry = walkinTypeEntries[lineIdx];
+        const lineExtraBedCount = assigned.extraBedCount;
+        const lineMaxExtraBeds = Math.max(0, Number(lineTypeEntry.maxExtraBeds) || 0);
+        const lineExtraBedRate = Math.max(0, Number(lineTypeEntry.extraBedRate) || 0);
+        if (lineExtraBedCount > lineMaxExtraBeds) {
+          throw new Error(
+            `Extra bed count (${lineExtraBedCount}) exceeds the room type's allowance (${lineMaxExtraBeds}).`
+          );
+        }
+        const lineOverflow = requiredExtraBedsFor({
+          numAdults: assigned.numAdults,
+          numChildren: assigned.numChildren,
+          maxCapacity: Number(lineTypeEntry.maxCapacity) || 0,
+          maxChildren: Math.max(0, Number(lineTypeEntry.maxChildren) || 0)
+        });
+        if (lineOverflow.requiredExtraBeds > lineExtraBedCount) {
+          throw new Error(
+            `Not enough extra beds: ${lineOverflow.overflowAdults} overflow adult(s) + ${lineOverflow.overflowChildren} overflow child(ren) = ${lineOverflow.requiredExtraBeds} extra bed(s) needed, but only ${lineExtraBedCount} extra bed(s) selected. The room type allows up to ${lineMaxExtraBeds} extra bed(s).`
+          );
+        }
+        return {
+          extraBedCount: lineExtraBedCount,
+          extraBedRate: lineExtraBedCount > 0 ? lineExtraBedRate : 0
+        };
       });
-      if (walkinOverflow.requiredExtraBeds > walkinExtraBedCount) {
-        throw new Error(
-          `Not enough extra beds: ${walkinOverflow.overflowAdults} overflow adult(s) + ${walkinOverflow.overflowChildren} overflow child(ren) = ${walkinOverflow.requiredExtraBeds} extra bed(s) needed, but only ${walkinExtraBedCount} extra bed(s) selected. The room type allows up to ${walkinTypeMaxExtraBeds} extra bed(s).`
-        );
-      }
+      const walkinExtraBedRate = walkinPerRoomExtraBeds[0].extraBedRate;
+      const walkinExtraBedCount = walkinPerRoomExtraBeds.reduce((sum, line) => sum + line.extraBedCount, 0);
       if (walkinExtraBedCount > 0) {
         const walkinExtraBedOverlapQuery = adminDb.collection("bookings").where("status", "in", ROOM_OCCUPYING_STATUSES);
         const walkinExtraBedOverlapSnapshot = await transaction.get(walkinExtraBedOverlapQuery);
@@ -226831,28 +226924,43 @@ async function handleCreateWalkin(req, res) {
           );
         }
       }
-      const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
-        checkIn: checkInDate,
-        checkOut: checkOutDate,
-        roomType: roomData.type,
-        baseRate: typeBaseRate,
-        weekendRate: typeWeekendRate,
-        seasonalRateOverrides
-      });
-      const roomTotal = roomBreakdown.roomSubtotal;
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: actualBreakfastRate,
-        numGuests: guests,
-        numNights,
-        breakfastIncludesChildren
+      const walkinRoomStayPricing = walkinAssignedRooms.map((assigned, lineIdx) => {
+        const lineTypeEntry = walkinTypeEntries[lineIdx];
+        const lineRoomBreakdown = calculateSeasonalAwareRoomBreakdown({
+          checkIn: checkInDate,
+          checkOut: checkOutDate,
+          roomType: assigned.data.type,
+          baseRate: Number(lineTypeEntry.pricePerNight) || 0,
+          weekendRate: Number(lineTypeEntry.weekendRate) || 0,
+          seasonalRateOverrides
+        });
+        const lineBreakfastTotal = calculateBreakfastAddOn({
+          hasBreakfast: finalHasBreakfast,
+          breakfastRate: actualBreakfastRate,
+          numGuests: assigned.numAdults + assigned.numChildren,
+          numNights,
+          breakfastIncludesChildren
+        });
+        const lineExtraBedTotal = calculateExtraBedAddOn({
+          extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
+          extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
+          numNights
+        });
+        return {
+          roomBreakdown: lineRoomBreakdown,
+          roomTotal: lineRoomBreakdown.roomSubtotal,
+          breakfastTotal: lineBreakfastTotal,
+          extraBedTotal: lineExtraBedTotal,
+          extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
+          extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
+          subtotal: lineRoomBreakdown.roomSubtotal + lineBreakfastTotal + lineExtraBedTotal
+        };
       });
-      const walkinExtraBedTotal = calculateExtraBedAddOn({
-        extraBedCount: walkinExtraBedCount,
-        extraBedRate: walkinExtraBedRate,
-        numNights
-      });
+      const roomBreakdown = walkinRoomStayPricing[0].roomBreakdown;
+      const roomTotal = walkinRoomStayPricing.reduce((sum, line) => sum + line.roomTotal, 0);
+      const breakfastTotal = walkinRoomStayPricing.reduce((sum, line) => sum + line.breakfastTotal, 0);
+      const walkinExtraBedTotal = walkinRoomStayPricing.reduce((sum, line) => sum + line.extraBedTotal, 0);
       const subtotal = roomTotal + breakfastTotal + walkinExtraBedTotal;
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
@@ -226877,7 +226985,7 @@ async function handleCreateWalkin(req, res) {
         if (!voucherDoc.exists) throw new Error("Voucher is invalid or no longer available.");
         const voucherData = voucherDoc.data();
         const expiresAt = toDateOrNull(voucherData.expiresAt);
-        const voucherIsValid = voucherData.isActive !== false && (!expiresAt || expiresAt >= /* @__PURE__ */ new Date()) && (voucherData.usageCap == null || Number(voucherData.usageCount || 0) < Number(voucherData.usageCap)) && ((voucherData.applicableRoomTypes?.length ?? 0) === 0 || voucherData.applicableRoomTypes.includes(roomData.type));
+        const voucherIsValid = voucherData.isActive !== false && (!expiresAt || expiresAt >= /* @__PURE__ */ new Date()) && (voucherData.usageCap == null || Number(voucherData.usageCount || 0) < Number(voucherData.usageCap)) && ((voucherData.applicableRoomTypes?.length ?? 0) === 0 || walkinAssignedRooms.every((assigned) => voucherData.applicableRoomTypes.includes(assigned.data.type)));
         if (!voucherIsValid) throw new Error("Voucher is invalid or no longer available.");
         voucherCode = formattedCode;
         voucherDiscount = Math.round(calculateVoucherDiscount({
@@ -226889,57 +226997,75 @@ async function handleCreateWalkin(req, res) {
           data: { usageCount: Number(voucherData.usageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
         };
       }
-      const walkinChainInput = totalPriceOverride !== void 0 && totalPriceOverride !== null ? {
-        roomTotal: pricingSubtotal,
-        breakfastTotal: 0,
-        extraBedTotal: 0,
-        seniorPct: discountPct,
-        voucherAmount: voucherDiscount,
-        memberPct: 0,
-        scope: snapshottedDiscountScope,
-        round: true
-      } : {
-        roomTotal,
-        breakfastTotal,
-        extraBedTotal: walkinExtraBedTotal,
-        seniorPct: discountPct,
-        voucherAmount: voucherDiscount,
-        memberPct: 0,
-        scope: snapshottedDiscountScope,
-        round: true
+      const hasManualOverride = totalPriceOverride !== void 0 && totalPriceOverride !== null;
+      const walkinAllocationBasis = walkinRoomStayPricing.reduce((sum, line) => sum + line.subtotal, 0);
+      const allocateAcrossRoomStays = (amount) => {
+        if (walkinRoomCount === 1) return [amount];
+        if (walkinAllocationBasis <= 0) {
+          return walkinRoomStayPricing.map((_2, idx) => idx === 0 ? amount : 0);
+        }
+        const shares = walkinRoomStayPricing.map(
+          (line) => Math.floor(amount * line.subtotal / walkinAllocationBasis)
+        );
+        const allocated = shares.reduce((sum, share) => sum + share, 0);
+        shares[0] += amount - allocated;
+        return shares;
       };
-      finalTotalPrice = calculateDiscountChain(walkinChainInput).total;
-      const rateBreakdown = buildRateBreakdown({
-        roomLines: totalPriceOverride !== void 0 && totalPriceOverride !== null ? [{
-          source: "manual",
-          label: "Manual front-desk rate",
-          startDate: checkIn,
-          endDate: checkOut,
-          nights: numNights,
-          nightlyRate: numNights > 0 ? Math.round(pricingSubtotal / numNights) : pricingSubtotal,
-          subtotal: pricingSubtotal
-        }] : roomBreakdown.roomLines,
-        roomSubtotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? pricingSubtotal : roomTotal,
-        breakfastTotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? 0 : breakfastTotal,
-        // Per EXB-08 (2026-08-01, per decision #156):
-        // the walk-in also surfaces the extra-bed
-        // add-on term. When `totalPriceOverride` is
-        // set, the manual rate collapses the extra
-        // bed into the room subtotal (the historical
-        // manual-rate shape) — so the add-on line is
-        // 0 in that path. When no override is set,
-        // the per-type `walkinExtraBedTotal` flows
-        // through to `addOns[]` exactly like the
-        // online create path.
-        extraBedTotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? 0 : walkinExtraBedTotal,
-        extraBedCount: walkinExtraBedCount,
-        extraBedRate: walkinExtraBedRate,
-        discountType,
-        discountPct,
-        voucherDiscount,
-        memberDiscountPct: 0,
-        finalTotal: finalTotalPrice
+      const walkinOverrideShares = hasManualOverride ? allocateAcrossRoomStays(Number(totalPriceOverride)) : null;
+      const walkinVoucherShares = allocateAcrossRoomStays(voucherDiscount);
+      const walkinRoomStayFinancials = walkinRoomStayPricing.map((line, lineIdx) => {
+        const linePricingSubtotal = walkinOverrideShares ? walkinOverrideShares[lineIdx] : line.subtotal;
+        const lineVoucherDiscount = walkinVoucherShares[lineIdx];
+        const lineChainInput = hasManualOverride ? {
+          roomTotal: linePricingSubtotal,
+          breakfastTotal: 0,
+          extraBedTotal: 0,
+          seniorPct: discountPct,
+          voucherAmount: lineVoucherDiscount,
+          memberPct: 0,
+          scope: snapshottedDiscountScope,
+          round: true
+        } : {
+          roomTotal: line.roomTotal,
+          breakfastTotal: line.breakfastTotal,
+          extraBedTotal: line.extraBedTotal,
+          seniorPct: discountPct,
+          voucherAmount: lineVoucherDiscount,
+          memberPct: 0,
+          scope: snapshottedDiscountScope,
+          round: true
+        };
+        const lineTotal = calculateDiscountChain(lineChainInput).total;
+        return {
+          ...line,
+          pricingSubtotal: linePricingSubtotal,
+          voucherDiscount: lineVoucherDiscount,
+          totalPrice: lineTotal,
+          rateBreakdown: buildRateBreakdown({
+            roomLines: hasManualOverride ? [{
+              source: "manual",
+              label: "Manual front-desk rate",
+              startDate: checkIn,
+              endDate: checkOut,
+              nights: numNights,
+              nightlyRate: numNights > 0 ? Math.round(linePricingSubtotal / numNights) : linePricingSubtotal,
+              subtotal: linePricingSubtotal
+            }] : line.roomBreakdown.roomLines,
+            roomSubtotal: hasManualOverride ? linePricingSubtotal : line.roomTotal,
+            breakfastTotal: hasManualOverride ? 0 : line.breakfastTotal,
+            extraBedTotal: hasManualOverride ? 0 : line.extraBedTotal,
+            extraBedCount: line.extraBedCount,
+            extraBedRate: line.extraBedRate,
+            discountType,
+            discountPct,
+            voucherDiscount: lineVoucherDiscount,
+            memberDiscountPct: 0,
+            finalTotal: lineTotal
+          })
+        };
       });
+      finalTotalPrice = walkinRoomStayFinancials.reduce((sum, line) => sum + line.totalPrice, 0);
+      const rateBreakdown = walkinRoomStayFinancials[0].rateBreakdown;
       const { todayStr, todayCompact } = getManilaDateInfo();
       const counterRef = adminDb.collection("counters").doc(`bookings-${todayStr}`);
       const counterDoc = await transaction.get(counterRef);
@@ -226947,7 +227073,10 @@ async function handleCreateWalkin(req, res) {
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
       }
-      const bookingRef = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
+      const walkinBookingRefs = walkinAssignedRooms.map(
+        (_2, lineIdx) => `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + lineIdx).padStart(5, "0")}`
+      );
+      const bookingRef = walkinBookingRefs[0];
       finalBookingRef = bookingRef;
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
@@ -227103,55 +227232,67 @@ async function handleCreateWalkin(req, res) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: DEFAULT_TERMS_VERSION,
-        roomCount: 1,
-        activeRoomCount: 1,
+        // Per MRB-07 (2026-08-02, per decision #159): the aggregate
+        // counters reflect the N room stays this reservation actually
+        // created, so the admin reservation row can show room count,
+        // status and balance without fanning out to the children.
+        roomCount: walkinRoomCount,
+        activeRoomCount: walkinRoomCount,
         cancelledRoomCount: 0,
-        checkedInRoomCount: status === "checked-in" ? 1 : 0,
-        checkedOutRoomCount: status === "checked-out" ? 1 : 0,
+        checkedInRoomCount: status === "checked-in" ? walkinRoomCount : 0,
+        checkedOutRoomCount: 0,
         // Walk-ins have no auto-expiry hold (the staff is
         // creating the booking, not waiting on a guest
         // action) — `null` mirrors the public path's
         // `payment-uploaded` case.
         holdExpiresAt: null,
-        requestFingerprint: computeRequestFingerprint({
-          reservationId: effectiveReservationId,
-          roomLines: [{
-            type: String(roomData.type || "").trim(),
-            quantity: 1,
-            adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
-            children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
-            extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
-          }],
-          checkIn: String(checkIn || "").trim(),
-          checkOut: String(checkOut || "").trim(),
-          leadGuestName: guestName,
-          leadGuestEmail: guestDetails.email.trim().toLowerCase(),
-          leadGuestPhone: guestDetails.phone.trim(),
-          source: "walk-in",
-          isCorporate: false,
-          corporateCode: "",
-          companyName: "",
-          voucherCode: String(requestedVoucherCode || "").trim().toUpperCase(),
-          memberDiscountPct: 0,
-          discountScope: normalizeDiscountScope(null),
-          termsVersion: DEFAULT_TERMS_VERSION,
-          privacyVersion: DEFAULT_TERMS_VERSION
-        }),
+        // Per MRB-07 (2026-08-02, per decision #159): the stored
+        // fingerprint is built by the same hoisted builder the
+        // idempotency check above used, so a replay of an N-room
+        // walk-in compares like for like.
+        requestFingerprint: buildWalkinFingerprint(guestName),
         createdAt: now,
         updatedAt: now,
         createdBy: "staff"
       };
       transaction.set(reservationDocRef, newReservation);
       if (status === "checked-in") {
-        transaction.update(roomRef, { status: "occupied" });
+        for (const assigned of walkinAssignedRooms) {
+          transaction.update(assigned.ref, { status: "occupied" });
+        }
       }
       if (counterDoc.exists) {
-        transaction.update(counterRef, { count: sequence });
+        transaction.update(counterRef, { count: sequence + walkinRoomCount - 1 });
       } else {
-        transaction.set(counterRef, { count: 1 });
+        transaction.set(counterRef, { count: walkinRoomCount });
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
-      transaction.set(bookingDocRef, newBooking);
+      for (let lineIdx = 0; lineIdx < walkinRoomCount; lineIdx++) {
+        const assigned = walkinAssignedRooms[lineIdx];
+        const lineFinancials = walkinRoomStayFinancials[lineIdx];
+        const perRoomBookingDocRef = lineIdx === 0 ? bookingDocRef : adminDb.collection("bookings").doc();
+        transaction.set(perRoomBookingDocRef, {
+          ...newBooking,
+          bookingRef: walkinBookingRefs[lineIdx],
+          roomId: assigned.roomId,
+          roomNumber: assigned.data.roomNumber,
+          roomType: assigned.data.type,
+          numGuests: assigned.numAdults + assigned.numChildren,
+          numAdults: assigned.numAdults,
+          numChildren: assigned.numChildren,
+          extraBedCount: lineFinancials.extraBedCount,
+          extraBedRate: lineFinancials.extraBedRate,
+          ratePerNight: Number(walkinTypeEntries[lineIdx].pricePerNight) || 0,
+          totalPrice: lineFinancials.totalPrice,
+          originalTotalPrice: lineFinancials.pricingSubtotal,
+          rateBreakdown: lineFinancials.rateBreakdown,
+          reservationPosition: lineIdx + 1,
+          reservationRoomCount: walkinRoomCount,
+          // Each room stay gets its own lookup token so its magic link
+          // resolves to that room independently.
+          lookupToken: lineIdx === 0 ? newBooking.lookupToken : generateLookupToken()
+        });
+      }
       for (const retirement of expiredHoldRetirements) {
         transaction.update(retirement.ref, {
           status: "cancelled",
