@@ -186,9 +186,14 @@ describe("bookingOccupancy — constants (PEX-02 + PEX-03)", () => {
       "payment-confirmed",
       "confirmed"
     ]);
+    // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+    // `checked-out` moved out of the universal reject
+    // list — staff-initiated cancellation is now
+    // allowed for the post-settlement path (with a
+    // loyalty clawback recorded in the awarding
+    // member's `pointsHistory`).
     expect(TERMINAL_CANCELLATION_STATUSES).toEqual([
       "checked-in",
-      "checked-out",
       "cancelled"
     ]);
   });
