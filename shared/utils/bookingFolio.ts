@@ -470,3 +470,114 @@ export function mapBookingStatusToReservationPaymentStatus(
       return bookingStatus as ReservationPaymentStatus;
   }
 }
+
+// Per MRB-05 (2026-08-02, per decision #159): the N>1
+// aggregate reader that computes the reservation header's
+// `paymentStatus` from the N child `Booking.status` values.
+// For N=1 (today's entire active surface — every reservation
+// has exactly one child booking), the aggregate is the same
+// as the single mapped status (i.e. the same answer
+// `mapBookingStatusToReservationPaymentStatus` returns).
+// For N>1 (future, when the MRB-06 client surface lands and
+// guests can book multiple rooms / multiple room types in
+// one flow), this helper is the wire contract.
+//
+// The aggregate rule (per decision #159, the reservation-
+// summary table):
+//   1. Cancellation is a SECONDARY count, not a hidden
+//      state — every non-cancelled child contributes to
+//      the aggregate. The reservation is `cancelled` only
+//      if EVERY child is cancelled.
+//   2. If ANY non-cancelled child is `pending` or
+//      `payment-uploaded`, the reservation is
+//      `awaiting-payment` (the guest hasn't paid yet for
+//      at least one room; the reservation can't claim to
+//      be confirmed).
+//   3. Else if ALL non-cancelled children are
+//      `payment-confirmed` or `confirmed`, the reservation
+//      is `confirmed` (every room is past the money gate
+//      but no room is in-house yet).
+//   4. Else if ANY non-cancelled child is `checked-out`,
+//      the reservation is `completed` (the partial / full
+//      completion states all encode to `completed` per the
+//      spec — the granular "partially checked out" label
+//      is deferred to MRB-12).
+//   5. Else the reservation is `in-house` (covers: all
+//      non-cancelled children are `checked-in`, OR a mix
+//      of `confirmed` and `checked-in` — both encode to
+//      `in-house` per the spec's "Partially checked in" +
+//      "In house" encoding).
+//
+// **Defensive coercion** — unknown statuses are treated as
+// non-cancelled participating children but they don't match
+// any of the 4 priority tiers' exact-string checks. The
+// default fall-through is tier 5 (`in-house`), which is the
+// operational catch-all. This matches the MRB-04 Phase 3
+// helper's defensive posture (don't throw, don't surface
+// broken values to the wire). An all-cancelled input (every
+// child is `"cancelled"`, or an empty array) returns
+// `"cancelled"` — the only path to the reservation's
+// `cancelled` state.
+//
+// **Pure function** — no React state, no Firestore calls, no
+// async, no side effects. Pinned by ~12 characterization
+// tests in `shared/__tests__/booking-folio.test.ts` (the
+// empty-array case + the 5 priority tiers + the mixed-state
+// cases + the defensive coercion cases).
+export function computeReservationAggregatePaymentStatus(
+  childStatuses: string[]
+): ReservationPaymentStatus {
+  // Filter out cancelled rooms. Cancellation is a
+  // secondary count, not a hidden state — every
+  // non-cancelled child contributes to the aggregate.
+  // The reservation is `cancelled` only if every child
+  // is cancelled (or there are no children).
+  const activeStatuses = childStatuses.filter((s) => s !== "cancelled");
+
+  // Tier 1: all rooms cancelled → "cancelled" (the only
+  // path to the reservation's `cancelled` state).
+  if (activeStatuses.length === 0) {
+    return "cancelled";
+  }
+
+  // Tier 2: any pre-confirmation room → "awaiting-payment"
+  // (the reservation can't claim to be confirmed while at
+  // least one room is still waiting for payment). The
+  // check operates on the BOOKING-scope enum (the input
+  // values) because the priority rule is expressed in
+  // terms of `pending` / `payment-uploaded` (the booking
+  // states) — NOT the reservation-scope mapping (which
+  // would have already collapsed both to
+  // `awaiting-payment`).
+  const hasPreConfirmation = activeStatuses.some(
+    (s) => s === "pending" || s === "payment-uploaded"
+  );
+  if (hasPreConfirmation) {
+    return "awaiting-payment";
+  }
+
+  // Tier 3: all confirmed (no room past check-in yet) →
+  // "confirmed".
+  const allConfirmed = activeStatuses.every(
+    (s) => s === "payment-confirmed" || s === "confirmed"
+  );
+  if (allConfirmed) {
+    return "confirmed";
+  }
+
+  // Tier 4: any checked-out room → "completed" (the
+  // partial / full completion states all encode to
+  // "completed" per the spec — the granular "partially
+  // checked out" label is deferred to MRB-12).
+  const hasCheckedOut = activeStatuses.some((s) => s === "checked-out");
+  if (hasCheckedOut) {
+    return "completed";
+  }
+
+  // Tier 5 (catch-all): all checked-in, or a mix of
+  // confirmed + checked-in → "in-house" (per the spec's
+  // "Partially checked in" + "In house" encoding). Also
+  // catches the defensive-coercion case (unknown
+  // statuses that don't match any prior tier).
+  return "in-house";
+}

@@ -221540,6 +221540,29 @@ function mapBookingStatusToReservationPaymentStatus(bookingStatus) {
       return bookingStatus;
   }
 }
+function computeReservationAggregatePaymentStatus(childStatuses) {
+  const activeStatuses = childStatuses.filter((s4) => s4 !== "cancelled");
+  if (activeStatuses.length === 0) {
+    return "cancelled";
+  }
+  const hasPreConfirmation = activeStatuses.some(
+    (s4) => s4 === "pending" || s4 === "payment-uploaded"
+  );
+  if (hasPreConfirmation) {
+    return "awaiting-payment";
+  }
+  const allConfirmed = activeStatuses.every(
+    (s4) => s4 === "payment-confirmed" || s4 === "confirmed"
+  );
+  if (allConfirmed) {
+    return "confirmed";
+  }
+  const hasCheckedOut = activeStatuses.some((s4) => s4 === "checked-out");
+  if (hasCheckedOut) {
+    return "completed";
+  }
+  return "in-house";
+}
 
 // ../shared/utils/bookingAddOns.ts
 function calculateBreakfastAddOn(input) {
@@ -227257,6 +227280,7 @@ async function handleCancelBooking(req, res) {
   try {
     let bookingDocumentRef;
     let bookingData2;
+    const now = /* @__PURE__ */ new Date();
     if (req.staff) {
       if (bookingId) {
         bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
@@ -227355,34 +227379,43 @@ async function handleCancelBooking(req, res) {
         cancellationReason: validReason,
         // Per CRL-02 (2026-08-02): the audit metadata is
         // stamped in the same transaction as the status
-        // flip. `cancelledAt` uses the same `now` value the
-        // transaction already captured (PEX-01's `now` is
-        // a transaction-time Date; here we use `new Date()`
-        // for byte-equivalence with the existing `updatedAt`
-        // — a sub-millisecond skew is acceptable for an
-        // audit field). `cancelledBy` is the staff UID or
-        // the literal "guest"; `cancellationSource` is the
-        // parallel discriminator (one of CANCELLATION_SOURCES).
-        // A partial failure cannot leave a half-stamped
+        // flip. `cancelledAt` uses the same `now` value
+        // the `now` constant at the top of the try block
+        // captured (BEFORE the runTransaction so it's
+        // stable across transaction retries). A
+        // sub-millisecond skew between `cancelledAt` and
+        // `updatedAt` is acceptable for an audit field.
+        // `cancelledBy` is the staff UID or the literal
+        // "guest"; `cancellationSource` is the parallel
+        // discriminator (one of CANCELLATION_SOURCES). A
+        // partial failure cannot leave a half-stamped
         // cancellation — the four writes share a single
         // `transaction.update` call.
-        cancelledAt: /* @__PURE__ */ new Date(),
+        cancelledAt: now,
         cancelledBy,
         cancellationSource,
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       });
+      const bookingReservationId2 = String(freshBooking.reservationId || "").trim();
+      if (bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
+          updatedAt: now
+        });
+      }
       if (voucherDoc?.exists && voucherRef) {
         const voucherData = voucherDoc.data() || {};
         transaction.update(voucherRef, {
           usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
-          updatedAt: /* @__PURE__ */ new Date()
+          updatedAt: now
         });
       }
       if (corporateCodeDoc?.exists && corporateCodeRef) {
         const corporateCodeData = corporateCodeDoc.data() || {};
         transaction.update(corporateCodeRef, {
           usageCount: Math.max((Number(corporateCodeData.usageCount) || 0) - 1, 0),
-          updatedAt: /* @__PURE__ */ new Date()
+          updatedAt: now
         });
       }
     });
@@ -227935,6 +227968,7 @@ async function handleConfirmBooking(req, res) {
     const confirmedBy = req.staff?.uid || "staff";
     let bookingData2 = null;
     let alreadyConfirmed = false;
+    const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
@@ -227950,12 +227984,20 @@ async function handleConfirmBooking(req, res) {
       if (!allowedStatuses.includes(data.status)) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
+      const bookingReservationId2 = String(data.reservationId || "").trim();
       transaction.update(bookingRef, {
         status: "confirmed",
-        confirmedAt: /* @__PURE__ */ new Date(),
+        confirmedAt: now,
         confirmedBy,
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       });
+      if (bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
+          updatedAt: now
+        });
+      }
     });
     if (alreadyConfirmed) {
       return res.status(200).json({ success: true, data: { status: "confirmed", alreadyConfirmed: true } });
@@ -228012,6 +228054,7 @@ async function handleConfirmBookingWithBalance(req, res) {
   let balanceThreshold = unpaidCheckoutThreshold;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
@@ -228050,7 +228093,14 @@ async function handleConfirmBookingWithBalance(req, res) {
         needsAdminApproval = true;
         throw new Error(`THRESHOLD_EXCEEDED:${txThreshold}:${computedBalance}`);
       }
-      const now = /* @__PURE__ */ new Date();
+      const bookingReservationId2 = String(data.reservationId || "").trim();
+      if (bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
+          updatedAt: now
+        });
+      }
       transaction.update(bookingRef, {
         status: "confirmed",
         // Stamps the original balance at confirm time —
@@ -228135,6 +228185,7 @@ async function handleCheckinBooking(req, res) {
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const checkedInBy = req.staff?.uid || "staff";
+    const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
@@ -228167,16 +228218,24 @@ async function handleCheckinBooking(req, res) {
       if (occupiedByOtherBooking) {
         throw new Error("Assigned room is already occupied by another checked-in booking.");
       }
+      const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
       transaction.update(bookingRef, {
         status: "checked-in",
-        checkedInAt: /* @__PURE__ */ new Date(),
+        checkedInAt: now,
         checkedInBy,
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       });
       transaction.update(roomRef, {
         status: "occupied",
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       });
+      if (bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["checked-in"]),
+          updatedAt: now
+        });
+      }
     });
     try {
       const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
@@ -228209,6 +228268,7 @@ async function handleCheckoutBooking(req, res) {
   }
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const now = /* @__PURE__ */ new Date();
     const bookingDoc = await bookingRef.get();
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
@@ -228286,18 +228346,18 @@ async function handleCheckoutBooking(req, res) {
       const shouldTruncateStay = originalCheckIn && originalCheckOut && checkoutDate > originalCheckIn && checkoutDate < originalCheckOut;
       const bookingUpdate = {
         status: "checked-out",
-        checkedOutAt: /* @__PURE__ */ new Date(),
+        checkedOutAt: now,
         checkedOutBy,
         checkedOutWithBalance,
         checkedOutFolioTotal: checkoutFolioTotal,
         checkedOutCollectedTotal: collectedTotal,
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       };
       if (checkedOutWithBalance > 0) {
         bookingUpdate.unpaidCheckoutReason = safeUnpaidReason;
         bookingUpdate.unpaidCheckoutApprovalThreshold = unpaidCheckoutThreshold;
         bookingUpdate.unpaidCheckoutApprovedBy = unpaidCheckoutApprovedBy;
-        bookingUpdate.unpaidCheckoutApprovedAt = /* @__PURE__ */ new Date();
+        bookingUpdate.unpaidCheckoutApprovedAt = now;
         bookingUpdate.unpaidCheckoutSnapshotFolioTotal = checkoutFolioTotal;
         bookingUpdate.unpaidCheckoutSnapshotCollectedTotal = collectedTotal;
         bookingUpdate.unpaidCheckoutSnapshotBalance = checkedOutWithBalance;
@@ -228319,15 +228379,16 @@ async function handleCheckoutBooking(req, res) {
         pointsAwarded,
         pendingLoyaltyPoints: canAwardPoints && !awardNow ? eligiblePoints : 0,
         loyaltyAwardStatus: canAwardPoints ? awardNow ? "awarded" : "pending-payment" : "ineligible",
-        pointsAwardedAt: awardNow ? /* @__PURE__ */ new Date() : null
+        pointsAwardedAt: awardNow ? now : null
       });
+      const bookingReservationId2 = String(freshBookingData.reservationId || "").trim();
       transaction.update(bookingRef, bookingUpdate);
       if (bookingData2.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
         transaction.update(roomRef, {
           status: "available",
           housekeepingStatus: "dirty",
-          updatedAt: /* @__PURE__ */ new Date()
+          updatedAt: now
         });
       }
       const roomNumber = String(bookingData2.roomNumber || "");
@@ -228335,15 +228396,22 @@ async function handleCheckoutBooking(req, res) {
         const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
         transaction.set(
           intercomRef,
-          { resolved: true, resolvedAt: /* @__PURE__ */ new Date(), resolvedBy: checkedOutBy, roomNumber, updatedAt: /* @__PURE__ */ new Date() },
+          { resolved: true, resolvedAt: now, resolvedBy: checkedOutBy, roomNumber, updatedAt: now },
           { merge: true }
         );
+      }
+      if (bookingReservationId2.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        transaction.update(reservationRef, {
+          paymentStatus: computeReservationAggregatePaymentStatus(["checked-out"]),
+          updatedAt: now
+        });
       }
       if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
         const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
         transaction.update(memberRef, {
           rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: /* @__PURE__ */ new Date()
+          updatedAt: now
         });
         const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
         transaction.set(historyRef, {
