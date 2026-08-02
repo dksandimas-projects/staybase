@@ -179,6 +179,7 @@ Used in: Bookings Management (print/download), email attachment option.
   - Outstanding Balance: ₱{totalPrice − totalCollected} — shown as ₱0 if fully settled, or outstanding amount in bold if not
 - If no payments recorded — show "Payment Method: {paymentMethod}" and "Amount Due: ₱{totalPrice}" as before
 - Footer: "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property."
+- **Reservation-aware receipt (MRB-04):** linked bookings produce one reservation receipt. The reservation reference is used in the header, footer, and filename. Child rooms are ordered by reservation position and each prints its stored pricing allocation, add-ons, deductions, room total, and special requests. VAT is aggregated from those stored room allocations. Reservation-wide store and incidental charges retain child-room labels where present; payments and refunds print once; the reservation total and balance are never multiplied by room count. Legacy bookings without a reservation link retain the single-booking layout above.
 
 **PDF checklist:**
 - [x] PDF font handling is stable in browsers: use jsPDF built-in fonts unless known-good base64 TTF assets are added and verified. Do not reference missing font files or embed OTF files that jsPDF cannot encode reliably.

@@ -366,7 +366,8 @@ function drawPdfFooter(
   bookingRef: string,
   footerNote: string,
   brandRgb: [number, number, number],
-  footerY = 278
+  footerY = 278,
+  referenceLabel = "Booking Ref"
 ) {
   const pageW = 210;
   pdf.setDrawColor(...brandRgb);
@@ -383,7 +384,7 @@ function drawPdfFooter(
     footerY + 9,
     { align: "center", charSpace: 0 }
   );
-  pdf.text(`Booking Ref: ${bookingRef}`, pageW / 2, footerY + 13, { align: "center", charSpace: 0 });
+  pdf.text(`${referenceLabel}: ${bookingRef}`, pageW / 2, footerY + 13, { align: "center", charSpace: 0 });
 }
 
 function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | null) {
@@ -2090,6 +2091,32 @@ export function BookingsPage() {
   const printBookingReceiptPDF = async () => {
     if (!selectedBooking) return;
     const b = selectedBooking;
+    const isReservationReceipt = Boolean(b.reservationId);
+    const receiptBookings = isReservationReceipt
+      ? bookings
+          .filter((booking) => booking.reservationId === b.reservationId)
+          .sort((left, right) => {
+            const positionDifference = Number(left.reservationPosition || 0) - Number(right.reservationPosition || 0);
+            return positionDifference || left.bookingRef.localeCompare(right.bookingRef);
+          })
+      : [b];
+    if (receiptBookings.length === 0) receiptBookings.push(b);
+    const receiptReference = isReservationReceipt
+      ? (b.reservationRef || b.bookingRef)
+      : b.bookingRef;
+    const receiptReferenceLabel = isReservationReceipt ? "Reservation Reference" : "Booking Reference";
+    const receiptFileStem = receiptReference || b.bookingRef || "booking";
+    const getReceiptRoomLabel = (booking: Booking, index: number) =>
+      isReservationReceipt
+        ? `Room ${booking.reservationPosition || index + 1} of ${receiptBookings.length} — ${booking.roomType}`
+        : booking.roomType;
+    const getReceiptAttribution = (bookingId?: string | null) => {
+      if (!isReservationReceipt || !bookingId) return "";
+      const bookingIndex = receiptBookings.findIndex((booking) => booking.id === bookingId);
+      if (bookingIndex < 0) return "";
+      const booking = receiptBookings[bookingIndex];
+      return ` — Room ${booking.reservationPosition || bookingIndex + 1}`;
+    };
     const pdfWindow = window.open("", "_blank");
     pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing booking receipt PDF...</p>");
 
@@ -2116,7 +2143,7 @@ export function BookingsPage() {
           y = drawPdfBrandHeader(pdf, {
             logoDataUrl,
             title: "Booking Confirmation Receipt",
-            subtitle: `Booking Reference: ${b.bookingRef}`,
+            subtitle: `${receiptReferenceLabel}: ${receiptReference}`,
             meta: `Generated: ${generatedAt}`,
             brandRgb,
             printLight: true,
@@ -2194,7 +2221,7 @@ export function BookingsPage() {
       y = drawPdfBrandHeader(pdf, {
         logoDataUrl,
         title: "Booking Confirmation Receipt",
-        subtitle: `Booking Reference: ${b.bookingRef}`,
+        subtitle: `${receiptReferenceLabel}: ${receiptReference}`,
         meta: `Generated: ${generatedAt}`,
         brandRgb,
         printLight: true,
@@ -2217,7 +2244,7 @@ export function BookingsPage() {
       setPdfFont(pdf, "Inter");
       pdf.setFontSize(7.5);
       pdf.setTextColor(90, 90, 90);
-      pdf.text(`Booking ${b.bookingRef} • Generated ${generatedAt}`, marginL + 5, y + 6.2, { charSpace: 0 });
+      pdf.text(`${isReservationReceipt ? "Reservation" : "Booking"} ${receiptReference} • Generated ${generatedAt}`, marginL + 5, y + 6.2, { charSpace: 0 });
       y += 12; // Reduced gap
 
       // ── Guest & Stay Information ──
@@ -2228,8 +2255,14 @@ export function BookingsPage() {
         { label: "Email", value: b.guestEmail },
         { label: "Phone", value: b.guestPhone }
       ], marginL, y, cardW);
+      const receiptGuestCount = receiptBookings.reduce((sum, booking) => sum + (Number(booking.numGuests) || 0), 0);
       const stayRows = [
-        { label: "Room", value: `${b.roomNumber} (${b.roomType})` },
+        {
+          label: isReservationReceipt ? "Rooms" : "Room",
+          value: isReservationReceipt
+            ? `${receiptBookings.length} room${receiptBookings.length === 1 ? "" : "s"} — itemized below`
+            : `${b.roomNumber} (${b.roomType})`
+        },
         { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
         // Per EXB-08 (2026-08-01, per decision #156):
         // the receipt's "Stay" line shows the adult/child
@@ -2237,6 +2270,10 @@ export function BookingsPage() {
         // extra bed count appended when > 0. Legacy pre-CHD
         // bookings read as a single `numGuests` total.
         { label: "Stay", value: (() => {
+          if (isReservationReceipt) {
+            const nightsLabel = `${b.numNights} night${b.numNights === 1 ? "" : "s"}`;
+            return `${nightsLabel} • ${receiptGuestCount} guest${receiptGuestCount === 1 ? "" : "s"} across ${receiptBookings.length} room${receiptBookings.length === 1 ? "" : "s"}`;
+          }
           const numAdults = Number((b as any).numAdults);
           const numChildren = Number((b as any).numChildren);
           const extraBedCount = Number((b as any).extraBedCount);
@@ -2250,7 +2287,10 @@ export function BookingsPage() {
           }
           return `${nightsLabel} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}`;
         })() },
-        { label: "Rate", value: `${formatAmount(b.ratePerNight)} / night` }
+        {
+          label: "Rate",
+          value: isReservationReceipt ? "See room allocations" : `${formatAmount(b.ratePerNight)} / night`
+        }
       ];
       if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
         stayRows.push({ label: "Breakfast", value: `${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night` });
@@ -2265,7 +2305,53 @@ export function BookingsPage() {
 
       pdf.setFontSize(10);
       pdf.setTextColor(50, 50, 50);
-      if (b.rateBreakdown?.roomLines?.length) {
+      if (isReservationReceipt) {
+        receiptBookings.forEach((receiptBooking, bookingIndex) => {
+          const roomLabel = getReceiptRoomLabel(receiptBooking, bookingIndex);
+          const breakdown = receiptBooking.rateBreakdown;
+          checkNewPage(12 + (
+            (breakdown?.roomLines?.length || 1)
+            + (breakdown?.addOns?.length || 0)
+            + (breakdown?.deductions?.length || 0)
+          ) * 5);
+
+          pdf.setFontSize(9.2);
+          pdf.setTextColor(...brandRgb);
+          pdf.setFont("helvetica", "bold");
+          pdf.text(roomLabel, labelColX, y, { charSpace: 0 });
+          pdf.text(receiptBooking.bookingRef, amountX, y, { align: "right", charSpace: 0 });
+          setPdfFont(pdf, "Inter");
+          y += 4.4;
+
+          if (breakdown?.roomLines?.length) {
+            breakdown.roomLines.forEach((line) => {
+              drawAmountRow(
+                `  ${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`,
+                formatAmount(line.subtotal)
+              );
+            });
+            breakdown.addOns.forEach((line) => {
+              drawAmountRow(`  ${line.label}`, formatAmount(line.amount));
+            });
+            breakdown.deductions.forEach((line) => {
+              drawAmountRow(`  ${line.label}`, `-${formatAmount(line.amount)}`, { muted: true });
+            });
+          } else {
+            const roomSubtotal = receiptBooking.ratePerNight * receiptBooking.numNights;
+            drawAmountRow(
+              `  Room subtotal: ${receiptBooking.numNights} night${receiptBooking.numNights === 1 ? "" : "s"} x ${formatAmount(receiptBooking.ratePerNight)}`,
+              formatAmount(roomSubtotal)
+            );
+          }
+
+          drawAmountRow(
+            `  ${roomLabel} total`,
+            formatAmount(receiptBooking.totalPrice),
+            { bold: true }
+          );
+          y += 1.5;
+        });
+      } else if (b.rateBreakdown?.roomLines?.length) {
         b.rateBreakdown.roomLines.forEach((line) => {
           checkNewPage(6);
           drawAmountRow(`${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`, formatAmount(line.subtotal));
@@ -2325,7 +2411,8 @@ export function BookingsPage() {
         }
       }
 
-      // Booking Total Banner
+      // Reservation / booking base total banner. Folio-only
+      // charges render separately below so they are counted once.
       y += 0.5;
       pdf.setFillColor(255, 247, 237);
       pdf.roundedRect(marginL, y - 2, marginR - marginL, 7.5, 1.5, 1.5, "F");
@@ -2333,9 +2420,9 @@ export function BookingsPage() {
 
       pdf.setFontSize(10);
       pdf.setTextColor(...brandRgb);
-      pdf.text("Booking Total", labelColX, y, { charSpace: 0 });
+      pdf.text(isReservationReceipt ? "Reservation Total" : "Booking Total", labelColX, y, { charSpace: 0 });
       pdf.setFont("helvetica", "bold");
-      pdf.text(formatAmount(b.totalPrice), amountX, y, { align: "right", charSpace: 0 });
+      pdf.text(formatAmount(isReservationReceipt ? selectedFolioBaseTotal : b.totalPrice), amountX, y, { align: "right", charSpace: 0 });
       setPdfFont(pdf, "Inter");
       y += 6.5;
 
@@ -2351,13 +2438,20 @@ export function BookingsPage() {
       checkNewPage(20);
       drawPdfSectionTitle(pdf, "VAT Breakdown (12% Philippine standard)", marginL, y, brandRgb);
       y += 4.5;
-      const vatBreakdown = getBookingVatBreakdown({
-        totalPrice: b.totalPrice,
-        originalTotalPrice: b.originalTotalPrice,
-        discountType: b.discountType,
-        discountPct: b.discountPct,
-        discountRejected: b.discountRejected
-      });
+      const vatBreakdown = receiptBookings.reduce((totals, receiptBooking) => {
+        const roomVat = getBookingVatBreakdown({
+          totalPrice: receiptBooking.totalPrice,
+          originalTotalPrice: receiptBooking.originalTotalPrice,
+          discountType: receiptBooking.discountType,
+          discountPct: receiptBooking.discountPct,
+          discountRejected: receiptBooking.discountRejected
+        });
+        return {
+          vatExclusiveSales: totals.vatExclusiveSales + roomVat.vatExclusiveSales,
+          vatExemptSales: totals.vatExemptSales + roomVat.vatExemptSales,
+          vatAmount: totals.vatAmount + roomVat.vatAmount
+        };
+      }, { vatExclusiveSales: 0, vatExemptSales: 0, vatAmount: 0 });
       drawAmountRow(
         "VATable Sales (VAT-exclusive)",
         formatAmount(vatBreakdown.vatExclusiveSales)
@@ -2377,30 +2471,51 @@ export function BookingsPage() {
         drawPdfSectionTitle(pdf, "Folio Charges", marginL, y, brandRgb);
         y += 4.5;
         receiptFolio.storeCharges.forEach((order) => {
-          drawAmountRow(`Store order ${order.orderRef || order.bookingId || ""}`, formatAmount(order.totalAmount ?? 0));
+          drawAmountRow(
+            `Store order ${order.orderRef || order.bookingId || ""}${getReceiptAttribution(order.bookingId)}`,
+            formatAmount(order.totalAmount ?? 0)
+          );
         });
         receiptFolio.charges.forEach((charge) => {
           const amount = charge.amount ?? 0;
-          drawAmountRow(charge.label || "Charge", formatAmount(amount), { muted: amount < 0 });
+          drawAmountRow(
+            `${charge.label || "Charge"}${getReceiptAttribution((charge as IncidentalCharge).bookingId)}`,
+            formatAmount(amount),
+            { muted: amount < 0 }
+          );
         });
         drawAmountRow("Folio total", formatAmount(receiptFolio.grandTotal), { bold: true });
         y += 2;
       }
 
       // ── Special Requests / Notes ──
-      if (b.specialRequests && b.specialRequests.trim().length > 0) {
+      const requestBookings = receiptBookings.filter(
+        (receiptBooking) => receiptBooking.specialRequests?.trim().length > 0
+      );
+      if (requestBookings.length > 0) {
         checkNewPage(15);
         drawPdfSectionTitle(pdf, "Special Requests", marginL, y, brandRgb);
         y += 5;
 
         pdf.setFontSize(10);
         pdf.setTextColor(60, 60, 60);
-        const reqLines = pdf.splitTextToSize(b.specialRequests, pageW - 40);
-        for (const line of reqLines) {
-          checkNewPage(5);
-          pdf.text(line, labelColX, y, { charSpace: 0 });
-          y += 4.0;
-        }
+        requestBookings.forEach((receiptBooking, requestIndex) => {
+          const bookingIndex = receiptBookings.findIndex((booking) => booking.id === receiptBooking.id);
+          if (isReservationReceipt) {
+            checkNewPage(5);
+            pdf.setFont("helvetica", "bold");
+            pdf.text(getReceiptRoomLabel(receiptBooking, bookingIndex), labelColX, y, { charSpace: 0 });
+            setPdfFont(pdf, "Inter");
+            y += 4;
+          }
+          const reqLines = pdf.splitTextToSize(receiptBooking.specialRequests, pageW - 40);
+          for (const line of reqLines) {
+            checkNewPage(5);
+            pdf.text(line, labelColX, y, { charSpace: 0 });
+            y += 4.0;
+          }
+          if (requestIndex < requestBookings.length - 1) y += 1;
+        });
         y += 3;
       }
 
@@ -2496,7 +2611,7 @@ export function BookingsPage() {
         y = drawPdfBrandHeader(pdf, {
           logoDataUrl,
           title: "Booking Confirmation Receipt",
-          subtitle: `Booking Reference: ${b.bookingRef}`,
+          subtitle: `${receiptReferenceLabel}: ${receiptReference}`,
           meta: `Generated: ${generatedAt}`,
           brandRgb,
           printLight: true,
@@ -2505,13 +2620,14 @@ export function BookingsPage() {
       }
       drawPdfFooter(
         pdf,
-        b.bookingRef,
+        receiptReference,
         "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property.",
         brandRgb,
-        footerY > 275 ? y + 8 : footerY
+        footerY > 275 ? y + 8 : footerY,
+        isReservationReceipt ? "Reservation Ref" : "Booking Ref"
       );
 
-      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-receipt.pdf`, pdfWindow);
+      const result = openPdfOrDownload(pdf, `${receiptFileStem}-receipt.pdf`, pdfWindow);
       toast.success(
         "Receipt PDF ready",
         result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."

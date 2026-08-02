@@ -41,6 +41,7 @@ The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 ### Onsite Payments & Refunds
 - **Record Payment:** Collects payment amount, method (from `hotelConfig.paymentMethods`), and tender reference (`transactionReference`). Append-only ledger in `payments` subcollection.
 - **Refunds:** Admin-only, requires method and reason. Appends immutable negative refund record. Idempotent via client-preallocated doc ID.
+- **Receipt:** Reservation-linked stays generate one reservation-referenced PDF with deterministic child-room allocation lines, aggregated VAT, attributed folio charges, and one reservation payment/balance section. Legacy bookings retain the historical single-room PDF.
 
 ### Unpaid Checkout (UCO) & Confirm with Balance (CWB)
 - **Unpaid Checkout:** Requires staff reason; balances above `unpaidCheckoutApprovalThreshold` (default ₱5,000) require `admin` authorization. Stamped immutably on departure.
