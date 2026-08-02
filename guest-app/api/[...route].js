@@ -221549,6 +221549,7 @@ function normalizePaymentHoldWindowHours(raw) {
   return clamped;
 }
 var EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
+var GUEST_CANCELLABLE_STATUSES = ["pending", "payment-uploaded"];
 
 // ../shared/utils/extraBedInventory.ts
 function countExtraBedsInUse(bookings, rangeStart, rangeEnd, excludeBookingId, now = /* @__PURE__ */ new Date()) {
@@ -222475,13 +222476,16 @@ function checkinReminderEmail(booking, houseRules) {
   });
 }
 function bookingCancelledEmail(booking) {
+  const source = String(booking.cancellationSource || "staff");
+  const intro = source === "guest" ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled at your request.` : source === "system" ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled because the payment hold expired.` : `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled by our team.`;
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} has been cancelled.`,
     eyebrow: "Booking cancelled",
     title: "Your reservation has been cancelled",
-    intro: `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled.`,
+    intro,
     body: `
       ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
+      ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.")}
       ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
@@ -222985,6 +222989,35 @@ async function sendStaffNewPaymentTrigger(booking, payment) {
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New payment proof: ${booking.bookingRef}`,
     staffNewPaymentEmail(booking, payment)
+  );
+}
+function staffRefundReviewEmail(order) {
+  return emailLayout({
+    preheader: `Paid store order ${order.orderRef} was cancelled.`,
+    eyebrow: "Refund review needed",
+    title: "A guest cancelled a paid store order",
+    intro: `A guest cancelled a paid store order at <strong>${escapeHtml(hotel_config_default.brandName)}</strong>. The guest was charged via the order's payment method; review the payment proof and record a refund through the order's booking if appropriate.`,
+    body: `
+      ${callout("warm", "Action required", "No refund is issued automatically by the cancellation. Open the order's payment screenshot, confirm the amount, and record a refund via the linked booking's Folio \u2192 Refund action.")}
+      ${card("Cancelled order", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef)}
+        ${row("Room", order.roomNumber || "\u2014")}
+        ${row("Guest", order.guestName || "\u2014")}
+        ${row("Amount", formatMoney(Number(order.totalAmount || 0)))}
+        ${row("Method", order.paymentMethod || "\u2014")}
+        ${row("Reason", order.cancellationReason ? escapeHtml(order.cancellationReason) : "\u2014")}
+        ${order.paymentProofUrl ? row("Payment proof", `<a href="${escapeHtml(order.paymentProofUrl)}" style="color: ${hotel_config_default.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Open booking",
+    ctaUrl: order.bookingId ? adminUrl(`/bookings?ref=${encodeURIComponent(order.bookingId)}`) : adminUrl("/bookings")
+  });
+}
+async function sendStaffRefundReviewTrigger(order) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${hotel_config_default.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
+    staffRefundReviewEmail(order)
   );
 }
 async function getTomorrowConfirmedBookings() {
@@ -226633,6 +226666,12 @@ async function handleCancelBooking(req, res) {
         error: `Booking cannot be cancelled because its status is already ${bookingData2.status}. Please contact the front desk.`
       });
     }
+    if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(String(bookingData2.status || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "Your booking is past the self-service cancellation window. Please contact the front desk so a staff member can assist you with cancellation and any applicable refund."
+      });
+    }
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingDocumentRef);
       if (!freshBookingDoc.exists) {
@@ -226641,6 +226680,9 @@ async function handleCancelBooking(req, res) {
       const freshBooking = freshBookingDoc.data() || {};
       if (freshBooking.status === "checked-in" || freshBooking.status === "checked-out" || freshBooking.status === "cancelled") {
         throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
+      }
+      if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(String(freshBooking.status || ""))) {
+        throw new Error("GUEST_PAST_SELF_SERVICE_WINDOW");
       }
       const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
       const appliedCorporateCode = String(freshBooking.corporateCode || "").trim().toUpperCase();
@@ -226718,6 +226760,12 @@ async function handleCancelBooking(req, res) {
     }
     return res.status(200).json({ success: true });
   } catch (error) {
+    if (error?.message === "GUEST_PAST_SELF_SERVICE_WINDOW") {
+      return res.status(400).json({
+        success: false,
+        error: "Your booking is past the self-service cancellation window. Please contact the front desk so a staff member can assist you with cancellation and any applicable refund."
+      });
+    }
     console.error("Booking cancellation handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
@@ -230614,20 +230662,39 @@ async function handleCancelStoreOrder(req, res) {
           }
         }
         if (guestEmail) {
-          const freshDoc = await adminDb.collection("storeOrders").doc(orderId).get();
-          const fresh = freshDoc.exists ? freshDoc.data() : cancelledOrder;
+          const freshDoc2 = await adminDb.collection("storeOrders").doc(orderId).get();
+          const fresh2 = freshDoc2.exists ? freshDoc2.data() : cancelledOrder;
           await sendStoreOrderTrigger("store-order-cancelled", {
-            orderRef: fresh.orderRef,
+            orderRef: fresh2.orderRef,
             orderId,
             roomNumber,
             guestEmail,
-            guestName: fresh.guestName,
-            items: fresh.items,
-            totalAmount: fresh.totalAmount,
-            paymentMethod: fresh.paymentMethod,
+            guestName: fresh2.guestName,
+            items: fresh2.items,
+            totalAmount: fresh2.totalAmount,
+            paymentMethod: fresh2.paymentMethod,
             status: "cancelled",
             cancellationReason: cancellationReason || "Guest cancelled from intercom"
           });
+        }
+        const freshDoc = await adminDb.collection("storeOrders").doc(orderId).get();
+        const fresh = freshDoc.exists ? freshDoc.data() : cancelledOrder;
+        if (fresh && fresh.paymentMethod === "gcash" && fresh.paymentProofUrl) {
+          try {
+            await sendStaffRefundReviewTrigger({
+              orderRef: fresh.orderRef,
+              orderId,
+              roomNumber,
+              guestName: fresh.guestName,
+              totalAmount: fresh.totalAmount,
+              paymentMethod: fresh.paymentMethod,
+              paymentProofUrl: fresh.paymentProofUrl,
+              cancellationReason: cancellationReason || "Guest cancelled from intercom",
+              bookingId: fresh.bookingId || null
+            });
+          } catch (staffEmailErr) {
+            console.error("Failed to send staff refund-review alert:", staffEmailErr);
+          }
         }
       } catch (emailErr) {
         console.error("Failed to send store-order-cancelled email:", emailErr);

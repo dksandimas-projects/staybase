@@ -1051,6 +1051,16 @@ export function BookingLookupPage() {
             <p className="text-sm text-gray-600 leading-relaxed">
               Are you sure you want to cancel your booking <span className="font-mono font-semibold text-gray-900">{activeBooking.bookingRef}</span>? This action is permanent.
             </p>
+            {/* Per CRL-04 (2026-08-02): the explicit "no refund is
+                automatic" line is the same in the booking-cancelled
+                email and the admin confirm modal. The server already
+                restricts guest self-service to pre-payment statuses
+                (CRL-03), so no money will have been collected — but
+                the copy stays defensive in case the source list
+                expands under CRL-06's policy preview. */}
+            <p className="text-sm text-gray-600 leading-relaxed">
+              <strong>No refund is issued automatically</strong> by the cancellation. If you have already sent payment, our team will review your booking and reach out to arrange any applicable refund.
+            </p>
 
             <label className="grid gap-2 text-sm font-semibold text-gray-700">
               Reason for Cancellation (optional)

@@ -84,6 +84,49 @@ Triggered by `/api/email/discount-rejected` when staff rejects a Senior Citizen 
 
 ---
 
+### Booking Cancelled Email (CRL-02 + CRL-04)
+
+Triggered by `sendBookingTrigger("booking-cancelled", ...)` from `handleCancelBooking` (the 3 PEX-03 in-transaction retirements + the PEX-06 daily cron also use this template).
+
+**Subject:** `[Spark Inn] Booking cancelled: {bookingRef}`
+
+**Email contents:**
+- Greeting: "Dear {guestName},"
+- **CRL-02**: the intro line uses `cancellationSource` to switch the actor — `"guest"` says "cancelled at your request", `"staff"` says "cancelled by our team", `"system"` says "cancelled because the payment hold expired" (the PEX auto-expiry case).
+- Red callout: "Cancellation recorded" with the staff/guest-supplied reason (or "No cancellation reason was provided" if empty).
+- **CRL-04**: a warm "What happens next" callout is added below the reason. The text is identical across the three sources because the rule is identical: "Cancellation is permanent and the booking record is kept in our audit log. **No refund is issued automatically** — if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary."
+- Card: cancelled reservation summary (booking ref, room, dates, guests, total).
+- Closing: "If this cancellation was unexpected, please contact our support team right away."
+- CTA: "Contact support" → `mailto:{supportEmail}`
+
+**Checklist:**
+- [x] Triggered by the same `sendBookingTrigger("booking-cancelled", ...)` call for the main handler + the 3 PEX-03 retirements + the PEX-06 cron (CRL-02 keeps the template shared; the `cancellationSource` field switches the actor line).
+- [x] CRL-04's "no refund is automatic" callout is the parallel source-aware truth-statement. CRL-03's guest-status restriction guarantees that a guest never sees this email for a booking where money was collected, but the copy stays defensive in case the source list expands under CRL-06.
+- [x] Never uses the word "refunded" — only "refund" + "issued" + "review" + "reach out". The ledger (CRL-07) is the only place "refunded" can be surfaced, and only after a processed refund entry exists.
+
+---
+
+### Staff Refund Review Alert (CRL-04)
+
+Triggered by `sendStaffRefundReviewTrigger(order)` from `handleCancelStoreOrder` when a paid GCash store order is cancelled (the `if` guard is `paymentMethod === "gcash" && paymentProofUrl`).
+
+**Subject:** `[Spark Inn] Refund review: cancelled paid store order {orderRef}`
+
+**Email contents:**
+- Eyebrow: "Refund review needed"
+- Title: "A guest cancelled a paid store order"
+- Intro: "A guest cancelled a paid store order at Spark Inn. The guest was charged via the order's payment method; review the payment proof and record a refund through the order's booking if appropriate."
+- Warm callout: "Action required" — "No refund is issued automatically by the cancellation. Open the order's payment screenshot, confirm the amount, and record a refund via the linked booking's Folio → Refund action."
+- Card: order ref, room, guest, amount, method, reason, payment-proof link.
+- CTA: "Open booking" → `/bookings?ref={bookingId}` (or `/bookings` if no linked booking).
+
+**Checklist:**
+- [x] Fires only for `paymentMethod === "gcash" && paymentProofUrl` — COD and Add-to-Bill do not need a refund review (the money has either not been collected yet, or rolls into the booking folio settled at checkout).
+- [x] Best-effort: a failure is logged but does not block the cancellation. The order's audit row is the canonical record; the staff alert is a queue item.
+- [x] Same shape as the existing `staffNewPaymentEmail` (warm callout + details card + admin URL CTA). Mirrors the `sendStaffNewPaymentTrigger` export surface so a future Notification Center queue item (per CRL-08) can plug in without a refactor.
+
+---
+
 ### Email Logic Checklist
 
 - [x] All email routes validate Firebase ID token (staff routes) or accept booking ref + email for guest-triggered resend

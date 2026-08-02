@@ -4681,7 +4681,7 @@ export function BookingsPage() {
                 showBookingCancelForm ? (
                   <ConfirmForm
                     title="Cancel this booking?"
-                    message="The guest will be notified by email. The booking record is kept in the audit log."
+                    message="Cancellation is permanent and the guest will be notified by email. The booking record is kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action."
                     reasonLabel="Cancellation reason (optional)"
                     reasonPlaceholder="e.g. guest requested, no-show, double-booked"
                     confirmLabel="Cancel booking"

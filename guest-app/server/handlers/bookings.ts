@@ -43,6 +43,14 @@ import {
   // CANCELLATION_SOURCES constant so a typo in any stamping path
   // breaks the type instead of silently corrupting the audit.
   CANCELLATION_SOURCES,
+  // Per CRL-03 (2026-08-02): the server-side status matrix that
+  // authorises a cancellation. The handler picks the right set
+  // from the `isStaffCancellation` boolean and rejects every
+  // other status with a 400. The terminal-status set is the
+  // universal "no path can cancel" list.
+  GUEST_CANCELLABLE_STATUSES,
+  STAFF_CANCELLABLE_STATUSES,
+  TERMINAL_CANCELLATION_STATUSES,
   // Per EXB-03 (2026-08-01, per decision #145): the
   // capacity overflow rule. Replaces the two CHD-04 hard
   // rejects (`numAdults > maxCapacity` +
@@ -3151,16 +3159,31 @@ export async function handleCancelBooking(req: any, res: any) {
       bookingData = snapshot.docs[0].data();
     }
 
-    // Per BF-16 (booking-flow audit 2026-06-26): the previous
-    // block list also rejected `confirmed` and `payment-confirmed`
-    // bookings, forcing paid guests to call the front desk. The
-    // self-service path is the more useful default; the only
-    // statuses that genuinely cannot be cancelled online are the
-    // terminal ones (`checked-in` has the guest on-property,
-    // `checked-out` is past, `cancelled` is already terminal). A
-    // confirmed or payment-confirmed booking has no business
-    // reason to be undeleteable — staff can reverse charges out
-    // of band if needed.
+    // Per CRL-03 (2026-08-02): the server-side status matrix
+    // replaces the BF-16 "block terminal, allow everything else"
+    // approach. Two checks in order:
+    //
+    //   (a) Universal terminal-status reject — no path can cancel
+    //       a checked-in, checked-out, or already-cancelled
+    //       booking. Cancellation is irreversible, so once the
+    //       guest is on-property or past checkout, the status
+    //       cannot flip back. Same 400 the BF-16 block produced.
+    //
+    //   (b) Source-specific authorisation — the guest self-service
+    //       path is restricted to `pending` / `payment-uploaded`
+    //       (no money may have been collected). The staff path
+    //       covers every pre-arrival status. The split is enforced
+    //       server-side so a client cannot POST a crafted body to
+    //       bypass the guest restriction; the apiRouter's
+    //       `authenticateStaff` check is the source of truth for
+    //       the boolean.
+    //
+    //   CRL-06 (secure cancellation preview) will deliberately
+    //   expand `GUEST_CANCELLABLE_STATUSES` after the guest sees
+    //   a policy-derived financial preview first. Until then, any
+    //   guest attempting to cancel a paid booking is funnelled to
+    //   the front desk — the safer default for the "no refund
+    //   issued automatically" rule (CRL-04).
     if (
       bookingData.status === "checked-in"
       || bookingData.status === "checked-out"
@@ -3171,6 +3194,15 @@ export async function handleCancelBooking(req: any, res: any) {
         error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk.`
       });
     }
+    if (
+      !isStaffCancellation
+      && !(GUEST_CANCELLABLE_STATUSES as readonly string[]).includes(String(bookingData.status || ""))
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Your booking is past the self-service cancellation window. Please contact the front desk so a staff member can assist you with cancellation and any applicable refund."
+      });
+    }
 
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingDocumentRef);
@@ -3178,12 +3210,24 @@ export async function handleCancelBooking(req: any, res: any) {
         throw new Error("Booking not found.");
       }
       const freshBooking = freshBookingDoc.data() || {};
+      // Per CRL-03: mirror the pre-transaction check inside the
+      // transaction so a concurrent status flip between the two
+      // reads is caught. The terminal-status reject is universal;
+      // the source-specific authorisation uses the same boolean
+      // the handler captured at entry (req.staff) — a `req.staff`
+      // value cannot change mid-handler, so capturing once is safe.
       if (
         freshBooking.status === "checked-in"
         || freshBooking.status === "checked-out"
         || freshBooking.status === "cancelled"
       ) {
         throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
+      }
+      if (
+        !isStaffCancellation
+        && !(GUEST_CANCELLABLE_STATUSES as readonly string[]).includes(String(freshBooking.status || ""))
+      ) {
+        throw new Error("GUEST_PAST_SELF_SERVICE_WINDOW");
       }
 
       const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
@@ -3270,6 +3314,19 @@ export async function handleCancelBooking(req: any, res: any) {
 
     return res.status(200).json({ success: true });
   } catch (error: any) {
+    // Per CRL-03: the in-transaction check raises
+    // `GUEST_PAST_SELF_SERVICE_WINDOW` when a concurrent status
+    // flip moved the booking past the guest-cancellable set
+    // between the handler's pre-transaction read and the
+    // transaction's re-read. Map to a 400 with the same message
+    // the pre-transaction check surfaces so the client UX is
+    // consistent regardless of which check caught it.
+    if (error?.message === "GUEST_PAST_SELF_SERVICE_WINDOW") {
+      return res.status(400).json({
+        success: false,
+        error: "Your booking is past the self-service cancellation window. Please contact the front desk so a staff member can assist you with cancellation and any applicable refund."
+      });
+    }
     console.error("Booking cancellation handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
