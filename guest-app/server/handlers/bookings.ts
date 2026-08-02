@@ -1679,6 +1679,17 @@ export async function handleCreateBooking(req: any, res: any) {
       let corporateCodeRef: any = null;
       let corporateCodeUsageUpdate: { ref: any; data: any } | null = null;
       let corpCodeDoc: any = null;
+      // Per MRB-08 (2026-08-02, per decision #167): the
+      // negotiated-rate lookup is now per-stay, not
+      // per-primary-type. A mixed-type corporate block (e.g.
+      // 2× Standard + 1× Deluxe) used to charge every stay
+      // the primary type's negotiated rate, silently
+      // overcharging a Deluxe stay or undercharging a Standard
+      // stay. We precompute a `Record<roomType, number>` from
+      // `corpData.ratePerRoomType` so the per-stay branch
+      // below can resolve the correct negotiated rate without
+      // re-reading the doc.
+      let perStayNegotiatedRate: Record<string, number> | null = null;
 
       if (corporateCode) {
         // (a) `code`-field fallback: try the doc-ID lookup first
@@ -1704,20 +1715,51 @@ export async function handleCreateBooking(req: any, res: any) {
         }
         if (corpCodeDoc.exists) {
           const corpData = corpCodeDoc.data()!;
+          // Per MRB-08 (2026-08-02, per decision #167): the
+          // cap check inside the create transaction must
+          // account for the N rooms the reservation will
+          // consume in one go. A 5-room block against a cap
+          // of 6 with `usageCount: 4` is fine
+          // (`4 + 5 ≤ 6`); a 5-room block against the same
+          // cap with `usageCount: 2` is not
+          // (`2 + 5 > 6`). The pre-MRB-08 cap check
+          // (`usageCount >= usageCap`) would have allowed
+          // the over-cap reservation to slip through and
+          // silently push the cap past its limit.
           const corpValidation = validateCorporateCode({
             isActive: corpData.isActive !== false,
             expiresAt: toDateOrNull(corpData.expiresAt),
             usageCap: corpData.usageCap ?? null,
             usageCount: corpData.usageCount || 0
-          });
+          }, { requestedUses: assignedRooms.length });
           if (corpValidation.valid) {
             corporateDetails.isCorporate = true;
             corporateDetails.corporateCode = formattedCorpCode;
             // The doc's companyName is the source of truth — the
             // body's guestDetails.companyName is informational only.
             corporateDetails.companyName = corpData.companyName || "";
-            if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomType] !== undefined) {
-              activeRoomRate = corpData.ratePerRoomType[roomType];
+            // Per MRB-08: capture the entire negotiated
+            // `ratePerRoomType` map. The per-stay branch
+            // below resolves the rate for each stay's
+            // `roomType` from this map (then falls back to
+            // the stay type's flat `corporateRate`, then the
+            // standard `pricePerNight`). The pre-MRB-08 code
+            // resolved only the primary `roomType`'s rate
+            // and re-used it for every stay, which priced a
+            // mixed-type block incorrectly.
+            if (corpData.ratePerRoomType && typeof corpData.ratePerRoomType === "object") {
+              perStayNegotiatedRate = { ...corpData.ratePerRoomType };
+              // Back-compat: the primary type's rate
+              // is still surfaced as `activeRoomRate` so
+              // the single-room legacy read sites (the
+              // booking doc's top-level `ratePerNight`
+              // when N=1) continue to match the per-stay
+              // write.
+              if (perStayNegotiatedRate[roomType] !== undefined) {
+                activeRoomRate = perStayNegotiatedRate[roomType];
+              } else if (typeCorporateRate) {
+                activeRoomRate = typeCorporateRate;
+              }
             } else if (typeCorporateRate) {
               activeRoomRate = typeCorporateRate;
             }
@@ -1725,10 +1767,22 @@ export async function handleCreateBooking(req: any, res: any) {
             // transaction, but defer the write until after every
             // transaction read has completed. The Firestore Admin
             // SDK rejects reads after queued writes.
+            // Per MRB-08 (2026-08-02, per decision #167):
+            // N rooms = N uses. The pre-MRB-08 code added
+            // exactly 1, which turned a `usageCap: 5` code
+            // into effectively unlimited when each
+            // reservation carried 2+ rooms. The
+            // `assignedRooms.length` here is the count of
+            // rooms the transaction has successfully claimed
+            // — at this point it equals
+            // `resolvedRoomSelections.length` (the loop
+            // aborts the transaction on the first
+            // unavailable room) so the increment can never
+            // exceed the requested N.
             corporateCodeUsageUpdate = {
               ref: corporateCodeRef,
               data: {
-                usageCount: (corpData.usageCount || 0) + 1,
+                usageCount: (corpData.usageCount || 0) + assignedRooms.length,
                 updatedAt: new Date()
               }
             };
@@ -1780,8 +1834,30 @@ export async function handleCreateBooking(req: any, res: any) {
         const stayType = stay.selection.typeEntry;
         const baseRate = Number(stayType.pricePerNight) || 0;
         const stayCorporateRate = Number(stayType.corporateRate) || 0;
+        // Per MRB-08 (2026-08-02, per decision #167): the
+        // negotiated rate is now resolved PER STAY, not
+        // per primary type. The fallback chain is
+        //   1. `perStayNegotiatedRate[stay.roomType]`
+        //      (the corporateCodes doc's per-type map
+        //      entry for THIS stay's type)
+        //   2. the stay type's flat `corporateRate`
+        //   3. the stay type's standard `pricePerNight`
+        // The pre-MRB-08 code (`index === 0 ?
+        // activeRoomRate : (stayCorporateRate > 0 ?
+        // stayCorporateRate : baseRate)`) priced every
+        // non-primary stay with the flat type's
+        // corporateRate, silently overcharging a mixed
+        // block whose non-primary types lack a flat rate
+        // (fell through to the standard rate) and
+        // undercharging one whose non-primary types have
+        // a higher flat rate than the negotiated rate.
+        const negotiatedForThisStay = perStayNegotiatedRate
+          ? perStayNegotiatedRate[stayType.value]
+          : undefined;
         const stayActiveRate = corporateDetails.isCorporate
-          ? (index === 0 ? activeRoomRate : (stayCorporateRate > 0 ? stayCorporateRate : baseRate))
+          ? (negotiatedForThisStay !== undefined
+              ? negotiatedForThisStay
+              : (stayCorporateRate > 0 ? stayCorporateRate : baseRate))
           : baseRate;
         const stayRoomBreakdown = corporateDetails.isCorporate
           ? {

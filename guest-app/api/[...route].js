@@ -222195,15 +222195,30 @@ function calculateVoucherDiscount(voucher, subtotal) {
 }
 
 // ../shared/utils/corporate-codes.ts
-function validateCorporateCode(code, now = /* @__PURE__ */ new Date()) {
+function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options = {}) {
+  let effectiveNow;
+  let requestedUses;
+  if (now instanceof Date) {
+    effectiveNow = now;
+    requestedUses = options.requestedUses ?? 1;
+  } else {
+    effectiveNow = /* @__PURE__ */ new Date();
+    requestedUses = now?.requestedUses ?? 1;
+  }
+  if (!Number.isFinite(requestedUses) || requestedUses < 1) {
+    requestedUses = 1;
+  }
   if (!code.isActive) {
     return { valid: false, error: "Corporate code is inactive." };
   }
-  if (code.expiresAt && code.expiresAt < now) {
+  if (code.expiresAt && code.expiresAt < effectiveNow) {
     return { valid: false, error: "Corporate code has expired." };
   }
-  if (code.usageCap !== null && code.usageCount >= code.usageCap) {
-    return { valid: false, error: "Corporate code usage limit reached." };
+  if (code.usageCap !== null && code.usageCount + requestedUses > code.usageCap) {
+    return {
+      valid: false,
+      error: requestedUses > 1 ? `Corporate code usage limit reached: this code allows ${code.usageCap} use(s) and ${code.usageCount} are already recorded; the requested ${requestedUses}-room reservation would exceed the cap.` : "Corporate code usage limit reached."
+    };
   }
   return { valid: true, error: "" };
 }
@@ -225942,6 +225957,7 @@ async function handleCreateBooking(req, res) {
       let corporateCodeRef = null;
       let corporateCodeUsageUpdate = null;
       let corpCodeDoc = null;
+      let perStayNegotiatedRate = null;
       if (corporateCode) {
         const formattedCorpCode = String(corporateCode).trim().toUpperCase();
         corporateCodeRef = adminDb.collection("corporateCodes").doc(formattedCorpCode);
@@ -225961,20 +225977,25 @@ async function handleCreateBooking(req, res) {
             expiresAt: toDateOrNull(corpData.expiresAt),
             usageCap: corpData.usageCap ?? null,
             usageCount: corpData.usageCount || 0
-          });
+          }, { requestedUses: assignedRooms.length });
           if (corpValidation.valid) {
             corporateDetails.isCorporate = true;
             corporateDetails.corporateCode = formattedCorpCode;
             corporateDetails.companyName = corpData.companyName || "";
-            if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomType] !== void 0) {
-              activeRoomRate = corpData.ratePerRoomType[roomType];
+            if (corpData.ratePerRoomType && typeof corpData.ratePerRoomType === "object") {
+              perStayNegotiatedRate = { ...corpData.ratePerRoomType };
+              if (perStayNegotiatedRate[roomType] !== void 0) {
+                activeRoomRate = perStayNegotiatedRate[roomType];
+              } else if (typeCorporateRate) {
+                activeRoomRate = typeCorporateRate;
+              }
             } else if (typeCorporateRate) {
               activeRoomRate = typeCorporateRate;
             }
             corporateCodeUsageUpdate = {
               ref: corporateCodeRef,
               data: {
-                usageCount: (corpData.usageCount || 0) + 1,
+                usageCount: (corpData.usageCount || 0) + assignedRooms.length,
                 updatedAt: /* @__PURE__ */ new Date()
               }
             };
@@ -225999,7 +226020,8 @@ async function handleCreateBooking(req, res) {
         const stayType = stay.selection.typeEntry;
         const baseRate = Number(stayType.pricePerNight) || 0;
         const stayCorporateRate = Number(stayType.corporateRate) || 0;
-        const stayActiveRate = corporateDetails.isCorporate ? index === 0 ? activeRoomRate : stayCorporateRate > 0 ? stayCorporateRate : baseRate : baseRate;
+        const negotiatedForThisStay = perStayNegotiatedRate ? perStayNegotiatedRate[stayType.value] : void 0;
+        const stayActiveRate = corporateDetails.isCorporate ? negotiatedForThisStay !== void 0 ? negotiatedForThisStay : stayCorporateRate > 0 ? stayCorporateRate : baseRate : baseRate;
         const stayRoomBreakdown = corporateDetails.isCorporate ? {
           roomSubtotal: stayActiveRate * numNights,
           roomLines: [{
