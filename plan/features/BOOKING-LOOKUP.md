@@ -183,3 +183,21 @@ The 4-eyes pattern from the email-only path is unchanged: Turnstile + 10/min/IP 
 - Cancel API route: `plan/docs/API-ROUTES.md §bookings`
 - Email triggers: `plan/features/EMAIL-PDF-STORAGE.md`
 - Admin cancellation flow: `plan/features/BOOKINGS-MANAGEMENT.md`
+
+---
+
+## Reservation-Scope Guest Cancellation (MRB-13)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #166`. Scope model + reservation-scope server transaction live in `plan/features/BOOKINGS-MANAGEMENT.md §Reservation-Scope Cancellation (MRB-13)`. The guest surface this section owns: the `/my-booking` cancel modal copy + body shape.
+
+- **Guest scope is always whole-reservation.** The public `/my-booking` cancel modal always cancels the WHOLE reservation when the looked-up booking has a `reservationId`. There is no per-room scope selector on the public path — the verbatim MRB-13 spec is "Guest-facing cancellation defaults to the whole reservation and must state the room count." For a legacy null-`reservationId` booking, the existing single-room behavior is preserved.
+- **Modal copy.** The cancel modal must state the room count ("This will cancel all N rooms in this reservation.") and a per-room list (room number + dates) so the guest can verify they're cancelling the right reservation before confirming. The existing CRL-04 "No refund is issued automatically" line stays verbatim.
+- **Server body.** The cancel POST sends `scope: "reservation"` when the looked-up booking has a `reservationId`; otherwise the body omits `scope` and the server default `"room"` applies (byte-compatible legacy behavior). The existing `ref + (email | token)` credential is the auth surface and is unchanged.
+- **No new public auth surface.** The server resolves `reservationId` from the child booking. A guest who can cancel one child of a reservation can cancel the whole reservation with the same credential; the credential gates entry to the reservation, not the unit of action. The existing rate limit + Turnstile + 3-failure 1-hour backoff still apply.
+- **Email.** One `booking-cancelled` email for the whole reservation; the per-room break-up is in the email body. The existing per-booking email template is reused with a multi-room payload; MRB-09 expands the full template inventory (separate item, separate PR).
+- **Picker interaction.** When the picker (MBP) renders and the guest picks a row, the strict `ref + email` lookup that follows returns the child booking as today; the cancel modal then sees the child's `reservationId` and renders the whole-reservation copy. The picker is not affected by MRB-13 — it still returns single-child rows; the reservation resolution happens at cancel time.
+- **Edge cases.**
+  - One-room reservation (post-MRB-01 with `reservationRoomCount === 1`): the modal copy degrades gracefully ("This will cancel your 1-room reservation."); the `scope` body field still rides as `"reservation"` for consistency, the server treats it the same as a one-child reservation cancel.
+  - Reservation with a mix of `cancelled` and active children: the modal lists the active rooms only; already-cancelled rooms do not appear. The server's CRL-03 dual gate skips already-cancelled children in the transaction.
+  - Reservation where every remaining child is in a terminal status that the guest can cancel (`payment-confirmed` / `confirmed`): the modal renders normally; the server cancels every cancellable child and the result is an empty reservation (header `activeRoomCount === 0`, `paymentStatus: "cancelled"`).
+  - Guest self-service past the self-service window (e.g. a `payment-confirmed` reservation): the existing CRL-03 guest status matrix still rejects the cancel with a 400 + "Your booking is past the self-service cancellation window" message. The modal shows the same copy and the guest is funnelled to the front desk. CRL-06 may expand the guest-cancellable set in a later PR.
+  - Lookup returns a child whose `reservationId` no longer exists (orphaned header): the server returns a 500 `RESERVATION_HEADER_WITHOUT_CHILD` (matches the MRB-02.x create error shape), the modal surfaces a generic "We couldn't reach the booking service" error. This case is theoretical (Firestore writes inside the create transaction guarantee both docs exist) and is guarded for completeness.
