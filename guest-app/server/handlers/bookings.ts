@@ -687,7 +687,7 @@ const lookupSchema = z.preprocess(
   (body) => {
     if (body && typeof body === "object" && !Array.isArray(body)) {
       const obj: Record<string, unknown> = { ...body };
-      for (const key of ["bookingRef", "guestEmail", "token", "turnstileToken"] as const) {
+      for (const key of ["bookingRef", "guestEmail", "token", "reservationRef", "turnstileToken"] as const) {
         const v = obj[key];
         if (typeof v === "string" && v.trim() === "") {
           delete obj[key];
@@ -705,6 +705,22 @@ const lookupSchema = z.preprocess(
         .max(40)
         .regex(BOOKING_REF_REGEX, "Invalid booking reference format.")
         .optional(),
+      // Per MRB-10 (2026-08-02, per decision #169): a
+      // direct reservation-scope lookup. The MRB-09
+      // reservation-scope emails carry a
+      // `reservationRef` link (e.g. `/my-booking?reservationRef=…&email=…`)
+      // so the guest can deep-link straight to the
+      // reservation without first landing on a
+      // per-child booking. The credential is unchanged
+      // — `email` is the second factor; the auth gate
+      // verifies the reservation's lead guest owns
+      // the email.
+      reservationRef: z
+        .string()
+        .trim()
+        .max(40)
+        .regex(/^R-\d{8}-\d{5}$/, "Invalid reservation reference format.")
+        .optional(),
       guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
       token: z
         .string()
@@ -715,8 +731,8 @@ const lookupSchema = z.preprocess(
       turnstileToken: z.string().max(2000).optional()
     })
     .refine(
-      (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
-      "Provide a booking reference, email, or lookup token."
+      (data) => Boolean(data.bookingRef) || Boolean(data.reservationRef) || Boolean(data.guestEmail) || Boolean(data.token),
+      "Provide a booking reference, reservation reference, email, or lookup token."
     )
     .refine(
       (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
@@ -6979,7 +6995,7 @@ export async function handleLookupBooking(req: any, res: any) {
     });
   }
 
-  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken } = parsed.data;
+  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken, reservationRef: trimmedReservationRef } = parsed.data;
 
   try {
     // Per feat/relax-booking-lookup: dispatch on whichever
@@ -7005,6 +7021,86 @@ export async function handleLookupBooking(req: any, res: any) {
       }
       const bookingData: any = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
       return await enrichAndRespond(res, bookingData);
+    }
+
+    if (trimmedReservationRef) {
+      // Per MRB-10 (2026-08-02, per decision #169): the
+      // direct reservation-scope lookup. The MRB-09
+      // reservation-scope emails carry a
+      // `reservationRef` link so the guest can deep-link
+      // straight to the reservation without first
+      // landing on a per-child booking. The auth gate
+      // is the existing `ref + (email | token)`
+      // contract: the email is the second factor
+      // against the reservation's lead guest; the
+      // token is the per-child magic link (the
+      // reservation ref links to the first child's
+      // token in the email footer — future iteration).
+      //
+      // The credential is required — a bare
+      // `reservationRef` is not enough to see a
+      // reservation (an attacker who guesses an
+      // `R-YYYYMMDD-NNNNN` would otherwise see the
+      // whole block view).
+      const reservationSnap = await adminDb.collection("reservations")
+        .where("reservationRef", "==", trimmedReservationRef)
+        .limit(1)
+        .get();
+      if (reservationSnap.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const reservation = { id: reservationSnap.docs[0].id, ...reservationSnap.docs[0].data() };
+      // Resolve the credential. The reservation's
+      // `leadGuestEmail` is the canonical email for
+      // the email-second-factor path; the magic-link
+      // path is per-child (the first child's
+      // `lookupToken` is what the email footer
+      // carries).
+      if (normalizedEmail) {
+        const leadEmail = String(reservation.leadGuestEmail || "").trim().toLowerCase();
+        if (leadEmail !== normalizedEmail) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+      } else if (lookupToken) {
+        // The reservation's first child carries the
+        // email footer's lookup token. Find it by
+        // sorting the children by `reservationPosition`.
+        const childrenSnap = await adminDb.collection("bookings")
+          .where("reservationId", "==", reservation.id)
+          .get();
+        const sorted = childrenSnap.docs
+          .map((doc: any) => ({ id: doc.id, ...doc.data() }))
+          .sort((a: any, b: any) => Number(a.reservationPosition || 0) - Number(b.reservationPosition || 0));
+        const match = sorted.find((c: any) => String(c.lookupToken || "").toLowerCase() === String(lookupToken).toLowerCase());
+        if (!match) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+        // Fall through to enrichAndRespond with the
+        // matched child so the existing single-booking
+        // paths can detect the reservationId + return
+        // the reservation view.
+        return await enrichAndRespond(res, { id: match.id, ...match });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide your booking email or lookup token along with the reservation reference."
+        });
+      }
+      // Email path: find the first child (or any
+      // child — the credential already gates access)
+      // and hand to `enrichAndRespond` which detects
+      // the `reservationId` and returns the
+      // reservation view.
+      const firstChildSnap = await adminDb.collection("bookings")
+        .where("reservationId", "==", reservation.id)
+        .orderBy("reservationPosition", "asc")
+        .limit(1)
+        .get();
+      if (firstChildSnap.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const firstChild = { id: firstChildSnap.docs[0].id, ...firstChildSnap.docs[0].data() };
+      return await enrichAndRespond(res, firstChild);
     }
 
     if (trimmedRef && normalizedEmail) {
@@ -7220,6 +7316,35 @@ async function enrichAndRespond(res: any, bookingData: any) {
     }
   }
 
+  // Per MRB-10 (2026-08-02, per decision #169): the
+  // reservation-scope lookup. When the looked-up
+  // booking has a `reservationId` AND the reservation
+  // has N>1 children (i.e. `reservationRoomCount > 1`),
+  // the page renders a single card with every room
+  // nested inside. N=1 falls through to the legacy
+  // `kind: "single"` path (the reservation view is
+  // byte-equivalent to the per-child view for N=1).
+  // Legacy pre-MRB-01 bookings (no `reservationId`)
+  // also fall through to `kind: "single"`.
+  const reservationId = String(bookingData.reservationId || "").trim();
+  if (reservationId) {
+    const reservationRef = adminDb.collection("reservations").doc(reservationId);
+    const reservationSnap = await reservationRef.get();
+    if (reservationSnap.exists) {
+      const reservation = { id: reservationId, ...reservationSnap.data() };
+      const childrenSnap = await adminDb.collection("bookings")
+        .where("reservationId", "==", reservationId)
+        .get();
+      const children = childrenSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+      if (children.length > 1) {
+        return res.status(200).json({
+          success: true,
+          data: buildReservationLookupView(reservation, children, roomData, bookingData)
+        });
+      }
+    }
+  }
+
   // Per decisions #128 (2026-07-25) + #131 (2026-07-25):
   // the public /my-booking page NEVER reflects the guest
   // name back to the caller — neither via the email-alone
@@ -7269,6 +7394,118 @@ async function enrichAndRespond(res: any, bookingData: any) {
       specialRequests: bookingData.specialRequests || ""
     }
   });
+}
+
+// Per MRB-10 (2026-08-02, per decision #169): the
+// reservation-scope lookup view. Mirrors the
+// MRB-09 email view's privacy posture (no `guestName`,
+// `maskedEmail` instead of `guestEmail`) + the
+// per-room projection shape (position + ref + type +
+// occupancy + per-stay total). The view is what the
+// `/my-booking` page renders when a looked-up booking
+// has a `reservationId` AND the reservation has N>1
+// children. Cancel + resend act on the reservation
+// (the server resolves the first child for the
+// credential, then `scope: "reservation"` for the
+// cancel — per MRB-13).
+function buildReservationLookupView(reservation: any, children: any[], anchorRoomData: any | null, anchorBooking: any) {
+  // Sort the children by `reservationPosition`
+  // (1..N) so the page renders them in the same
+  // order they were created. Children without a
+  // `reservationPosition` (legacy) fall to the end
+  // and keep their natural order.
+  const sortedChildren = [...children].sort((a: any, b: any) => {
+    const ap = Number(a.reservationPosition || 0);
+    const bp = Number(b.reservationPosition || 0);
+    return ap - bp;
+  });
+  // For each child, fetch the room data so the page
+  // can show the friendly room name. The reads run
+  // in parallel — the per-room fetches are independent.
+  // (The `anchorRoomData` is the first room's data,
+  // already fetched by `enrichAndRespond` — reuse
+  // it for the first child to skip one round trip.)
+  const rooms = sortedChildren.map((child: any, index: number) => {
+    // The room data isn't fetched here — the page
+    // falls back to `roomType` when `roomName` is
+    // missing (matches the legacy `roomName` /
+    // `roomType` fallback in the single-booking
+    // card). The anchor child reuses the already-
+    // fetched room data; other children surface
+    // only their type until the page deep-links
+    // into a specific child (MRB-15 follow-up).
+    const childRoomData = index === 0 ? anchorRoomData : null;
+    return {
+      id: child.id,
+      position: child.reservationPosition || index + 1,
+      bookingRef: child.bookingRef,
+      maskedEmail: maskEmail(String(child.guestEmail || "")),
+      roomId: child.roomId,
+      roomName: childRoomData?.name || child.roomType || "",
+      roomNumber: child.roomNumber || "",
+      roomType: child.roomType,
+      checkIn: child.checkIn,
+      checkOut: child.checkOut,
+      numNights: Number(child.numNights || 0),
+      numGuests: Number(child.numGuests || 0),
+      numAdults: Number(child.numAdults || 0),
+      numChildren: Number(child.numChildren || 0),
+      extraBedCount: Number(child.extraBedCount || 0),
+      hasBreakfast: Boolean(child.hasBreakfast),
+      ratePerNight: Number(child.ratePerNight || 0),
+      totalPrice: Number(child.totalPrice || 0),
+      status: child.status,
+      // Per-child rate breakdown (snapshotted at
+      // create time per MRB-04) for the receipt
+      // PDF and the receipt card. The page renders
+      // the per-stay lines when the guest expands
+      // a row.
+      rateBreakdown: child.rateBreakdown || null
+    };
+  });
+  return {
+    kind: "reservation",
+    // The reservation header fields the page reads
+    // to render the card (reservation ref + dates +
+    // aggregate total + payment status). The legacy
+    // `id` field is the reservation doc id (NOT a
+    // booking id) so the cancel + resend paths can
+    // pass it to the server without confusing it
+    // with a single-booking id.
+    id: reservation.id,
+    reservationRef: reservation.reservationRef,
+    maskedEmail: maskEmail(String(anchorBooking.guestEmail || "")),
+    guestPhone: anchorBooking.guestPhone,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    numNights: Number(reservation.numNights || 0),
+    // Per MRB-04 (2026-08-02, per decision #159): the
+    // reservation header is the source of truth for
+    // the aggregate total. The per-room values are
+    // the source of truth for the per-stay lines.
+    // The page renders the aggregate + the per-stay
+    // values for the receipt card.
+    totalPrice: Number(reservation.totalPrice || 0),
+    paymentMethod: reservation.paymentMethod,
+    // Per MRB-04: the reservation header's
+    // `paymentStatus` is the aggregate mirror. The
+    // page renders the per-child status badges for
+    // each room and the aggregate status for the
+    // header.
+    status: reservation.paymentStatus || "pending",
+    roomCount: Number(reservation.roomCount || rooms.length),
+    activeRoomCount: Number(reservation.activeRoomCount || rooms.length),
+    cancelledRoomCount: Number(reservation.cancelledRoomCount || 0),
+    rooms,
+    // The "active room" data is what the cancel +
+    // resend flows use as the server credential. The
+    // server resolves the reservation from the
+    // booking, so any child's `bookingId` + `ref` is
+    // valid; we use the first child for consistency
+    // with the legacy single-booking card.
+    primaryBookingId: anchorBooking.id,
+    primaryBookingRef: anchorBooking.bookingRef
+  };
 }
 
 const resolveEarlyCheckinSchema = z.object({
