@@ -221,3 +221,126 @@ export function computeServerFolioTotals(
   const computedBalance = Math.max(folioTotal - collectedTotal, 0);
   return { folioTotal, computedBalance };
 }
+
+// Per MRB-04 (2026-08-02, per decision #159): the
+// behavior-frozen reservation folio summary. The
+// reservation header is the single source of truth
+// for the reservation's money state; this helper is
+// the canonical resolver that reads from the new
+// subcollections for reservations with a
+// `reservationId` (post-MRB-01), and falls back to the
+// legacy `bookings/{id}/payments` + `bookings/{id}/charges`
+// for null-`reservationId` bookings (pre-MRB-01, i.e.
+// created before 2026-08-02). The `source` flag on
+// the returned summary records which subcollection
+// the data came from, so the caller can branch on
+// legacy vs new (the admin UI uses this to render a
+// "legacy booking" badge; the receipt path renders
+// the same shape regardless of source).
+//
+// The balance invariant is the canonical money rule:
+// `reservation balance == reservationTotal +
+// chargesTotal − paymentsTotal`. The helper enforces
+// this with a single-pass sign-aware sum so the
+// invariant is preserved at the math level (no
+// separate derivation that could drift).
+
+/**
+ * Minimal shape for a payment entry on the reservation folio.
+ * Sign-aware: positive for a payment collected, negative for a
+ * refund. The shared `ReservationPayment` type satisfies this;
+ * the existing `OnsitePayment` + `PaymentEntry` shapes are
+ * structurally compatible via duck typing (both carry `amount`).
+ */
+export interface FolioReservationPayment {
+  amount: number;
+}
+
+/**
+ * Minimal shape for a charge entry on the reservation folio.
+ * The shared `ReservationCharge` type satisfies this; the
+ * existing `IncidentalCharge` shape is structurally compatible
+ * (both carry `amount`).
+ */
+export interface FolioReservationCharge {
+  amount: number;
+}
+
+export interface ReservationFolioSummaryInput {
+  reservationId: string;
+  /** The reservation's total — the sum of per-room `totalPrice`. Set at create time; recomputed transactionally in MRB-04's payment write paths. */
+  reservationTotal: number;
+  /** The reservation's payment entries (from `reservations/{id}/payments` for new reservations, or `bookings/{id}/payments` for legacy null-`reservationId` bookings). */
+  payments: FolioReservationPayment[];
+  /** The reservation's charge entries (from `reservations/{id}/charges` for new reservations, or `bookings/{id}/charges` for legacy null-`reservationId` bookings). */
+  charges: FolioReservationCharge[];
+  /**
+   * Whether the data came from the new reservation subcollections
+   * or the legacy `bookings/{id}/payments` +
+   * `bookings/{id}/charges`. The caller decides (the booking has
+   * a `reservationId` for the new subcollections; null for the
+   * legacy adapter). The flag is echoed on the returned summary.
+   */
+  source: "reservation-subcollection" | "booking-subcollection-legacy";
+}
+
+/**
+ * Compute the behavior-frozen reservation folio summary. Pure
+ * function — no Firestore calls, no React state, no async. The
+ * caller supplies the pre-fetched payments + charges; the helper
+ * sums them and computes the balance.
+ *
+ * The balance invariant is `reservation balance == reservationTotal
+ * + chargesTotal − paymentsTotal`. A single-pass sign-aware sum
+ * preserves the invariant at the math level — no separate
+ * derivation that could drift. For refunds, `paymentsTotal` is
+ * negative; for voids, `chargesTotal` is zero (the void entry has
+ * a negative amount that exactly cancels the original; the helper
+ * filters out the void entry's contribution by treating the sum
+ * at the entry level — the caller is responsible for supplying
+ * only the active entries, not the void pair). For a single-pass
+ * implementation, the caller should pre-filter the void pairs
+ * (the `bookings/{id}/charges` query reads all entries; the legacy
+ * adapter filters voids in `computeBookingFolio` above; the new
+ * reservation adapter should do the same).
+ */
+export function getReservationFolioSummary(
+  input: ReservationFolioSummaryInput
+): {
+  reservationId: string;
+  reservationTotal: number;
+  chargesTotal: number;
+  paymentsTotal: number;
+  balance: number;
+  source: "reservation-subcollection" | "booking-subcollection-legacy";
+} {
+  const reservationTotal = Number(input.reservationTotal) || 0;
+  // Sign-aware sums — `payments` includes refunds (negative
+  // amounts); `charges` includes adjustments (positive or
+  // negative per the existing per-creator + bounds + void
+  // semantics). A single pass preserves the balance invariant
+  // at the math level: the caller is expected to pre-filter
+  // the void pairs (see the doc block above) so the sum is
+  // over the ACTIVE entries only.
+  const paymentsTotal = input.payments.reduce(
+    (sum, p) => sum + (Number(p.amount) || 0),
+    0
+  );
+  const chargesTotal = input.charges.reduce(
+    (sum, c) => sum + (Number(c.amount) || 0),
+    0
+  );
+  // The canonical balance invariant: outstanding =
+  // reservationTotal + chargesTotal − paymentsTotal. A
+  // positive balance means the guest owes money; a negative
+  // balance means the guest is overpaid (refund pending).
+  const balance = reservationTotal + chargesTotal - paymentsTotal;
+  return {
+    reservationId: input.reservationId,
+    reservationTotal,
+    chargesTotal,
+    paymentsTotal,
+    balance,
+    source: input.source
+  };
+}
