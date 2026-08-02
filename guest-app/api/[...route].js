@@ -222384,8 +222384,24 @@ function generateReceiptPdf(booking) {
   top += 6;
   text("Guest:", String(booking.guestName || "\u2014"), top);
   top += 6;
-  text("Room Type:", String(booking.roomName || booking.roomType || "\u2014"), top);
-  top += 6;
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
+  if (rooms && rooms.length > 0) {
+    if (booking.reservationRef) {
+      text("Reservation Ref:", String(booking.reservationRef), top);
+      top += 6;
+    }
+    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`, top);
+    top += 6;
+    for (const room of rooms) {
+      const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
+      const value = `${String(room.bookingRef || "\u2014")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
+      text(label, value, top);
+      top += 5;
+    }
+  } else {
+    text("Room Type:", String(booking.roomName || booking.roomType || "\u2014"), top);
+    top += 6;
+  }
   text("Check-in:", fmtDate(booking.checkIn), top);
   top += 6;
   text("Check-out:", fmtDate(booking.checkOut), top);
@@ -222464,6 +222480,114 @@ function siteUrl(path = "") {
 function adminUrl(path = "") {
   return `${getServerAdminBaseUrl()}${path}`;
 }
+function buildReservationEmailView(reservation, children) {
+  if (!reservation || !Array.isArray(children) || children.length === 0) return null;
+  const first = children[0] || {};
+  const roomTypeLabels = children.map((c2) => String(c2.roomName || c2.roomType || "Room"));
+  const aggregateRoomLines = [];
+  let aggregateAddOns = [];
+  let aggregateDeductions = [];
+  let aggregateSubtotal = 0;
+  let aggregateTotal = 0;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    const bd = child.rateBreakdown;
+    if (bd && Array.isArray(bd.roomLines)) {
+      for (const line of bd.roomLines) {
+        aggregateRoomLines.push({
+          ...line,
+          // Per MRB-09 (decision #168): each room
+          // line is prefixed with the room's
+          // 1-indexed position so the email
+          // reader can match the line to the
+          // rooms list above. N=1 stays as
+          // "Room 1 — Room rate" (the prefix
+          // is always present).
+          label: children.length > 1 ? `Room ${index + 1} \u2014 ${line.label || "Room rate"}` : line.label || "Room rate"
+        });
+      }
+    }
+    if (bd && Array.isArray(bd.addOns)) {
+      aggregateAddOns = aggregateAddOns.concat(bd.addOns);
+    }
+    if (bd && Array.isArray(bd.deductions)) {
+      aggregateDeductions = aggregateDeductions.concat(bd.deductions);
+    }
+    aggregateSubtotal += Number(child.totalPrice || 0);
+  }
+  aggregateTotal = Number(reservation.totalPrice ?? aggregateSubtotal) || aggregateSubtotal;
+  const aggregateRateBreakdown = {
+    roomSubtotal: aggregateRoomLines.reduce((sum, line) => sum + Number(line.subtotal || 0), 0),
+    addOns: aggregateAddOns,
+    deductions: aggregateDeductions,
+    roomLines: aggregateRoomLines,
+    total: aggregateTotal
+  };
+  const roomProjections = children.map((child, index) => ({
+    position: index + 1,
+    bookingId: String(child.id || child.bookingId || ""),
+    bookingRef: String(child.bookingRef || ""),
+    lookupToken: String(child.lookupToken || ""),
+    roomId: String(child.roomId || ""),
+    roomNumber: String(child.roomNumber || ""),
+    roomType: String(child.roomType || ""),
+    roomName: child.roomName || child.roomType || "",
+    numGuests: Number(child.numGuests || 0),
+    numAdults: Number(child.numAdults || 0),
+    numChildren: Number(child.numChildren || 0),
+    extraBedCount: Number(child.extraBedCount || 0),
+    hasBreakfast: child.hasBreakfast === true,
+    ratePerNight: Number(child.ratePerNight || 0),
+    totalPrice: Number(child.totalPrice || 0)
+  }));
+  return {
+    // The legacy single-room shape — kept so the
+    // existing templates' top-level fields render
+    // the same way they did pre-MRB-09. The legacy
+    // `bookingRef` is the first room's ref (so
+    // single-room emails stay byte-equivalent);
+    // the reservation ref is the new top-level
+    // `reservationRef` field.
+    bookingRef: first.bookingRef || "",
+    guestName: String(reservation.leadGuestName || first.guestName || ""),
+    guestEmail: String(reservation.leadGuestEmail || first.guestEmail || ""),
+    guestPhone: String(reservation.leadGuestPhone || first.guestPhone || ""),
+    roomName: first.roomName || first.roomType || "",
+    roomType: first.roomType || "",
+    roomNumber: first.roomNumber || "",
+    checkIn: reservation.checkIn ?? first.checkIn,
+    checkOut: reservation.checkOut ?? first.checkOut,
+    numNights: Number(reservation.numNights ?? first.numNights ?? 0),
+    totalPrice: aggregateTotal,
+    rateBreakdown: aggregateRateBreakdown,
+    // Per MRB-09: the new top-level reservation
+    // fields. Templates + subject-line pickers
+    // check `isReservation || rooms.length > 1`
+    // to switch into the multi-room shape.
+    reservationRef: String(reservation.reservationRef || ""),
+    reservationId: String(reservation.id || ""),
+    isReservation: true,
+    roomCount: children.length,
+    activeRoomCount: Number(reservation.activeRoomCount ?? children.length),
+    rooms: roomProjections,
+    roomTypeLabels,
+    // Per MRB-09: source / corporate context.
+    source: reservation.source || first.source || "online",
+    isCorporate: reservation.isCorporate === true,
+    corporateCode: reservation.corporateCode || first.corporateCode || "",
+    companyName: reservation.companyName || first.companyName || "",
+    // Status passthrough so the templates can
+    // render the same "Payment recorded" / "See
+    // you soon" copy as the single-room path.
+    status: reservation.paymentStatus || first.status || "pending",
+    paymentMethod: reservation.paymentMethod || first.paymentMethod || "",
+    // Cancellation metadata (used by the
+    // reservation-scope cancel template that
+    // MRB-13 will call).
+    cancellationReason: first.cancellationReason || "",
+    cancellationSource: first.cancellationSource || ""
+  };
+}
 function lookupUrl(booking) {
   const ref = encodeURIComponent(booking.bookingRef || "");
   const token2 = encodeURIComponent(booking.lookupToken || "");
@@ -222527,6 +222651,30 @@ function rateBreakdownRows(booking) {
   `;
 }
 function bookingRows(booking) {
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
+  const isReservation = rooms && rooms.length > 0;
+  if (isReservation) {
+    const roomsTable = `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${rooms.map((room) => `
+          ${row(
+      `Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
+      room.bookingRef ? `${escapeHtml(String(room.bookingRef))} \xB7 ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}` : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}`
+    )}
+        `).join("")}
+      </table>
+    `;
+    return `
+      ${booking.reservationRef ? row("Reservation reference", booking.reservationRef) : ""}
+      ${row("Guest", booking.guestName)}
+      ${row("Rooms", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`)}
+      ${roomsTable}
+      ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
+      ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
+      ${row("Nights", `${booking.numNights || 0} night(s)`)}
+      ${row("Total", formatMoney(booking.totalPrice))}
+    `;
+  }
   const roomLabel = booking.roomName || booking.roomType || "Not set";
   return `
     ${row("Booking reference", booking.bookingRef)}
@@ -222801,6 +222949,44 @@ function bookingCancelledEmail(booking) {
       ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.")}
       ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
+    `,
+    ctaLabel: "Contact support",
+    ctaUrl: `mailto:${hotel_config_default.supportEmail}`
+  });
+}
+function bookingCancelledReservationEmail(booking) {
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : [];
+  const source = String(booking.cancellationSource || "staff");
+  const intro = source === "guest" ? `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> at your request.` : source === "system" ? `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> because the payment hold expired.` : `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> by our team.`;
+  const cancelledRooms = rooms.filter((room) => room.cancelledAt);
+  const survivingRooms = rooms.filter((room) => !room.cancelledAt);
+  const isFullCancel = survivingRooms.length === 0;
+  const title = isFullCancel ? "Your reservation has been cancelled" : `Part of your reservation was cancelled (${cancelledRooms.length} of ${rooms.length} room${rooms.length === 1 ? "" : "s"})`;
+  const eyebrow = isFullCancel ? "Reservation cancelled" : "Reservation updated";
+  const roomsTable = rooms.length > 0 ? `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${rooms.map((room) => {
+    const isCancelled = Boolean(room.cancelledAt);
+    const roomLabel = `Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`;
+    const ref = escapeHtml(String(room.bookingRef || "\u2014"));
+    const status = isCancelled ? `<span style="color: #b91c1c; font-weight: 600;">Cancelled</span>${room.cancellationReason ? ` \xB7 ${escapeHtml(String(room.cancellationReason))}` : ""}` : `<span style="color: #166534; font-weight: 600;">Confirmed</span>`;
+    return `<tr>
+            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; vertical-align: top; width: 50%;">${roomLabel}<br/><span style="color: #6b7280; font-size: 12px;">${ref}</span></td>
+            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; text-align: right; vertical-align: top;">${status}</td>
+          </tr>`;
+  }).join("")}
+      </table>
+    ` : "";
+  return emailLayout({
+    preheader: booking.reservationRef ? `Reservation ${booking.reservationRef} was updated.` : `Booking ${booking.bookingRef} has been cancelled.`,
+    eyebrow,
+    title,
+    intro,
+    body: `
+      ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
+      ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.")}
+      ${roomsTable ? card("Rooms", roomsTable) : card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
     ctaUrl: `mailto:${hotel_config_default.supportEmail}`
@@ -223361,39 +223547,61 @@ async function sendBookingTrigger(action, booking) {
   }
   const templates = {
     "booking-submitted": {
-      subject: `[${hotel_config_default.brandName}] Booking request received: ${booking.bookingRef}`,
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // subject uses the reservation ref when the view
+      // is reservation-scope (N>1). N=1 keeps the
+      // legacy `Booking request received: <bookingRef>`
+      // subject byte-equivalent.
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking request received: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking request received: ${booking.bookingRef}`,
       html: bookingSubmittedEmail(booking)
     },
     "payment-confirmed": {
-      subject: `[${hotel_config_default.brandName}] Payment confirmed: ${booking.bookingRef}`,
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Payment confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Payment confirmed: ${booking.bookingRef}`,
       html: paymentConfirmedEmail(booking, houseRules)
     },
     "booking-confirmed": {
-      subject: `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef}`,
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef}`,
       html: bookingConfirmedEmail(booking, houseRules),
       // G-03 (E2E audit 2026-07-17): attach the receipt PDF required
       // by Decision #82. Generated server-side from persisted
       // booking/folio data. Does not expose private payment-proof
       // or ID URLs.
       attachments: [{
-        filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+        filename: booking.reservationRef ? `receipt-${String(booking.reservationRef).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf` : `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
         content: generateReceiptPdf(booking)
       }]
     },
     "checkin-reminder": {
-      subject: `[${hotel_config_default.brandName}] Check-in reminder: ${booking.bookingRef}`,
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Check-in reminder: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Check-in reminder: ${booking.bookingRef}`,
       html: checkinReminderEmail(booking, houseRules)
     },
     "booking-cancelled": {
-      subject: `[${hotel_config_default.brandName}] Booking cancelled: ${booking.bookingRef}`,
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking cancelled: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking cancelled: ${booking.bookingRef}`,
       html: bookingCancelledEmail(booking)
+    },
+    // Per MRB-09 (2026-08-02, per decision #168): the
+    // reservation-scope cancel. Fires from MRB-13's
+    // reservation-scope cancel path (`scope: "reservation"`
+    // in `POST /api/bookings/cancel`). The body lists every
+    // cancelled room with its own ref + final state. The
+    // subject uses the reservation ref (never a per-room
+    // ref) so the email is unambiguous about which
+    // reservation it covers. A partial reservation-scope
+    // action (e.g. one room cancelled out of three) sends
+    // this same action with the surviving rooms'
+    // `status`/`cancelledAt` fields set on the projection
+    // — the template's "rooms affected" / "rooms remaining"
+    // split makes the partial state explicit.
+    "booking-cancelled-reservation": {
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Reservation updated: ${booking.bookingRef}`,
+      html: bookingCancelledReservationEmail(booking)
     },
     "discount-rejected": {
       subject: `[${hotel_config_default.brandName}] Discount verification update: ${booking.bookingRef}`,
       html: discountRejectedEmail(booking)
     },
     "booking-rescheduled": {
-      subject: `[${hotel_config_default.brandName}] Booking updated: ${booking.bookingRef}`,
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking updated: ${booking.bookingRef}`,
       html: bookingRescheduledEmail(booking)
     },
     "payment-rejected": {
@@ -223492,15 +223700,72 @@ async function handleEmailTrigger(req, res, action) {
     if (action === "checkin-reminder" && !req.body?.bookingId && !req.body?.bookingRef) {
       const bookings = await getTomorrowConfirmedBookings();
       const pending = bookings.filter((booking2) => !booking2?.reminderSentAt);
-      await Promise.all(pending.map((booking2) => sendBookingTrigger(action, booking2)));
-      const sentIds = pending.map((booking2) => booking2?.id).filter(Boolean);
-      if (sentIds.length > 0) {
-        const stamp = /* @__PURE__ */ new Date();
-        await Promise.all(sentIds.map(
-          (id) => adminDb.collection("bookings").doc(id).update({ reminderSentAt: stamp }).catch(() => null)
-        ));
+      const reservationGroups = /* @__PURE__ */ new Map();
+      const legacySingles = [];
+      for (const booking2 of pending) {
+        const reservationId = String(booking2?.reservationId || "").trim();
+        if (reservationId) {
+          const list = reservationGroups.get(reservationId) || [];
+          list.push(booking2);
+          reservationGroups.set(reservationId, list);
+        } else {
+          legacySingles.push(booking2);
+        }
       }
-      return res.status(200).json({ success: true, data: { sent: pending.length, skipped: bookings.length - pending.length } });
+      const reservationAnchors = [];
+      for (const [reservationId, children] of reservationGroups.entries()) {
+        reservationAnchors.push({ anchor: children[0], reservationId });
+      }
+      const reservationViewPromises = reservationAnchors.map(async ({ anchor, reservationId }) => {
+        const reservationRef = adminDb.collection("reservations").doc(reservationId);
+        const [reservationSnap, childrenSnap] = await Promise.all([
+          reservationRef.get(),
+          adminDb.collection("bookings").where("reservationId", "==", reservationId).get()
+        ]);
+        if (!reservationSnap.exists) {
+          return { anchor, view: anchor };
+        }
+        const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        return { anchor, view: buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children) };
+      });
+      const resolvedReservationViews = await Promise.all(reservationViewPromises);
+      const sendTasks = [];
+      for (const { anchor, view } of resolvedReservationViews) {
+        sendTasks.push(sendBookingTrigger(action, view || anchor));
+      }
+      for (const single of legacySingles) {
+        sendTasks.push(sendBookingTrigger(action, single));
+      }
+      await Promise.all(sendTasks);
+      const stamp = /* @__PURE__ */ new Date();
+      const stampTasks = [];
+      for (const [, children] of reservationGroups.entries()) {
+        for (const child of children) {
+          stampTasks.push(
+            adminDb.collection("bookings").doc(child.id).update({ reminderSentAt: stamp }).catch(() => null)
+          );
+        }
+      }
+      for (const single of legacySingles) {
+        stampTasks.push(
+          adminDb.collection("bookings").doc(single.id).update({ reminderSentAt: stamp }).catch(() => null)
+        );
+      }
+      await Promise.all(stampTasks);
+      return res.status(200).json({
+        success: true,
+        data: {
+          sent: pending.length,
+          skipped: bookings.length - pending.length,
+          // Diagnostic — the cron response surfaces
+          // the grouping (how many reservation-scope
+          // emails vs legacy single-room emails) so
+          // the next audit can verify the
+          // consolidation worked.
+          reservations: reservationAnchors.length,
+          legacySingles: legacySingles.length
+        }
+      });
     }
     const hasStaff = Boolean(req.staff?.success);
     const booking = await findBooking(req, { requireGuestMatch: !hasStaff });
@@ -223622,6 +223887,23 @@ async function handleEmailPreview(req, res) {
         break;
       case "booking-cancelled":
         html = bookingCancelledEmail(mockBooking);
+        break;
+      case "booking-cancelled-reservation":
+        html = bookingCancelledReservationEmail({
+          ...mockBooking,
+          reservationRef: "R-20260802-00001",
+          reservationId: "rsv-mock",
+          isReservation: true,
+          roomCount: 3,
+          activeRoomCount: 2,
+          rooms: [
+            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 7200 },
+            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
+            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasBreakfast: true, totalPrice: 9800 }
+          ],
+          cancellationReason: "Guest requested partial cancellation.",
+          cancellationSource: "guest"
+        });
         break;
       case "discount-rejected":
         html = discountRejectedEmail(mockBooking);
@@ -224720,12 +225002,12 @@ function syntheticFromSource(sourceValue, salt, prefix, domain) {
 }
 function sanitizeBookingExport(booking, salt) {
   const guestEmail = String(booking.guestEmail || "");
-  const guestName = String(booking.guestName || "");
+  const guestName2 = String(booking.guestName || "");
   const guestPhone = String(booking.guestPhone || "");
   const sourceEmail = guestEmail.trim().toLowerCase();
   const sanitized = {
     ...booking,
-    guestName: syntheticFromSource(guestName, salt, "Guest", "guests.invalid"),
+    guestName: syntheticFromSource(guestName2, salt, "Guest", "guests.invalid"),
     guestEmail: sourceEmail ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid") : "",
     guestPhone: guestPhone ? syntheticFromSource(guestPhone, salt, "+63900000", "phones.invalid") : "",
     address: "[REDACTED \u2014 sanitized for staging]",
@@ -225053,6 +225335,74 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
 // server/handlers/bookings.ts
 function getConfiguredBookingRefPrefix() {
   return hotel_config_default.bookingRefPrefix || "SI";
+}
+function buildCreateEmailView(args) {
+  if (!args.reservationId || !args.reservationRef) return null;
+  if (!Array.isArray(args.finalRooms) || args.finalRooms.length === 0) return null;
+  const reservation = {
+    id: args.reservationId,
+    reservationRef: args.reservationRef,
+    leadGuestName: args.guestName,
+    leadGuestEmail: args.guestEmail,
+    leadGuestPhone: args.guestPhone,
+    checkIn: null,
+    checkOut: null,
+    numNights: args.numNights,
+    totalPrice: args.totalPrice,
+    source: args.source,
+    isCorporate: args.isCorporate,
+    corporateCode: args.corporateCode,
+    companyName: args.companyName,
+    paymentMethod: args.paymentMethod,
+    paymentStatus: args.paymentStatus,
+    activeRoomCount: args.finalRooms.length,
+    cancelledRoomCount: 0
+  };
+  const children = args.finalRooms.map((room, index) => {
+    const typeEntry = args.roomTypes.find((type) => type && type.value === room.roomType);
+    const roomName = typeEntry?.label || typeEntry?.shortLabel || room.roomType;
+    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0, finalHasBreakfast: false };
+    return {
+      id: room.bookingId,
+      bookingRef: args.finalBookingRefs[index] || "",
+      lookupToken: args.finalLookupTokens[index] || "",
+      roomId: room.roomId,
+      roomNumber: room.roomNumber,
+      roomType: room.roomType,
+      roomName,
+      numAdults: room.numAdults,
+      numChildren: room.numChildren,
+      extraBedCount: room.extraBedCount,
+      hasBreakfast: pricing.finalHasBreakfast,
+      ratePerNight: pricing.activeRoomRate,
+      totalPrice: room.totalPrice,
+      rateBreakdown: pricing.rateBreakdown,
+      source: args.source,
+      isCorporate: args.isCorporate,
+      corporateCode: args.corporateCode,
+      companyName: args.companyName,
+      paymentMethod: args.paymentMethod,
+      status: args.paymentStatus
+    };
+  });
+  return buildReservationEmailView(reservation, children);
+}
+async function loadReservationEmailView(bookingId) {
+  if (!bookingId) return null;
+  const bookingRef = adminDb.collection("bookings").doc(bookingId);
+  const bookingSnap = await bookingRef.get();
+  if (!bookingSnap.exists) return null;
+  const booking = bookingSnap.data() || {};
+  const reservationId = String(booking.reservationId || "").trim();
+  if (!reservationId) return null;
+  const reservationRef = adminDb.collection("reservations").doc(reservationId);
+  const [reservationSnap, childrenSnap] = await Promise.all([
+    reservationRef.get(),
+    adminDb.collection("bookings").where("reservationId", "==", reservationId).get()
+  ]);
+  if (!reservationSnap.exists) return null;
+  const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  return buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
 }
 var ROOM_OCCUPYING_STATUSES = BOOKING_OCCUPYING_STATUSES;
 var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest has not checked out yet.";
@@ -225649,6 +225999,7 @@ async function handleCreateBooking(req, res) {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let finalRateBreakdown = null;
+    let finalLookupTokens = [];
     let finalReservationRef = "";
     let finalRooms = [];
     let computedData = {};
@@ -225762,7 +226113,7 @@ async function handleCreateBooking(req, res) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
       }
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const resolvedRoomSelections = normalizedRoomSelections.map((selection) => {
+      const resolvedRoomSelections2 = normalizedRoomSelections.map((selection) => {
         const rawSelectionType = roomTypesArr.find(
           (entry) => entry && entry.value === selection.roomType
         );
@@ -225774,7 +226125,7 @@ async function handleCreateBooking(req, res) {
           typeEntry: applyRoomTypeDefaults(rawSelectionType)
         };
       });
-      const primaryRoomType = resolvedRoomSelections[0]?.roomType || roomType;
+      const primaryRoomType = resolvedRoomSelections2[0]?.roomType || roomType;
       const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === primaryRoomType);
       if (!rawTypeEntry) {
         throw new Error("Selected room type is not available.");
@@ -225786,7 +226137,7 @@ async function handleCreateBooking(req, res) {
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
       const candidatesByType = /* @__PURE__ */ new Map();
-      for (const typeValue of [...new Set(resolvedRoomSelections.map((selection) => selection.roomType))]) {
+      for (const typeValue of [...new Set(resolvedRoomSelections2.map((selection) => selection.roomType))]) {
         const candidatesQuery = adminDb.collection("rooms").where("type", "==", typeValue).where("isActive", "==", true);
         const candidatesSnapshot = await transaction.get(candidatesQuery);
         const candidates = candidatesSnapshot.docs.map((d) => ({ id: d.id, data: d.data() })).filter((candidate) => candidate.data).sort((a, b3) => {
@@ -225799,7 +226150,7 @@ async function handleCreateBooking(req, res) {
       let sawLingeringCheckedInConflict = false;
       const assignedRooms = [];
       const assignedRoomIds = [];
-      for (const selection of resolvedRoomSelections) {
+      for (const selection of resolvedRoomSelections2) {
         const candidates = candidatesByType.get(selection.roomType) || [];
         let foundThisRound = null;
         for (const candidate of candidates) {
@@ -225953,7 +226304,7 @@ async function handleCreateBooking(req, res) {
         }
       }
       let activeRoomRate = typeBaseRate;
-      let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
+      let corporateDetails2 = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
       let corporateCodeUsageUpdate = null;
       let corpCodeDoc = null;
@@ -225979,9 +226330,9 @@ async function handleCreateBooking(req, res) {
             usageCount: corpData.usageCount || 0
           }, { requestedUses: assignedRooms.length });
           if (corpValidation.valid) {
-            corporateDetails.isCorporate = true;
-            corporateDetails.corporateCode = formattedCorpCode;
-            corporateDetails.companyName = corpData.companyName || "";
+            corporateDetails2.isCorporate = true;
+            corporateDetails2.corporateCode = formattedCorpCode;
+            corporateDetails2.companyName = corpData.companyName || "";
             if (corpData.ratePerRoomType && typeof corpData.ratePerRoomType === "object") {
               perStayNegotiatedRate = { ...corpData.ratePerRoomType };
               if (perStayNegotiatedRate[roomType] !== void 0) {
@@ -226010,10 +226361,10 @@ async function handleCreateBooking(req, res) {
           );
         }
       }
-      if (!corporateDetails.isCorporate && corporateFlatRate === true) {
-        corporateDetails.isCorporate = true;
-        corporateDetails.corporateCode = "";
-        corporateDetails.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
+      if (!corporateDetails2.isCorporate && corporateFlatRate === true) {
+        corporateDetails2.isCorporate = true;
+        corporateDetails2.corporateCode = "";
+        corporateDetails2.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
         activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : typeBaseRate;
       }
       const roomStayPricing = validatedRoomStays.map((stay, index) => {
@@ -226021,12 +226372,12 @@ async function handleCreateBooking(req, res) {
         const baseRate = Number(stayType.pricePerNight) || 0;
         const stayCorporateRate = Number(stayType.corporateRate) || 0;
         const negotiatedForThisStay = perStayNegotiatedRate ? perStayNegotiatedRate[stayType.value] : void 0;
-        const stayActiveRate = corporateDetails.isCorporate ? negotiatedForThisStay !== void 0 ? negotiatedForThisStay : stayCorporateRate > 0 ? stayCorporateRate : baseRate : baseRate;
-        const stayRoomBreakdown = corporateDetails.isCorporate ? {
+        const stayActiveRate = corporateDetails2.isCorporate ? negotiatedForThisStay !== void 0 ? negotiatedForThisStay : stayCorporateRate > 0 ? stayCorporateRate : baseRate : baseRate;
+        const stayRoomBreakdown = corporateDetails2.isCorporate ? {
           roomSubtotal: stayActiveRate * numNights,
           roomLines: [{
             source: "corporate",
-            label: corporateDetails.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
+            label: corporateDetails2.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
             startDate: checkIn,
             endDate: checkOut,
             nights: numNights,
@@ -226091,7 +226442,7 @@ async function handleCreateBooking(req, res) {
       let voucherDiscount = 0;
       let appliedVoucherCode = "";
       let voucherUsageUpdate = null;
-      if (voucherCode && !corporateDetails.isCorporate) {
+      if (voucherCode && !corporateDetails2.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
         let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         let voucherDoc = await transaction.get(voucherRef);
@@ -226111,7 +226462,7 @@ async function handleCreateBooking(req, res) {
             (assignedRoom) => assignedRoom.data.type === assignedRoom.selection.roomType
           );
           const applicableTypes = Array.isArray(vData.applicableRoomTypes) ? vData.applicableRoomTypes : [];
-          const allSelectedTypesApplicable = applicableTypes.length === 0 || resolvedRoomSelections.every((selection) => applicableTypes.includes(selection.roomType));
+          const allSelectedTypesApplicable = applicableTypes.length === 0 || resolvedRoomSelections2.every((selection) => applicableTypes.includes(selection.roomType));
           const isValid2 = vData.isActive !== false && (!voucherExpiresAt || voucherExpiresAt >= now2) && (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) && // Per BF-19 (booking-flow audit 2026-06-26): the
           // empty-or-undefined case is covered by the optional
           // chaining below; drop the redundant `!vData.applicableRoomTypes`
@@ -226194,7 +226545,7 @@ async function handleCreateBooking(req, res) {
         label: deduction.label,
         amounts: allocateRoundedAmount(deduction.amount, roomStayWeights)
       }));
-      const childPricing = roomStayPricing.map((stay, index) => ({
+      const childPricing2 = roomStayPricing.map((stay, index) => ({
         ...stay,
         totalPrice: allocatedChildTotals[index],
         voucherDiscount: allocatedVoucherDiscounts[index],
@@ -226221,10 +226572,10 @@ async function handleCreateBooking(req, res) {
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
       }
-      const childBookingRefs = assignedRooms.map(
+      const childBookingRefs2 = assignedRooms.map(
         (_2, roomIdx) => `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + roomIdx).padStart(5, "0")}`
       );
-      const bookingRef = childBookingRefs[0];
+      const bookingRef = childBookingRefs2[0];
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
@@ -226240,13 +226591,13 @@ async function handleCreateBooking(req, res) {
       } else {
         transaction.set(counterRef, { count: assignedRooms.length });
       }
-      const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
+      const guestName2 = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       const newBooking = {
         bookingRef,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType,
-        guestName,
+        guestName: guestName2,
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
@@ -226284,9 +226635,9 @@ async function handleCreateBooking(req, res) {
         discountRejectionReason: "",
         voucherCode: appliedVoucherCode,
         voucherDiscount,
-        isCorporate: corporateDetails.isCorporate,
-        corporateCode: corporateDetails.corporateCode,
-        companyName: corporateDetails.companyName,
+        isCorporate: corporateDetails2.isCorporate,
+        corporateCode: corporateDetails2.corporateCode,
+        companyName: corporateDetails2.companyName,
         specialRequests: guestDetails.requests || "",
         status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
         // Per PEX-01 (2026-08-01, per decision #147): the
@@ -226308,7 +226659,7 @@ async function handleCreateBooking(req, res) {
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
         paymentProofPath: paymentProofPath || null,
-        source: corporateDetails.isCorporate ? "corporate" : "online",
+        source: corporateDetails2.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
         // Server-detected Spark Rewards member (per W2.2 / decision #90).
@@ -226379,7 +226730,7 @@ async function handleCreateBooking(req, res) {
         // `isCorporate: true` defaults to direct-billing
         // semantics and the staff LOU workflow assumes
         // chargeback.
-        ...corporateDetails.isCorporate ? {
+        ...corporateDetails2.isCorporate ? {
           corporate: {
             designation: String(guestDetails.designation || "").trim().slice(0, 120),
             companyAddress: String(guestDetails.companyAddress || "").trim().slice(0, 300),
@@ -226414,7 +226765,7 @@ async function handleCreateBooking(req, res) {
         updatedAt: /* @__PURE__ */ new Date()
       };
       const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data() : {};
-      const corpCodeData = corporateDetails.isCorporate && corpCodeDoc && corpCodeDoc.exists ? corpCodeDoc.data() : null;
+      const corpCodeData = corporateDetails2.isCorporate && corpCodeDoc && corpCodeDoc.exists ? corpCodeDoc.data() : null;
       const cancellationPolicySnapshot = createCancellationPolicySnapshot({
         websiteContent,
         hotelConfig,
@@ -226424,7 +226775,7 @@ async function handleCreateBooking(req, res) {
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
-        leadGuestName: guestName,
+        leadGuestName: guestName2,
         cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
@@ -226447,10 +226798,10 @@ async function handleCreateBooking(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal,
         totalPrice,
-        source: corporateDetails.isCorporate ? "corporate" : "online",
-        isCorporate: corporateDetails.isCorporate,
-        corporateCode: corporateDetails.corporateCode,
-        companyName: corporateDetails.companyName,
+        source: corporateDetails2.isCorporate ? "corporate" : "online",
+        isCorporate: corporateDetails2.isCorporate,
+        corporateCode: corporateDetails2.corporateCode,
+        companyName: corporateDetails2.companyName,
         voucherCode: appliedVoucherCode,
         memberDiscountPct: appliedMemberDiscountPct,
         paymentStatus: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "awaiting-payment",
@@ -226478,7 +226829,7 @@ async function handleCreateBooking(req, res) {
       const bookingWriteRefs = [];
       for (let bookingIdx = 0; bookingIdx < assignedRooms.length; bookingIdx++) {
         const assignedRoomForBooking = assignedRooms[bookingIdx];
-        const pricingForRoom = childPricing[bookingIdx];
+        const pricingForRoom = childPricing2[bookingIdx];
         const bookingIdForThisRoom = assignedRoomForBooking.selection.bookingId;
         const perRoomBookingDocRef = adminDb.collection("bookings").doc(bookingIdForThisRoom);
         bookingWriteRefs.push({
@@ -226500,7 +226851,7 @@ async function handleCreateBooking(req, res) {
             // reservation inherited the spread `newBooking.bookingRef`,
             // which made a "ref + email" lookup ambiguous across the
             // group.
-            bookingRef: childBookingRefs[bookingIdx],
+            bookingRef: childBookingRefs2[bookingIdx],
             roomId: assignedRoomForBooking.id,
             roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
             roomType: assignedRoomForBooking.selection.roomType,
@@ -226529,7 +226880,24 @@ async function handleCreateBooking(req, res) {
             // (one magic link for the whole group,
             // resolving to the reservation header
             // first).
-            lookupToken: generateLookupToken()
+            // Per-booking lookup token. The
+            // pre-MRB-02 code generated a single
+            // token per booking; for N>1 each
+            // booking doc gets its own token (so
+            // each magic link works independently).
+            // A future MRB-04 follow-up can
+            // refactor to a per-reservation token
+            // (one magic link for the whole group,
+            // resolving to the reservation header
+            // first).
+            //
+            // Per MRB-09 (2026-08-02, per decision
+            // #168): the token is generated into
+            // `finalLookupTokens[bookingIdx]` so
+            // the post-transaction reservation
+            // email view can carry it in
+            // `rooms[].lookupToken` for N>1.
+            lookupToken: finalLookupTokens[bookingIdx] = generateLookupToken()
           }
         });
       }
@@ -226538,7 +226906,7 @@ async function handleCreateBooking(req, res) {
       }
       finalRooms = bookingWriteRefs.map((write, index) => {
         const assigned = assignedRooms[index];
-        const pricing = childPricing[index];
+        const pricing = childPricing2[index];
         return {
           bookingId: write.ref.id,
           roomId: assigned.id,
@@ -226575,7 +226943,7 @@ async function handleCreateBooking(req, res) {
         });
       }
       computedData = {
-        guestName,
+        guestName: guestName2,
         email: guestDetails.email.trim().toLowerCase(),
         roomName: roomData.name,
         roomNumber: roomData.roomNumber,
@@ -226584,7 +226952,7 @@ async function handleCreateBooking(req, res) {
         numNights,
         totalPrice,
         rateBreakdown,
-        source: corporateDetails.isCorporate ? "corporate" : "online"
+        source: corporateDetails2.isCorporate ? "corporate" : "online"
       };
     });
     if (alreadyExistingBookingResponse) {
@@ -226594,7 +226962,27 @@ async function handleCreateBooking(req, res) {
       });
     }
     try {
-      await sendBookingTrigger("booking-submitted", {
+      const emailView = buildCreateEmailView({
+        reservationId: finalReservationId || "",
+        reservationRef: finalReservationRef || "",
+        finalBookingRefs: childBookingRefs,
+        finalLookupTokens: childLookupTokens,
+        finalRooms,
+        childPricing,
+        roomTypes: resolvedRoomSelections.map((s4) => s4.typeEntry),
+        guestName,
+        guestEmail: guestDetails.email.trim().toLowerCase(),
+        guestPhone: guestDetails.phone.trim(),
+        totalPrice: finalTotalPrice,
+        numNights,
+        paymentMethod,
+        paymentStatus: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
+        source: corporateDetails.isCorporate ? "corporate" : "online",
+        isCorporate: corporateDetails.isCorporate === true,
+        corporateCode: corporateDetails.corporateCode || "",
+        companyName: corporateDetails.companyName || ""
+      });
+      await sendBookingTrigger("booking-submitted", emailView ?? {
         ...computedData,
         bookingRef: finalBookingRef,
         guestEmail: computedData.email,
@@ -227288,13 +227676,13 @@ async function handleCreateWalkin(req, res) {
       const bookingRef = walkinBookingRefs[0];
       finalBookingRef = bookingRef;
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
-      const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
+      const guestName2 = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       newBooking = {
         bookingRef,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
-        guestName,
+        guestName: guestName2,
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
@@ -227403,7 +227791,7 @@ async function handleCreateWalkin(req, res) {
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
-        leadGuestName: guestName,
+        leadGuestName: guestName2,
         cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
@@ -227459,7 +227847,7 @@ async function handleCreateWalkin(req, res) {
         // fingerprint is built by the same hoisted builder the
         // idempotency check above used, so a replay of an N-room
         // walk-in compares like for like.
-        requestFingerprint: buildWalkinFingerprint(guestName),
+        requestFingerprint: buildWalkinFingerprint(guestName2),
         createdAt: now,
         updatedAt: now,
         createdBy: "staff"
@@ -228057,10 +228445,11 @@ async function handleCancelBooking(req, res) {
       }
     });
     try {
-      await sendBookingTrigger("booking-cancelled", {
-        ...bookingData2,
-        cancellationReason: validReason
-      });
+      const reservationView = await loadReservationEmailView(bookingId);
+      await sendBookingTrigger(
+        "booking-cancelled",
+        reservationView ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff" } : { ...bookingData2, cancellationReason: validReason }
+      );
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
     }
@@ -228640,7 +229029,11 @@ async function handleConfirmBooking(req, res) {
       return res.status(200).json({ success: true, data: { status: "confirmed", alreadyConfirmed: true } });
     }
     try {
-      await sendBookingTrigger("booking-confirmed", { ...bookingData2, status: "confirmed" });
+      const reservationView = await loadReservationEmailView(bookingId);
+      await sendBookingTrigger(
+        "booking-confirmed",
+        reservationView ?? { ...bookingData2, status: "confirmed" }
+      );
     } catch (emailErr) {
       console.error("Failed to send booking confirmation email:", emailErr);
     }
@@ -230385,7 +230778,7 @@ async function handleConvertInquiryToBooking(req, res) {
       const contactName = String(inquiryData.contactPerson || "").trim();
       const [firstName, ...rest] = contactName.split(/\s+/);
       const lastName = rest.length > 0 ? rest.join(" ") : "\u2014";
-      const guestName = `${firstName || "Corporate"} ${lastName}`.trim();
+      const guestName2 = `${firstName || "Corporate"} ${lastName}`.trim();
       const guestEmail = String(inquiryData.email || "").trim().toLowerCase();
       const guestPhone = String(inquiryData.phone || "").trim();
       const companyName = String(inquiryData.companyName || "").trim();
@@ -230394,7 +230787,7 @@ async function handleConvertInquiryToBooking(req, res) {
         roomId,
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
-        guestName,
+        guestName: guestName2,
         guestEmail,
         guestPhone,
         numGuests: guests,
@@ -231861,14 +232254,14 @@ async function handleCreateStoreOrder(req, res) {
   }
   const roomId = String(body.roomId).trim();
   const roomNumber = String(body.roomNumber).trim();
-  const guestName = String(body.guestName).trim();
+  const guestName2 = String(body.guestName).trim();
   if (roomId.length === 0 || roomId.length > 64) {
     return res.status(400).json({ success: false, error: "Invalid room id." });
   }
   if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
     return res.status(400).json({ success: false, error: "Invalid room number." });
   }
-  if (guestName.length === 0 || guestName.length > MAX_GUEST_NAME_LENGTH) {
+  if (guestName2.length === 0 || guestName2.length > MAX_GUEST_NAME_LENGTH) {
     return res.status(400).json({ success: false, error: "Please share the guest's name (up to 120 characters)." });
   }
   if (typeof body.paymentMethod !== "string" || body.paymentMethod.length === 0) {
@@ -231964,7 +232357,7 @@ async function handleCreateStoreOrder(req, res) {
         roomId,
         roomNumber,
         bookingId,
-        guestName,
+        guestName: guestName2,
         items: orderItems,
         totalAmount,
         paymentMethod: body.paymentMethod,
@@ -232004,7 +232397,7 @@ async function handleCreateStoreOrder(req, res) {
             orderId: responseData.orderId,
             roomNumber,
             guestEmail,
-            guestName,
+            guestName: guestName2,
             items: responseData.items,
             totalAmount: responseData.totalAmount,
             paymentMethod: body.paymentMethod,
@@ -232280,7 +232673,7 @@ async function handleSendGuestMessage(req, res) {
       error: "Please check your message and try again."
     });
   }
-  const { roomNumber, guestName, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
+  const { roomNumber, guestName: guestName2, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
   const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (isGuestMessageRateLimited(`intercom-msg:${ip}:${roomNumber}`, 30, 10 * 60 * 1e3)) {
@@ -232293,7 +232686,7 @@ async function handleSendGuestMessage(req, res) {
     await adminDb.collection("intercoms").doc(roomNumber).set({
       roomId: roomNumber,
       roomNumber,
-      guestName,
+      guestName: guestName2,
       currentStayId,
       resolved: false,
       updatedAt: /* @__PURE__ */ new Date()
@@ -232301,7 +232694,7 @@ async function handleSendGuestMessage(req, res) {
     await adminDb.collection("intercoms").doc(roomNumber).collection("messages").add({
       text,
       sender: "guest",
-      guestName,
+      guestName: guestName2,
       timestamp: /* @__PURE__ */ new Date(),
       isRead: false,
       isQuickRequest,

@@ -1,7 +1,7 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { hashToken } from "./test-runs";
 import { Timestamp } from "firebase-admin/firestore";
-import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
+import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger, buildReservationEmailView } from "./email";
 import { writeNotification } from "../lib/notifications";
 import {
   calculateSeasonalAwareRoomBreakdown,
@@ -144,6 +144,163 @@ import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreak
 
 export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
+}
+
+// Per MRB-09 (2026-08-02, per decision #168): the
+// reservation-scope email view builder. Synthesises
+// the reservation header + N child docs from the
+// captured create-transaction data and hands them
+// to `buildReservationEmailView`. The returned view
+// is what the create/confirm/payment-confirmed/
+// reschedule/checkin-reminder handlers pass to
+// `sendBookingTrigger` instead of the per-first-child
+// `computedData` shape the pre-MRB-09 code used.
+//
+// For N=1 the helper still produces a view with
+// `rooms: [{ position: 1, ... }]` — the email
+// templates' `bookingRows` recognises the array and
+// renders the single-room table shape (visually the
+// same as the legacy `bookingRows` output; the
+// subject still uses the per-room ref for the N=1
+// path, byte-equivalent to pre-MRB-09).
+//
+// For legacy single-room bookings without a
+// `reservationId` (pre-MRB-01), the helper returns
+// `null` and the caller falls through to the
+// pre-MRB-09 single-room path.
+function buildCreateEmailView(args: {
+  reservationId: string;
+  reservationRef: string;
+  finalBookingRefs: string[];
+  finalLookupTokens: string[];
+  finalRooms: Array<{
+    bookingId: string;
+    roomId: string;
+    roomNumber: string;
+    roomType: string;
+    reservationPosition: number;
+    numAdults: number;
+    numChildren: number;
+    extraBedCount: number;
+    hasBreakfast: boolean;
+    totalPrice: number;
+  }>;
+  childPricing: Array<{
+    rateBreakdown: any;
+    activeRoomRate: number;
+    finalHasBreakfast: boolean;
+  }>;
+  roomTypes: any[];
+  guestName: string;
+  guestEmail: string;
+  guestPhone: string;
+  totalPrice: number;
+  numNights: number;
+  paymentMethod: string;
+  paymentStatus: string;
+  source: string;
+  isCorporate: boolean;
+  corporateCode: string;
+  companyName: string;
+}): any | null {
+  if (!args.reservationId || !args.reservationRef) return null;
+  if (!Array.isArray(args.finalRooms) || args.finalRooms.length === 0) return null;
+  // Build the synthetic reservation header (the
+  // values the email templates read).
+  const reservation = {
+    id: args.reservationId,
+    reservationRef: args.reservationRef,
+    leadGuestName: args.guestName,
+    leadGuestEmail: args.guestEmail,
+    leadGuestPhone: args.guestPhone,
+    checkIn: null,
+    checkOut: null,
+    numNights: args.numNights,
+    totalPrice: args.totalPrice,
+    source: args.source,
+    isCorporate: args.isCorporate,
+    corporateCode: args.corporateCode,
+    companyName: args.companyName,
+    paymentMethod: args.paymentMethod,
+    paymentStatus: args.paymentStatus,
+    activeRoomCount: args.finalRooms.length,
+    cancelledRoomCount: 0
+  };
+  // Build the synthetic child docs (the values
+  // `buildReservationEmailView` reads for each
+  // child). The `roomName` is the room type's
+  // friendly label (or the type code as a
+  // fallback) — matches the legacy single-room
+  // `roomName` derivation.
+  const children = args.finalRooms.map((room, index) => {
+    const typeEntry = args.roomTypes.find((type: any) => type && type.value === room.roomType);
+    const roomName = typeEntry?.label || typeEntry?.shortLabel || room.roomType;
+    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0, finalHasBreakfast: false };
+    return {
+      id: room.bookingId,
+      bookingRef: args.finalBookingRefs[index] || "",
+      lookupToken: args.finalLookupTokens[index] || "",
+      roomId: room.roomId,
+      roomNumber: room.roomNumber,
+      roomType: room.roomType,
+      roomName,
+      numAdults: room.numAdults,
+      numChildren: room.numChildren,
+      extraBedCount: room.extraBedCount,
+      hasBreakfast: pricing.finalHasBreakfast,
+      ratePerNight: pricing.activeRoomRate,
+      totalPrice: room.totalPrice,
+      rateBreakdown: pricing.rateBreakdown,
+      source: args.source,
+      isCorporate: args.isCorporate,
+      corporateCode: args.corporateCode,
+      companyName: args.companyName,
+      paymentMethod: args.paymentMethod,
+      status: args.paymentStatus
+    };
+  });
+  return buildReservationEmailView(reservation, children);
+}
+
+// Per MRB-09 (2026-08-02, per decision #168): the
+// reservation-scope email view loader. Reads a
+// single booking doc + (when it has a
+// `reservationId`) the reservation header + every
+// sibling child, then returns the
+// `buildReservationEmailView` view. Returns `null`
+// for legacy single-room bookings (pre-MRB-01,
+// no `reservationId`) so the caller falls through
+// to the pre-MRB-09 single-room path. The caller
+// never has to know the difference — it just hands
+// the result to `sendBookingTrigger`.
+//
+// Read in two queries (booking + reservation/siblings)
+// because the email path is already off the critical
+// write path. The booking doc + the reservation +
+// children are read in parallel (one `Promise.all`)
+// so the latency is the slower of the two, not the
+// sum. The lookup is non-transactional — the email
+// is informational, a stale room state on a single
+// email is harmless, and the next email picks up the
+// latest snapshot.
+async function loadReservationEmailView(bookingId: string): Promise<any | null> {
+  if (!bookingId) return null;
+  const bookingRef = adminDb.collection("bookings").doc(bookingId);
+  const bookingSnap = await bookingRef.get();
+  if (!bookingSnap.exists) return null;
+  const booking = bookingSnap.data() || {};
+  const reservationId = String(booking.reservationId || "").trim();
+  if (!reservationId) return null;
+  const reservationRef = adminDb.collection("reservations").doc(reservationId);
+  const [reservationSnap, childrenSnap] = await Promise.all([
+    reservationRef.get(),
+    adminDb.collection("bookings")
+      .where("reservationId", "==", reservationId)
+      .get()
+  ]);
+  if (!reservationSnap.exists) return null;
+  const children = childrenSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+  return buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
 }
 
 const ROOM_OCCUPYING_STATUSES = BOOKING_OCCUPYING_STATUSES;
@@ -1055,6 +1212,17 @@ export async function handleCreateBooking(req: any, res: any) {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let finalRateBreakdown: BookingRateBreakdown | null = null;
+    // Per MRB-09 (2026-08-02, per decision #168): the
+    // per-room lookup tokens, captured inside the
+    // transaction so the post-transaction reservation
+    // email view can carry them in `rooms[].lookupToken`.
+    // The first room's token equals
+    // `finalBookingRef`'s associated token (the legacy
+    // single-room `lookupToken` field, which the
+    // receipt PDF + email lookup URL still use for the
+    // N=1 path). N>1 populates the array with N
+    // independent tokens.
+    let finalLookupTokens: string[] = [];
     // Per MRB-02 (2026-08-02, per decision #164): the public
     // reservation ref (e.g. `R-20260802-00001`) is minted inside
     // the transaction (so it shares the same `now` + counter
@@ -2577,7 +2745,24 @@ export async function handleCreateBooking(req: any, res: any) {
             // (one magic link for the whole group,
             // resolving to the reservation header
             // first).
-            lookupToken: generateLookupToken()
+            // Per-booking lookup token. The
+            // pre-MRB-02 code generated a single
+            // token per booking; for N>1 each
+            // booking doc gets its own token (so
+            // each magic link works independently).
+            // A future MRB-04 follow-up can
+            // refactor to a per-reservation token
+            // (one magic link for the whole group,
+            // resolving to the reservation header
+            // first).
+            //
+            // Per MRB-09 (2026-08-02, per decision
+            // #168): the token is generated into
+            // `finalLookupTokens[bookingIdx]` so
+            // the post-transaction reservation
+            // email view can carry it in
+            // `rooms[].lookupToken` for N>1.
+            lookupToken: (finalLookupTokens[bookingIdx] = generateLookupToken())
           }
         });
       }
@@ -2666,7 +2851,37 @@ export async function handleCreateBooking(req: any, res: any) {
 
     // Send acknowledgment email outside the transaction via Resend
     try {
-      await sendBookingTrigger("booking-submitted", {
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // reservation-scope email view. Build the view
+      // from the captured create-transaction data
+      // (finalReservationRef, finalRooms, childPricing,
+      // etc.) so the email lists every room when N>1
+      // and stays byte-equivalent to the single-room
+      // path for N=1. The pre-MRB-09 single-room
+      // fallback (`computedData` shape) is preserved
+      // for legacy callers that pre-date MRB-01
+      // (no `reservationId` on the response).
+      const emailView = buildCreateEmailView({
+        reservationId: finalReservationId || "",
+        reservationRef: finalReservationRef || "",
+        finalBookingRefs: childBookingRefs,
+        finalLookupTokens: childLookupTokens,
+        finalRooms,
+        childPricing: childPricing as any,
+        roomTypes: resolvedRoomSelections.map((s: any) => s.typeEntry) as any,
+        guestName,
+        guestEmail: guestDetails.email.trim().toLowerCase(),
+        guestPhone: guestDetails.phone.trim(),
+        totalPrice: finalTotalPrice,
+        numNights,
+        paymentMethod,
+        paymentStatus: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
+        source: corporateDetails.isCorporate ? "corporate" : "online",
+        isCorporate: corporateDetails.isCorporate === true,
+        corporateCode: corporateDetails.corporateCode || "",
+        companyName: corporateDetails.companyName || ""
+      });
+      await sendBookingTrigger("booking-submitted", emailView ?? {
         ...computedData,
         bookingRef: finalBookingRef,
         guestEmail: computedData.email,
@@ -4996,10 +5211,25 @@ export async function handleCancelBooking(req: any, res: any) {
     });
 
     try {
-      await sendBookingTrigger("booking-cancelled", {
-        ...bookingData,
-        cancellationReason: validReason
-      });
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // reservation-scope email view. The pre-MRB-09
+      // per-child path stayed correct (one email per
+      // cancelled child), but the body rendered only
+      // the single room. The view loader reads the
+      // reservation header + sibling children and
+      // hands the multi-room view to the template. The
+      // subject + body now show the reservation ref +
+      // every room in the reservation, with the
+      // cancelled room's row marked as such. The
+      // single-room booking-cancelled path is
+      // preserved (legacy pre-MRB-01 callers).
+      const reservationView = await loadReservationEmailView(bookingId);
+      await sendBookingTrigger(
+        "booking-cancelled",
+        reservationView
+          ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff" }
+          : { ...bookingData, cancellationReason: validReason }
+      );
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
     }
@@ -5980,7 +6210,20 @@ export async function handleConfirmBooking(req: any, res: any) {
     // contact info. Use the UID from the auth result (the
     // dispatcher's `authenticateStaff` guarantees presence).
     try {
-      await sendBookingTrigger("booking-confirmed", { ...bookingData, status: "confirmed" });
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // reservation-scope email view. The pre-MRB-09
+      // per-child path stayed correct (one email per
+      // confirmed child), but the body rendered only
+      // the single room. The view loader reads the
+      // reservation header + sibling children and
+      // hands the multi-room view to the template.
+      // Legacy pre-MRB-01 bookings (no `reservationId`)
+      // fall through to the per-child view.
+      const reservationView = await loadReservationEmailView(bookingId);
+      await sendBookingTrigger(
+        "booking-confirmed",
+        reservationView ?? { ...bookingData, status: "confirmed" }
+      );
     } catch (emailErr) {
       console.error("Failed to send booking confirmation email:", emailErr);
     }
