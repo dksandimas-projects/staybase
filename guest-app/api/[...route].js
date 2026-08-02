@@ -225630,7 +225630,7 @@ var lookupSchema = external_exports.preprocess(
   (body) => {
     if (body && typeof body === "object" && !Array.isArray(body)) {
       const obj = { ...body };
-      for (const key of ["bookingRef", "guestEmail", "token", "turnstileToken"]) {
+      for (const key of ["bookingRef", "guestEmail", "token", "reservationRef", "turnstileToken"]) {
         const v6 = obj[key];
         if (typeof v6 === "string" && v6.trim() === "") {
           delete obj[key];
@@ -225642,12 +225642,23 @@ var lookupSchema = external_exports.preprocess(
   },
   external_exports.object({
     bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format.").optional(),
+    // Per MRB-10 (2026-08-02, per decision #169): a
+    // direct reservation-scope lookup. The MRB-09
+    // reservation-scope emails carry a
+    // `reservationRef` link (e.g. `/my-booking?reservationRef=…&email=…`)
+    // so the guest can deep-link straight to the
+    // reservation without first landing on a
+    // per-child booking. The credential is unchanged
+    // — `email` is the second factor; the auth gate
+    // verifies the reservation's lead guest owns
+    // the email.
+    reservationRef: external_exports.string().trim().max(40).regex(/^R-\d{8}-\d{5}$/, "Invalid reservation reference format.").optional(),
     guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
     token: external_exports.string().trim().max(64).regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.").optional(),
     turnstileToken: external_exports.string().max(2e3).optional()
   }).refine(
-    (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
-    "Provide a booking reference, email, or lookup token."
+    (data) => Boolean(data.bookingRef) || Boolean(data.reservationRef) || Boolean(data.guestEmail) || Boolean(data.token),
+    "Provide a booking reference, reservation reference, email, or lookup token."
   ).refine(
     (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
     "Provide either an email or a lookup token (not both)."
@@ -229498,7 +229509,7 @@ async function handleLookupBooking(req, res) {
       error: "Please provide a valid booking reference, email, or lookup token."
     });
   }
-  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken } = parsed.data;
+  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken, reservationRef: trimmedReservationRef } = parsed.data;
   try {
     if (trimmedRef && lookupToken) {
       const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).where("lookupToken", "==", String(lookupToken).toLowerCase()).limit(1).get();
@@ -229507,6 +229518,38 @@ async function handleLookupBooking(req, res) {
       }
       const bookingData2 = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
       return await enrichAndRespond(res, bookingData2);
+    }
+    if (trimmedReservationRef) {
+      const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmedReservationRef).limit(1).get();
+      if (reservationSnap.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const reservation = { id: reservationSnap.docs[0].id, ...reservationSnap.docs[0].data() };
+      if (normalizedEmail) {
+        const leadEmail = String(reservation.leadGuestEmail || "").trim().toLowerCase();
+        if (leadEmail !== normalizedEmail) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+      } else if (lookupToken) {
+        const childrenSnap = await adminDb.collection("bookings").where("reservationId", "==", reservation.id).get();
+        const sorted = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })).sort((a, b3) => Number(a.reservationPosition || 0) - Number(b3.reservationPosition || 0));
+        const match = sorted.find((c2) => String(c2.lookupToken || "").toLowerCase() === String(lookupToken).toLowerCase());
+        if (!match) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+        return await enrichAndRespond(res, { id: match.id, ...match });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide your booking email or lookup token along with the reservation reference."
+        });
+      }
+      const firstChildSnap = await adminDb.collection("bookings").where("reservationId", "==", reservation.id).orderBy("reservationPosition", "asc").limit(1).get();
+      if (firstChildSnap.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const firstChild = { id: firstChildSnap.docs[0].id, ...firstChildSnap.docs[0].data() };
+      return await enrichAndRespond(res, firstChild);
     }
     if (trimmedRef && normalizedEmail) {
       const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).where("guestEmail", "==", normalizedEmail).limit(1).get();
@@ -229604,6 +229647,22 @@ async function enrichAndRespond(res, bookingData2) {
       console.error("Failed to enrich booking with room data:", roomErr);
     }
   }
+  const reservationId = String(bookingData2.reservationId || "").trim();
+  if (reservationId) {
+    const reservationRef = adminDb.collection("reservations").doc(reservationId);
+    const reservationSnap = await reservationRef.get();
+    if (reservationSnap.exists) {
+      const reservation = { id: reservationId, ...reservationSnap.data() };
+      const childrenSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationId).get();
+      const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      if (children.length > 1) {
+        return res.status(200).json({
+          success: true,
+          data: buildReservationLookupView(reservation, children, roomData, bookingData2)
+        });
+      }
+    }
+  }
   return res.status(200).json({
     success: true,
     data: {
@@ -229638,6 +229697,86 @@ async function enrichAndRespond(res, bookingData2) {
       specialRequests: bookingData2.specialRequests || ""
     }
   });
+}
+function buildReservationLookupView(reservation, children, anchorRoomData, anchorBooking) {
+  const sortedChildren = [...children].sort((a, b3) => {
+    const ap = Number(a.reservationPosition || 0);
+    const bp = Number(b3.reservationPosition || 0);
+    return ap - bp;
+  });
+  const rooms = sortedChildren.map((child, index) => {
+    const childRoomData = index === 0 ? anchorRoomData : null;
+    return {
+      id: child.id,
+      position: child.reservationPosition || index + 1,
+      bookingRef: child.bookingRef,
+      maskedEmail: maskEmail(String(child.guestEmail || "")),
+      roomId: child.roomId,
+      roomName: childRoomData?.name || child.roomType || "",
+      roomNumber: child.roomNumber || "",
+      roomType: child.roomType,
+      checkIn: child.checkIn,
+      checkOut: child.checkOut,
+      numNights: Number(child.numNights || 0),
+      numGuests: Number(child.numGuests || 0),
+      numAdults: Number(child.numAdults || 0),
+      numChildren: Number(child.numChildren || 0),
+      extraBedCount: Number(child.extraBedCount || 0),
+      hasBreakfast: Boolean(child.hasBreakfast),
+      ratePerNight: Number(child.ratePerNight || 0),
+      totalPrice: Number(child.totalPrice || 0),
+      status: child.status,
+      // Per-child rate breakdown (snapshotted at
+      // create time per MRB-04) for the receipt
+      // PDF and the receipt card. The page renders
+      // the per-stay lines when the guest expands
+      // a row.
+      rateBreakdown: child.rateBreakdown || null
+    };
+  });
+  return {
+    kind: "reservation",
+    // The reservation header fields the page reads
+    // to render the card (reservation ref + dates +
+    // aggregate total + payment status). The legacy
+    // `id` field is the reservation doc id (NOT a
+    // booking id) so the cancel + resend paths can
+    // pass it to the server without confusing it
+    // with a single-booking id.
+    id: reservation.id,
+    reservationRef: reservation.reservationRef,
+    maskedEmail: maskEmail(String(anchorBooking.guestEmail || "")),
+    guestPhone: anchorBooking.guestPhone,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    numNights: Number(reservation.numNights || 0),
+    // Per MRB-04 (2026-08-02, per decision #159): the
+    // reservation header is the source of truth for
+    // the aggregate total. The per-room values are
+    // the source of truth for the per-stay lines.
+    // The page renders the aggregate + the per-stay
+    // values for the receipt card.
+    totalPrice: Number(reservation.totalPrice || 0),
+    paymentMethod: reservation.paymentMethod,
+    // Per MRB-04: the reservation header's
+    // `paymentStatus` is the aggregate mirror. The
+    // page renders the per-child status badges for
+    // each room and the aggregate status for the
+    // header.
+    status: reservation.paymentStatus || "pending",
+    roomCount: Number(reservation.roomCount || rooms.length),
+    activeRoomCount: Number(reservation.activeRoomCount || rooms.length),
+    cancelledRoomCount: Number(reservation.cancelledRoomCount || 0),
+    rooms,
+    // The "active room" data is what the cancel +
+    // resend flows use as the server credential. The
+    // server resolves the reservation from the
+    // booking, so any child's `bookingId` + `ref` is
+    // valid; we use the first child for consistency
+    // with the legacy single-booking card.
+    primaryBookingId: anchorBooking.id,
+    primaryBookingRef: anchorBooking.bookingRef
+  };
 }
 var resolveEarlyCheckinSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(80),

@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Wallet } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -89,6 +89,60 @@ interface PickerEntry {
   status: string;
 }
 
+// Per MRB-10 (2026-08-02, per decision #169): the
+// reservation-scope lookup view shape. Returned by
+// `kind: "reservation"` responses when the looked-up
+// booking is part of a multi-room reservation. The
+// shape mirrors the MRB-09 email view's privacy
+// posture (no `guestName`, `maskedEmail` instead of
+// `guestEmail`) + the per-room projection shape
+// (position + ref + type + occupancy + per-stay
+// total). Cancel + resend act on the reservation
+// (the server resolves the first child for the
+// credential).
+interface ReservationRoom {
+  id: string;
+  position: number;
+  bookingRef: string;
+  maskedEmail: string;
+  roomId: string;
+  roomName: string;
+  roomNumber: string;
+  roomType: string;
+  checkIn: unknown;
+  checkOut: unknown;
+  numNights: number;
+  numGuests: number;
+  numAdults: number;
+  numChildren: number;
+  extraBedCount: number;
+  hasBreakfast: boolean;
+  ratePerNight: number;
+  totalPrice: number;
+  status: string;
+  rateBreakdown: BookingRateBreakdown | null;
+}
+
+interface ReservationView {
+  kind: "reservation";
+  id: string;
+  reservationRef: string;
+  maskedEmail: string;
+  guestPhone: string;
+  checkIn: unknown;
+  checkOut: unknown;
+  numNights: number;
+  totalPrice: number;
+  paymentMethod: string;
+  status: string;
+  roomCount: number;
+  activeRoomCount: number;
+  cancelledRoomCount: number;
+  rooms: ReservationRoom[];
+  primaryBookingId: string;
+  primaryBookingRef: string;
+}
+
 function toDateInput(value: unknown): string {
   if (!value) return "";
   if (value instanceof Date) {
@@ -129,6 +183,14 @@ export function BookingLookupPage() {
   const [searchError, setSearchError] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [activeBooking, setActiveBooking] = useState<BookingData | null>(null);
+  // Per MRB-10 (2026-08-02, per decision #169): the
+  // reservation-scope lookup view. Set when the
+  // server returns `kind: "reservation"`. Mutually
+  // exclusive with `activeBooking` (a single
+  // `performLookup` call sets one or the other, never
+  // both). Cancel + resend routes through this state
+  // when the view is reservation-scope.
+  const [activeReservation, setActiveReservation] = useState<ReservationView | null>(null);
 
   // Per MBP / decision #123 (2026-07-24): when the email-alone
   // lookup matches >1 booking, the server returns a privacy-
@@ -258,7 +320,20 @@ export function BookingLookupPage() {
       // (ref+token, ref+email, ref alone, token alone, and
       // email-alone with 1 match) returns `kind: "single"`
       // and renders the existing single-booking card.
-      const kind = (data?.kind ?? "single") as "single" | "list";
+      //
+      // Per MRB-10 (2026-08-02, per decision #169): the
+      // reservation-scope path. The server returns
+      // `kind: "reservation"` when the looked-up booking
+      // has a `reservationId` and the reservation has
+      // N>1 children. The page renders a single card
+      // with the reservation header + a list of N
+      // room children. N=1 (single room stays that
+      // happen to be part of a `reservations/{id}` doc)
+      // falls through to `kind: "single"` — the
+      // server-side helper detects the N=1 case and
+      // returns the single-booking shape (byte-
+      // equivalent to the pre-MRB-10 contract).
+      const kind = (data?.kind ?? "single") as "single" | "list" | "reservation";
       if (kind === "list" && Array.isArray(data?.bookings)) {
         setPickerResults(data.bookings as PickerEntry[]);
         setPickerMoreExist(Boolean(data?.moreExist));
@@ -266,9 +341,31 @@ export function BookingLookupPage() {
         // lookup. The picker takes over the result area until
         // the user clicks a row.
         setActiveBooking(null);
+        setActiveReservation(null);
         // Mark so the finally block leaves the Turnstile
         // token in place — the row click reuses it.
         showedPicker = true;
+        return;
+      }
+      if (kind === "reservation" && Array.isArray(data?.rooms)) {
+        // The server returns a fully-shaped view.
+        // We only re-normalize the date fields (the
+        // server can return `Timestamp` objects; the
+        // page's render path expects ISO strings).
+        const normalized: ReservationView = {
+          ...data,
+          checkIn: toDateInput(data.checkIn),
+          checkOut: toDateInput(data.checkOut),
+          rooms: data.rooms.map((room: any) => ({
+            ...room,
+            checkIn: toDateInput(room.checkIn),
+            checkOut: toDateInput(room.checkOut)
+          }))
+        } as ReservationView;
+        setPickerResults(null);
+        setPickerMoreExist(false);
+        setActiveBooking(null);
+        setActiveReservation(normalized);
         return;
       }
 
@@ -383,6 +480,10 @@ export function BookingLookupPage() {
     setHasSearched(false);
     setSearchError("");
     setActiveBooking(null);
+    // Per MRB-10 (2026-08-02, per decision #169): also
+    // clear the reservation-scope view when the user
+    // goes back to the search screen.
+    setActiveReservation(null);
     setPickerResults(null);
     setPickerMoreExist(false);
     setResendStatus("idle");
@@ -438,7 +539,27 @@ export function BookingLookupPage() {
   };
 
   const handleResendEmail = async () => {
-    if (!activeBooking) return;
+    // Per MRB-10 (2026-08-02, per decision #169): the
+    // resend routes to the primary child of the
+    // reservation when the view is reservation-scope.
+    // The MRB-09 reservation-scope email templates
+    // (one email listing every room) are fired
+    // server-side on create; the resend endpoint is
+    // per-child. For MVP the resend fires the primary
+    // child's email — the existing per-child template
+    // renders the full reservation view (per MRB-09).
+    // A future "resend reservation email" endpoint
+    // (MRB-15 follow-up) can fire the
+    // booking-cancelled-reservation action's cousin
+    // for the active-state email.
+    const isReservationScope = Boolean(activeReservation);
+    const activeRef = isReservationScope
+      ? activeReservation?.primaryBookingRef
+      : activeBooking?.bookingRef;
+    const activeStatus = isReservationScope
+      ? activeReservation?.status
+      : activeBooking?.status;
+    if (!activeRef) return;
     if (resendCooldownUntil > Date.now()) {
       setResendStatus("rate-limited");
       setResendError("Email already resent recently, please wait.");
@@ -451,7 +572,7 @@ export function BookingLookupPage() {
 
     try {
       const triggerAction =
-        activeBooking.status === "pending" || activeBooking.status === "payment-uploaded"
+        activeStatus === "pending" || activeStatus === "payment-uploaded"
           ? "booking-submitted"
           : "booking-confirmed";
 
@@ -459,7 +580,7 @@ export function BookingLookupPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          bookingRef: activeBooking.bookingRef,
+          bookingRef: activeRef,
           // Per #131: the lookup response no longer carries
           // the full email. Cancel + resend use the value
           // the user typed into the form (already validated
@@ -496,7 +617,17 @@ export function BookingLookupPage() {
 
   const handleCancelBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeBooking) return;
+    // Per MRB-10 (2026-08-02, per decision #169): the
+    // cancel routes to the reservation when the view
+    // is reservation-scope (`activeReservation` set),
+    // otherwise to the single booking (`activeBooking`
+    // set). The two are mutually exclusive — exactly
+    // one is non-null after a successful lookup.
+    const isReservationScope = Boolean(activeReservation);
+    const activeRef = isReservationScope
+      ? activeReservation?.primaryBookingRef
+      : activeBooking?.bookingRef;
+    if (!activeRef) return;
     // Per BI-02: the lookup consumed the previous token and
     // `performLookup` reset the widget — wait for the fresh one.
     if (!turnstileToken) {
@@ -515,11 +646,25 @@ export function BookingLookupPage() {
       // authenticate, pivoting across modes is denied so
       // a bot can't scrape the email from the page
       // response and re-authenticate via the email path.
+      //
+      // Per MRB-13 (decision #166): when the view is
+      // reservation-scope, the cancel body adds
+      // `scope: "reservation"` so the server cancels the
+      // whole reservation in one transaction (per
+      // MRB-13's reservation-scope cancel path). The
+      // server's `handleCancelBooking` honours the
+      // `scope` field; a missing/unknown scope is the
+      // legacy per-room default. The modal copy
+      // (BOOKING-LOOKUP.md §MRB-13) tells the guest the
+      // room count is being cancelled.
       const cancelPayload: Record<string, string> = {
-        bookingRef: activeBooking.bookingRef,
+        bookingRef: activeRef,
         reason: cancelReason,
         turnstileToken
       };
+      if (isReservationScope) {
+        cancelPayload.scope = "reservation";
+      }
       if (lookupAuthMode === "token" && activeLookupToken) {
         cancelPayload.token = activeLookupToken;
       } else {
@@ -546,7 +691,22 @@ export function BookingLookupPage() {
         return;
       }
 
-      setActiveBooking({ ...activeBooking, status: "cancelled" });
+      if (isReservationScope && activeReservation) {
+        // The server cancelled every room in the
+        // transaction. Mark every room as cancelled in
+        // the local view so the card reflects the new
+        // state immediately. The next lookup fetches
+        // the canonical reservation header.
+        setActiveReservation({
+          ...activeReservation,
+          status: "cancelled",
+          rooms: activeReservation.rooms.map((room) => ({ ...room, status: "cancelled" })),
+          activeRoomCount: 0,
+          cancelledRoomCount: activeReservation.roomCount
+        });
+      } else if (activeBooking) {
+        setActiveBooking({ ...activeBooking, status: "cancelled" });
+      }
       setShowCancelModal(false);
       setCancelReason("");
     } catch (err) {
@@ -1043,14 +1203,203 @@ export function BookingLookupPage() {
             </div>
           </div>
         )}
+
+        {/* Reservation card: shown when the looked-up booking
+            has a `reservationId` and the reservation has N>1
+            children. Renders the reservation header + a list
+            of N room children. The cancel + resend actions
+            act on the reservation (the first child carries
+            the server credential). Per MRB-10 (2026-08-02,
+            per decision #169) + MRB-13's reservation-scope
+            cancel scope. */}
+        {activeReservation && (
+          <div className="space-y-6">
+            <button
+              onClick={handleResetSearch}
+              className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"
+            >
+              <ArrowLeft size={16} />
+              Back to search
+            </button>
+
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Reservation Status</span>
+                <div className="mt-1 flex items-center gap-3">
+                  <h1 className="font-heading text-3xl text-gray-950 sm:text-4xl">
+                    Reference: {activeReservation.reservationRef}
+                  </h1>
+                  <StatusBadge
+                    label={String(activeReservation.status).replace("-", " ")}
+                    status={activeReservation.status}
+                  />
+                </div>
+                <p className="mt-1 text-sm text-gray-600">
+                  {activeReservation.roomCount} room{activeReservation.roomCount === 1 ? "" : "s"} ·{" "}
+                  {activeReservation.numNights} night{activeReservation.numNights === 1 ? "" : "s"} duration
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <GhostButton
+                  onClick={handleResendEmail}
+                  disabled={isResending || isOnCooldown}
+                >
+                  <Mail size={16} />
+                  {isResending
+                    ? "Resending..."
+                    : isOnCooldown
+                      ? `Wait ${cooldownSeconds}s`
+                      : "Resend Email"}
+                </GhostButton>
+                <PrimaryButton
+                  onClick={() => setShowCancelModal(true)}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  Cancel all rooms
+                </PrimaryButton>
+              </div>
+            </div>
+
+            {/* Reservation header card — the per-reservation
+                dates + aggregate total + masked email. Mirrors
+                the single-booking card's privacy posture (no
+                `guestName` reflected back, per #131). */}
+            <div className="rounded-card-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
+              <div className="grid gap-5 md:grid-cols-3">
+                <div className="flex gap-3">
+                  <Calendar className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-gray-500">Stay dates</p>
+                    <p className="mt-1 font-semibold text-gray-900">
+                      {formatStayDate(String(activeReservation.checkIn))} — {formatStayDate(String(activeReservation.checkOut))}
+                    </p>
+                    <p className="text-xs text-gray-500">{activeReservation.numNights} night{activeReservation.numNights === 1 ? "" : "s"}</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <BedDouble className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-gray-500">Rooms</p>
+                    <p className="mt-1 font-semibold text-gray-900">
+                      {activeReservation.activeRoomCount} active / {activeReservation.cancelledRoomCount} cancelled
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {activeReservation.rooms.length} total in this reservation
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Wallet className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-gray-500">Reservation total</p>
+                    <p className="mt-1 text-lg font-bold text-gray-900">
+                      {formatPrice(activeReservation.totalPrice)}
+                    </p>
+                    {activeReservation.paymentMethod && (
+                      <p className="text-xs text-gray-500">{activeReservation.paymentMethod}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {activeReservation.maskedEmail && (
+                <div className="mt-5 border-t border-gray-100 pt-5 flex gap-3">
+                  <Mail className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-gray-500">Booked under</p>
+                    <p className="mt-1 font-mono text-sm font-semibold text-gray-900">{activeReservation.maskedEmail}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Per-room list — every room in the reservation,
+                with its own ref + type + per-stay total. The
+                receipt PDF + the email helper use the same
+                per-stay shape (per MRB-04). */}
+            <div className="rounded-card-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
+              <h2 className="text-base font-semibold text-gray-950 mb-4">
+                Rooms in this reservation
+              </h2>
+              <ul className="space-y-3">
+                {activeReservation.rooms.map((room) => (
+                  <li
+                    key={room.id}
+                    className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <BedDouble size={16} className="text-primary" />
+                        <span className="font-semibold text-gray-950">
+                          Room {room.position} · {room.roomType || "Room"}
+                        </span>
+                        <StatusBadge
+                          label={String(room.status).replace("-", " ")}
+                          status={room.status}
+                        />
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500 font-mono">
+                        {room.bookingRef}
+                        {room.roomNumber ? ` · Room ${room.roomNumber}` : ""}
+                        {room.hasBreakfast ? " · breakfast" : ""}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-gray-900">{formatPrice(room.totalPrice)}</p>
+                      <p className="text-xs text-gray-500">
+                        {room.numAdults} adult{room.numAdults === 1 ? "" : "s"}
+                        {room.numChildren > 0 ? `, ${room.numChildren} child${room.numChildren === 1 ? "" : "ren"}` : ""}
+                        {room.extraBedCount > 0 ? `, ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-card-lg bg-primary-light/30 border border-primary/20 p-5 text-sm text-gray-700">
+              <p className="font-semibold text-gray-900">Need to change something?</p>
+              <p className="mt-1 text-xs leading-relaxed">
+                To change check-in dates, guest count, or breakfast selections for a specific room, please call our front desk directly at {config.frontDeskPhone}. To cancel the whole reservation, use the button above — every room in the reservation will be cancelled in one step.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
-      {showCancelModal && activeBooking && (
+      {(showCancelModal && (activeBooking || activeReservation)) && (
         <Modal open={showCancelModal} onClose={() => !isCancelling && setShowCancelModal(false)} title="Cancel reservation?">
           <form onSubmit={handleCancelBookingSubmit} className="space-y-4">
-            <p className="text-sm text-gray-600 leading-relaxed">
-              Are you sure you want to cancel your booking <span className="font-mono font-semibold text-gray-900">{activeBooking.bookingRef}</span>? This action is permanent.
-            </p>
+            {/* Per MRB-10 (2026-08-02, per decision #169):
+                the cancel modal copy is reservation-scope
+                when the view is reservation-scope. The
+                guest sees the room count and a per-room
+                list so they can verify they're
+                cancelling the right reservation. The
+                per-room copy mirrors the spec in
+                BOOKING-LOOKUP.md §MRB-13. */}
+            {activeReservation ? (
+              <>
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  This will cancel all <strong>{activeReservation.roomCount} room{activeReservation.roomCount === 1 ? "" : "s"}</strong> in your reservation <span className="font-mono font-semibold text-gray-900">{activeReservation.reservationRef}</span>. This action is permanent.
+                </p>
+                <ul className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 space-y-1">
+                  {activeReservation.rooms.map((room) => (
+                    <li key={room.id} className="flex justify-between">
+                      <span className="font-mono">{room.bookingRef} · {room.roomType}</span>
+                      <span className="text-gray-500">Room {room.position}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : activeBooking ? (
+              <p className="text-sm text-gray-600 leading-relaxed">
+                Are you sure you want to cancel your booking <span className="font-mono font-semibold text-gray-900">{activeBooking.bookingRef}</span>? This action is permanent.
+              </p>
+            ) : null}
             {/* Per CRL-04 (2026-08-02): the explicit "no refund is
                 automatic" line is the same in the booking-cancelled
                 email and the admin confirm modal. The server already
