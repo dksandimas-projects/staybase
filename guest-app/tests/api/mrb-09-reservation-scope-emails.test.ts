@@ -260,8 +260,18 @@ describe("MRB-09 — Create handler wires the reservation view into the booking-
   });
 
   it("the cancel handler passes the reservation view (with cancellationReason) to the booking-cancelled email", () => {
+    // Per MRB-13 (2026-08-02, per decision #166): the
+    // action name is now a local variable
+    // (`postTransactionAction`) that switches
+    // between `"booking-cancelled"` (per-child)
+    // and `"booking-cancelled-reservation"`
+    // (reservation scope). The per-child case still
+    // hands the reservation view + `validReason`
+    // to the per-child template — the MRB-09
+    // multi-room rendering kicks in when the
+    // booking has a `reservationId`.
     expect(bookingsHandlerSrc).toMatch(
-      /await sendBookingTrigger\(\s*"booking-cancelled",\s*reservationView[\s\S]*?cancellationReason: validReason/
+      /await sendBookingTrigger\(\s*postTransactionAction,\s*reservationView[\s\S]*?cancellationReason: validReason/
     );
   });
 });

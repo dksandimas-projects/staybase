@@ -28101,15 +28101,15 @@ var require_root = __commonJS({
             self2.setOptions(source.options).addJSON(source.nested);
           else {
             parse5.filename = filename2;
-            var parsed = parse5(source, self2, options), resolved2, i3 = 0;
-            if (parsed.imports) {
-              for (; i3 < parsed.imports.length; ++i3)
-                if (resolved2 = getBundledFileName(parsed.imports[i3]) || self2.resolvePath(filename2, parsed.imports[i3]))
+            var parsed2 = parse5(source, self2, options), resolved2, i3 = 0;
+            if (parsed2.imports) {
+              for (; i3 < parsed2.imports.length; ++i3)
+                if (resolved2 = getBundledFileName(parsed2.imports[i3]) || self2.resolvePath(filename2, parsed2.imports[i3]))
                   fetch4(resolved2, false, depth + 1);
             }
-            if (parsed.weakImports) {
-              for (i3 = 0; i3 < parsed.weakImports.length; ++i3)
-                if (resolved2 = getBundledFileName(parsed.weakImports[i3]) || self2.resolvePath(filename2, parsed.weakImports[i3]))
+            if (parsed2.weakImports) {
+              for (i3 = 0; i3 < parsed2.weakImports.length; ++i3)
+                if (resolved2 = getBundledFileName(parsed2.weakImports[i3]) || self2.resolvePath(filename2, parsed2.weakImports[i3]))
                   fetch4(resolved2, true, depth + 1);
             }
           }
@@ -60106,13 +60106,13 @@ var require_validate = __commonJS({
       if (!validateOptional(value, options)) {
         validateString(arg, value);
         const urlString = `http://${value}/`;
-        let parsed;
+        let parsed2;
         try {
-          parsed = new url_1.URL(urlString);
+          parsed2 = new url_1.URL(urlString);
         } catch (e3) {
           throw new Error(invalidArgumentMessage(arg, "host"));
         }
-        if (parsed.search !== "" || parsed.pathname !== "/" || parsed.username !== "") {
+        if (parsed2.search !== "" || parsed2.pathname !== "/" || parsed2.username !== "") {
           throw new Error(invalidArgumentMessage(arg, "host"));
         }
       }
@@ -103337,18 +103337,18 @@ var require_multipart = __commonJS({
         part.on("header", function(header) {
           let contype;
           let fieldname;
-          let parsed;
+          let parsed2;
           let charset;
           let encoding;
           let filename;
           let nsize = 0;
           if (header["content-type"]) {
-            parsed = parseParams(header["content-type"][0]);
-            if (parsed[0]) {
-              contype = parsed[0].toLowerCase();
-              for (i2 = 0, len = parsed.length; i2 < len; ++i2) {
-                if (RE_CHARSET.test(parsed[i2][0])) {
-                  charset = parsed[i2][1].toLowerCase();
+            parsed2 = parseParams(header["content-type"][0]);
+            if (parsed2[0]) {
+              contype = parsed2[0].toLowerCase();
+              for (i2 = 0, len = parsed2.length; i2 < len; ++i2) {
+                if (RE_CHARSET.test(parsed2[i2][0])) {
+                  charset = parsed2[i2][1].toLowerCase();
                   break;
                 }
               }
@@ -103361,15 +103361,15 @@ var require_multipart = __commonJS({
             charset = defCharset;
           }
           if (header["content-disposition"]) {
-            parsed = parseParams(header["content-disposition"][0]);
-            if (!RE_FIELD.test(parsed[0])) {
+            parsed2 = parseParams(header["content-disposition"][0]);
+            if (!RE_FIELD.test(parsed2[0])) {
               return skipPart(part);
             }
-            for (i2 = 0, len = parsed.length; i2 < len; ++i2) {
-              if (RE_NAME.test(parsed[i2][0])) {
-                fieldname = parsed[i2][1];
-              } else if (RE_FILENAME.test(parsed[i2][0])) {
-                filename = parsed[i2][1];
+            for (i2 = 0, len = parsed2.length; i2 < len; ++i2) {
+              if (RE_NAME.test(parsed2[i2][0])) {
+                fieldname = parsed2[i2][1];
+              } else if (RE_FILENAME.test(parsed2[i2][0])) {
+                filename = parsed2[i2][1];
                 if (!preservePath) {
                   filename = basename2(filename);
                 }
@@ -103969,7 +103969,7 @@ var require_main = __commonJS({
       WritableStream2.prototype.emit.apply(this, arguments);
     };
     Busboy.prototype.getParserByHeaders = function(headers) {
-      const parsed = parseParams(headers["content-type"]);
+      const parsed2 = parseParams(headers["content-type"]);
       const cfg = {
         defCharset: this.opts.defCharset,
         fileHwm: this.opts.fileHwm,
@@ -103977,13 +103977,13 @@ var require_main = __commonJS({
         highWaterMark: this.opts.highWaterMark,
         isPartAFile: this.opts.isPartAFile,
         limits: this.opts.limits,
-        parsedConType: parsed,
+        parsedConType: parsed2,
         preservePath: this.opts.preservePath
       };
-      if (MultipartParser3.detect.test(parsed[0])) {
+      if (MultipartParser3.detect.test(parsed2[0])) {
         return new MultipartParser3(this, cfg);
       }
-      if (UrlencodedParser.detect.test(parsed[0])) {
+      if (UrlencodedParser.detect.test(parsed2[0])) {
         return new UrlencodedParser(this, cfg);
       }
       throw new Error("Unsupported Content-Type.");
@@ -104664,18 +104664,18 @@ var require_api_request = __commonJS({
         return this.httpConfig.httpAgent;
       }
       buildRequestOptions() {
-        const parsed = this.buildUrl();
-        const protocol = parsed.protocol;
-        let port = parsed.port;
+        const parsed2 = this.buildUrl();
+        const protocol = parsed2.protocol;
+        let port = parsed2.port;
         if (!port) {
           const isHttps = protocol === "https:";
           port = isHttps ? "443" : "80";
         }
         return {
           protocol,
-          hostname: parsed.hostname,
+          hostname: parsed2.hostname,
           port,
-          path: parsed.path,
+          path: parsed2.path,
           method: this.method,
           agent: this.httpAgent,
           headers: Object.assign({}, this.headers)
@@ -104691,11 +104691,11 @@ var require_api_request = __commonJS({
         return this.http2Config.http2SessionHandler;
       }
       buildRequestOptions() {
-        const parsed = this.buildUrl();
-        const protocol = parsed.protocol;
+        const parsed2 = this.buildUrl();
+        const protocol = parsed2.protocol;
         return {
           protocol,
-          path: parsed.path,
+          path: parsed2.path,
           method: this.method,
           headers: Object.assign({}, this.headers)
         };
@@ -109289,8 +109289,8 @@ var require_prerelease = __commonJS({
     "use strict";
     var parse5 = require_parse3();
     var prerelease = (version6, options) => {
-      const parsed = parse5(version6, options);
-      return parsed && parsed.prerelease.length ? parsed.prerelease : null;
+      const parsed2 = parse5(version6, options);
+      return parsed2 && parsed2.prerelease.length ? parsed2.prerelease : null;
     };
     module2.exports = prerelease;
   }
@@ -127877,20 +127877,20 @@ var require_agent = __commonJS({
       callback(req, opts) {
         return __awaiter(this, void 0, void 0, function* () {
           const { proxy, secureProxy } = this;
-          const parsed = url_1.default.parse(req.path);
-          if (!parsed.protocol) {
-            parsed.protocol = "http:";
+          const parsed2 = url_1.default.parse(req.path);
+          if (!parsed2.protocol) {
+            parsed2.protocol = "http:";
           }
-          if (!parsed.hostname) {
-            parsed.hostname = opts.hostname || opts.host || null;
+          if (!parsed2.hostname) {
+            parsed2.hostname = opts.hostname || opts.host || null;
           }
-          if (parsed.port == null && typeof opts.port) {
-            parsed.port = String(opts.port);
+          if (parsed2.port == null && typeof opts.port) {
+            parsed2.port = String(opts.port);
           }
-          if (parsed.port === "80") {
-            parsed.port = "";
+          if (parsed2.port === "80") {
+            parsed2.port = "";
           }
-          req.path = url_1.default.format(parsed);
+          req.path = url_1.default.format(parsed2);
           if (proxy.auth) {
             req.setHeader("Proxy-Authorization", `Basic ${Buffer.from(proxy.auth).toString("base64")}`);
           }
@@ -222604,8 +222604,8 @@ function toDate2(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
   if (typeof value.toDate === "function") return value.toDate();
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const parsed2 = new Date(value);
+  return Number.isNaN(parsed2.getTime()) ? null : parsed2;
 }
 function formatDate(value) {
   const date = toDate2(value);
@@ -223666,11 +223666,11 @@ async function handleEmailTrigger(req, res, action) {
         notes: external_exports.string().trim().max(500).optional().default("")
       });
       const bodyData = req.body?.request || req.body || {};
-      const parsed = earlyCheckinRequestSchema.safeParse(bodyData);
-      if (!parsed.success) {
+      const parsed2 = earlyCheckinRequestSchema.safeParse(bodyData);
+      if (!parsed2.success) {
         return res.status(400).json({ success: false, error: "Please provide a valid requested check-in time (max 20 characters) and notes (max 500 characters)." });
       }
-      const request = parsed.data;
+      const request = parsed2.data;
       const earlyCheckIn = {
         status: "requested",
         requestedTime: request.requestedCheckInTime,
@@ -224101,14 +224101,14 @@ async function handleCreateTestRun(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can create test runs." });
   }
-  const parsed = createTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = createTestRunSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid test run name, environment, and duration."
     });
   }
-  const { name: name2, environment, durationMinutes } = parsed.data;
+  const { name: name2, environment, durationMinutes } = parsed2.data;
   try {
     if (environment === "production") {
       const activeRuns = await adminDb.collection("testRuns").where("environment", "==", "production").where("status", "==", "active").get();
@@ -224164,14 +224164,14 @@ async function handleCloseTestRun(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can close test runs." });
   }
-  const parsed = closeTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = closeTestRunSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid test run ID."
     });
   }
-  const { runId } = parsed.data;
+  const { runId } = parsed2.data;
   try {
     const runRef = adminDb.collection("testRuns").doc(runId);
     const runDoc = await runRef.get();
@@ -224233,14 +224233,14 @@ async function handleDeleteTestRun(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can delete test data." });
   }
-  const parsed = deleteTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = deleteTestRunSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid test run ID."
     });
   }
-  const { runId } = parsed.data;
+  const { runId } = parsed2.data;
   const runRef = adminDb.collection("testRuns").doc(runId);
   const now = /* @__PURE__ */ new Date();
   try {
@@ -224593,14 +224593,14 @@ async function handleStagingResetExecute(req, res) {
       error: "This project is not authorized for operational reset. Staging allowlist check failed."
     });
   }
-  const parsed = stagingResetConfirmSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = stagingResetConfirmSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Preview ID, typed RESET STAGING, and project name are required."
     });
   }
-  const { confirmation, projectName, previewId } = parsed.data;
+  const { confirmation, projectName, previewId } = parsed2.data;
   const currentProject = process.env.FIREBASE_PROJECT_ID || "";
   if (projectName !== currentProject) {
     return res.status(400).json({
@@ -225106,14 +225106,14 @@ async function handleStagingRefreshPreview(req, res) {
       error: "Staging refresh is only available on staging projects. The current project is not on the staging allowlist."
     });
   }
-  const parsed = stagingRefreshSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = stagingRefreshSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid production export (bookings, storeOrders, members) and options."
     });
   }
-  const { export: exportPayload, options } = parsed.data;
+  const { export: exportPayload, options } = parsed2.data;
   const mode = options.mode;
   const salt = import_node_crypto.default.randomBytes(16).toString("hex");
   const snapshotId = `refresh-${Date.now()}-${import_node_crypto.default.randomBytes(4).toString("hex")}`;
@@ -225668,7 +225668,8 @@ var guestCancelSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
   guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
   token: external_exports.string().trim().max(64).regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.").optional(),
-  reason: external_exports.string().trim().max(500).optional().default("")
+  reason: external_exports.string().trim().max(500).optional().default(""),
+  scope: external_exports.enum(["room", "reservation"]).optional().default("room")
 }).refine(
   (data) => Boolean(data.guestEmail) !== Boolean(data.token),
   "Provide either an email or a lookup token (not both)."
@@ -228278,21 +228279,21 @@ async function handleCancelBooking(req, res) {
       }
       bookingData2 = doc.data();
     } else {
-      const parsed = guestCancelSchema.safeParse(req.body || {});
-      if (!parsed.success) {
+      const parsed2 = guestCancelSchema.safeParse(req.body || {});
+      if (!parsed2.success) {
         return res.status(400).json({
           success: false,
           error: "Please provide a valid booking reference and email or lookup token."
         });
       }
-      validReason = parsed.data.reason;
-      const compositeFilter = parsed.data.token ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() } : { field: "guestEmail", value: parsed.data.guestEmail };
-      const query = adminDb.collection("bookings").where("bookingRef", "==", parsed.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+      validReason = parsed2.data.reason;
+      const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
+      const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
       const snapshot = await query.get();
       if (snapshot.empty) {
         return res.status(404).json({
           success: false,
-          error: parsed.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+          error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
         });
       }
       bookingDocumentRef = snapshot.docs[0].ref;
@@ -228330,136 +228331,251 @@ async function handleCancelBooking(req, res) {
         error: "Your booking is past the self-service cancellation window. Please contact the front desk so a staff member can assist you with cancellation and any applicable refund."
       });
     }
-    await adminDb.runTransaction(async (transaction) => {
-      const freshBookingDoc = await transaction.get(bookingDocumentRef);
-      if (!freshBookingDoc.exists) {
-        throw new Error("Booking not found.");
-      }
-      const freshBooking = freshBookingDoc.data() || {};
-      if (
-        // Per MRB-05 PR #2 (2026-08-02, per decision #159):
-        // the in-transaction terminal-status reject
-        // mirrors the pre-transaction check above —
-        // excludes `checked-out` (allowed for the
-        // clawback scenario) and still rejects
-        // `checked-in` (in-house cancellation is a
-        // separate flow) + `cancelled` (idempotent
-        // rejection).
-        freshBooking.status === "checked-in" || freshBooking.status === "cancelled"
-      ) {
-        throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
-      }
-      if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(String(freshBooking.status || ""))) {
-        throw new Error("GUEST_PAST_SELF_SERVICE_WINDOW");
-      }
-      const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
-      const appliedCorporateCode = String(freshBooking.corporateCode || "").trim().toUpperCase();
-      let voucherRef = null;
-      let voucherDoc = null;
-      if (appliedVoucherCode) {
-        voucherRef = adminDb.collection("vouchers").doc(appliedVoucherCode);
-        voucherDoc = await transaction.get(voucherRef);
-        if (!voucherDoc.exists) {
-          const voucherQuery = adminDb.collection("vouchers").where("code", "==", appliedVoucherCode).limit(1);
-          const voucherQuerySnap = await transaction.get(voucherQuery);
-          if (!voucherQuerySnap.empty) {
-            voucherDoc = voucherQuerySnap.docs[0];
-            voucherRef = voucherDoc.ref;
+    const requestedScope = isStaffCancellation ? String((req.body || {}).scope || "").trim().toLowerCase() === "reservation" ? "reservation" : "room" : parsed.data.scope;
+    const lookedUpReservationId = String(bookingData2.reservationId || "").trim();
+    const isReservationScope = requestedScope === "reservation" && lookedUpReservationId.length > 0;
+    const postTransactionAction = isReservationScope ? "booking-cancelled-reservation" : "booking-cancelled";
+    if (isReservationScope) {
+      await adminDb.runTransaction(async (transaction) => {
+        const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
+        const reservationDoc = await transaction.get(reservationRef);
+        if (!reservationDoc.exists) {
+          throw new Error("Reservation not found.");
+        }
+        const reservationData = reservationDoc.data() || {};
+        const childrenSnap = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", lookedUpReservationId)
+        );
+        const children = childrenSnap.docs.map((d) => ({
+          id: d.id,
+          ref: d.ref,
+          data: d.data() || {}
+        }));
+        const cancellableIds = /* @__PURE__ */ new Set();
+        for (const child of children) {
+          const status = String(child.data.status || "");
+          if (status === "checked-in" || status === "cancelled") continue;
+          if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(status)) {
+            continue;
+          }
+          cancellableIds.add(child.id);
+        }
+        const cancelledCount = cancellableIds.size;
+        const voucherCounts = /* @__PURE__ */ new Map();
+        const corporateCounts = /* @__PURE__ */ new Map();
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          const v6 = String(child.data.voucherCode || "").trim().toUpperCase();
+          if (v6) voucherCounts.set(v6, (voucherCounts.get(v6) || 0) + 1);
+          const cp = String(child.data.corporateCode || "").trim().toUpperCase();
+          if (cp) corporateCounts.set(cp, (corporateCounts.get(cp) || 0) + 1);
+        }
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          transaction.update(child.ref, {
+            status: "cancelled",
+            cancellationReason: validReason,
+            cancelledAt: now,
+            cancelledBy,
+            cancellationSource,
+            updatedAt: now
+          });
+          if (child.data.loyaltyAwardStatus === "awarded" && Number(child.data.pointsAwarded || 0) > 0) {
+            const memberId = String(child.data.memberId || "").trim();
+            if (memberId) {
+              const memberRef = adminDb.collection("members").doc(memberId);
+              const memberDoc = await transaction.get(memberRef);
+              if (memberDoc.exists) {
+                const clawbackPoints = -Number(child.data.pointsAwarded || 0);
+                const clawbackHistoryRef = memberRef.collection("pointsHistory").doc(`clawback-${child.id}`);
+                transaction.set(clawbackHistoryRef, {
+                  type: "clawback",
+                  points: clawbackPoints,
+                  bookingId: child.id,
+                  bookingRef: child.data.bookingRef,
+                  description: `Cancellation clawback for cancelled stay (${child.data.bookingRef})`,
+                  by: cancelledBy,
+                  createdAt: now
+                });
+                transaction.update(child.ref, {
+                  pointsAwarded: 0,
+                  loyaltyAwardStatus: "clawback-recorded",
+                  pointsAwardedAt: null
+                });
+              }
+            }
           }
         }
-      }
-      let corporateCodeRef = null;
-      let corporateCodeDoc = null;
-      if (appliedCorporateCode) {
-        corporateCodeRef = adminDb.collection("corporateCodes").doc(appliedCorporateCode);
-        corporateCodeDoc = await transaction.get(corporateCodeRef);
-        if (!corporateCodeDoc.exists) {
-          const corporateCodeQuery = adminDb.collection("corporateCodes").where("code", "==", appliedCorporateCode).limit(1);
-          const corporateCodeQuerySnap = await transaction.get(corporateCodeQuery);
-          if (!corporateCodeQuerySnap.empty) {
-            corporateCodeDoc = corporateCodeQuerySnap.docs[0];
-            corporateCodeRef = corporateCodeDoc.ref;
+        for (const [code, count] of voucherCounts.entries()) {
+          const vRef = adminDb.collection("vouchers").doc(code);
+          const vDoc = await transaction.get(vRef);
+          if (vDoc.exists) {
+            const vData = vDoc.data() || {};
+            transaction.update(vRef, {
+              usageCount: Math.max((Number(vData.usageCount) || 0) - count, 0),
+              updatedAt: now
+            });
           }
         }
-      }
-      transaction.update(bookingDocumentRef, {
-        status: "cancelled",
-        cancellationReason: validReason,
-        // Per CRL-02 (2026-08-02): the audit metadata is
-        // stamped in the same transaction as the status
-        // flip. `cancelledAt` uses the same `now` value
-        // the `now` constant at the top of the try block
-        // captured (BEFORE the runTransaction so it's
-        // stable across transaction retries). A
-        // sub-millisecond skew between `cancelledAt` and
-        // `updatedAt` is acceptable for an audit field.
-        // `cancelledBy` is the staff UID or the literal
-        // "guest"; `cancellationSource` is the parallel
-        // discriminator (one of CANCELLATION_SOURCES). A
-        // partial failure cannot leave a half-stamped
-        // cancellation — the four writes share a single
-        // `transaction.update` call.
-        cancelledAt: now,
-        cancelledBy,
-        cancellationSource,
-        updatedAt: now
-      });
-      const bookingReservationId2 = String(freshBooking.reservationId || "").trim();
-      if (bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        for (const [code, count] of corporateCounts.entries()) {
+          const cpRef = adminDb.collection("corporateCodes").doc(code);
+          const cpDoc = await transaction.get(cpRef);
+          if (cpDoc.exists) {
+            const cpData = cpDoc.data() || {};
+            transaction.update(cpRef, {
+              usageCount: Math.max((Number(cpData.usageCount) || 0) - count, 0),
+              updatedAt: now
+            });
+          }
+        }
+        const newActiveRoomCount = Math.max(
+          (Number(reservationData.activeRoomCount) || 0) - cancelledCount,
+          0
+        );
+        const newCancelledRoomCount = (Number(reservationData.cancelledRoomCount) || 0) + cancelledCount;
+        const postStatuses = children.map(
+          (c2) => cancellableIds.has(c2.id) ? "cancelled" : String(c2.data.status || "")
+        );
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
+          cancelledRoomCount: newCancelledRoomCount,
+          activeRoomCount: newActiveRoomCount,
+          paymentStatus: computeReservationAggregatePaymentStatus(postStatuses),
           updatedAt: now
         });
-      }
-      if (freshBooking.loyaltyAwardStatus === "awarded" && Number(freshBooking.pointsAwarded || 0) > 0) {
-        const memberIdForClawback = String(freshBooking.memberId || "").trim();
-        if (memberIdForClawback) {
-          const clawbackMemberRef = adminDb.collection("members").doc(memberIdForClawback);
-          const clawbackMemberDoc = await transaction.get(clawbackMemberRef);
-          if (clawbackMemberDoc.exists) {
-            const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
-            const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
-            transaction.set(clawbackHistoryRef, {
-              type: "clawback",
-              points: clawbackPoints,
-              bookingId,
-              bookingRef: freshBooking.bookingRef,
-              description: `Cancellation clawback for cancelled stay (${freshBooking.bookingRef})`,
-              by: cancelledBy,
-              createdAt: now
-            });
-            bookingUpdate.pointsAwarded = 0;
-            bookingUpdate.loyaltyAwardStatus = "clawback-recorded";
-            bookingUpdate.pointsAwardedAt = null;
-            transaction.update(bookingDocumentRef, {
-              pointsAwarded: 0,
-              loyaltyAwardStatus: "clawback-recorded",
-              pointsAwardedAt: null
-            });
+      });
+    } else {
+      await adminDb.runTransaction(async (transaction) => {
+        const freshBookingDoc = await transaction.get(bookingDocumentRef);
+        if (!freshBookingDoc.exists) {
+          throw new Error("Booking not found.");
+        }
+        const freshBooking = freshBookingDoc.data() || {};
+        if (
+          // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+          // the in-transaction terminal-status reject
+          // mirrors the pre-transaction check above —
+          // excludes `checked-out` (allowed for the
+          // clawback scenario) and still rejects
+          // `checked-in` (in-house cancellation is a
+          // separate flow) + `cancelled` (idempotent
+          // rejection).
+          freshBooking.status === "checked-in" || freshBooking.status === "cancelled"
+        ) {
+          throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
+        }
+        if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(String(freshBooking.status || ""))) {
+          throw new Error("GUEST_PAST_SELF_SERVICE_WINDOW");
+        }
+        const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
+        const appliedCorporateCode = String(freshBooking.corporateCode || "").trim().toUpperCase();
+        let voucherRef = null;
+        let voucherDoc = null;
+        if (appliedVoucherCode) {
+          voucherRef = adminDb.collection("vouchers").doc(appliedVoucherCode);
+          voucherDoc = await transaction.get(voucherRef);
+          if (!voucherDoc.exists) {
+            const voucherQuery = adminDb.collection("vouchers").where("code", "==", appliedVoucherCode).limit(1);
+            const voucherQuerySnap = await transaction.get(voucherQuery);
+            if (!voucherQuerySnap.empty) {
+              voucherDoc = voucherQuerySnap.docs[0];
+              voucherRef = voucherDoc.ref;
+            }
           }
         }
-      }
-      if (voucherDoc?.exists && voucherRef) {
-        const voucherData = voucherDoc.data() || {};
-        transaction.update(voucherRef, {
-          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+        let corporateCodeRef = null;
+        let corporateCodeDoc = null;
+        if (appliedCorporateCode) {
+          corporateCodeRef = adminDb.collection("corporateCodes").doc(appliedCorporateCode);
+          corporateCodeDoc = await transaction.get(corporateCodeRef);
+          if (!corporateCodeDoc.exists) {
+            const corporateCodeQuery = adminDb.collection("corporateCodes").where("code", "==", appliedCorporateCode).limit(1);
+            const corporateCodeQuerySnap = await transaction.get(corporateCodeQuery);
+            if (!corporateCodeQuerySnap.empty) {
+              corporateCodeDoc = corporateCodeQuerySnap.docs[0];
+              corporateCodeRef = corporateCodeDoc.ref;
+            }
+          }
+        }
+        transaction.update(bookingDocumentRef, {
+          status: "cancelled",
+          cancellationReason: validReason,
+          // Per CRL-02 (2026-08-02): the audit metadata is
+          // stamped in the same transaction as the status
+          // flip. `cancelledAt` uses the same `now` value
+          // the `now` constant at the top of the try block
+          // captured (BEFORE the runTransaction so it's
+          // stable across transaction retries). A
+          // sub-millisecond skew between `cancelledAt` and
+          // `updatedAt` is acceptable for an audit field.
+          // `cancelledBy` is the staff UID or the literal
+          // "guest"; `cancellationSource` is the parallel
+          // discriminator (one of CANCELLATION_SOURCES). A
+          // partial failure cannot leave a half-stamped
+          // cancellation — the four writes share a single
+          // `transaction.update` call.
+          cancelledAt: now,
+          cancelledBy,
+          cancellationSource,
           updatedAt: now
         });
-      }
-      if (corporateCodeDoc?.exists && corporateCodeRef) {
-        const corporateCodeData = corporateCodeDoc.data() || {};
-        transaction.update(corporateCodeRef, {
-          usageCount: Math.max((Number(corporateCodeData.usageCount) || 0) - 1, 0),
-          updatedAt: now
-        });
-      }
-    });
+        const bookingReservationId2 = String(freshBooking.reservationId || "").trim();
+        if (bookingReservationId2.length > 0) {
+          const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+          transaction.update(reservationRef, {
+            paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
+            updatedAt: now
+          });
+        }
+        if (freshBooking.loyaltyAwardStatus === "awarded" && Number(freshBooking.pointsAwarded || 0) > 0) {
+          const memberIdForClawback = String(freshBooking.memberId || "").trim();
+          if (memberIdForClawback) {
+            const clawbackMemberRef = adminDb.collection("members").doc(memberIdForClawback);
+            const clawbackMemberDoc = await transaction.get(clawbackMemberRef);
+            if (clawbackMemberDoc.exists) {
+              const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
+              const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
+              transaction.set(clawbackHistoryRef, {
+                type: "clawback",
+                points: clawbackPoints,
+                bookingId,
+                bookingRef: freshBooking.bookingRef,
+                description: `Cancellation clawback for cancelled stay (${freshBooking.bookingRef})`,
+                by: cancelledBy,
+                createdAt: now
+              });
+              bookingUpdate.pointsAwarded = 0;
+              bookingUpdate.loyaltyAwardStatus = "clawback-recorded";
+              bookingUpdate.pointsAwardedAt = null;
+              transaction.update(bookingDocumentRef, {
+                pointsAwarded: 0,
+                loyaltyAwardStatus: "clawback-recorded",
+                pointsAwardedAt: null
+              });
+            }
+          }
+        }
+        if (voucherDoc?.exists && voucherRef) {
+          const voucherData = voucherDoc.data() || {};
+          transaction.update(voucherRef, {
+            usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+            updatedAt: now
+          });
+        }
+        if (corporateCodeDoc?.exists && corporateCodeRef) {
+          const corporateCodeData = corporateCodeDoc.data() || {};
+          transaction.update(corporateCodeRef, {
+            usageCount: Math.max((Number(corporateCodeData.usageCount) || 0) - 1, 0),
+            updatedAt: now
+          });
+        }
+      });
+    }
     try {
       const reservationView = await loadReservationEmailView(bookingId);
+      const cancellationSourceForEmail = cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff";
       await sendBookingTrigger(
-        "booking-cancelled",
-        reservationView ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff" } : { ...bookingData2, cancellationReason: validReason }
+        postTransactionAction,
+        reservationView ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancellationSourceForEmail } : { ...bookingData2, cancellationReason: validReason }
       );
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
@@ -229502,14 +229618,14 @@ async function handleCheckoutBooking(req, res) {
   }
 }
 async function handleLookupBooking(req, res) {
-  const parsed = lookupSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = lookupSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid booking reference, email, or lookup token."
     });
   }
-  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken, reservationRef: trimmedReservationRef } = parsed.data;
+  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken, reservationRef: trimmedReservationRef } = parsed2.data;
   try {
     if (trimmedRef && lookupToken) {
       const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).where("lookupToken", "==", String(lookupToken).toLowerCase()).limit(1).get();
@@ -229794,11 +229910,11 @@ async function handleResolveEarlyCheckin(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed = resolveEarlyCheckinSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = resolveEarlyCheckinSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({ success: false, error: "Invalid resolution request details." });
   }
-  const { bookingId, status, staffNote, confirmedTime } = parsed.data;
+  const { bookingId, status, staffNote, confirmedTime } = parsed2.data;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
@@ -230291,8 +230407,8 @@ function toIsoDate(value) {
     return value.toISOString().slice(0, 10);
   }
   if (typeof value === "string") {
-    const parsed = new Date(value);
-    if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+    const parsed2 = new Date(value);
+    if (!isNaN(parsed2.getTime())) return parsed2.toISOString().slice(0, 10);
   }
   return null;
 }
@@ -230416,30 +230532,30 @@ async function assertRoomIsFreeForBlock(transaction, roomId, start, end, exclude
   }
 }
 async function handleCreateRoomBlock(req, res) {
-  const parsed = blockSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = blockSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({ success: false, error: "Please choose a room, valid dates, and a reason." });
   }
   try {
-    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
+    const { start, end } = parseStayRange(parsed2.data.startDate, parsed2.data.endDate);
     let blockId = "";
     await adminDb.runTransaction(async (transaction) => {
-      const roomRef = adminDb.collection("rooms").doc(parsed.data.roomId);
+      const roomRef = adminDb.collection("rooms").doc(parsed2.data.roomId);
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) throw new Error("Room not found.");
       const room = roomDoc.data() || {};
       if (room.isActive === false) throw new Error("Cannot block an inactive room.");
-      await assertRoomIsFreeForBlock(transaction, parsed.data.roomId, start, end);
+      await assertRoomIsFreeForBlock(transaction, parsed2.data.roomId, start, end);
       const blockRef = adminDb.collection("roomBlocks").doc();
       blockId = blockRef.id;
       transaction.set(blockRef, {
-        roomId: parsed.data.roomId,
+        roomId: parsed2.data.roomId,
         roomNumber: String(room.roomNumber || ""),
         roomType: String(room.type || ""),
         startDate: Timestamp.fromDate(start),
         endDate: Timestamp.fromDate(end),
-        reason: parsed.data.reason,
-        notes: parsed.data.notes || "",
+        reason: parsed2.data.reason,
+        notes: parsed2.data.notes || "",
         status: "active",
         createdBy: req.staff?.uid || req.staff?.email || "staff",
         createdAt: /* @__PURE__ */ new Date(),
@@ -230454,33 +230570,33 @@ async function handleCreateRoomBlock(req, res) {
   }
 }
 async function handleUpdateRoomBlock(req, res) {
-  const parsed = updateBlockSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = updateBlockSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({ success: false, error: "Please provide valid block details." });
   }
   try {
-    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
+    const { start, end } = parseStayRange(parsed2.data.startDate, parsed2.data.endDate);
     await adminDb.runTransaction(async (transaction) => {
-      const blockRef = adminDb.collection("roomBlocks").doc(parsed.data.blockId);
+      const blockRef = adminDb.collection("roomBlocks").doc(parsed2.data.blockId);
       const blockDoc = await transaction.get(blockRef);
       if (!blockDoc.exists) throw new Error("Block not found.");
       const existing = blockDoc.data() || {};
       if (existing.status === "cancelled") throw new Error("Cancelled blocks cannot be edited.");
-      const targetRoomId = parsed.data.roomId || existing.roomId;
+      const targetRoomId = parsed2.data.roomId || existing.roomId;
       if (!targetRoomId) throw new Error("Room ID is required.");
       const roomRef = adminDb.collection("rooms").doc(targetRoomId);
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) throw new Error("Room not found.");
       const room = roomDoc.data() || {};
-      await assertRoomIsFreeForBlock(transaction, targetRoomId, start, end, parsed.data.blockId);
+      await assertRoomIsFreeForBlock(transaction, targetRoomId, start, end, parsed2.data.blockId);
       transaction.update(blockRef, {
         roomId: targetRoomId,
         roomNumber: String(room.roomNumber || ""),
         roomType: String(room.type || ""),
         startDate: Timestamp.fromDate(start),
         endDate: Timestamp.fromDate(end),
-        reason: parsed.data.reason,
-        notes: parsed.data.notes || "",
+        reason: parsed2.data.reason,
+        notes: parsed2.data.notes || "",
         updatedAt: /* @__PURE__ */ new Date()
       });
     });
@@ -230490,12 +230606,12 @@ async function handleUpdateRoomBlock(req, res) {
   }
 }
 async function handleCancelRoomBlock(req, res) {
-  const parsed = cancelBlockSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = cancelBlockSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({ success: false, error: "Block ID is required." });
   }
   try {
-    const blockRef = adminDb.collection("roomBlocks").doc(parsed.data.blockId);
+    const blockRef = adminDb.collection("roomBlocks").doc(parsed2.data.blockId);
     await blockRef.update({
       status: "cancelled",
       cancelledAt: /* @__PURE__ */ new Date(),
@@ -230701,15 +230817,15 @@ async function handleCreateCorporateInquiry(req, res) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
   const { _hp, turnstileToken, ...inquiryBody } = req.body || {};
-  const parsed = inquirySchema.safeParse(inquiryBody);
-  if (!parsed.success) {
+  const parsed2 = inquirySchema.safeParse(inquiryBody);
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the inquiry form and try again."
     });
   }
   const inquiry = {
-    ...parsed.data,
+    ...parsed2.data,
     status: "new",
     handler: "",
     notes: [],
@@ -230749,8 +230865,8 @@ async function handleConvertInquiryToBooking(req, res) {
   if (!staff.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
-  const parsed = convertInquirySchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = convertInquirySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the conversion details and try again."
@@ -230766,7 +230882,7 @@ async function handleConvertInquiryToBooking(req, res) {
     hasBreakfast,
     paymentMethod,
     ratePerNightOverride
-  } = parsed.data;
+  } = parsed2.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
@@ -231237,8 +231353,8 @@ function toMillis(value) {
   if (!value) return 0;
   if (value instanceof Date) return value.getTime();
   if (typeof value?.toDate === "function") return value.toDate().getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
+  const parsed2 = new Date(value).getTime();
+  return Number.isFinite(parsed2) ? parsed2 : 0;
 }
 function toIsoDate2(value) {
   if (!value) return "";
@@ -231324,8 +231440,8 @@ async function handleRegisterMember(req, res) {
   if (!authUser.uid || !authUser.email) {
     return res.status(401).json({ success: false, error: `Sign in before joining ${hotel_config_default.rewardsName}.` });
   }
-  const parsed = registerMemberSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = registerMemberSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check your rewards profile details and try again."
@@ -231358,14 +231474,14 @@ async function handleRegisterMember(req, res) {
       } else {
         transaction.set(counterRef, { count: sequence, createdAt: now, updatedAt: now });
       }
-      const fullName = parsed.data.fullName || authUser.name || email.split("@")[0];
-      const photoUrl = parsed.data.photoUrl || authUser.picture || "";
+      const fullName = parsed2.data.fullName || authUser.name || email.split("@")[0];
+      const photoUrl = parsed2.data.photoUrl || authUser.picture || "";
       transaction.set(memberRef, {
         fullName,
         email,
-        phone: parsed.data.phone,
+        phone: parsed2.data.phone,
         photoUrl,
-        authProvider: parsed.data.authProvider,
+        authProvider: parsed2.data.authProvider,
         memberNumber,
         isMember: true,
         memberSince: now,
@@ -231377,7 +231493,7 @@ async function handleRegisterMember(req, res) {
       }, { merge: true });
     });
     const emailIsVerified = authUser.email_verified === true;
-    const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed.data.bookingId || void 0) : 0;
+    const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed2.data.bookingId || void 0) : 0;
     return res.status(200).json({
       success: true,
       data: {
@@ -231411,8 +231527,8 @@ async function handleRedeemMemberPoints(req, res) {
   if (!staff.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
-  const parsed = redeemPointsSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = redeemPointsSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the points redemption details and try again."
@@ -231420,7 +231536,7 @@ async function handleRedeemMemberPoints(req, res) {
   }
   try {
     const now = /* @__PURE__ */ new Date();
-    const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed.data;
+    const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed2.data;
     let responseData = {};
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -231519,8 +231635,8 @@ async function handleUndoMemberPointsRedemption(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can undo points redemption." });
   }
-  const parsed = undoRedemptionSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = undoRedemptionSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the redemption undo details and try again."
@@ -231528,7 +231644,7 @@ async function handleUndoMemberPointsRedemption(req, res) {
   }
   try {
     const now = /* @__PURE__ */ new Date();
-    const { bookingId } = parsed.data;
+    const { bookingId } = parsed2.data;
     let responseData = {};
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -231608,14 +231724,14 @@ async function handleSetMemberActive(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
   }
-  const parsed = setMemberActiveSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = setMemberActiveSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please choose a member account to update."
     });
   }
-  const { uid, isActive } = parsed.data;
+  const { uid, isActive } = parsed2.data;
   try {
     const memberRef = adminDb.collection("members").doc(uid);
     const memberDoc = await memberRef.get();
@@ -231678,14 +231794,14 @@ async function handleManualAdjustPoints(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
   }
-  const parsed = manualAdjustPointsSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = manualAdjustPointsSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid member ID, a non-zero points amount, and a reason (max 500 characters)."
     });
   }
-  const { memberId, amount, reason } = parsed.data;
+  const { memberId, amount, reason } = parsed2.data;
   const trimmedReason = reason.trim();
   try {
     let responseData = {};
@@ -231744,14 +231860,14 @@ async function handleLinkBookingToMember(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can link bookings to a member." });
   }
-  const parsed = linkBookingToMemberSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = linkBookingToMemberSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a member UID, a booking ID, and a reason (max 500 characters)."
     });
   }
-  const { memberUid, bookingId, reason } = parsed.data;
+  const { memberUid, bookingId, reason } = parsed2.data;
   const trimmedReason = reason.trim();
   try {
     let responseData = {};
@@ -231827,8 +231943,8 @@ async function handleEraseMemberAccount(req, res) {
   if (!authUser.uid || !authUser.email) {
     return res.status(401).json({ success: false, error: "Sign in before requesting account erasure." });
   }
-  const parsed = eraseAccountSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = eraseAccountSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please confirm account erasure by sending the 'erase-my-account' confirmation string."
@@ -231949,14 +232065,14 @@ async function handleUpdateTerms(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can update terms." });
   }
-  const parsed = updateTermsSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = updateTermsSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: `Terms body is required and must be 1-${TERMS_BODY_MAX_LENGTH.toLocaleString()} characters.`
     });
   }
-  const { termsBody } = parsed.data;
+  const { termsBody } = parsed2.data;
   const now = /* @__PURE__ */ new Date();
   const lastUpdated = now.toISOString().slice(0, 10);
   let responseData = {};
@@ -232046,14 +232162,14 @@ async function handleCreateStaff(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can create staff accounts." });
   }
-  const parsed = createStaffSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = createStaffSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the staff account details and try again."
     });
   }
-  const { fullName, email, password, phone, nationality, role } = parsed.data;
+  const { fullName, email, password, phone, nationality, role } = parsed2.data;
   try {
     const now = /* @__PURE__ */ new Date();
     const user = await adminAuth.createUser({
@@ -232114,14 +232230,14 @@ async function handleDisableStaff(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can disable staff accounts." });
   }
-  const parsed = disableStaffSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = disableStaffSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please choose a staff account to disable."
     });
   }
-  const { uid } = parsed.data;
+  const { uid } = parsed2.data;
   if (uid === staff.uid) {
     return res.status(400).json({
       success: false,
@@ -232196,14 +232312,14 @@ async function handleUpdateStaff(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can update staff accounts." });
   }
-  const parsed = updateStaffSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = updateStaffSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the staff account details and try again."
     });
   }
-  const { uid, fullName, email, phone, nationality, role, password } = parsed.data;
+  const { uid, fullName, email, phone, nationality, role, password } = parsed2.data;
   try {
     const docRef = adminDb.collection("guests").doc(uid);
     const docSnap = await docRef.get();
@@ -232805,14 +232921,14 @@ async function handleSendGuestMessage(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed = guestMessageSchema.safeParse(req.body || {});
-  if (!parsed.success) {
+  const parsed2 = guestMessageSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
       error: "Please check your message and try again."
     });
   }
-  const { roomNumber, guestName: guestName2, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
+  const { roomNumber, guestName: guestName2, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed2.data;
   const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (isGuestMessageRateLimited(`intercom-msg:${ip}:${roomNumber}`, 30, 10 * 60 * 1e3)) {
@@ -233121,21 +233237,21 @@ async function handlePublishSeo(req, res) {
       error: "SEO publishing is not configured. Add VERCEL_DEPLOY_HOOK_URL to the guest app environment."
     });
   }
-  const parsed = SeoPublishSchema.safeParse(req.body);
-  if (!parsed.success) {
+  const parsed2 = SeoPublishSchema.safeParse(req.body);
+  if (!parsed2.success) {
     return res.status(400).json({
       success: false,
-      error: parsed.error.issues[0]?.message || "Review the SEO fields and try again."
+      error: parsed2.error.issues[0]?.message || "Review the SEO fields and try again."
     });
   }
   const staff = req.staff;
   await adminDb.doc("settings/seo").set({
     draft: {
-      metaDescription: parsed.data.metaDescription,
-      priceRange: parsed.data.priceRange,
-      ogImage: parsed.data.ogImage
+      metaDescription: parsed2.data.metaDescription,
+      priceRange: parsed2.data.priceRange,
+      ogImage: parsed2.data.ogImage
     },
-    published: parsed.data,
+    published: parsed2.data,
     publishedAt: FieldValue.serverTimestamp(),
     publishedBy: staff?.uid || staff?.email || "admin"
   }, { merge: true });
@@ -233320,8 +233436,8 @@ async function handleGetPrivateStorageUrl(req, res) {
   if (!req.staff?.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
-  const parsed = privateStoragePathSchema.safeParse(req.body || {});
-  if (!parsed.success || !isAllowedPrivatePath(parsed.data?.path || "")) {
+  const parsed2 = privateStoragePathSchema.safeParse(req.body || {});
+  if (!parsed2.success || !isAllowedPrivatePath(parsed2.data?.path || "")) {
     return res.status(400).json({ success: false, error: "Invalid private file path." });
   }
   const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
@@ -233329,7 +233445,7 @@ async function handleGetPrivateStorageUrl(req, res) {
     return res.status(500).json({ success: false, error: "Storage is not configured." });
   }
   try {
-    const file = adminStorage.bucket(bucketName).file(parsed.data.path);
+    const file = adminStorage.bucket(bucketName).file(parsed2.data.path);
     const [exists] = await file.exists();
     if (!exists) {
       return res.status(404).json({ success: false, error: "Private file not found." });

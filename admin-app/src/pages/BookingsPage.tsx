@@ -556,6 +556,17 @@ export function BookingsPage() {
   const [refundError, setRefundError] = useState<string | null>(null);
   const [chargeError, setChargeError] = useState<string | null>(null);
   const [showBookingCancelForm, setShowBookingCancelForm] = useState(false);
+  // Per MRB-13 (2026-08-02, per decision #166): the
+  // cancel scope selector. The admin BookingsPage
+  // cancel modal exposes a `This room` / `All N
+  // rooms` selector when the selected booking is part
+  // of a multi-room reservation. The default `"room"`
+  // is the safer choice — staff must opt into the
+  // reservation-scope path explicitly. The state
+  // resets to `"room"` when the cancel form closes so
+  // a previous session's choice never bleeds into a
+  // new session.
+  const [bookingCancelScope, setBookingCancelScope] = useState<"room" | "reservation">("room");
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
   const [chargeToVoid, setChargeToVoid] = useState<IncidentalCharge | null>(null);
 
@@ -2101,12 +2112,35 @@ export function BookingsPage() {
     }
   };
 
-  const handleCancelBooking = async (reason: string) => {
+  const handleCancelBooking = async (reason: string, scope: "room" | "reservation" = "room") => {
     if (!selectedBooking) return;
-    updateBookingStatus(selectedBooking.id, "cancelled", { cancellationReason: reason });
+    // Per MRB-13 (2026-08-02, per decision #166): the
+    // scope selector flows into `updateBookingStatus`
+    // as the 4th arg (`options.scope`). The default
+    // `"room"` is the legacy per-child path (byte-
+    // compatible with pre-MRB-13). The
+    // reservation-scope path cancels every cancellable
+    // child of the reservation in one transaction +
+    // decrements the shared voucher / corporate code
+    // `usageCount` exactly once per code. The
+    // `confirmLabel` already states the room count
+    // when `selectedReservationContext` is set, so the
+    // staff sees what they're about to cancel before
+    // they tap.
+    updateBookingStatus(selectedBooking.id, "cancelled", { cancellationReason: reason }, { scope });
     setSelectedBooking(prev => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
-    toast.success("Booking cancelled", reason ? `Reason: ${reason}` : "Guest will be notified by email.");
+    toast.success(
+      "Booking cancelled",
+      scope === "reservation"
+        ? `All rooms in this reservation have been cancelled. ${reason ? `Reason: ${reason}` : "Guest will be notified by email."}`
+        : reason ? `Reason: ${reason}` : "Guest will be notified by email."
+    );
     setShowBookingCancelForm(false);
+    // Per MRB-13: reset the scope on close so a
+    // previous session's choice never bleeds into a
+    // new session. The default `"room"` is the safer
+    // choice.
+    setBookingCancelScope("room");
   };
 
   // Per feat/payment-success-modal: the success modal's
@@ -5418,15 +5452,104 @@ export function BookingsPage() {
               {selectedBooking.status !== "checked-out" && selectedBooking.status !== "cancelled" && (
                 showBookingCancelForm ? (
                   <ConfirmForm
-                    title="Cancel this booking?"
-                    message="Cancellation is permanent and the guest will be notified by email. The booking record is kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action."
+                    // Per MRB-13 (2026-08-02, per decision
+                    // #166): the cancel form's title +
+                    // confirm label switch with the
+                    // selected scope. Default scope is
+                    // `"room"` (safer choice — staff must
+                    // opt into the whole-reservation
+                    // path). The `additionalFields` slot
+                    // hosts the `This room` / `All N
+                    // rooms` segmented control; it is only
+                    // rendered when the selected booking
+                    // is part of a multi-room reservation
+                    // (so single-room work is not
+                    // cluttered with a control that
+                    // would always pick the same value).
+                    title={
+                      selectedReservationContext && bookingCancelScope === "reservation"
+                        ? `Cancel all ${selectedReservationContext.roomCount} rooms?`
+                        : "Cancel this booking?"
+                    }
+                    message={
+                      selectedReservationContext && bookingCancelScope === "reservation"
+                        ? `This will cancel every room in reservation ${selectedReservationContext.reservationRef || "—"} (${selectedReservationContext.roomCount} rooms total). Cancellation is permanent and the guest will be notified by email. The booking records are kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action.`
+                        : "Cancellation is permanent and the guest will be notified by email. The booking record is kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action."
+                    }
                     reasonLabel="Cancellation reason (optional)"
                     reasonPlaceholder="e.g. guest requested, no-show, double-booked"
-                    confirmLabel="Cancel booking"
+                    confirmLabel={
+                      selectedReservationContext && bookingCancelScope === "reservation"
+                        ? `Cancel all ${selectedReservationContext.roomCount} rooms`
+                        : "Cancel booking"
+                    }
                     cancelLabel="Back"
                     variant="danger"
-                    onConfirm={(reason) => void handleCancelBooking(reason)}
-                    onCancel={() => setShowBookingCancelForm(false)}
+                    additionalFields={
+                      selectedReservationContext ? (
+                        <div
+                          data-testid="booking-cancel-scope-selector"
+                          className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
+                        >
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+                            Cancellation scope
+                          </p>
+                          <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                            This booking is part of reservation {selectedReservationContext.reservationRef || "—"} ({selectedReservationContext.roomCount} rooms). Pick what to cancel.
+                          </p>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              data-testid="booking-cancel-scope-room"
+                              onClick={() => setBookingCancelScope("room")}
+                              className={cn(
+                                "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                                bookingCancelScope === "room"
+                                  ? "border-primary bg-primary text-white shadow-sm"
+                                  : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                              )}
+                            >
+                              <span className="block text-xs font-bold">This room</span>
+                              <span className={cn(
+                                "mt-0.5 block text-[10px]",
+                                bookingCancelScope === "room" ? "text-white/80" : "text-gray-500"
+                              )}>
+                                Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="booking-cancel-scope-reservation"
+                              onClick={() => setBookingCancelScope("reservation")}
+                              className={cn(
+                                "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                                bookingCancelScope === "reservation"
+                                  ? "border-red-600 bg-red-600 text-white shadow-sm"
+                                  : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                              )}
+                            >
+                              <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
+                              <span className={cn(
+                                "mt-0.5 block text-[10px]",
+                                bookingCancelScope === "reservation" ? "text-white/80" : "text-gray-500"
+                              )}>
+                                Cancel the whole reservation
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : null
+                    }
+                    onConfirm={(reason) => void handleCancelBooking(reason, bookingCancelScope)}
+                    onCancel={() => {
+                      setShowBookingCancelForm(false);
+                      // Per MRB-13: reset the scope on
+                      // close so a previous session's
+                      // choice never bleeds into a new
+                      // session. The default `"room"` is
+                      // the safer choice.
+                      setBookingCancelScope("room");
+                    }}
                   />
                 ) : (
                   <button

@@ -508,7 +508,17 @@ export interface AdminContextType {
 
   // Bookings
   bookings: Booking[];
-  updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
+  updateBookingStatus: (
+    bookingId: string,
+    status: Booking["status"],
+    details?: Partial<Booking>,
+    // Per MRB-13 (2026-08-02, per decision #166):
+    // optional request options. The cancel flow
+    // uses `options.scope` to forward the
+    // reservation-scope selector to the server.
+    // Other status transitions ignore the field.
+    options?: { scope?: "room" | "reservation" }
+  ) => void | Promise<void>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
@@ -1581,7 +1591,26 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
-  const updateBookingStatus = async (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => {
+  const updateBookingStatus = async (
+    bookingId: string,
+    status: Booking["status"],
+    details?: Partial<Booking>,
+    // Per MRB-13 (2026-08-02, per decision #166): the
+    // cancel scope. The admin BookingsPage cancel
+    // modal surfaces a `This room` / `All N rooms`
+    // selector when the selected booking is part of
+    // a multi-room reservation. The default `"room"`
+    // preserves byte-compatible single-child behavior
+    // — the server's Zod schema also defaults
+    // `scope` to `"room"` (see
+    // `guestCancelSchema` in `bookings.ts`), so a
+    // caller that omits `options.scope` lands on the
+    // legacy per-child branch. Only the `"cancelled"`
+    // status honours `options.scope`; other status
+    // transitions ignore it (the field is silently
+    // dropped on the wire).
+    options?: { scope?: "room" | "reservation" }
+  ) => {
     try {
       const currentBooking = bookings.find((b) => b.id === bookingId);
       const isStatusChanging = currentBooking ? currentBooking.status !== status : true;
@@ -1598,6 +1627,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
 
       if (status === "cancelled") {
         const token = await auth.currentUser?.getIdToken(true);
+        // Per MRB-13: forward the scope to the server.
+        // Default to `"room"` (the schema default) so a
+        // caller that never opts in still cancels a
+        // single child — byte-equivalent to pre-MRB-13.
+        const cancelScope: "room" | "reservation" = options?.scope === "reservation" ? "reservation" : "room";
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/cancel`, {
           method: "POST",
           headers: {
@@ -1606,7 +1640,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           },
           body: JSON.stringify({
             bookingId,
-            reason: details?.cancellationReason || ""
+            reason: details?.cancellationReason || "",
+            scope: cancelScope
           })
         });
         const data = await res.json();
