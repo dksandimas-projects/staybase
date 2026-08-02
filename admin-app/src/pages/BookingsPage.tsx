@@ -885,6 +885,7 @@ export function BookingsPage() {
 
   const [selectedBookingPayments, setSelectedBookingPayments] = useState<OnsitePayment[]>([]);
   const [selectedBookingCharges, setSelectedBookingCharges] = useState<IncidentalCharge[]>([]);
+  const [selectedReservationTotal, setSelectedReservationTotal] = useState<number | null>(null);
   const [chargeCategory, setChargeCategory] = useState<IncidentalChargeCategory>("other");
   const [chargeLabel, setChargeLabel] = useState("");
   const [chargeAmount, setChargeAmount] = useState("");
@@ -892,70 +893,174 @@ export function BookingsPage() {
   const [isSavingCharge, setIsSavingCharge] = useState(false);
   const [showChargeModal, setShowChargeModal] = useState(false);
 
+  const selectedFolioBookingIds = useMemo(() => {
+    if (!selectedBooking?.id) return [];
+    if (!selectedBooking.reservationId) return [selectedBooking.id];
+    const childIds = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .map((booking) => booking.id);
+    return childIds.length > 0 ? childIds : [selectedBooking.id];
+  }, [bookings, selectedBooking?.id, selectedBooking?.reservationId]);
+
+  const selectedFolioBaseTotal = useMemo(() => {
+    if (!selectedBooking) return 0;
+    if (!selectedBooking.reservationId) return selectedBooking.totalPrice;
+    if (selectedReservationTotal !== null) return selectedReservationTotal;
+    const childTotal = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .reduce((sum, booking) => sum + (Number(booking.totalPrice) || 0), 0);
+    return childTotal || selectedBooking.totalPrice;
+  }, [bookings, selectedBooking, selectedReservationTotal]);
+
+  useEffect(() => {
+    if (!selectedBooking?.reservationId) {
+      setSelectedReservationTotal(null);
+      return;
+    }
+
+    setSelectedReservationTotal(null);
+    const unsubscribe = onSnapshot(
+      doc(db, "reservations", selectedBooking.reservationId),
+      (snapshot) => {
+        const total = Number(snapshot.data()?.totalPrice);
+        setSelectedReservationTotal(snapshot.exists() && Number.isFinite(total) ? total : null);
+      },
+      (error) => {
+        console.error("Error listening to reservation total:", error);
+        setSelectedReservationTotal(null);
+      }
+    );
+    return unsubscribe;
+  }, [selectedBooking?.reservationId]);
+
   useEffect(() => {
     if (!selectedBooking?.id) {
       setSelectedBookingPayments([]);
       return;
     }
 
-    const paymentsRef = collection(db, "bookings", selectedBooking.id, "payments");
-    const unsubscribe = onSnapshot(paymentsRef, (snapshot) => {
-      const paymentsData: OnsitePayment[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        paymentsData.push({
-          id: docSnap.id,
-          type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
-          amount: data.amount || 0,
-          method: data.method || "",
-          note: data.note || "",
-          reason: data.reason || null,
-          approvedBy: data.approvedBy || null,
-          recordedBy: data.recordedBy || "staff",
-          recordedAt: data.recordedAt instanceof Date
-            ? data.recordedAt.toISOString()
-            : data.recordedAt?.toDate
-              ? data.recordedAt.toDate().toISOString()
-              : data.recordedAt || ""
-        });
-      });
-      paymentsData.sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
-      setSelectedBookingPayments(paymentsData);
-    }, (error) => {
-      console.error("Error listening to payments subcollection:", error);
-    });
+    setSelectedBookingPayments([]);
+    const snapshots = new Map<string, OnsitePayment[]>();
+    const sources = selectedBooking.reservationId
+      ? [
+          { key: `reservation:${selectedBooking.reservationId}:payments`, ref: collection(db, "reservations", selectedBooking.reservationId, "payments") },
+          { key: `reservation:${selectedBooking.reservationId}:refunds`, ref: collection(db, "reservations", selectedBooking.reservationId, "refunds") },
+          ...selectedFolioBookingIds.map((bookingId) => ({
+            key: `booking:${bookingId}:payments`,
+            ref: collection(db, "bookings", bookingId, "payments")
+          }))
+        ]
+      : [{
+          key: `booking:${selectedBooking.id}:payments`,
+          ref: collection(db, "bookings", selectedBooking.id, "payments")
+        }];
 
-    return unsubscribe;
-  }, [selectedBooking?.id]);
+    const emitPayments = () => {
+      setSelectedBookingPayments(
+        Array.from(snapshots.values())
+          .flat()
+          .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt))
+      );
+    };
+
+    const unsubscribes = sources.map((source) => onSnapshot(
+      source.ref,
+      (snapshot) => {
+        snapshots.set(source.key, snapshot.docs.map((paymentDoc) => {
+          const data = paymentDoc.data();
+          return {
+            id: `${source.key}:${paymentDoc.id}`,
+            type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
+            amount: Number(data.amount || 0),
+            method: String(data.method || ""),
+            note: String(data.note || ""),
+            transactionReference: data.transactionReference ? String(data.transactionReference) : null,
+            reason: data.reason ? String(data.reason) : null,
+            approvedBy: data.approvedBy ? String(data.approvedBy) : null,
+            recordedBy: String(data.recordedBy || "staff"),
+            recordedAt: data.recordedAt instanceof Date
+              ? data.recordedAt.toISOString()
+              : data.recordedAt?.toDate
+                ? data.recordedAt.toDate().toISOString()
+                : String(data.recordedAt || "")
+          };
+        }));
+        emitPayments();
+      },
+      (error) => {
+        console.error("Error listening to folio payments:", error);
+      }
+    ));
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [selectedBooking?.id, selectedBooking?.reservationId, selectedFolioBookingIds]);
 
   useEffect(() => {
     if (!selectedBooking?.id) {
       setSelectedBookingCharges([]);
       return;
     }
-    const chargesRef = collection(db, "bookings", selectedBooking.id, "charges");
-    const unsubscribe = onSnapshot(chargesRef, (snapshot) => {
-      const charges = snapshot.docs.map((chargeDoc) => {
-        const data = chargeDoc.data();
-        const addedAt = data.addedAt?.toDate ? data.addedAt.toDate().toISOString() : String(data.addedAt || "");
-        return {
-          id: chargeDoc.id,
-          label: String(data.label || "Incidental charge"),
-          amount: Number(data.amount || 0),
-          category: (data.category || "other") as IncidentalChargeCategory,
-          note: String(data.note || ""),
-          addedBy: String(data.addedBy || "staff"),
-          addedAt,
-          voidOf: data.voidOf ? String(data.voidOf) : null
-        };
-      }).sort((a, b) => a.addedAt.localeCompare(b.addedAt));
-      setSelectedBookingCharges(charges);
-    }, (error) => {
-      console.error("Error listening to charges subcollection:", error);
-      toast.error("Could not load incidental charges", "Refresh the booking drawer and try again.");
-    });
-    return unsubscribe;
-  }, [selectedBooking?.id, toast]);
+
+    setSelectedBookingCharges([]);
+    const snapshots = new Map<string, IncidentalCharge[]>();
+    const sources = selectedBooking.reservationId
+      ? [
+          {
+            key: `reservation:${selectedBooking.reservationId}`,
+            owner: "reservation" as const,
+            ownerId: selectedBooking.reservationId,
+            ref: collection(db, "reservations", selectedBooking.reservationId, "charges")
+          },
+          ...selectedFolioBookingIds.map((bookingId) => ({
+            key: `booking:${bookingId}`,
+            owner: "booking" as const,
+            ownerId: bookingId,
+            ref: collection(db, "bookings", bookingId, "charges")
+          }))
+        ]
+      : [{
+          key: `booking:${selectedBooking.id}`,
+          owner: "booking" as const,
+          ownerId: selectedBooking.id,
+          ref: collection(db, "bookings", selectedBooking.id, "charges")
+        }];
+
+    const emitCharges = () => {
+      setSelectedBookingCharges(
+        Array.from(snapshots.values())
+          .flat()
+          .sort((a, b) => a.addedAt.localeCompare(b.addedAt))
+      );
+    };
+
+    const unsubscribes = sources.map((source) => onSnapshot(
+      source.ref,
+      (snapshot) => {
+        snapshots.set(source.key, snapshot.docs.map((chargeDoc) => {
+          const data = chargeDoc.data();
+          return {
+            id: chargeDoc.id,
+            label: String(data.label || "Incidental charge"),
+            amount: Number(data.amount || 0),
+            category: (data.category || "other") as IncidentalChargeCategory,
+            note: String(data.note || ""),
+            addedBy: String(data.addedBy || "staff"),
+            addedAt: data.addedAt?.toDate ? data.addedAt.toDate().toISOString() : String(data.addedAt || ""),
+            voidOf: data.voidOf ? String(data.voidOf) : null,
+            bookingId: data.bookingId ? String(data.bookingId) : source.owner === "booking" ? source.ownerId : null,
+            ledgerOwner: source.owner,
+            ledgerOwnerId: source.ownerId
+          };
+        }));
+        emitCharges();
+      },
+      (error) => {
+        console.error("Error listening to folio charges:", error);
+        toast.error("Could not load incidental charges", "Refresh the booking drawer and try again.");
+      }
+    ));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [selectedBooking?.id, selectedBooking?.reservationId, selectedFolioBookingIds, toast]);
 
   // Filter available rooms based on type selected
   const availableRoomsOfType = rooms.filter(
@@ -1193,22 +1298,19 @@ export function BookingsPage() {
   // and any future group-folio change can edit one place.
   const getBookingFolio = (booking: Booking) => {
     const isSelected = selectedBooking?.id === booking.id;
-    const storeCharges = storeOrders.filter(
-      (o) =>
-        o.bookingId === booking.id &&
-        o.paymentMethod === "add-to-bill" &&
-        o.status === "delivered" &&
-        o.isBilled === true
-    );
+    const folioBookingIds = isSelected ? selectedFolioBookingIds : [booking.id];
     return computeBookingFolio({
-      booking,
+      booking: isSelected
+        ? { ...booking, totalPrice: selectedFolioBaseTotal }
+        : booking,
       // Prefer the live (selected) payments when this is the
       // selected booking (optimistic-update path). Otherwise
       // use the booking's persisted payments.
       selectedBookingPayments: isSelected ? selectedBookingPayments : undefined,
       persistedPayments: isSelected ? undefined : (booking.onsitePayments || []),
       selectedBookingCharges: isSelected ? selectedBookingCharges : undefined,
-      storeOrders: storeCharges as any
+      folioBookingIds,
+      storeOrders: storeOrders as any
     });
   };
 
@@ -2648,12 +2750,32 @@ export function BookingsPage() {
     }
   };
 
+  const createSelectedLedgerEntryId = (kind: "payment" | "refund") => {
+    if (!selectedBooking) return "";
+    if (selectedBooking.reservationId) {
+      return doc(collection(
+        db,
+        "reservations",
+        selectedBooking.reservationId,
+        kind === "refund" ? "refunds" : "payments"
+      )).id;
+    }
+    return doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+  };
+
+  const getSelectedChargeCollection = () => {
+    if (!selectedBooking) return null;
+    return selectedBooking.reservationId
+      ? collection(db, "reservations", selectedBooking.reservationId, "charges")
+      : collection(db, "bookings", selectedBooking.id, "charges");
+  };
+
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedBooking && paymentAmount) {
       const amount = parseFloat(paymentAmount);
       const paymentId = paymentSubmissionIdRef.current
-        || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+        || createSelectedLedgerEntryId("payment");
       paymentSubmissionIdRef.current = paymentId;
       setIsRecordingPayment(true);
       let paymentCompleted = false;
@@ -2696,7 +2818,7 @@ export function BookingsPage() {
     // ID so the ID is server-acceptable under the existing rules shape
     // (no client-side rules allowlist for /payments/{id}).
     const refundId = refundSubmissionIdRef.current
-      || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+      || createSelectedLedgerEntryId("refund");
     refundSubmissionIdRef.current = refundId;
     setIsRefunding(true);
     let refundCompleted = false;
@@ -2742,14 +2864,17 @@ export function BookingsPage() {
     }
     setIsSavingCharge(true);
     try {
-      await addDoc(collection(db, "bookings", selectedBooking.id, "charges"), {
+      const chargesRef = getSelectedChargeCollection();
+      if (!chargesRef) return;
+      await addDoc(chargesRef, {
         label: chargeLabel.trim(),
         amount,
         category: chargeCategory,
         note: chargeNote.trim(),
         addedBy: currentUser?.uid || "staff",
         addedAt: serverTimestamp(),
-        voidOf: null
+        voidOf: null,
+        ...(selectedBooking.reservationId ? { bookingId: selectedBooking.id } : {})
       });
       setChargeLabel("");
       setChargeAmount("");
@@ -2766,7 +2891,9 @@ export function BookingsPage() {
   const handleVoidCharge = async (reason: string) => {
     if (!selectedBooking || !chargeToVoid) return;
     try {
-      const reversalRef = doc(db, "bookings", selectedBooking.id, "charges", `void-${chargeToVoid.id}`);
+      const owner = chargeToVoid.ledgerOwner || (selectedBooking.reservationId ? "reservation" : "booking");
+      const ownerId = chargeToVoid.ledgerOwnerId || selectedBooking.reservationId || selectedBooking.id;
+      const reversalRef = doc(db, owner === "reservation" ? "reservations" : "bookings", ownerId, "charges", `void-${chargeToVoid.id}`);
       await setDoc(reversalRef, {
         label: `Reversal — ${chargeToVoid.label}`,
         amount: -Math.abs(chargeToVoid.amount),
@@ -2774,7 +2901,10 @@ export function BookingsPage() {
         note: reason.trim(),
         addedBy: currentUser?.uid || "staff",
         addedAt: serverTimestamp(),
-        voidOf: chargeToVoid.id
+        voidOf: chargeToVoid.id,
+        ...(owner === "reservation"
+          ? { bookingId: chargeToVoid.bookingId || selectedBooking.id }
+          : {})
       });
       toast.success("Charge voided", "A reversal entry was added; the original record remains unchanged.");
       setChargeToVoid(null);
@@ -3863,7 +3993,7 @@ export function BookingsPage() {
                 <div className="mt-3 space-y-2 text-gray-600">
                   <div className="flex items-center justify-between gap-4">
                     <span>Room and booked add-ons</span>
-                    <span className="font-semibold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(selectedFolioBaseTotal)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span>Store charges billed to room</span>
@@ -3945,7 +4075,7 @@ export function BookingsPage() {
                           {selectedBooking.status === "payment-uploaded" && (
                             <button
                               type="button"
-                              onClick={() => { verifySubmissionIdRef.current = doc(collection(db, "bookings", selectedBooking.id, "payments")).id; setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
+                              onClick={() => { verifySubmissionIdRef.current = createSelectedLedgerEntryId("payment"); setShowVerifyPaymentModal(true); setVerifyAmount(String(Math.max(0, selectedBookingFolio?.balance ?? 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
                               className="inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 text-[10px] font-bold text-white transition hover:bg-green-700"
                             >
                               <ShieldCheck size={13} />
@@ -5517,11 +5647,11 @@ export function BookingsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg bg-gray-50 px-3 py-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Booking total</p>
-                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBookingFolio?.grandTotal ?? selectedFolioBaseTotal)}</p>
               </div>
               <div className="rounded-lg bg-gray-50 px-3 py-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Outstanding</p>
-                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))}</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(Math.max(0, selectedBookingFolio?.balance ?? 0))}</p>
               </div>
             </div>
             <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
@@ -5555,7 +5685,7 @@ export function BookingsPage() {
                 if (!Number.isFinite(amount) || amount <= 0) { setVerifyError("Enter a valid positive amount."); return; }
                 setVerifyPending(true);
                 const paymentId = verifySubmissionIdRef.current
-                  || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+                  || createSelectedLedgerEntryId("payment");
                 verifySubmissionIdRef.current = paymentId;
                 const result = await verifyAndRecordPayment(selectedBooking.id, paymentId, amount, verifyMethod, verifyReference.trim() || undefined, verifyNote.trim() || undefined);
                 setVerifyPending(false);
@@ -5573,16 +5703,17 @@ export function BookingsPage() {
                 // onsitePayments snapshot is pre-action (the
                 // snapshot listener will catch up on the next
                 // tick), so the math here is correct.
-                const existingPaid = selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0;
+                const existingPaid = selectedBookingPayments.reduce((s, p) => s + p.amount, 0);
                 const cumulativeAfter = existingPaid + amount;
-                const isFullPayment = cumulativeAfter >= selectedBooking.totalPrice && selectedBooking.totalPrice > 0;
+                const folioTotal = selectedBookingFolio?.grandTotal ?? selectedFolioBaseTotal;
+                const isFullPayment = cumulativeAfter >= folioTotal && folioTotal > 0;
                 setVerifySuccess({
                   booking: selectedBooking,
                   amount,
                   method: verifyMethod,
                   methodLabel: onsitePaymentMethodLabels[verifyMethod] || verifyMethod,
                   isFullPayment,
-                  remainingBalance: Math.max(0, selectedBooking.totalPrice - cumulativeAfter)
+                  remainingBalance: Math.max(0, folioTotal - cumulativeAfter)
                 });
               })()} disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
                 {verifyPending ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Verify & Record Payment"}
@@ -5625,7 +5756,11 @@ export function BookingsPage() {
         <ConfirmWithBalanceForm
           open={confirmWithBalanceContext !== null}
           onClose={() => setConfirmWithBalanceContext(null)}
-          booking={confirmWithBalanceContext.booking}
+          booking={{
+            ...confirmWithBalanceContext.booking,
+            totalPrice: selectedBookingFolio?.grandTotal ?? confirmWithBalanceContext.booking.totalPrice,
+            onsitePayments: selectedBookingPayments
+          }}
           currentBalance={confirmWithBalanceContext.currentBalance}
           onConfirmed={() => setConfirmWithBalanceContext(null)}
         />
@@ -5728,7 +5863,7 @@ export function BookingsPage() {
               // flow so a manual retry after a closed tab never appends a
               // second refund entry.
               const refundId = refundSubmissionIdRef.current
-                || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+                || createSelectedLedgerEntryId("refund");
               refundSubmissionIdRef.current = refundId;
               setRefundError(null);
               setIsRefunding(true);
@@ -5815,14 +5950,17 @@ export function BookingsPage() {
               setChargeError(null);
               setIsSavingCharge(true);
               try {
-                await addDoc(collection(db, "bookings", selectedBooking.id, "charges"), {
+                const chargesRef = getSelectedChargeCollection();
+                if (!chargesRef) return;
+                await addDoc(chargesRef, {
                   label: chargeLabel.trim(),
                   amount,
                   category: chargeCategory,
                   note: chargeNote.trim(),
                   addedBy: currentUser?.uid || "staff",
                   addedAt: serverTimestamp(),
-                  voidOf: null
+                  voidOf: null,
+                  ...(selectedBooking.reservationId ? { bookingId: selectedBooking.id } : {})
                 });
                 setChargeLabel("");
                 setChargeAmount("");

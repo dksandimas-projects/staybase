@@ -98,6 +98,24 @@ describe("computeBookingFolio — basic shape", () => {
     expect(folio.balance).toBe(4000 + 500);
   });
 
+  it("includes qualifying store orders from every reservation child when folioBookingIds is provided", () => {
+    const storeOrders: FolioStoreOrder[] = [
+      { bookingId: "b1", paymentMethod: "add-to-bill", status: "delivered", isBilled: true, totalAmount: 500 },
+      { bookingId: "b2", paymentMethod: "add-to-bill", status: "delivered", isBilled: true, totalAmount: 750 },
+      { bookingId: "other", paymentMethod: "add-to-bill", status: "delivered", isBilled: true, totalAmount: 900 }
+    ];
+
+    const folio = computeBookingFolio({
+      booking: { ...baseBooking, totalPrice: 8000 },
+      storeOrders,
+      folioBookingIds: ["b1", "b2"]
+    });
+
+    expect(folio.storeCharges).toHaveLength(2);
+    expect(folio.storeTotal).toBe(1250);
+    expect(folio.grandTotal).toBe(9250);
+  });
+
   it("uses persistedPayments when no live payments are passed", () => {
     const folio = computeBookingFolio({
       booking: baseBooking,

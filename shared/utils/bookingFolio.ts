@@ -108,6 +108,12 @@ export interface BookingFolioInput {
    */
   selectedBookingCharges?: FolioCharge[];
   /**
+   * Booking IDs whose room-billed store orders belong to this
+   * folio. Reservation drawers pass every child booking ID; legacy
+   * callers omit this and retain the single-booking behavior.
+   */
+  folioBookingIds?: string[];
+  /**
    * All store orders; the function filters to those that match
    * this booking and qualify for the folio (paymentMethod ===
    * "add-to-bill" + status === "delivered" + isBilled === true).
@@ -139,13 +145,17 @@ export interface BookingFolio {
  */
 export function computeBookingFolio(input: BookingFolioInput): BookingFolio {
   const { booking, storeOrders } = input;
+  const folioBookingIds = new Set(
+    input.folioBookingIds?.length ? input.folioBookingIds : [booking.id]
+  );
 
   // Store charges for THIS booking that qualify for the folio.
   // Historical filter: `add-to-bill` + `delivered` + `isBilled`.
   // Matches the `getBookingStoreCharges` local closure.
   const storeCharges = storeOrders.filter(
     (o) =>
-      o.bookingId === booking.id &&
+      typeof o.bookingId === "string" &&
+      folioBookingIds.has(o.bookingId) &&
       o.paymentMethod === "add-to-bill" &&
       o.status === "delivered" &&
       o.isBilled === true

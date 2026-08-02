@@ -165,7 +165,7 @@ service cloud.firestore {
       match /charges/{chargeId} {
         allow read: if isStaff();
         allow create: if isStaff()
-          && request.resource.data.keys().hasOnly(["label", "amount", "category", "note", "addedBy", "addedAt", "voidOf"])
+          && request.resource.data.keys().hasOnly(["label", "amount", "category", "note", "addedBy", "addedAt", "voidOf", "bookingId"])
           && request.resource.data.label is string
           && request.resource.data.label.size() > 0
           && request.resource.data.label.size() <= 120
@@ -178,6 +178,10 @@ service cloud.firestore {
           && request.resource.data.note.size() <= 300
           && request.resource.data.addedBy == request.auth.uid
           && request.resource.data.addedAt == request.time
+          && request.resource.data.bookingId is string
+          && request.resource.data.bookingId.size() > 0
+          && request.resource.data.bookingId.size() <= 128
+          && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.reservationId == reservationId
           && (
             (request.resource.data.amount > 0 && request.resource.data.voidOf == null)
             || (
@@ -185,6 +189,7 @@ service cloud.firestore {
               && request.resource.data.voidOf is string
               && chargeId == "void-" + request.resource.data.voidOf
               && get(/databases/$(database)/documents/reservations/$(reservationId)/charges/$(request.resource.data.voidOf)).data.amount == -request.resource.data.amount
+              && get(/databases/$(database)/documents/reservations/$(reservationId)/charges/$(request.resource.data.voidOf)).data.bookingId == request.resource.data.bookingId
             )
           );
         allow update, delete: if false;

@@ -113,14 +113,14 @@ describe("MRB-01 reservation header model", () => {
       // close our outer slice early.
       const start = rules.indexOf("match /reservations/{reservationId}");
       expect(start).toBeGreaterThanOrEqual(0);
-      const slice = rules.slice(start, start + 2500);
+      const slice = rules.slice(start, start + 3200);
       expect(slice).toMatch(/match \/payments\/\{paymentId\} \{[\s\S]+?allow create: if false;/);
       expect(slice).toMatch(/allow update, delete: if false;/);
     });
 
     it("reservations/{id}/charges mirrors the booking charges rule (staff create with per-creator + bounds + void semantics)", () => {
       const start = rules.indexOf("match /reservations/{reservationId}");
-      const slice = rules.slice(start, start + 2500);
+      const slice = rules.slice(start, start + 3200);
       expect(slice).toMatch(/match \/charges\/\{chargeId\} \{[\s\S]+?allow create: if isStaff\(\)/);
       expect(slice).toMatch(/request\.resource\.data\.addedBy == request\.auth\.uid/);
       expect(slice).toMatch(/request\.resource\.data\.amount <= 1000000/);
