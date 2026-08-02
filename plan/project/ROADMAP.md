@@ -27,7 +27,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Enhancements & Multi-Room | 🔄 Active (MRB-01..05 shipped) | Open MRB-06..15 items + Phase 12 follow-ups (§Phase 12 below) |
+| 12 — Enhancements, Multi-Room & CRL | 🔄 Active (MRB-01..05 & CRL-01..04 shipped) | Open MRB-06..15 & CRL-05..09 items (§Phase 12 below) |
 | Plan Audits (FIN, FR, FL, PF, QA, NC, AUD, SA, FLR, PC, INC) | ✅ Closed / In Prod | 0 — details in archive |
 
 ---
@@ -110,7 +110,7 @@
 
 ---
 
-## Phase 12 — Enhancements & Multi-Room Bookings (MRB)
+## Phase 12 — Enhancements, Multi-Room Bookings (MRB) & Cancellation Lifecycle (CRL)
 
 ### Deferred features
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
@@ -135,7 +135,14 @@
 - ✅ **NBS** — New Booking & Customizable Booking Sources (#142, 2026-07-31/08-01)
 - ✅ **PEX** — Pending Booking Expiry & Hold Window (#147, 2026-08-01)
 - ✅ **DSC** — Discount Scope Configuration & VAT Breakdown (#146/#148/#149/#150, 2026-07-31/08-01)
+- ✅ **CRL (Phase 1)** — Cancellation & Refund Lifecycle foundation: refund idempotency (CRL-01), immutable cancellation audit stamps (`cancelledAt`/`cancelledBy`/`cancellationSource`, CRL-02), server status matrix dual gate (CRL-03), and truthful copy + staff paid-store cancel alert (CRL-04) (2026-08-01/02)
 - ✅ **MRB (Phase 1)** — Multi-Room Bookings foundation: `reservations/{id}` header, reservationRef (`R-YYYYMMDD-NNNNN`), transactional create & idempotency for single-room, walk-in, reschedule, corporate, N-booking assignment (MRB-01..05, 2026-08-02)
+
+### Open Cancellation & Refund Lifecycle (CRL) Follow-ups
+- ⬜ **CRL-05 / CRL-06** — Policy-derived financial preview on `/my-booking` before cancellation submit & expanded guest cancellation window.
+- ⬜ **CRL-07** — Refund liability ledger & target account collection (GCash number/bank details) during cancellation.
+- ⬜ **CRL-08** — Notification Center queue integration for staff refund review alerts.
+- ⬜ **CRL-09** — Admin Cancellation Audit UI pass in Bookings Drawer (`cancelledAt`, `cancelledBy`, `cancellationSource`).
 
 ### Open Multi-Room Booking (MRB) Tasks
 - ⬜ **MRB-06 Phase 3 / MRB-07** — Group folio & per-room charge attribution on multi-room reservations.
