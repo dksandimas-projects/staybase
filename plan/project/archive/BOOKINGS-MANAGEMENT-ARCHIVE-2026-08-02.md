@@ -4,12 +4,29 @@
 
 ---
 
-## Historical Feature Implementations & Narratives
+## Historical Feature Implementations & Detailed Specs
 
-- **BDUX Drawer Refactor (2026-07-16):** Four-section workspace (Overview, Check-in, Folio, Activity & More), sticky header & footer, focused task modals, folio read-first rules.
-- **FSO Table Filtering & Search (2026-07-16):** Two-level controls, active filter chips, URL query state normalization, AND composition rules, quick views.
-- **Unpaid Checkout (UCO, 2026-07-16):** Required staff reason, elevated admin approval threshold (default ₱5,000), immutable departure snapshots.
-- **Payment Reference Unification (2026-07-24):** Retired top-level `paymentReferenceNumber` in favor of per-payment `transactionReference` on the onsite payments ledger.
-- **Guest ID Upload & HEIC Conversion (HSD-01..05, 2026-07-24):** Format guards, lazy-loaded `heic-to@1.5.2` Web Worker conversion, 5s PDF decode timeout.
-- **Walk-in Split Name (WSN-01..02, 2026-07-25):** Separate first and last name collection fields in the walk-in modal.
-- **Cancellation Rules (CRL-01..04, 2026-08-01..02):** Immutable audit timestamps (`cancelledAt`, `cancelledBy`, `cancellationSource`), staff vs. guest self-service cancellation restrictions.
+### 1. Booking Drawer UX (BDUX) Refactor (2026-07-16)
+- **Four-Section Layout:** Replaced monolithic drawer with 4 focused sections:
+  1. `Overview` — Core stay metadata, guest contact details, sticky action bar, quick status transitions.
+  2. `Check-in & Registration` — Physical check-in registry form, purpose of stay, guest ID photo upload, PDF registration form generator.
+  3. `Folio & Payments` — Itemized charges, payment ledger, onsite payment recording, refund workflow, balance breakdown.
+  4. `Activity & Audit` — Complete immutable audit log of status changes, payment reviews, discount verifications, and staff notes.
+- **Mobile Readability (<768px):** Single-column stacked layout, full-bleed bottom sheets for entry forms, safe-area padded primary CTA button.
+- **Sticky Proof Header:** Direct deep link to uploaded payment proof image with 1-tap approval/rejection actions without needing to scroll the folio.
+
+### 2. Table Filtering, Search & Quick Views (FSO-01..18, 2026-07-16)
+- **Two-Level Filter Controls:** Quick-filter status pills (`All`, `Pending`, `Confirmed`, `In-House`, `Checked Out`, `Cancelled`) combined with an advanced filter drawer.
+- **Active Filter Chips:** Visible dismissable chips showing active date range, room type, booking source, and payment method filters.
+- **URL Query State Normalization:** Bidirectional synchronization between active filter state and URL query parameters (`/bookings?status=pending&source=walk-in`).
+- **AND Composition Rules:** All active filters compose using strict logical AND criteria across Firestore query and client-side fallback predicates.
+
+### 3. Unpaid Checkout & Balance Approvals (UCO-01..14, 2026-07-16)
+- **Staff Departure Reason:** Required free-text staff reason input (up to 500 characters) when checking out a booking with a positive balance.
+- **Elevated Admin Threshold:** Configurable `unpaidCheckoutApprovalThreshold` (default ₱5,000). Balances exceeding the threshold require elevated admin authorization before checkout is permitted.
+- **Departure Snapshots:** Stamping `checkedOutWithBalance`, `unpaidCheckoutReason`, `unpaidCheckoutApprovedBy`, and departure-time balance snapshots.
+
+### 4. Special Photo Formats & Walk-in Enhancements
+- **HEIC Photo Conversion (HSD-01..05, 2026-07-24):** Format validation for iPhone photos, client-side Web Worker conversion via `heic-to@1.5.2`, and fallback error rendering.
+- **Walk-in Split Name (WSN-01..02, 2026-07-25):** Dedicated `firstName` and `lastName` collection inputs in the walk-in booking creation modal.
+- **Cancellation Rules & Audit Stamps (CRL-01..04, 2026-08-01..02):** Server-authoritative audit fields (`cancelledAt`, `cancelledBy`, `cancellationSource`) and dual-gate cancellation restriction matrix.
