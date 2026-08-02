@@ -88,3 +88,46 @@ A dedicated booking route at `/corporate/book` for corporate clients. Reuses all
 Corporate Step 1 uses the same adult, child, and extra-bed steppers and shared overflow hint as the public booking flow. The submitted total remains `numAdults + numChildren`, with the split and `extraBedCount` sent to the existing booking API. Legacy `?guests=N` links hydrate as N adults and zero children. See `plan/features/BOOKING-FLOW.md §Extra Bed` for the server rules and pricing contract.
 
 The shared booking API re-derives and validates the total, normalizes the selected room type before reading its caps, and evaluates adults and children independently. A corporate group may therefore use the full adult cap plus the allowed children; children are not incorrectly counted against `maxCapacity`.
+
+---
+
+## Multi-Room Block (MRB-08) — proposed 2026-08-02 (decision #167)
+
+> The corporate `/corporate/book` flow mirrors the public `/book` room cart from MRB-06 so a corporate group can book a block of rooms in one reservation. The negotiated/flat corporate rate applies **per stay type**, and the corporate code's `usageCount` records **N rooms as N uses**. Mirrors the admin New Booking modal (MRB-07) — same per-stay shape, same reservation header, same per-stay negotiated rate fallback chain.
+
+### UX Checklist
+
+- [x] Step 1 shows the room cart above the room-type card grid: each cart row carries the room type label, the per-stay negotiated or flat rate, the per-stay occupancy (auto-distributed from the page-level adults + children totals), and a remove button when N>1.
+- [x] "Add another room" picker lists every available room type as a chip; clicking appends a new stay of that type. Disabled when no types have availability.
+- [x] Cart hydrates from the `?rooms=` URL param (round-tripped via `parseBookingRoomCart` / `serializeBookingRoomCart`) so a refresh preserves the selection. Auto-seeds with one stay of the first available type when the URL has no `?rooms=` and no `?roomType=`.
+- [x] Page-level adults + children steppers stay (the user states "we are N adults and M children"); the rebalance helper distributes them across the cart's per-stay occupancy.
+- [x] Page-level "Extra beds" stepper is hidden when N>1 (the per-stay count is derived by the rebalance helper from each room type's `maxExtraBeds` + leftover guests).
+- [x] Sticky footer shows the aggregate total for the whole block and the room count + nights + guests summary.
+- [x] No promo vouchers in corporate bookings (unchanged from `DECISIONS-FEATURES.md #100`); negotiated rates are the only discount.
+- [x] LOU "Charge Back" wording unchanged (per `DECISIONS-FEATURES.md #99`).
+
+### Data & Logic Checklist
+
+- [x] The submit body carries `roomCount` + `roomSelections[]` (same shape MRB-06 uses for the public cart and MRB-07 uses for the admin New Booking modal). The server (`handleCreateBooking`) prices each stay against its own type.
+- [x] Negotiated rate is resolved **per stay type** from `corporateCodes/{code}.ratePerRoomType[stay.roomType]` (then the stay type's flat `corporateRate`, then the standard `pricePerNight`). The "Continue without code" flat-rate path applies the same per-stay fallback chain. A pre-MRB-08 single-rate lookup (resolved once for the primary type) would silently over- or under-charge a mixed-type block.
+- [x] The corporate code's `usageCount` increments by `assignedRooms.length` inside the create transaction (N rooms = N uses). The shared `validateCorporateCode` helper accepts an optional `requestedUses` (default 1) so the cap check (`usageCount + requestedUses > usageCap`) catches over-cap multi-room reservations.
+- [x] Cancel of one child decrements `usageCount` by 1 (per child, per child cancel) — the MRB-13 reservation-scope cancel will consolidate the decrement into a single `usageCount -= N` transaction.
+- [x] Reservation header (`reservations/{id}`), reservation-aware folio, and idempotency (`reservationId` + `requestFingerprint`) all carry over from MRB-02/04/06/07. The single-room corporate path (N=1) is byte-equivalent to the pre-MRB-08 contract.
+
+### Edge Cases & States
+
+- [x] N=1 — the pre-MRB-08 single-room UX, byte-equivalent: one stay, no cart row remove button, no per-stay chip picker. The legacy `selectedRoomType` / `rateChoice` / `numAdults` / `numChildren` / `extraBedCount` body fields carry the first stay's values for back-compat with the server's pre-MRB-06 single-room schema validation.
+- [x] N>1, all same type — every stay uses the same negotiated rate (the lookup is by type, not by index).
+- [x] N>1, mixed types — each stay's rate resolves independently from the negotiated map.
+- [x] Cart overflow (`unassignedAdults + unassignedChildren > 0`) — the cart UI surfaces an "X guests overflow" badge; the user can add another room or pick a type with more capacity.
+- [x] Corporate code at cap (5 of 5 used, requesting 3) — the server returns the `validateCorporateCode` error and the cart stays on Step 1.
+- [x] Empty cart — the page auto-seeds with one stay of the first available type, matching the pre-MRB-08 default.
+
+### References
+
+- Public room cart: `plan/features/BOOKING-FLOW.md §Multi-Room Cart` (MRB-06)
+- Admin multi-room walk-in: `plan/features/BOOKINGS-MANAGEMENT.md §MRB-07`
+- Reservation header + idempotency: `plan/docs/DECISIONS-FEATURES.md #159`, `#164`
+- Cancellation scope: `plan/docs/DECISIONS-FEATURES.md #166` (MRB-13)
+- Helper test: `shared/__tests__/corporate-codes.test.ts` (the `requestedUses` cap check)
+- End-to-end source-text test: `guest-app/tests/api/mrb-08-corporate-multi-room.test.ts`
