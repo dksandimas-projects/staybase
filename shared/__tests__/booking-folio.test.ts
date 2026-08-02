@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeBookingFolio,
   computeServerFolioTotals,
+  mapBookingStatusToReservationPaymentStatus,
   type FolioBooking,
   type FolioCharge,
   type FolioLivePayments,
@@ -548,5 +549,90 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
     expect(summary.paymentsTotal).toBe(500);
     expect(summary.chargesTotal).toBe(500);
     expect(summary.balance).toBe(2000);
+  });
+});
+
+// Per MRB-04 Phase 3 (2026-08-02, per decision #159): the
+// N=1 mapping helper that closes the money-state-mirror rule
+// promised by the Phase 1 doc block. The reservation header's
+// `paymentStatus` MUST match the per-room money state;
+// the helper is the single source of truth for the N=1 case.
+// MRB-05 replaces this with the N>1 aggregate reader.
+//
+// 9 tests covering: the 7 mapping cases (2 relabels + 5
+// pass-throughs) + the 2 defensive-coercion cases (unknown
+// status + nullish input).
+describe("mapBookingStatusToReservationPaymentStatus — N=1 mapping helper (MRB-04 Phase 3)", () => {
+  describe("the 2 relabels (booking-scope → reservation-scope labels)", () => {
+    it("maps 'pending' to 'awaiting-payment' (the reservation-aware label)", () => {
+      // The reservation's "guest has not paid yet" label is
+      // more truthful at reservation scope than "pending",
+      // which sounds like a server-side queue state. Pinned
+      // by MRB-04 Phase 3 contract.
+      expect(mapBookingStatusToReservationPaymentStatus("pending")).toBe("awaiting-payment");
+    });
+
+    it("maps 'checked-in' to 'in-house' (the reservation's 'in the hotel right now' label)", () => {
+      // The reservation-scope "in-house" label is the
+      // wire contract for MRB-12's admin affordance. Pinned
+      // by MRB-04 Phase 3 contract.
+      expect(mapBookingStatusToReservationPaymentStatus("checked-in")).toBe("in-house");
+    });
+  });
+
+  describe("the 5 pass-through values (no relabel)", () => {
+    it("'payment-uploaded' passes through unchanged", () => {
+      // The booking's "guest uploaded proof, staff has not
+      // verified yet" label is the same at reservation
+      // scope (the reservation is in the same state).
+      expect(mapBookingStatusToReservationPaymentStatus("payment-uploaded")).toBe("payment-uploaded");
+    });
+
+    it("'payment-confirmed' passes through unchanged", () => {
+      // The booking's "staff verified the payment" label is
+      // the same at reservation scope.
+      expect(mapBookingStatusToReservationPaymentStatus("payment-confirmed")).toBe("payment-confirmed");
+    });
+
+    it("'confirmed' passes through unchanged", () => {
+      // The booking's "staff confirmed (no payment required)"
+      // label is the same at reservation scope.
+      expect(mapBookingStatusToReservationPaymentStatus("confirmed")).toBe("confirmed");
+    });
+
+    it("'checked-out' passes through unchanged", () => {
+      // The booking's "stay finished" label is the same
+      // at reservation scope.
+      expect(mapBookingStatusToReservationPaymentStatus("checked-out")).toBe("completed");
+    });
+
+    it("'cancelled' passes through unchanged", () => {
+      // The booking's "reservation cancelled" label is the
+      // same at reservation scope.
+      expect(mapBookingStatusToReservationPaymentStatus("cancelled")).toBe("cancelled");
+    });
+  });
+
+  describe("defensive coercion (the helper never throws on a malformed input)", () => {
+    it("unknown status returns the same string passed in (NOT one of the 7 known values)", () => {
+      // The field type is the runtime guard at the
+      // assignment site — the helper never throws on a
+      // malformed input, it just passes it through. An
+      // out-of-union value will get a TS error at the
+      // `transaction.update(reservationRef, { paymentStatus: ... })`
+      // call site (Phase 3 PR #2), so the helper does not
+      // need to validate the input.
+      expect(mapBookingStatusToReservationPaymentStatus("unknown-future-state")).toBe("unknown-future-state");
+    });
+
+    it("nullish input returns the input unchanged (no defensive sanitization)", () => {
+      // The helper is not a sanitizer — the caller is
+      // responsible for not calling it on nullish data. An
+      // empty string passes through (the assignment site
+      // catches the union-mismatch with a TS error).
+      // (Using `as any` to test the nullish case without
+      // breaking the function signature.)
+      expect(mapBookingStatusToReservationPaymentStatus("" as any)).toBe("");
+    });
   });
 });
