@@ -22,6 +22,7 @@ import {
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   getLockedManualNightlyRate,
   WalkinBookingSchema,
+  RescheduleBookingSchema,
   MAX_STAY_NIGHTS,
   MAX_ADVANCE_DAYS,
   // Per PEX-02 (2026-08-01, per decision #147): the shared
@@ -5610,10 +5611,22 @@ export async function handleRescheduleBooking(req: any, res: any) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const { bookingId, roomId, checkIn, checkOut, reason } = req.body || {};
-  if (!bookingId || !roomId || !checkIn || !checkOut) {
-    return res.status(400).json({ success: false, error: "Booking, room, check-in, and check-out are required." });
+  // Per MRB-02.x (2026-08-02, per decision #164): strict-Zod
+  // validates the reschedule body. The schema accepts an
+  // optional `reservationId` (the staff modal doesn't
+  // preallocate, but a future migration tool that wants
+  // to bulk-reschedule and retry the same call rides the
+  // same contract). The schema is `strict()` so a client
+  // can't add unexpected fields (same posture as the
+  // create + walkin schemas).
+  const parsedReschedule = RescheduleBookingSchema.safeParse(req.body || {});
+  if (!parsedReschedule.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking, room, check-in, and check-out are required."
+    });
   }
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
@@ -5643,6 +5656,56 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+      // Per MRB-02.x (2026-08-02, per decision #164): the
+      // canonical reservation id for this reschedule. The
+      // reschedule re-uses the existing booking's
+      // `reservationId` (the reschedule is a modification of
+      // the same reservation group, not a new reservation).
+      // A `body.reservationId` is accepted but only honored
+      // when the booking's stored `reservationId` is null
+      // (a defensive migration path for a future bulk
+      // reschedule tool that wants to attach a fresh id);
+      // when the booking already has a `reservationId`, the
+      // body's value is ignored (the booking's id is the
+      // canonical anchor). Legacy null-`reservationId`
+      // bookings (pre-MRB-02) keep today's self-contained
+      // behavior: the reschedule updates the booking but
+      // does NOT touch a reservation header (the booking's
+      // own rate breakdown + status matrix remain the
+      // single source of truth for those legacy records).
+      const bookingReservationId: string | null = (() => {
+        const stored = String((booking as any).reservationId || "").trim();
+        if (stored.length > 0) return stored;
+        if (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId)) {
+          return requestedReservationId;
+        }
+        return null;
+      })();
+      // The reservation doc ref is built only when the
+      // booking has a `reservationId` — legacy bookings
+      // stay on the self-contained path.
+      const reservationDocRef = bookingReservationId
+        ? adminDb.collection("reservations").doc(bookingReservationId)
+        : null;
+      // Read the reservation header early so the
+      // half-stamped guard fires BEFORE the pricing math
+      // (a missing header means the booking is in an
+      // inconsistent state; we don't want to recompute
+      // the rate breakdown just to throw 500 on the
+      // commit). When the booking has a `reservationId`
+      // but the header is missing, the state is
+      // unrecoverable by this request — staff must
+      // investigate, then either restore the header or
+      // migrate the booking to a fresh one.
+      let existingReservationData: any = null;
+      if (reservationDocRef) {
+        const existingReservationSnap = await transaction.get(reservationDocRef);
+        if (existingReservationSnap.exists) {
+          existingReservationData = existingReservationSnap.data() || {};
+        } else {
+          throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+        }
+      }
       if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
         throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
       }
@@ -6025,6 +6088,75 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
 
       transaction.update(bookingRef, updatedBooking);
+      // Per MRB-02.x (2026-08-02, per decision #164):
+      // update the reservation header in the SAME
+      // transaction as the booking update. The header's
+      // date range + totals + `requestFingerprint` reflect
+      // the new state. The fingerprint computation
+      // re-uses the existing booking's source / corporate
+      // / member context (the reschedule doesn't change
+      // those — only the dates/room/rate change) + the
+      // NEW checkIn/checkOut + the NEW room's type. The
+      // fingerprint's `roomLines[0].type` uses the NEW
+      // room's type (the same field the create + walkin
+      // paths use); the adults/children/extraBeds mirror
+      // the existing booking's snapshotted occupancy
+      // (the reschedule doesn't change occupancy — only
+      // dates + room). When the booking is legacy
+      // (no `reservationId`), this block is skipped
+      // entirely — the booking's own fields remain the
+      // source of truth.
+      if (reservationDocRef && existingReservationData) {
+        const rescheduleFingerprint = computeRequestFingerprint({
+          reservationId: bookingReservationId as string,
+          roomLines: [{
+            type: String(room.type || "").trim(),
+            quantity: 1,
+            adults: Math.max(0, Math.floor(Number(booking.numAdults ?? booking.numGuests) || 0)),
+            children: Math.max(0, Math.floor(Number(booking.numChildren) || 0)),
+            extraBeds: Math.max(0, Math.floor(Number(booking.extraBedCount) || 0))
+          }],
+          checkIn: String(checkIn || "").trim(),
+          checkOut: String(checkOut || "").trim(),
+          leadGuestName: String(booking.guestName || "").trim(),
+          leadGuestEmail: String(booking.guestEmail || "").trim().toLowerCase(),
+          leadGuestPhone: String(booking.guestPhone || "").trim(),
+          source: String(booking.source || (booking.isCorporate ? "corporate" : "online")).trim(),
+          isCorporate: Boolean(booking.isCorporate),
+          corporateCode: String(booking.corporateCode || "").trim().toUpperCase(),
+          companyName: String(booking.companyName || "").trim(),
+          voucherCode: String(booking.voucherCode || "").trim().toUpperCase(),
+          memberDiscountPct: Math.max(0, Math.floor(Number(booking.memberDiscountPct) || 0)),
+          discountScope: normalizeDiscountScope(booking.discountScopeSnapshot),
+          termsVersion: String(existingReservationData.termsVersion || DEFAULT_TERMS_VERSION),
+          privacyVersion: String(existingReservationData.privacyVersion || DEFAULT_TERMS_VERSION)
+        });
+        transaction.update(reservationDocRef, {
+          checkIn: Timestamp.fromDate(checkInDate),
+          checkOut: Timestamp.fromDate(checkOutDate),
+          numNights,
+          // The reservation-level totals track the
+          // child booking's `totalPrice` for the
+          // single-room case (the reschedule
+          // re-derives the child's total from the new
+          // dates/room). The MRB-04 generalization
+          // sums across children for the N>1 case —
+          // single-room here so the simple assignment
+          // is byte-equivalent.
+          totalPrice: finalTotalPrice,
+          subtotal: originalTotalPrice,
+          originalSubtotal: originalTotalPrice,
+          // The fingerprint is INTENTIONALLY allowed
+          // to change on reschedule — the reschedule
+          // IS the legitimate request to change the
+          // fingerprint (the dates + room changed).
+          // Replaying the same `reservationId` with a
+          // different fingerprint is the natural
+          // reschedule flow, not a conflict.
+          requestFingerprint: rescheduleFingerprint,
+          updatedAt: now
+        });
+      }
       // Per PEX-03 (2026-08-01, per decision #147): same
       // in-transaction retirement as handleCreateBooking /
       // handleCreateWalkin. The reschedule transaction may
@@ -6077,8 +6209,39 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
     }
 
-    return res.status(200).json({ success: true, data: updatedBooking });
+    return res.status(200).json({
+      success: true,
+      data: {
+        // Per MRB-02.x (2026-08-02, per decision #164):
+        // echo the reservation linkage in the reschedule
+        // success payload. The booking update + the
+        // reservation header update both committed in the
+        // same transaction, so the response carries both
+        // ids. For legacy null-`reservationId` bookings
+        // the `reservationId` + `reservationRef` are
+        // empty strings (the booking was created before
+        // MRB-02, so it has no header to echo).
+        ...updatedBooking,
+        reservationId: bookingReservationId || "",
+        reservationRef: String((existingReservationData as any)?.reservationRef || "")
+      }
+    });
   } catch (error: any) {
+    // Per MRB-02.x (2026-08-02, per decision #164): the
+    // half-stamped state (booking has `reservationId`
+    // but the corresponding `reservations/{id}` header
+    // is missing) is a 500 — the state is
+    // unrecoverable by the request and must be flagged
+    // to staff. The pre-existing 400 path handles every
+    // other error (validation, occupancy, rate
+    // recalc) — those stay 400 because the staff can
+    // fix them by adjusting the input.
+    if (error?.message === "RESERVATION_HEADER_WITHOUT_CHILD") {
+      return res.status(500).json({
+        success: false,
+        error: "Booking has a reservation id but the reservation header is missing — please contact support."
+      });
+    }
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
   }
 }

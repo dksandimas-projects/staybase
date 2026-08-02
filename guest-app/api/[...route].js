@@ -221263,6 +221263,25 @@ var WalkinBookingSchema = external_exports.object({
   // ride the same idempotency contract.
   reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
 }).strict();
+var RescheduleBookingSchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(1).max(64),
+  roomId: external_exports.string().trim().min(1).max(64),
+  checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: external_exports.string().trim().max(500).optional().default(""),
+  // The optional `reservationId` is here so a future
+  // reschedule client that preallocates (e.g. a bulk
+  // reschedule tool that wants the staff to be able to
+  // retry the same reschedule without re-picking dates)
+  // can ride the same idempotency contract. The
+  // current staff modal doesn't preallocate, so the
+  // server derives the id from the existing booking
+  // (or, for legacy null-reservationId bookings, the
+  // server auto-mints one if `body.reservationId` is
+  // explicitly provided — a defensive path for a
+  // future migration tool).
+  reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+}).strict();
 
 // ../shared/schemas/paymentMethod.ts
 var PaymentMethodConfigSchema = external_exports.object({
@@ -228402,10 +228421,14 @@ async function handleRescheduleBooking(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const { bookingId, roomId, checkIn, checkOut, reason } = req.body || {};
-  if (!bookingId || !roomId || !checkIn || !checkOut) {
-    return res.status(400).json({ success: false, error: "Booking, room, check-in, and check-out are required." });
+  const parsedReschedule = RescheduleBookingSchema.safeParse(req.body || {});
+  if (!parsedReschedule.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking, room, check-in, and check-out are required."
+    });
   }
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
@@ -228426,6 +228449,24 @@ async function handleRescheduleBooking(req, res) {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+      const bookingReservationId2 = (() => {
+        const stored = String(booking.reservationId || "").trim();
+        if (stored.length > 0) return stored;
+        if (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId)) {
+          return requestedReservationId;
+        }
+        return null;
+      })();
+      const reservationDocRef = bookingReservationId2 ? adminDb.collection("reservations").doc(bookingReservationId2) : null;
+      let existingReservationData2 = null;
+      if (reservationDocRef) {
+        const existingReservationSnap = await transaction.get(reservationDocRef);
+        if (existingReservationSnap.exists) {
+          existingReservationData2 = existingReservationSnap.data() || {};
+        } else {
+          throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
+        }
+      }
       if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
         throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
       }
@@ -228692,6 +228733,57 @@ async function handleRescheduleBooking(req, res) {
         transaction.update(roomRef, { status: "occupied" });
       }
       transaction.update(bookingRef, updatedBooking);
+      if (reservationDocRef && existingReservationData2) {
+        const rescheduleFingerprint = computeRequestFingerprint({
+          reservationId: bookingReservationId2,
+          roomLines: [{
+            type: String(room.type || "").trim(),
+            quantity: 1,
+            adults: Math.max(0, Math.floor(Number(booking.numAdults ?? booking.numGuests) || 0)),
+            children: Math.max(0, Math.floor(Number(booking.numChildren) || 0)),
+            extraBeds: Math.max(0, Math.floor(Number(booking.extraBedCount) || 0))
+          }],
+          checkIn: String(checkIn || "").trim(),
+          checkOut: String(checkOut || "").trim(),
+          leadGuestName: String(booking.guestName || "").trim(),
+          leadGuestEmail: String(booking.guestEmail || "").trim().toLowerCase(),
+          leadGuestPhone: String(booking.guestPhone || "").trim(),
+          source: String(booking.source || (booking.isCorporate ? "corporate" : "online")).trim(),
+          isCorporate: Boolean(booking.isCorporate),
+          corporateCode: String(booking.corporateCode || "").trim().toUpperCase(),
+          companyName: String(booking.companyName || "").trim(),
+          voucherCode: String(booking.voucherCode || "").trim().toUpperCase(),
+          memberDiscountPct: Math.max(0, Math.floor(Number(booking.memberDiscountPct) || 0)),
+          discountScope: normalizeDiscountScope(booking.discountScopeSnapshot),
+          termsVersion: String(existingReservationData2.termsVersion || DEFAULT_TERMS_VERSION),
+          privacyVersion: String(existingReservationData2.privacyVersion || DEFAULT_TERMS_VERSION)
+        });
+        transaction.update(reservationDocRef, {
+          checkIn: Timestamp.fromDate(checkInDate),
+          checkOut: Timestamp.fromDate(checkOutDate),
+          numNights,
+          // The reservation-level totals track the
+          // child booking's `totalPrice` for the
+          // single-room case (the reschedule
+          // re-derives the child's total from the new
+          // dates/room). The MRB-04 generalization
+          // sums across children for the N>1 case —
+          // single-room here so the simple assignment
+          // is byte-equivalent.
+          totalPrice: finalTotalPrice,
+          subtotal: originalTotalPrice,
+          originalSubtotal: originalTotalPrice,
+          // The fingerprint is INTENTIONALLY allowed
+          // to change on reschedule — the reschedule
+          // IS the legitimate request to change the
+          // fingerprint (the dates + room changed).
+          // Replaying the same `reservationId` with a
+          // different fingerprint is the natural
+          // reschedule flow, not a conflict.
+          requestFingerprint: rescheduleFingerprint,
+          updatedAt: now
+        });
+      }
       for (const retirement of expiredHoldRetirements) {
         transaction.update(retirement.ref, {
           status: "cancelled",
@@ -228731,8 +228823,30 @@ async function handleRescheduleBooking(req, res) {
         console.error("Failed to send reschedule retired-hold email for", retirement.bookingRef, expiredEmailErr);
       }
     }
-    return res.status(200).json({ success: true, data: updatedBooking });
+    return res.status(200).json({
+      success: true,
+      data: {
+        // Per MRB-02.x (2026-08-02, per decision #164):
+        // echo the reservation linkage in the reschedule
+        // success payload. The booking update + the
+        // reservation header update both committed in the
+        // same transaction, so the response carries both
+        // ids. For legacy null-`reservationId` bookings
+        // the `reservationId` + `reservationRef` are
+        // empty strings (the booking was created before
+        // MRB-02, so it has no header to echo).
+        ...updatedBooking,
+        reservationId: bookingReservationId || "",
+        reservationRef: String(existingReservationData?.reservationRef || "")
+      }
+    });
   } catch (error) {
+    if (error?.message === "RESERVATION_HEADER_WITHOUT_CHILD") {
+      return res.status(500).json({
+        success: false,
+        error: "Booking has a reservation id but the reservation header is missing \u2014 please contact support."
+      });
+    }
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
   }
 }
