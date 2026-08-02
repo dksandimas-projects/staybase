@@ -47,7 +47,19 @@ const FILE_BUDGETS = [
 ];
 const ALWAYS_READ = ["CLAUDE.md", "plan/docs/GOTCHAS.md"];
 const ALWAYS_READ_CEILING = 10000;
-const ACTIVE_TOTAL_WARN = 120000;
+// Ratchet, set 2026-08-02. The previous 120,000 target was written on
+// 2026-07-17 in the same commit that introduced this script, when the
+// active corpus already measured ~212,000 — so it warned on every run
+// from day one and never signalled anything. The corpus today is
+// slightly SMALLER than it was then, which is the opposite of the
+// regression the warning implied.
+//
+// This is the same ratchet pattern CONTRIBUTING.md already applies to
+// oversized per-file docs: set the ceiling just above current size so
+// further GROWTH fails while the existing body of specification passes.
+// Lower it deliberately when a restructure actually reduces the corpus;
+// do not raise it to accommodate growth without a compaction review.
+const ACTIVE_TOTAL_WARN = 230000;
 
 const errors = [];
 const warnings = [];
