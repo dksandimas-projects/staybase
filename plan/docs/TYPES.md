@@ -125,9 +125,84 @@ DiscountType = "" | "senior" | "pwd"
 
 PaymentMethod = "pay-at-hotel" | "gcash" | "paypal" | string
 
+Reservation {
+  // Per MRB-01 (2026-08-02, per decision #159): the reservation
+  // header. Every new booking (including a one-room stay) is
+  // linked to a `reservations/{id}` document. The header owns
+  // the public ref, lead booker / contact, source / corporate
+  // context, payment proof / state, voucher / member discount,
+  // consent, group totals, and (in MRB-04) the folio at
+  // `reservations/{id}/payments` + `reservations/{id}/charges`.
+  // Per-room fields (physical room, dates per room, occupancy,
+  // rate / add-on / tax snapshots, registration, check-in / out,
+  // housekeeping) live on each child `bookings/{id}`.
+
+  id: string                              // Firestore doc ID = the preallocated UUIDv4
+  reservationRef: string                  // "R-YYYYMMDD-NNNNN" — public ref, distinct prefix from SI-
+
+  leadGuestName: string
+  leadGuestEmail: string
+  leadGuestPhone: string
+  memberId: string | null                 // server-mapped from verified email token
+
+  checkIn: Date                           // shared date range (one per reservation)
+  checkOut: Date
+  numNights: number
+
+  originalSubtotal: number               // pre-discount sum of every child room's subtotal
+  discountScopeSnapshot: DiscountScope | null   // DSC-01 snapshot
+  subtotal: number                        // sum of every child room's subtotal
+  totalPrice: number                      // sum of every child room's totalPrice
+
+  source: BookingSource                   // single value per reservation
+  isCorporate: boolean
+  corporateCode: string                   // snapshotted
+  companyName: string
+  voucherCode: string                     // flat voucher applies once (per MRB-09)
+  memberDiscountPct: number
+
+  paymentStatus: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled"
+  paymentMethod: PaymentMethod
+  paymentProofUrl: string | null          // canonical "no payment proof" is null
+  paymentProofPath: string | null
+
+  termsAccepted: boolean                  // single per reservation, covers all rooms
+  termsAcceptedAt: Date | null
+  termsVersion: string
+  privacyAccepted: boolean
+  privacyAcceptedAt: Date | null
+  privacyVersion: string
+
+  roomCount: number                       // aggregate counters, denormalized for fast UI
+  activeRoomCount: number
+  cancelledRoomCount: number
+  checkedInRoomCount: number
+  checkedOutRoomCount: number
+
+  holdExpiresAt: Date | null              // unified PEX hold (no separate large-group timer, per MRB-08)
+
+  requestFingerprint: string              // server-only; canonical SHA-256 of the create request
+
+  createdAt: Date
+  updatedAt: Date
+  createdBy: string                       // staff UID or the literal "guest"
+}
+
 Booking {
   id: string
   bookingRef: string
+  // Per MRB-01 (2026-08-02, per decision #159): the reservation
+  // header linkage. Every new booking (including a one-room
+  // stay) carries server-assigned `reservationId`, denormalized
+  // `reservationRef`, `reservationPosition` (1-indexed), and
+  // `reservationRoomCount`. These are read-only projections of
+  // the parent reservation — the Firestore rules deny client
+  // writes to all four. Legacy null-reservationId bookings
+  // keep today's self-contained behavior.
+  reservationId: string | null
+  reservationRef: string | null
+  reservationPosition: number | null
+  reservationRoomCount: number | null
   roomId: string
   roomNumber: string
   roomType: RoomType

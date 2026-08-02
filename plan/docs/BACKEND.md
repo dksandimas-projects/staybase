@@ -80,6 +80,44 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 
 ---
 
+### `reservations/{reservationId}` *(MRB-01, 2026-08-02)*
+
+Per decision #159: the reservation header. Server-authoritative — staff can read; all writes go through the Admin SDK (the public lookup + cancel endpoints resolve a reservation via the pre-allocated `reservationId` + the verified email / token credential, gated by `/api/bookings/lookup` and `/api/bookings/cancel`).
+
+`reservationId` is the Firestore document ID, **client-preallocated as a UUIDv4** by the create flow's `generateReservationId()` helper (shared, environment-agnostic — `globalThis.crypto.randomUUID` with a `node:crypto` fallback). Holding the same `reservationId` across a retry-after-uncertain-response replays the original commit (the `requestFingerprint` matches); a same-ID-different-fingerprint replay is a 409 conflict.
+
+`reservationRef` is the public ref, `R-YYYYMMDD-NNNNN` (distinct prefix from `SI-` booking refs). The 5-digit sequence width matches the H3 hardening batch's booking-ref widening.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Firestore doc ID = the preallocated UUIDv4 |
+| `reservationRef` | string | Public ref (`R-YYYYMMDD-NNNNN`) |
+| `leadGuestName` / `leadGuestEmail` / `leadGuestPhone` | string | One lead booker / contact per reservation, captured at create time. Per-room occupant identities are captured at check-in where registration already happens. |
+| `memberId` | string \| null | Server-mapped from the verified email token; `null` for non-member guests. |
+| `checkIn` / `checkOut` / `numNights` | timestamp / number | Shared date range — every room in the reservation shares these dates at creation. |
+| `originalSubtotal` | number | Pre-discount sum of every child room's subtotal (room + add-ons). |
+| `discountScopeSnapshot` | object \| null | Per DSC-01: the discount scope at the moment the reservation was created. Snapshotted. |
+| `subtotal` | number | Sum of every child room's subtotal after the chain math. |
+| `totalPrice` | number | Sum of every child room's `totalPrice` (after discounts + VAT). |
+| `source` / `isCorporate` / `corporateCode` / `companyName` / `voucherCode` / `memberDiscountPct` | string / number | Source / corporate / voucher / member context — single value per reservation (properties of the guest's intent, not per-room). Snapshotted. |
+| `paymentStatus` | enum | `"awaiting-payment"` \| `"payment-uploaded"` \| `"payment-confirmed"` \| `"confirmed"` \| `"in-house"` \| `"completed"` \| `"cancelled"`. A reservation is "awaiting payment" while any non-cancelled room is `pending` or `payment-uploaded`. |
+| `paymentMethod` / `paymentProofUrl` / `paymentProofPath` | string | Money-state mirrors at reservation scope. |
+| `termsAccepted` / `termsAcceptedAt` / `termsVersion` / `privacyAccepted` / `privacyAcceptedAt` / `privacyVersion` | bool / timestamp / string | Single per reservation, same T&C + privacy acceptance covers all rooms. |
+| `roomCount` / `activeRoomCount` / `cancelledRoomCount` / `checkedInRoomCount` / `checkedOutRoomCount` | number | Aggregate counters — denormalized for fast UI; recomputed transactionally in MRB-04 / MRB-13. |
+| `holdExpiresAt` | timestamp \| null | Per PEX-01: the unified hold window for the whole reservation. No separate large-group timer (per MRB-08). `null` after the hold transitions to `payment-uploaded` or beyond. |
+| `requestFingerprint` | string | The canonical SHA-256 fingerprint of the create request. The same `reservationId` + same fingerprint is an idempotent replay; the same `reservationId` + different fingerprint is a 409. Computed by `computeRequestFingerprint` (shared) at create time. Server-only — never read or set by clients. |
+| `createdAt` / `updatedAt` / `createdBy` | timestamp / string | Audit. `createdBy` is the staff UID or the literal `"guest"` (no PII). |
+
+**Subcollections** (mirroring the booking's money shape so MRB-04's folio migration + MRB-07's refund state machine can land without a second rules change):
+- `reservations/{id}/payments/{paymentId}` — server-only create, no update/delete. Same shape as the booking payments rule.
+- `reservations/{id}/charges/{chargeId}` — staff create with per-creator + bounds + void semantics. Same shape as the booking charges rule.
+
+**Compatibility copies on `bookings/{id}`:** each child booking carries `reservationId` + `reservationRef` + `reservationPosition` (1-indexed) + `reservationRoomCount` (all nullable on legacy bookings, server-assigned on create). These are read-only projections; the bookings update allowlist does NOT include the four fields, so any client write that touches them is implicitly denied by omission (the test in `firebase/tests/reservation-rules.emulator.test.ts` pins the contract when MRB-02's emulator coverage lands).
+
+**Legacy behavior:** null-`reservationId` bookings keep today's self-contained behavior; pre-live TEST DATA is reset, not migrated. Every new booking, including a one-room stay, is linked to a reservation header so the public ref + the lead booker + the group totals + the cancel scope (per MRB-13) all read from a single authoritative source.
+
+---
+
 ### `bookings/{bookingId}`
 
 `bookingId` is the Firestore document ID. Guest and corporate booking flows preallocate this ID before payment-proof or discount-ID uploads so Firebase Storage paths can be created before the booking document exists. `/api/bookings/create` must create the booking document at this supplied ID inside the availability-locking transaction. The guest-facing `bookingRef` is generated separately inside the transaction.

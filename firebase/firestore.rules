@@ -42,6 +42,17 @@ service cloud.firestore {
     match /bookings/{bookingId} {
       allow read: if isStaff();
       allow create: if false;
+      // Per MRB-01 (2026-08-02, per decision #159): the four
+      // `reservation*` fields on a booking are server-assigned
+      // projections of the parent `reservations/{id}` document.
+      // The `affectedKeys().hasOnly([...])` allowlist below does
+      // NOT list them, so any client write that touches
+      // `reservationId` / `reservationRef` / `reservationPosition`
+      // / `reservationRoomCount` is implicitly denied by omission.
+      // (The pin test in
+      // `firebase/tests/reservation-rules.emulator.test.ts` asserts
+      // the implicit-deny contract — a future refactor that
+      // accidentally widens the allowlist breaks the test.)
       allow update: if isStaff()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "guestIdPhotoUrl",
@@ -105,6 +116,63 @@ service cloud.firestore {
     match /financeIntegrityRepairs/{repairId} {
       allow read: if isAdmin();
       allow write: if false;
+    }
+
+    // Per MRB-01 (2026-08-02, per decision #159): the reservation
+    // header. Server-authoritative create / update / delete — the
+    // public ref, lead booker, source / corporate context, payment
+    // state, voucher / member discount, consent, and group totals
+    // are all written through Admin SDK transactions. Staff can
+    // read for the admin booking drawer; guests never have direct
+    // access (the public lookup resolves the reservation via the
+    // pre-allocated `reservationId` + the verified email / token
+    // credential, gated by /api/bookings/lookup).
+    //
+    // Subcollections mirror the booking's money-shape so MRB-04's
+    // folio migration (payments + charges on the reservation) and
+    // MRB-07's refund-state machine can land without a second
+    // rules change. The `payments` subcollection is server-only
+    // (no client create — same shape as the existing booking
+    // payments rule); the `charges` subcollection allows staff
+    // direct write (same shape as the existing booking charges
+    // rule, with the per-creator + bounds + void semantics).
+    match /reservations/{reservationId} {
+      allow read: if isStaff();
+      allow write: if false;  // Server-authoritative; Admin SDK only.
+
+      match /payments/{paymentId} {
+        allow read: if isStaff();
+        allow create: if false;  // Server-authoritative payment/refund APIs only.
+        allow update, delete: if false;
+      }
+
+      match /charges/{chargeId} {
+        allow read: if isStaff();
+        allow create: if isStaff()
+          && request.resource.data.keys().hasOnly(["label", "amount", "category", "note", "addedBy", "addedAt", "voidOf"])
+          && request.resource.data.label is string
+          && request.resource.data.label.size() > 0
+          && request.resource.data.label.size() <= 120
+          && request.resource.data.amount is number
+          && request.resource.data.amount != 0
+          && request.resource.data.amount <= 1000000
+          && request.resource.data.amount >= -1000000
+          && request.resource.data.category in ["late-checkout", "early-checkin", "extra-person", "damage", "laundry", "other"]
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 300
+          && request.resource.data.addedBy == request.auth.uid
+          && request.resource.data.addedAt == request.time
+          && (
+            (request.resource.data.amount > 0 && request.resource.data.voidOf == null)
+            || (
+              request.resource.data.amount < 0
+              && request.resource.data.voidOf is string
+              && chargeId == "void-" + request.resource.data.voidOf
+              && get(/databases/$(database)/documents/reservations/$(reservationId)/charges/$(request.resource.data.voidOf)).data.amount == -request.resource.data.amount
+            )
+          );
+        allow update, delete: if false;
+      }
     }
 
     // FD-02 (E2E audit 2026-07-17): signed-in users may update only

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { generateBookingRef, generateMemberNumber, generateStoreOrderRef, nextSequence, isValidBookingRef, BOOKING_REF_REGEX, generateLookupToken, isValidLookupToken } from "../utils/references";
+import { generateBookingRef, generateMemberNumber, generateStoreOrderRef, nextSequence, isValidBookingRef, BOOKING_REF_REGEX, generateLookupToken, isValidLookupToken, RESERVATION_REF_REGEX, isValidReservationRef, RESERVATION_ID_REGEX, isValidReservationId, generateReservationId } from "../utils/references";
 
 describe("reference utilities", () => {
   const testDate = new Date("2026-06-08T12:00:00Z");
@@ -94,5 +94,71 @@ describe("reference utilities", () => {
       expect(isValidLookupToken("g".repeat(32))).toBe(false);
       expect(isValidLookupToken("not a token")).toBe(false);
     });
+  });
+});
+
+describe("MRB-01 reservation ref + id utilities", () => {
+  test("RESERVATION_REF_REGEX accepts the canonical shape (R-YYYYMMDD-NNNNN) and rejects everything else", () => {
+    // Per MRB-01 (2026-08-02, per decision #159): the public
+    // reservation ref uses the R- prefix (distinct from SI- for
+    // bookings) so the public surface reads naturally and a
+    // guess of one ref space gives no information about the
+    // other. The 5-digit sequence width matches the H3
+    // hardening batch's booking-ref widening.
+    expect(RESERVATION_REF_REGEX.test("R-20260802-00001")).toBe(true);
+    expect(RESERVATION_REF_REGEX.test("R-20260802-99999")).toBe(true);
+    expect(RESERVATION_REF_REGEX.test("R-20260802-123")).toBe(true);  // 3-digit sequence is also accepted
+    expect(RESERVATION_REF_REGEX.test("SI-20260802-00001")).toBe(false);  // wrong prefix
+    expect(RESERVATION_REF_REGEX.test("R-20260802-100000")).toBe(false);  // 6-digit too wide
+    expect(RESERVATION_REF_REGEX.test("R-2026-08-02-00001")).toBe(false);  // wrong date shape
+    expect(RESERVATION_REF_REGEX.test("")).toBe(false);
+  });
+
+  test("isValidReservationRef is a thin wrapper around the regex (trim + accept)", () => {
+    expect(isValidReservationRef("R-20260802-00001")).toBe(true);
+    expect(isValidReservationRef("  R-20260802-00001  ")).toBe(true);
+    expect(isValidReservationRef("not a ref")).toBe(false);
+    expect(isValidReservationRef(null)).toBe(false);
+  });
+
+  test("RESERVATION_ID_REGEX accepts RFC4122 UUIDs (v1-v5 with the standard variant) and rejects the malformed forms", () => {
+    // Per MRB-01: client preallocates a UUID as the
+    // reservationId. The regex accepts any RFC4122 UUID with
+    // a version digit in [1-5] and a variant digit in [8/9/a/b]
+    // (the standard UUID shape). The all-zeros form is rejected
+    // because it is the "nil" UUID and is not a valid identifier.
+    // Server-side validation short-circuits malformed IDs
+    // before hitting Firestore.
+    expect(RESERVATION_ID_REGEX.test("9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d")).toBe(true);  // UUIDv4
+    expect(RESERVATION_ID_REGEX.test("9b1deb4d-3b7d-1bad-9bdd-2b0d7b3dcb6d")).toBe(true);  // UUIDv1 (also accepted — the regex is RFC4122, not v4-only)
+    expect(RESERVATION_ID_REGEX.test("00000000-0000-0000-0000-000000000000")).toBe(false);  // nil UUID
+    expect(RESERVATION_ID_REGEX.test("9b1deb4d-3b7d-4bad-cbdd-2b0d7b3dcb6d")).toBe(false);  // wrong variant digit
+    expect(RESERVATION_ID_REGEX.test("not a uuid")).toBe(false);
+    expect(RESERVATION_ID_REGEX.test("")).toBe(false);
+  });
+
+  test("isValidReservationId is a thin wrapper around the regex (trim + accept)", () => {
+    expect(isValidReservationId("9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d")).toBe(true);
+    expect(isValidReservationId("  9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d  ")).toBe(true);
+    expect(isValidReservationId("not a uuid")).toBe(false);
+    expect(isValidReservationId(null)).toBe(false);
+  });
+
+  test("generateReservationId returns a UUIDv4 that matches the regex (deterministic generator pin)", () => {
+    // The injected `randomUUID` lets the test pin the output
+    // without relying on the runtime's entropy source. The real
+    // implementation (in `references.ts`) defaults to
+    // `globalThis.crypto.randomUUID` with a `node:crypto`
+    // fallback; the test uses a fixed string to assert the
+    // shape contract.
+    const id = generateReservationId(() => "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d");
+    expect(id).toBe("9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d");
+    expect(isValidReservationId(id)).toBe(true);
+  });
+
+  test("generateReservationId throws if the injected generator returns a non-conforming value", () => {
+    // A missing or broken generator must surface immediately,
+    // not silently produce an ID that the server rejects.
+    expect(() => generateReservationId(() => "not a uuid")).toThrow(/did not match the expected UUIDv4 shape/);
   });
 });

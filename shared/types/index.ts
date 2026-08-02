@@ -175,9 +175,133 @@ export interface RoomBlock {
   cancelledBy: string | null;
 }
 
+// Per MRB-01 (2026-08-02, per decision #159): the reservation
+// header. Every new booking (including a one-room stay) carries
+// a server-assigned `reservationId` + denormalized `reservationRef`
+// pointing at a `reservations/{id}` document. The header owns
+// the public ref, lead booker / contact, source / corporate
+// context, payment proof / state, voucher / member discount,
+// consent, group totals, and (in MRB-04) the folio at
+// `reservations/{id}/payments` + `reservations/{id}/charges`.
+// Room-booking-authoritative fields (physical room, dates,
+// occupancy, rate / add-on / tax snapshots, registration / ID /
+// signature, check-in / out, housekeeping, room lifecycle) live
+// on each child `bookings/{id}`.
+//
+// Compatibility copies (e.g. `reservationRef` denormalized onto
+// each child booking) are read-only projections; the Firestore
+// rules deny client writes to those copies and to `reservationId`
+// itself. The header is the single authoritative source for the
+// public ref + the lead booker + the group totals + the cancel
+// scope (per MRB-13). Legacy null-`reservationId` bookings keep
+// today's self-contained behavior; pre-live TEST DATA is reset,
+// not migrated.
+//
+// Aggregate status is derived from the child rooms
+// (decision #159, the reservation-summary table): `Awaiting payment`
+// (any non-cancelled room is `pending` or `payment-uploaded`),
+// `Confirmed` (all non-cancelled rooms are `payment-confirmed` or
+// `confirmed`), `Partially checked in` (a mix of confirmed and
+// checked-in rooms), `In house` (all active rooms checked in),
+// `Partially checked out` (a mix of checked-in and checked-out),
+// `Completed` (all active rooms checked out), `Cancelled` (all
+// rooms cancelled). A reservation with a mix of cancelled and
+// active rooms shows the active count + a "X of Y rooms cancelled"
+// secondary label — cancellation is a secondary count, not a hidden
+// state. This is the wire contract for MRB-12's admin affordance.
+export interface Reservation {
+  id: string;
+  /** Public ref — `R-YYYYMMDD-NNNNN`. Distinct prefix from `SI-` booking refs. */
+  reservationRef: string;
+
+  /** Lead booker / contact. Captured at create time. Per-room occupant identities are captured at check-in where registration already happens. */
+  leadGuestName: string;
+  leadGuestEmail: string;
+  leadGuestPhone: string;
+  /** Server-mapped from the verified email token; `null` for non-member guests. */
+  memberId: string | null;
+
+  /** Shared date range. Every room in the reservation shares these dates at creation. */
+  checkIn: Date;
+  checkOut: Date;
+  numNights: number;
+
+  /** Group totals — recomputed transactionally in MRB-04 whenever a child is created / rescheduled / cancelled. */
+  originalSubtotal: number;
+  /** Per DSC-01: the discount scope at the moment the reservation was created. Snapshotted. */
+  discountScopeSnapshot: DiscountScope | null;
+  /** Sum of every child room's `subtotal` (room + add-ons after the chain math). The reservation total is the sum of these, not a separate derivation. */
+  subtotal: number;
+  /** Final bill — the sum of every child room's `totalPrice` after discounts + VAT. */
+  totalPrice: number;
+
+  /** Source / corporate context — single value per reservation, properties of the guest's intent, not per-room. */
+  source: BookingSource;
+  isCorporate: boolean;
+  /** Snapshotted — a later code change never rewrites an existing reservation. */
+  corporateCode: string;
+  companyName: string;
+  /** Flat voucher applies once to the reservation (per MRB-09); percentage vouchers are reapplied per-eligible-line. */
+  voucherCode: string;
+  /** Member discount pct applied to the lead member's eligible room lines. */
+  memberDiscountPct: number;
+
+  /** Money state — mirrors the child rooms but at reservation scope. A reservation is "awaiting payment" while any non-cancelled room is `pending` or `payment-uploaded`. */
+  paymentStatus: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled";
+  paymentMethod: PaymentMethod;
+  /** Per BF-45: canonical "no payment proof" is `null` (not `""`). */
+  paymentProofUrl: string | null;
+  /** Private Storage object path; staff resolves a short-lived signed URL. */
+  paymentProofPath: string | null;
+
+  /** Consent — single per reservation, same T&C + privacy acceptance covers all rooms. */
+  termsAccepted: boolean;
+  termsAcceptedAt: Date | null;
+  termsVersion: string;
+  privacyAccepted: boolean;
+  privacyAcceptedAt: Date | null;
+  privacyVersion: string;
+
+  /** Aggregate counters — denormalized for fast UI; recomputed transactionally in MRB-04 / MRB-13. */
+  roomCount: number;
+  activeRoomCount: number;
+  cancelledRoomCount: number;
+  checkedInRoomCount: number;
+  checkedOutRoomCount: number;
+
+  /** Per PEX-01 (decision #147): the unified hold window for the whole reservation. No separate large-group timer per MRB-08. `null` after the hold transitions to `payment-uploaded` or beyond. */
+  holdExpiresAt: Date | null;
+
+  /** Per decision #159: the canonical request fingerprint. The same `reservationId` + same fingerprint is an idempotent replay; a same-ID-different-fingerprint replay is a 409. Computed by `computeRequestFingerprint` at create time. Server-only — never read or set by clients. */
+  requestFingerprint: string;
+
+  createdAt: Date;
+  updatedAt: Date;
+  /** Staff UID for staff-created reservations, or the literal `"guest"` for self-service. Same pattern as CRL-02's `cancelledBy`. */
+  createdBy: string;
+}
+
 export interface Booking {
   id: string;
   bookingRef: string;
+  // Per MRB-01 (2026-08-02, per decision #159): the reservation
+  // header linkage. Every new booking (including a one-room stay)
+  // carries server-assigned `reservationId`, denormalized
+  // `reservationRef`, `reservationPosition` (1-indexed room
+  // position), and `reservationRoomCount`. These are read-only
+  // projections of the parent reservation — no UI or rule may edit
+  // them independently. The Firestore rules deny client writes to
+  // all four (see `firebase/firestore.rules §reservations`).
+  // Legacy null-`reservationId` bookings keep today's self-contained
+  // behavior; pre-live TEST DATA is reset, not migrated. Every new
+  // booking, including a one-room stay, is linked to a reservation
+  // header so the public ref + the lead booker + the group totals +
+  // the cancel scope (per MRB-13) all read from a single
+  // authoritative source — no dual single/group implementation.
+  reservationId: string | null;
+  reservationRef: string | null;
+  reservationPosition: number | null;
+  reservationRoomCount: number | null;
   roomId: string;
   roomNumber: string;
   roomType: RoomType;
