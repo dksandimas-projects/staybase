@@ -260,6 +260,33 @@ export interface Booking {
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
+  // Per CRL-02 (2026-08-02): mirror the shared `Booking.cancelledAt`
+  // / `cancelledBy` / `cancellationSource` fields on the admin
+  // view. Hydrated by the bookings mapper (see line 1281+).
+  // Legacy null-`cancelledAt` bookings keep today's self-contained
+  // behavior — pre-live TEST DATA is reset, not migrated. All
+  // three are optional so the existing call sites that build a
+  // `Booking` literal without them (walk-in / corporate
+  // create flows) keep typing.
+  cancelledAt?: string | null;
+  cancelledBy?: string | null;
+  cancellationSource?: "guest" | "staff" | "system" | null;
+  // Per MRB-01 (2026-08-02, per decision #159): the reservation
+  // header linkage. Mirror the shared `Booking.reservationId`
+  // / `reservationRef` / `reservationPosition` /
+  // `reservationRoomCount` so the admin view can render the
+  // group ref / position badge on the bookings table. Legacy
+  // null-`reservationId` bookings keep today's self-contained
+  // behavior. MRB-02 now exposes `reservationId` +
+  // `reservationRef` on the `/api/bookings/create` response
+  // payload, so any code that hydrates fresh bookings from
+  // create needs these fields on the local type. All four
+  // are optional to match the shared type's `| null` shape
+  // and keep existing literal builders typing.
+  reservationId?: string | null;
+  reservationRef?: string | null;
+  reservationPosition?: number | null;
+  reservationRoomCount?: number | null;
   createdAt: string;
   onsitePayments?: OnsitePayment[];
   guestRegistration?: {
