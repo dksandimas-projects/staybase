@@ -161,14 +161,22 @@ describe("MRB-02 single-room reservation create", () => {
     });
 
     it("single-room header sets roomCount: 1, activeRoomCount: 1, cancelledRoomCount: 0, checkedInRoomCount: 0, checkedOutRoomCount: 0", () => {
-      // The single-room MRB-02 case stamps the header
-      // with `roomCount: 1` and the matching
-      // active/cancelled/checkedIn/checkedOut counters.
-      // MRB-06's N>1 case will assign sequential
-      // positions and a `roomCount` matching the
-      // room-line count.
-      expect(handlers).toMatch(/roomCount:\s*1,/);
-      expect(handlers).toMatch(/activeRoomCount:\s*1/);
+      // The header's counters are the reservation's actual room
+      // count, which for the single-room MRB-02 case is 1.
+      //
+      // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): both
+      // create paths now stamp the counters from the number of rooms
+      // they assigned (`assignedRooms.length` on the public path,
+      // `walkinRoomCount` on the walk-in), rather than a literal 1.
+      // This asserts the expression rather than the literal, because
+      // a whole-file search for `roomCount: 1,` passed only by
+      // accident once one path still hardcoded it.
+      expect(handlers).toMatch(/roomCount:\s*assignedRooms\.length,/);
+      expect(handlers).toMatch(/activeRoomCount:\s*assignedRooms\.length,/);
+      expect(handlers).toMatch(/roomCount:\s*walkinRoomCount,/);
+      expect(handlers).toMatch(/activeRoomCount:\s*walkinRoomCount,/);
+      // The lifecycle counters still start empty on a fresh
+      // reservation — nothing is cancelled or checked out at create.
       expect(handlers).toMatch(/cancelledRoomCount:\s*0/);
       expect(handlers).toMatch(/checkedInRoomCount:\s*0/);
       expect(handlers).toMatch(/checkedOutRoomCount:\s*0/);
