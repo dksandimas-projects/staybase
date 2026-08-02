@@ -14,7 +14,12 @@ describe("launch-readiness must-fix regressions", () => {
     );
 
     const existingRead = fn.indexOf("const existingWalkin = await transaction.get(bookingDocRef)");
-    const firstRoomWrite = fn.indexOf("transaction.update(roomRef");
+    // Per MRB-07 (2026-08-02, per decision #159): an immediate check-in
+    // occupies every room in the reservation, so the room status write
+    // is a loop over the assigned rooms rather than a single
+    // `transaction.update(roomRef, ...)`. The ordering invariant this
+    // test protects — every read precedes every write — is unchanged.
+    const firstRoomWrite = fn.indexOf("transaction.update(assigned.ref");
     const firstCounterWrite = Math.min(
       fn.indexOf("transaction.update(counterRef"),
       fn.indexOf("transaction.set(counterRef")

@@ -151,26 +151,37 @@ describe("EXB-09 — EXB-04 breakfast-coupling guard (extra bed is a separate ad
   });
 
   it("handleCreateBooking calls `calculateBreakfastAddOn` with `numGuests: guests` (the total occupancy)", () => {
-    // The server wires the breakfast helper with
-    // `numGuests: guests` (the historical total
-    // occupancy, which is `numAdults + numChildren` per
-    // CHD-04). The extra bed does NOT enter the
-    // breakfast math at this call site — the extra
+    // The server wires the breakfast helper with the stay's own
+    // occupancy (`numAdults + numChildren` per CHD-04). The extra bed
+    // does NOT enter the breakfast math at this call site — the extra
     // bed is a separate add-on line, computed by
-    // `calculateExtraBedAddOn`. Pin the call so a
-    // refactor that adds `+ extraBedCount` to the
-    // breakfast occupancy is caught.
+    // `calculateExtraBedAddOn`. Pin the call so a refactor that adds
+    // `+ extraBedCount` to the breakfast occupancy is caught.
+    //
+    // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): a
+    // reservation charges breakfast once per guest, so each room stay
+    // passes ITS OWN guest count rather than the reservation total —
+    // otherwise an N-room reservation would bill breakfast N times for
+    // every guest. Both create paths are asserted, because a whole-file
+    // search for `numGuests: guests` passed only by accident once one
+    // path still used the reservation-wide total.
     expect(bookingsHandlerSrc).toMatch(
-      /calculateBreakfastAddOn\(\{[\s\S]{0,400}numGuests:\s*guests,[\s\S]{0,400}\}\)/m
+      /calculateBreakfastAddOn\(\{[\s\S]{0,400}numGuests:\s*assigned\.numAdults \+ assigned\.numChildren,[\s\S]{0,400}\}\)/m
     );
+    expect(bookingsHandlerSrc).toMatch(/const stayBreakfastTotal = calculateBreakfastAddOn\(\{/);
     // And the breakfast call must NOT include
     // `extraBedCount` (the extra bed is a separate
     // add-on, not a breakfast multiplier).
-    const breakfastCallMatch = bookingsHandlerSrc.match(
-      /calculateBreakfastAddOn\(\{[\s\S]{0,800}?\}\)/m
+    const breakfastCallMatches = bookingsHandlerSrc.match(
+      /calculateBreakfastAddOn\(\{[\s\S]{0,800}?\}\)/gm
     );
-    expect(breakfastCallMatch).toBeTruthy();
-    expect(breakfastCallMatch![0]).not.toMatch(/extraBedCount/);
+    expect(breakfastCallMatches).toBeTruthy();
+    // Every call site, not just the first — the handler now has one per
+    // create path.
+    expect(breakfastCallMatches!.length).toBeGreaterThanOrEqual(2);
+    for (const call of breakfastCallMatches!) {
+      expect(call).not.toMatch(/extraBedCount/);
+    }
   });
 
   it("handleCreateBooking's `subtotal` is `roomTotal + breakfastTotal + extraBedTotal` (3 additively independent terms)", () => {

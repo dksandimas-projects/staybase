@@ -147,21 +147,25 @@ describe("EXB-08 — server rate breakdown writes the extra bed add-on line", ()
   });
 
   it("handleCreateWalkin passes the 3 new fields to buildRateBreakdown (and collapses the term when manual override is set)", () => {
-    // The walk-in path threads `walkinExtraBedTotal` +
-    // `walkinExtraBedCount` + `walkinExtraBedRate`. When
-    // `totalPriceOverride` is set, the manual rate
-    // collapses the extra bed into the room subtotal
-    // (the historical manual-rate shape), so the add-on
+    // The walk-in path threads the extra-bed total, count and
+    // rate into the rate breakdown. When `totalPriceOverride` is
+    // set, the manual rate collapses the extra bed into the room
+    // subtotal (the historical manual-rate shape), so the add-on
     // line is forced to 0 in that path.
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the breakdown is
+    // built once per room stay inside the per-room financials map,
+    // from that stay's own extra-bed snapshot, so each booking doc
+    // stores its own allocation.
     const handleCreateWalkin = bookingsHandlerSrc.match(
-      /export async function handleCreateWalkin[\s\S]*?const rateBreakdown = buildRateBreakdown\(\{[\s\S]*?\}\);/
+      /export async function handleCreateWalkin[\s\S]*?rateBreakdown: buildRateBreakdown\(\{[\s\S]*?\}\)/
     );
     expect(handleCreateWalkin, "handleCreateWalkin must exist").toBeTruthy();
     expect(handleCreateWalkin![0]).toMatch(/extraBedTotal:/);
     expect(handleCreateWalkin![0]).toMatch(/extraBedCount:/);
     expect(handleCreateWalkin![0]).toMatch(/extraBedRate:/);
     expect(handleCreateWalkin![0]).toMatch(
-      /totalPriceOverride !== undefined && totalPriceOverride !== null\s*\?\s*0\s*:\s*walkinExtraBedTotal/
+      /extraBedTotal:\s*hasManualOverride\s*\?\s*0\s*:\s*line\.extraBedTotal/
     );
   });
 });

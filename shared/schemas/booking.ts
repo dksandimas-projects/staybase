@@ -41,9 +41,34 @@ export const WalkinGuestDetailsSchema = z.object({
   consent: z.boolean().optional()
 }).strict();
 
+// Per MRB-07 (2026-08-02, per decision #159): one room stay inside a
+// staff-created multi-room reservation. The desk picks each physical
+// room explicitly (unlike the public `/book` flow, which sends a
+// `roomType` + `roomCount` and lets the server auto-assign), because a
+// walk-in group is normally allocated at the counter. Each line carries
+// its own occupancy so the reservation's guests are distributed across
+// rooms rather than duplicated onto every room. The rooms in one
+// reservation may be of different types — the server prices each line
+// against its own type entry and stores the per-room allocation.
+export const WalkinRoomLineSchema = z.object({
+  roomId: z.string().trim().min(1).max(64),
+  numAdults: z.coerce.number().int().min(0).max(100),
+  numChildren: z.coerce.number().int().min(0).max(100),
+  extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0)
+}).strict();
+
 export const WalkinBookingSchema = z.object({
   bookingId: z.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
   roomId: z.string().trim().min(1).max(64),
+  // Per MRB-07 (2026-08-02, per decision #159): the optional N-room
+  // room list. When absent (every pre-MRB-07 caller), the server
+  // derives a single line from the top-level `roomId` + `numAdults` +
+  // `numChildren` + `extraBedCount` — byte-equivalent to the
+  // single-room walk-in. When present, it is the canonical room list;
+  // the server rejects the request unless `roomId === rooms[0].roomId`
+  // and `guests` equals the summed per-line occupancy, so neither the
+  // room nor the guest total is trusted from two disagreeing places.
+  rooms: z.array(WalkinRoomLineSchema).min(1).max(50).optional(),
   checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   guests: z.coerce.number().int().min(1).max(100),
@@ -147,3 +172,4 @@ export const RescheduleBookingSchema = z.object({
 
 export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;
 export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;
+export type WalkinRoomLineInput = z.infer<typeof WalkinRoomLineSchema>;

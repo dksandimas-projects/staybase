@@ -18,6 +18,13 @@ interface DataTableProps<T> {
   renderMobileCard?: (row: T) => ReactNode;
   emptyMessage?: string;
   mobileCardShowChevron?: boolean;
+  // Per MRB-07 (2026-08-02, per decision #159): a reservation covering
+  // several rooms renders as one parent row with its room stays nested
+  // beneath it. The caller supplies the already-flattened row list (a
+  // parent followed by its visible children) and classifies each row
+  // here; the table only owns the visual nesting, so grouping logic
+  // stays with the caller that knows the domain.
+  rowVariant?: (row: T) => "parent" | "child" | undefined;
 }
 
 function MobileCardSkeleton() {
@@ -41,7 +48,8 @@ export function DataTable<T extends { id: string }>({
   onRowClick,
   renderMobileCard,
   emptyMessage = "No data to show.",
-  mobileCardShowChevron = false
+  mobileCardShowChevron = false,
+  rowVariant
 }: DataTableProps<T>) {
   const { isMobile } = useBreakpoint();
   const useMobileCards = isMobile && renderMobileCard !== undefined;
@@ -66,7 +74,12 @@ export function DataTable<T extends { id: string }>({
               key={row.id}
               className={cn(
                 "rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 transition",
-                onRowClick && "cursor-pointer hover:shadow-md active:scale-[0.99]"
+                onRowClick && "cursor-pointer hover:shadow-md active:scale-[0.99]",
+                // Per MRB-07: a nested room stay is indented and tinted
+                // so the card list reads as "reservation, then its
+                // rooms" on a phone the same way the table does.
+                rowVariant?.(row) === "child" && "ml-4 bg-gray-50/70 ring-gray-150",
+                rowVariant?.(row) === "parent" && "ring-gray-300"
               )}
               onClick={() => onRowClick?.(row)}
               onKeyDown={(e) => {
@@ -142,15 +155,25 @@ export function DataTable<T extends { id: string }>({
               rows.map((row) => (
                 <tr
                   key={row.id}
-                  className={cn(onRowClick && "cursor-pointer hover:bg-gray-50")}
+                  className={cn(
+                    onRowClick && "cursor-pointer hover:bg-gray-50",
+                    // Per MRB-07: nested room stays sit on a tinted
+                    // band under their reservation row, and the
+                    // reservation row itself keeps a normal white
+                    // background so it reads as the group header.
+                    rowVariant?.(row) === "child" && "bg-gray-50/70"
+                  )}
                   onClick={() => onRowClick?.(row)}
                 >
-                  {columns.map((column) => (
+                  {columns.map((column, columnIndex) => (
                     <td
                       key={String(column.key)}
                       className={cn(
                         "whitespace-nowrap px-4 py-4 text-gray-700",
-                        column.align === "end" && "text-right"
+                        column.align === "end" && "text-right",
+                        // Indent only the first cell so the nesting is
+                        // visible without shifting every column.
+                        columnIndex === 0 && rowVariant?.(row) === "child" && "pl-10"
                       )}
                     >
                       {column.render ? column.render(row) : String(row[column.key as keyof T] ?? "")}

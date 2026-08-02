@@ -73,7 +73,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `paymentStatus` | enum | `"awaiting-payment"` \| `"payment-uploaded"` \| `"payment-confirmed"` \| `"confirmed"` \| `"in-house"` \| `"completed"` \| `"cancelled"` |
 | `paymentMethod` / `paymentProofUrl` / `paymentProofPath` | string \| null | Money-state mirrors at reservation level |
 | `termsAccepted` / `termsVersion` / `privacyAccepted` / `privacyVersion` | bool / string | Consent versioning |
-| `roomCount` / `activeRoomCount` / `cancelledRoomCount` / `checkedInRoomCount` / `checkedOutRoomCount` | number | Aggregate counters |
+| `roomCount` / `activeRoomCount` / `cancelledRoomCount` / `checkedInRoomCount` / `checkedOutRoomCount` | number | Aggregate counters. Per MRB-07, a staff-created reservation stamps these from its actual room count (N), so the admin reservation row reads room count, status and balance without fanning out to the children |
 | `holdExpiresAt` | timestamp \| null | Unified payment hold deadline (PEX-01) |
 | `requestFingerprint` | string | Canonical SHA-256 create request fingerprint for idempotency |
 | `createdAt` / `updatedAt` / `createdBy` | timestamp / string | Audit |

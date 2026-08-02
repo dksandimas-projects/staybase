@@ -183,18 +183,21 @@ describe("CHD-04 — capacity validation splits into two checks (server-authorit
 
   it("handleCreateWalkin applies the same two-checks (adult cap + child cap)", () => {
     // Per EXB-03: the walk-in path uses the same
-    // `requiredExtraBedsFor` helper, scoped to the
-    // walk-in variables (`walkinNumAdults` +
-    // `walkinNumChildren` + `walkinExtraBedCount`). The
-    // helper subsumes the old `walkinNumChildren >
-    // walkinMaxChildren` hard reject — when
-    // `walkinExtraBedCount === 0`, the helper reduces to
-    // both hard caps.
+    // `requiredExtraBedsFor` helper. The helper subsumes the
+    // old `numChildren > maxChildren` hard reject — when the
+    // extra-bed count is 0, the helper reduces to both hard
+    // caps.
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the check moved
+    // inside the per-room-stay loop, so each room in a multi-room
+    // reservation is capped against ITS OWN type entry rather than
+    // against the primary room's. The occupancy passed to the
+    // helper is that room's own split.
     expect(bookingsHandlerSrc).toMatch(
-      /const\s+walkinOverflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}walkinNumAdults,[\s\S]{0,200}walkinNumChildren,[\s\S]{0,200}maxCapacity:\s*typeMaxCapacity,[\s\S]{0,200}maxChildren:\s*walkinMaxChildren[\s\S]{0,200}\}\)/
+      /const\s+lineOverflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,300}numAdults:\s*assigned\.numAdults,[\s\S]{0,300}numChildren:\s*assigned\.numChildren,[\s\S]{0,300}maxCapacity:[\s\S]{0,300}lineTypeEntry\.maxCapacity[\s\S]{0,300}maxChildren:[\s\S]{0,300}lineTypeEntry\.maxChildren[\s\S]{0,300}\}\)/
     );
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*walkinOverflow\.requiredExtraBeds\s*>\s*walkinExtraBedCount\s*\)/
+      /if\s*\(\s*lineOverflow\.requiredExtraBeds\s*>\s*lineExtraBedCount\s*\)/
     );
   });
 });

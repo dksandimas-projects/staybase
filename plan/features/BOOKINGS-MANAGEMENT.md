@@ -22,6 +22,23 @@ The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 
 ---
 
+## Multi-Room Reservations (MRB-07)
+
+The New Booking modal creates a reservation covering one **or more** rooms — walk-in groups, phone bookings, and OTA entry all book blocks.
+
+- **Room stay list:** each stay picks its own room type + specific vacant room and carries its own occupancy steppers (adults / children / extra beds). Rooms may be of different types. The lead guest, dates, source, payment, discount, and voucher stay reservation-level; guests are distributed across rooms, never repeated on each.
+- **Picker safety:** a room already claimed by another stay is filtered out, and the submit button stays disabled until every stay names a vacant room and fits its own type's caps — all of these are server rejects.
+- **Preview:** the accommodation figure is the sum of the per-stay charges, each priced against its own type; a multi-room reservation states its room count and room numbers.
+- **Reset:** a successful create drops the modal back to a single empty stay, so the next booking never inherits the previous group's rooms.
+
+**List rendering.** The main Bookings list shows one row per reservation with its room stays nested beneath it (collapsed by default; the row expands rather than opening a workspace). The reservation row shows the public reservation ref, room count, aggregate total, group balance due, and a **Mixed** status pill when its rooms disagree. Operational quick views — Needs attention, Arrivals today, Departures today, In house — stay **room rows**, because the unit of work there is a room. A reservation is only grouped when it holds more than one row currently in view, so filters never misreport the result set; single-room reservations and legacy bookings without a reservation link render as plain room rows.
+
+**Action scope.** Inside a multi-room reservation, the drawer shows a reservation strip (ref, "Room X of N", one-tap navigation to sibling rooms) and every action states what it touches: `This room` for check-in, confirm, move/upgrade, and cancel; `All rooms` for the reservation-owned folio actions (payment review, collect balance, confirm with balance). Single-room and legacy bookings show no scope labels.
+
+**Deep links.** `?bookingId=` opens that room's drawer. `?reservationId=` / `?reservationRef=` expand the reservation in the list and open its lead room.
+
+---
+
 ## Table Filtering & Search (FSO Contract)
 
 - **Two-Level Controls:** Quick-view chips, search input, result counts (`n of total`), and advanced filter panel.

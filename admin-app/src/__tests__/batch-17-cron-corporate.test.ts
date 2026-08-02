@@ -105,7 +105,11 @@ describe("Phase 11.6 Batch 17 — cron idempotency + corporate no-promo", () => 
       // The previous code unconditionally entered the if(voucherCode)
       // block. Now the only entry path is the gated check.
       const createMatch = bookingsHandlerSrc.match(
-        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(bookingDocRef,\s*newBooking\);/
+        // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): the
+        // create path writes N booking docs in a loop rather than one
+        // `transaction.set(bookingDocRef, newBooking)`, so the body is
+        // anchored on the reservation header write instead.
+        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(reservationDocRef,\s*newReservation\);/
       );
       expect(createMatch).toBeTruthy();
       const body = createMatch![0];
@@ -120,7 +124,11 @@ describe("Phase 11.6 Batch 17 — cron idempotency + corporate no-promo", () => 
       // branch was skipped (corporate), the defaults from the doc
       // literal are what gets stored.
       const createMatch = bookingsHandlerSrc.match(
-        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(bookingDocRef,\s*newBooking\);/
+        // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): the
+        // create path writes N booking docs in a loop rather than one
+        // `transaction.set(bookingDocRef, newBooking)`, so the body is
+        // anchored on the reservation header write instead.
+        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(reservationDocRef,\s*newReservation\);/
       );
       expect(createMatch).toBeTruthy();
       const body = createMatch![0];

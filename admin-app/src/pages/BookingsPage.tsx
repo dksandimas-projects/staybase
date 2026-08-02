@@ -22,6 +22,7 @@ import { BookingEmailActions } from "../components/BookingEmailActions";
 import { IncidentalChargeList } from "../components/IncidentalChargeList";
 import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
+import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import {
@@ -47,12 +48,53 @@ import {
   Loader2,
   Move,
   Info,
+  ChevronDown,
   ChevronRight,
   Search,
   FlaskConical
 } from "lucide-react";
 
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+
+// Per MRB-07 (2026-08-02, per decision #159): one room inside the New
+// Booking modal's reservation. The desk picks a type and a specific
+// room per stay and distributes the party's guests across them; the
+// lead guest, dates, payment, discount and voucher stay
+// reservation-level. `key` is a stable React key so removing a middle
+// row doesn't reshuffle the inputs of the rows after it.
+type WalkinRoomStay = {
+  key: string;
+  roomType: string;
+  roomNumber: string;
+  numAdults: number;
+  numChildren: number;
+  extraBedCount: number;
+};
+
+// Per MRB-07 (2026-08-02, per decision #159): a row in the main
+// Bookings list. `booking` is an ungrouped room row (the historical
+// shape); `reservation` is the synthetic parent row for a reservation
+// covering several rooms; `roomStay` is one of that reservation's rooms
+// rendered nested beneath it. Grouping is derived from the
+// `reservation*` fields already denormalized onto each booking, so the
+// list needs no extra reads to render a group.
+type BookingListRow = Booking & {
+  listRowKind: "booking" | "reservation" | "roomStay";
+  listReservationId?: string;
+  listRoomCount?: number;
+  listChildBookings?: Booking[];
+  listReservationBalance?: number;
+};
+
+let walkinRoomStayKeySeq = 0;
+const createWalkinRoomStay = (roomType: string): WalkinRoomStay => ({
+  key: `stay_${++walkinRoomStayKeySeq}`,
+  roomType,
+  roomNumber: "",
+  numAdults: 1,
+  numChildren: 0,
+  extraBedCount: 0
+});
 
 function toDate(value: any): Date | null {
   if (!value) return null;
@@ -656,12 +698,43 @@ export function BookingsPage() {
 
   const processedDeepLinkRef = useRef<string | null>(null);
   useEffect(() => {
+    // Per MRB-07 (2026-08-02, per decision #159): deep links resolve
+    // both a child booking id (`?bookingId=`) and a reservation
+    // (`?reservationId=` or `?reservationRef=`). Emails, receipts and
+    // notifications reference whichever level they were written about,
+    // and every one of them must land somewhere useful. A reservation
+    // link expands that reservation in the list and opens its lead room
+    // — the room the desk almost always wants — rather than dead-ending
+    // because the id isn't a booking id.
     const bookingId = searchParams.get("bookingId");
-    if (!bookingId || bookingId === processedDeepLinkRef.current) return;
-    processedDeepLinkRef.current = bookingId;
-    const match = bookings.find((booking) => booking.id === bookingId);
-    if (!match) return;
-    setSelectedBooking(match);
+    const reservationId = searchParams.get("reservationId");
+    const reservationRef = searchParams.get("reservationRef");
+    const deepLinkKey = bookingId || reservationId || reservationRef;
+    if (!deepLinkKey || deepLinkKey === processedDeepLinkRef.current) return;
+
+    if (bookingId) {
+      const match = bookings.find((booking) => booking.id === bookingId);
+      if (!match) return;
+      processedDeepLinkRef.current = deepLinkKey;
+      setSelectedBooking(match);
+      setIsDrawerOpen(true);
+      return;
+    }
+
+    const reservationRooms = bookings
+      .filter((booking) =>
+        reservationId
+          ? booking.reservationId === reservationId
+          : booking.reservationRef === reservationRef
+      )
+      .sort((a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0));
+    if (reservationRooms.length === 0) return;
+    processedDeepLinkRef.current = deepLinkKey;
+    const resolvedReservationId = reservationRooms[0].reservationId;
+    if (resolvedReservationId) {
+      setExpandedReservationIds((current) => new Set(current).add(resolvedReservationId));
+    }
+    setSelectedBooking(reservationRooms[0]);
     setIsDrawerOpen(true);
   }, [searchParams, bookings]);
 
@@ -788,15 +861,42 @@ export function BookingsPage() {
   const [walkinLastName, setWalkinLastName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [roomType, setRoomType] = useState<string>(() => roomTypes[0]?.value || "");
+  // Per MRB-07 (2026-08-02, per decision #159): the New Booking modal
+  // creates a reservation covering one OR MORE room stays — walk-in
+  // groups, phone bookings and OTA entry all book blocks of rooms. The
+  // room stay list is the single source of truth for the room, guest
+  // and extra-bed selections; the whole reservation shares one lead
+  // guest, one set of dates and one payment. A brand new modal starts
+  // with exactly one stay, so the common single-room case is unchanged
+  // for the desk.
+  const [walkinRoomStays, setWalkinRoomStays] = useState<WalkinRoomStay[]>(
+    () => [createWalkinRoomStay(roomTypes[0]?.value || "")]
+  );
 
-  // Sync default roomType when roomTypes load
+  // Sync the default room type onto the first stay when the room type
+  // catalog finishes loading.
   useEffect(() => {
-    if (!roomType && roomTypes.length > 0) {
-      setRoomType(roomTypes[0].value);
+    if (roomTypes.length > 0) {
+      setWalkinRoomStays((stays) =>
+        stays.some((stay) => stay.roomType)
+          ? stays
+          : stays.map((stay) => ({ ...stay, roomType: roomTypes[0].value }))
+      );
     }
   }, [roomTypes]);
-  const [roomNumber, setRoomNumber] = useState("");
+
+  // Compatibility aliases for the primary room stay. The submit
+  // handler, the price preview and the booking payload all describe the
+  // reservation as a whole; these two keep the "primary room" reads
+  // that predate multi-room support reading the first stay.
+  const roomType = walkinRoomStays[0]?.roomType || "";
+  const roomNumber = walkinRoomStays[0]?.roomNumber || "";
+
+  const updateWalkinRoomStay = (index: number, patch: Partial<WalkinRoomStay>) => {
+    setWalkinRoomStays((stays) =>
+      stays.map((stay, idx) => (idx === index ? { ...stay, ...patch } : stay))
+    );
+  };
   const [checkInDate, setCheckInDate] = useState(() => getManilaDateInfo(config.timezone).todayStr);
   const [checkOutDate, setCheckOutDate] = useState(() => {
     const tomorrow = getManilaDateInfo(config.timezone).manilaDate;
@@ -816,15 +916,23 @@ export function BookingsPage() {
   // `allowsExtraBed` boolean" rule). The legacy single
   // `numGuests` input is replaced by the 3 steppers; the
   // total is auto-derived from the adult + child sum.
-  const [walkinNumAdults, setWalkinNumAdults] = useState(1);
-  const [walkinNumChildren, setWalkinNumChildren] = useState(0);
-  const [walkinExtraBedCount, setWalkinExtraBedCount] = useState(0);
+  //
+  // Per MRB-07 (2026-08-02, per decision #159): the steppers live on
+  // each room stay, so a reservation distributes its guests across its
+  // rooms instead of repeating one occupancy on every room. These
+  // aliases read the primary stay.
+  const walkinNumAdults = walkinRoomStays[0]?.numAdults ?? 1;
+  const walkinNumChildren = walkinRoomStays[0]?.numChildren ?? 0;
+  const walkinExtraBedCount = walkinRoomStays[0]?.extraBedCount ?? 0;
   // Derived from the split (per CHD-04): the price preview
   // and the booking doc's `numGuests` field both use this
-  // sum. The walkin form no longer has an independent
-  // `numGuests` input — the 3 steppers are the only source
-  // of truth.
-  const numGuests = walkinNumAdults + walkinNumChildren;
+  // sum. The walkin form has no independent `numGuests`
+  // input — the steppers are the only source of truth. Per
+  // MRB-07 the total is summed across every room stay.
+  const numGuests = walkinRoomStays.reduce(
+    (sum, stay) => sum + stay.numAdults + stay.numChildren,
+    0
+  );
   // Per NBS-07 (2026-07-31): the New Booking modal now records the
   // source (walk-in / phone / facebook / agoda / etc.) and writes it
   // to `Booking.source`. Default is still "walk-in" so the common
@@ -1063,63 +1171,98 @@ export function BookingsPage() {
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, [selectedBooking?.id, selectedBooking?.reservationId, selectedFolioBookingIds, toast]);
 
-  // Filter available rooms based on type selected
-  const availableRoomsOfType = rooms.filter(
-    r => r.type === roomType && r.status === "available"
-  );
-
-  // Per EXB-07 (2026-08-01, per decision #155): the walk-in
-  // modal reads the selected room TYPE (not the room number —
-  // the desk picks a type first, then a specific room) to
-  // surface the per-type caps (`maxCapacity` + `maxChildren`
-  // + `maxExtraBeds` + `extraBedRate`) for the occupancy
-  // steppers + the overflow contextual message. The lookup
-  // is intentionally separate from `selectedRoomType` (which
-  // reads from the room number's type) so the overflow
-  // message can render before the desk has picked a specific
-  // room — that's the case where the message is most
-  // actionable.
-  const walkinTypeEntry = roomTypes.find(t => t.value === roomType);
-  const walkinTypeMaxCapacity = Number(walkinTypeEntry?.maxCapacity) || 0;
-  const walkinTypeMaxChildren = Number(walkinTypeEntry?.maxChildren) || 0;
-  const walkinTypeMaxExtraBeds = Number(walkinTypeEntry?.maxExtraBeds) || 0;
-  const walkinTypeExtraBedRate = Number(walkinTypeEntry?.extraBedRate) || 0;
-  // The derived `numGuests` for the price preview is the
-  // sum of the adult + child split (per CHD-04). When the
-  // desk changes either stepper, the total auto-updates.
-  const walkinDerivedNumGuests = walkinNumAdults + walkinNumChildren;
-  // The overflow for the contextual message. Uses the same
-  // `requiredExtraBedsFor` helper the server uses
-  // (per decision #153) so the client-side preview is
-  // byte-equivalent to the server's `handleCreateWalkin`
-  // check.
-  const walkinOverflow = walkinTypeEntry
-    ? requiredExtraBedsFor({
-        numAdults: walkinNumAdults,
-        numChildren: walkinNumChildren,
-        maxCapacity: walkinTypeMaxCapacity,
-        maxChildren: walkinTypeMaxChildren
-      })
-    : { overflowAdults: 0, overflowChildren: 0, requiredExtraBeds: 0 };
-  const walkinShowOverflowHint =
-    walkinTypeEntry && walkinOverflow.requiredExtraBeds > walkinExtraBedCount;
+  // Per EXB-07 (2026-08-01, per decision #155) + MRB-07 (2026-08-02,
+  // per decision #159): the per-type caps (`maxCapacity` +
+  // `maxChildren` + `maxExtraBeds` + `extraBedRate`) that drive the
+  // occupancy steppers and the contextual overflow message are read
+  // per room stay, inside the room list below, rather than once from a
+  // single selected type. Each stay looks up its own type entry from
+  // its selected room TYPE (not its room number) so the overflow
+  // message can render before the desk has picked a specific room —
+  // that's the case where the message is most actionable. The overflow
+  // itself uses the same `requiredExtraBedsFor` helper the server uses
+  // (per decision #153) so the preview matches the server's check.
 
   // Calculate rate per night for the selected room number — per W3.6
   // the rate lives on the room's type, not the room itself.
   const selectedRoomDetails = rooms.find(r => r.roomNumber === roomNumber);
   const selectedRoomType = roomTypes.find(t => t.value === selectedRoomDetails?.type);
   const ratePerNight = selectedRoomType?.pricePerNight || 0;
-  const roomChargeTotal = selectedRoomType
-    ? calculateSeasonalAwareRoomTotal({
-        checkIn: `${checkInDate}T00:00:00Z`,
-        checkOut: `${checkOutDate}T00:00:00Z`,
-        roomType: selectedRoomType.value,
-        baseRate: selectedRoomType.pricePerNight,
-        weekendRate: selectedRoomType.weekendRate,
-        seasonalRateOverrides
-      })
-    : 0;
-  
+
+  // Per MRB-07 (2026-08-02, per decision #159): the room charge is the
+  // sum across every room stay, each priced against its own type — the
+  // same shape the server computes, so the preview the desk sees before
+  // confirming matches what gets written.
+  const walkinRoomChargeTotals = walkinRoomStays.map((stay) => {
+    const stayRoom = rooms.find((r) => r.roomNumber === stay.roomNumber);
+    const stayType = roomTypes.find((t) => t.value === (stayRoom?.type || stay.roomType));
+    if (!stayType || !stay.roomNumber) return 0;
+    return calculateSeasonalAwareRoomTotal({
+      checkIn: `${checkInDate}T00:00:00Z`,
+      checkOut: `${checkOutDate}T00:00:00Z`,
+      roomType: stayType.value,
+      baseRate: stayType.pricePerNight,
+      weekendRate: stayType.weekendRate,
+      seasonalRateOverrides
+    });
+  });
+  const roomChargeTotal = walkinRoomChargeTotals.reduce((sum, amount) => sum + amount, 0);
+
+  // Rooms already claimed by another stay must not be offered again —
+  // the server rejects a duplicate room, so the picker never lets the
+  // desk build one.
+  const availableRoomsForStay = (stayIndex: number) => {
+    const claimed = new Set(
+      walkinRoomStays
+        .filter((_, idx) => idx !== stayIndex)
+        .map((stay) => stay.roomNumber)
+        .filter(Boolean)
+    );
+    return rooms.filter(
+      (r) =>
+        r.type === walkinRoomStays[stayIndex].roomType &&
+        r.status === "available" &&
+        !claimed.has(r.roomNumber)
+    );
+  };
+
+  const addWalkinRoomStay = () => {
+    setWalkinRoomStays((stays) => {
+      const nextType = stays[stays.length - 1]?.roomType || roomTypes[0]?.value || "";
+      const claimed = new Set(stays.map((stay) => stay.roomNumber).filter(Boolean));
+      const nextStay = createWalkinRoomStay(nextType);
+      const firstFree = rooms.find(
+        (r) => r.type === nextType && r.status === "available" && !claimed.has(r.roomNumber)
+      );
+      return [...stays, { ...nextStay, roomNumber: firstFree?.roomNumber || "" }];
+    });
+  };
+
+  const removeWalkinRoomStay = (index: number) => {
+    setWalkinRoomStays((stays) =>
+      stays.length <= 1 ? stays : stays.filter((_, idx) => idx !== index)
+    );
+  };
+
+  // Every stay must name a room, and no stay may exceed its type's caps
+  // without enough extra beds — both are server rejects, so the submit
+  // button stays disabled until the reservation is actually creatable.
+  const walkinRoomStayIssues = walkinRoomStays.map((stay) => {
+    if (!stay.roomNumber) return "room";
+    const stayType = roomTypes.find((t) => t.value === stay.roomType);
+    if (!stayType) return "type";
+    const overflow = requiredExtraBedsFor({
+      numAdults: stay.numAdults,
+      numChildren: stay.numChildren,
+      maxCapacity: Number(stayType.maxCapacity) || 0,
+      maxChildren: Number(stayType.maxChildren) || 0
+    });
+    if (overflow.requiredExtraBeds > stay.extraBedCount) return "capacity";
+    if (stay.numAdults + stay.numChildren < 1) return "empty";
+    return null;
+  });
+  const walkinReservationIsValid = walkinRoomStayIssues.every((issue) => issue === null);
+
   // Calculate nights
   const getNumNights = () => {
     if (!checkInDate || !checkOutDate) return 1;
@@ -1133,13 +1276,30 @@ export function BookingsPage() {
   const totalPrice = roomChargeTotal + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
 
   // Table Columns Setup
-  const columns: Array<DataTableColumn<Booking>> = [
+  // Per MRB-07 (2026-08-02, per decision #159): the columns render three
+  // row kinds. A `reservation` row is the group header — it shows the
+  // public reservation reference, the room count, and the reservation's
+  // aggregate money, and it expands rather than opening a workspace. A
+  // `roomStay` row is one room inside an expanded reservation. A
+  // `booking` row is an ungrouped room, exactly as before.
+  const columns: Array<DataTableColumn<BookingListRow>> = [
     {
       key: "bookingRef",
       header: "Reference",
       render: (row) => (
         <span className="inline-flex items-center gap-1.5">
-          {row.bookingRef}
+          {row.listRowKind === "reservation" ? (
+            <>
+              {expandedReservationIds.has(row.listReservationId!) ? (
+                <ChevronDown size={13} className="text-gray-500" aria-hidden="true" />
+              ) : (
+                <ChevronRight size={13} className="text-gray-500" aria-hidden="true" />
+              )}
+              <strong className="font-bold">{row.reservationRef || row.bookingRef}</strong>
+            </>
+          ) : (
+            row.bookingRef
+          )}
           {row.isTestData && (
             <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
           )}
@@ -1150,11 +1310,16 @@ export function BookingsPage() {
     {
       key: "roomNumber",
       header: "Room",
-      render: (row) => (
-        <span>
-          Room {row.roomNumber} ({row.roomType.replace("-", " ")})
-        </span>
-      )
+      render: (row) =>
+        row.listRowKind === "reservation" ? (
+          <span className="font-semibold text-gray-700">
+            {row.listRoomCount} rooms
+          </span>
+        ) : (
+          <span>
+            Room {row.roomNumber} ({row.roomType.replace("-", " ")})
+          </span>
+        )
     },
     {
       key: "checkIn",
@@ -1169,14 +1334,34 @@ export function BookingsPage() {
       key: "totalPrice",
       header: "Total",
       align: "end",
-      render: (row) => <strong className="font-bold">{formatPrice(row.totalPrice)}</strong>
+      render: (row) => (
+        <span className="inline-flex flex-col items-end">
+          <strong className="font-bold">{formatPrice(row.totalPrice)}</strong>
+          {/* Per MRB-07: the reservation row states the group balance
+              so the desk can triage a group without expanding it. */}
+          {row.listRowKind === "reservation" && (row.listReservationBalance || 0) > 0 && (
+            <span className="text-[10px] font-semibold text-amber-700">
+              {formatPrice(row.listReservationBalance!)} due
+            </span>
+          )}
+        </span>
+      )
     },
     {
       key: "status",
       header: "Status",
       render: (row) => (
         <div className="flex items-center gap-1.5">
-          <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+          {/* Per MRB-07: when a reservation's rooms disagree the row
+              says so rather than picking one room's status to stand
+              for the whole group. */}
+          {row.listRowKind === "reservation" && new Set((row.listChildBookings || []).map((child) => child.status)).size > 1 ? (
+            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 ring-1 ring-gray-200">
+              Mixed
+            </span>
+          ) : (
+            <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+          )}
           {row.earlyCheckIn?.status === "requested" && (
             <span
               title="Early check-in pending review"
@@ -1205,19 +1390,33 @@ export function BookingsPage() {
       key: "action",
       header: "Actions",
       align: "end",
-      render: (row) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setSelectedBooking(row);
-            setIsDrawerOpen(true);
-          }}
-          className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition"
-        >
-          <Eye size={12} />
-          Details
-        </button>
-      )
+      render: (row) =>
+        // Per MRB-07: a reservation has no single booking workspace, so
+        // its action is to reveal the rooms. Each room then opens its
+        // own drawer as it always has.
+        row.listRowKind === "reservation" ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleReservationExpanded(row.listReservationId!);
+            }}
+            className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition"
+          >
+            {expandedReservationIds.has(row.listReservationId!) ? "Hide rooms" : "Show rooms"}
+          </button>
+        ) : (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedBooking(row);
+              setIsDrawerOpen(true);
+            }}
+            className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition"
+          >
+            <Eye size={12} />
+            Details
+          </button>
+        )
     }
   ];
 
@@ -1378,7 +1577,155 @@ export function BookingsPage() {
     return rows;
   }, [bookings, bookingSearch, bookingStatusFilter, bookingQuickView, bDateBasis, bDateFrom, bDateTo, bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount]);
 
-  const handleRowClick = (row: Booking) => {
+  // Per MRB-07 (2026-08-02, per decision #159): the main Bookings list
+  // shows one row per RESERVATION, with its room stays nested beneath
+  // it. Operational quick views stay room rows — when the desk is
+  // working arrivals, departures, in-house or needs-attention, the unit
+  // of work is a room, not a reservation, and collapsing rooms into a
+  // group would hide the very rows being worked.
+  const OPERATIONAL_QUICK_VIEWS = new Set([
+    "needs-attention",
+    "arrivals-today",
+    "departures-today",
+    "in-house"
+  ]);
+  const bookingListIsGrouped = !OPERATIONAL_QUICK_VIEWS.has(bookingQuickView);
+
+  // Which reservations the desk has expanded. Collapsed by default so
+  // a group booking reads as one line until the desk asks for the
+  // rooms.
+  const [expandedReservationIds, setExpandedReservationIds] = useState<Set<string>>(new Set());
+  const toggleReservationExpanded = (reservationId: string) => {
+    setExpandedReservationIds((current) => {
+      const next = new Set(current);
+      if (next.has(reservationId)) next.delete(reservationId);
+      else next.add(reservationId);
+      return next;
+    });
+  };
+
+  // The flattened row list the table renders: a synthetic reservation
+  // row followed by its room stays when expanded. A reservation is only
+  // grouped when it actually holds more than one of the rows currently
+  // in view — a single-room reservation, a legacy booking with no
+  // reservation link, or a group whose other rooms were filtered out
+  // all render as plain room rows, so filters never lie about what is
+  // in the result set.
+  const groupedRows = useMemo<BookingListRow[]>(() => {
+    if (!bookingListIsGrouped) {
+      return filteredRows.map((booking) => ({ ...booking, listRowKind: "booking" as const }));
+    }
+
+    const byReservation = new Map<string, Booking[]>();
+    for (const booking of filteredRows) {
+      const reservationId = booking.reservationId;
+      if (!reservationId) continue;
+      const group = byReservation.get(reservationId);
+      if (group) group.push(booking);
+      else byReservation.set(reservationId, [booking]);
+    }
+
+    const emitted = new Set<string>();
+    const rows: BookingListRow[] = [];
+    for (const booking of filteredRows) {
+      if (emitted.has(booking.id)) continue;
+      const reservationId = booking.reservationId;
+      const group = reservationId ? byReservation.get(reservationId) : undefined;
+
+      if (!reservationId || !group || group.length < 2) {
+        rows.push({ ...booking, listRowKind: "booking" });
+        emitted.add(booking.id);
+        continue;
+      }
+
+      const sorted = [...group].sort(
+        (a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0)
+      );
+      const reservationTotal = sorted.reduce((sum, child) => sum + (child.totalPrice || 0), 0);
+      const reservationBalance = sorted.reduce(
+        (sum, child) => sum + getBookingFolio(child).balance,
+        0
+      );
+      // The reservation row borrows the lead room's identity for the
+      // fields every column already knows how to read, and overrides
+      // the ones that are reservation-scoped (money, room label,
+      // occupancy). The columns special-case `listRowKind` where the
+      // reservation needs to read differently from a room.
+      rows.push({
+        ...sorted[0],
+        id: `reservation_${reservationId}`,
+        listRowKind: "reservation",
+        listReservationId: reservationId,
+        listRoomCount: sorted.length,
+        listChildBookings: sorted,
+        listReservationBalance: reservationBalance,
+        totalPrice: reservationTotal,
+        numGuests: sorted.reduce((sum, child) => sum + (child.numGuests || 0), 0)
+      });
+      emitted.add(booking.id);
+
+      if (expandedReservationIds.has(reservationId)) {
+        for (const child of sorted) {
+          rows.push({ ...child, listRowKind: "roomStay", listReservationId: reservationId });
+          emitted.add(child.id);
+        }
+      } else {
+        for (const child of sorted) emitted.add(child.id);
+      }
+    }
+    return rows;
+  }, [filteredRows, bookingListIsGrouped, expandedReservationIds]);
+
+  // Per MRB-07 (2026-08-02, per decision #159): the reservation context
+  // for whatever booking the drawer currently has open. `null` for a
+  // legacy booking with no reservation link, and for a reservation that
+  // only ever held one room — in both cases there is no "other rooms"
+  // to disambiguate against, so the drawer stays exactly as it was.
+  const selectedReservationContext = useMemo(() => {
+    if (!selectedBooking?.reservationId) return null;
+    const siblings = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .sort((a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0));
+    if (siblings.length < 2) return null;
+    return {
+      reservationId: selectedBooking.reservationId,
+      reservationRef: selectedBooking.reservationRef || "",
+      rooms: siblings,
+      roomCount: siblings.length,
+      position: siblings.findIndex((booking) => booking.id === selectedBooking.id) + 1
+    };
+  }, [selectedBooking, bookings]);
+
+  // Every action inside a multi-room reservation states what it touches.
+  // Without this the desk cannot tell whether "Cancel Booking" drops one
+  // room or the whole group — the single most expensive ambiguity in a
+  // group booking. Rendered only when there IS more than one room, so
+  // ordinary single-room work is not cluttered with a label that would
+  // always read the same.
+  const renderActionScope = (scope: "room" | "reservation") => {
+    if (!selectedReservationContext) return null;
+    return (
+      <span
+        className={cn(
+          "ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+          scope === "room"
+            ? "bg-white/20 text-current"
+            : "bg-amber-100 text-amber-800"
+        )}
+      >
+        {scope === "room" ? "This room" : "All rooms"}
+      </span>
+    );
+  };
+
+  const handleRowClick = (row: BookingListRow) => {
+    // Clicking a reservation row expands it rather than opening a
+    // drawer — a reservation has no single booking workspace, and the
+    // desk's next decision is always "which room".
+    if (row.listRowKind === "reservation") {
+      toggleReservationExpanded(row.listReservationId!);
+      return;
+    }
     setSelectedBooking(row);
     setIsDrawerOpen(true);
   };
@@ -1449,7 +1796,64 @@ export function BookingsPage() {
     return paid >= row.totalPrice && row.totalPrice > 0;
   };
 
-  const renderBookingCard = (row: Booking) => (
+  const renderBookingCard = (row: BookingListRow) => {
+    // Per MRB-07 (2026-08-02, per decision #159): on a phone a
+    // reservation renders as a compact summary card that expands to its
+    // room cards, rather than repeating the full room detail of its
+    // lead room.
+    if (row.listRowKind === "reservation") {
+      const mixedStatus = new Set((row.listChildBookings || []).map((child) => child.status)).size > 1;
+      return (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5">
+              {expandedReservationIds.has(row.listReservationId!) ? (
+                <ChevronDown size={13} className="text-gray-500" aria-hidden="true" />
+              ) : (
+                <ChevronRight size={13} className="text-gray-500" aria-hidden="true" />
+              )}
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
+                REF: {row.reservationRef || row.bookingRef}
+              </span>
+              {row.isTestData && (
+                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+              )}
+            </span>
+            {mixedStatus ? (
+              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 ring-1 ring-gray-200">
+                Mixed
+              </span>
+            ) : (
+              <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+            )}
+          </div>
+          <p className="text-base font-bold text-gray-900">{row.guestName}</p>
+          <div className="flex items-center gap-3 text-xs text-gray-600">
+            <span className="flex items-center gap-1">
+              <Calendar size={12} className="text-gray-400" aria-hidden="true" />
+              {row.checkIn} – {row.checkOut}
+            </span>
+            <span className="flex items-center gap-1">
+              <BedDouble size={12} className="text-gray-400" aria-hidden="true" />
+              {row.listRoomCount} rooms
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <strong className="text-sm font-bold text-gray-900">{formatPrice(row.totalPrice)}</strong>
+            {(row.listReservationBalance || 0) > 0 && (
+              <span className="text-[11px] font-semibold text-amber-700">
+                {formatPrice(row.listReservationBalance!)} due
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] font-semibold text-gray-500">
+            Tap to {expandedReservationIds.has(row.listReservationId!) ? "hide" : "show"} rooms
+          </p>
+        </div>
+      );
+    }
+
+    return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5">
@@ -1523,7 +1927,8 @@ export function BookingsPage() {
         </button>
       </div>
     </div>
-  );
+    );
+  };
 
   const renderOrderCard = (row: any) => (
     <div className="space-y-2">
@@ -3070,13 +3475,36 @@ export function BookingsPage() {
       );
       return;
     }
+    // Per MRB-07 (2026-08-02, per decision #159): every room in the
+    // reservation must name a vacant room before the reservation can be
+    // created — the server writes all N rooms or none of them.
+    if (walkinRoomStays.some((stay) => !stay.roomNumber)) {
+      toast.warning(
+        "Missing room",
+        "Every room in this reservation needs an available room number."
+      );
+      return;
+    }
 
+    const submittedRoomStays = walkinRoomStays;
     setIsWalkinSubmitting(true);
     try {
       const result = await addWalkinBooking({
         roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
         roomNumber,
         roomType,
+        // Per MRB-07 (2026-08-02, per decision #159): the reservation's
+        // full room list. The server treats this as canonical, prices
+        // each room against its own type, and writes one booking doc
+        // per room under a single reservation header. The top-level
+        // room / occupancy fields above still describe the primary
+        // room, which the server cross-checks against `rooms[0]`.
+        rooms: submittedRoomStays.map((stay) => ({
+          roomId: rooms.find((r) => r.roomNumber === stay.roomNumber)?.id || "",
+          numAdults: stay.numAdults,
+          numChildren: stay.numChildren,
+          extraBedCount: stay.extraBedCount
+        })),
         firstName: trimmedFirst,
         lastName: trimmedLast,
         reminderSentAt: null,
@@ -3151,22 +3579,22 @@ export function BookingsPage() {
         setWalkinLastName("");
         setGuestEmail("");
         setGuestPhone("");
-        setRoomNumber("");
         setPriceOverride("");
         setHasBreakfast(false);
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
         setWalkinTestRunId("");
-        // Per EXB-07: reset the adult/child split + extra bed
-        // count to the defaults so the next walk-in starts
-        // from the 1-adult-0-children-0-extra-bed state.
-        setWalkinNumAdults(1);
-        setWalkinNumChildren(0);
-        setWalkinExtraBedCount(0);
+        // Per EXB-07 + MRB-07: reset back to a single empty room stay
+        // at the 1-adult / 0-children / 0-extra-bed default, so the
+        // next booking starts from the common single-room state
+        // rather than inheriting the previous group's room list.
+        setWalkinRoomStays([createWalkinRoomStay(roomTypes[0]?.value || "")]);
         setIsModalOpen(false);
         toast.success(
-          "Walk-in booking created",
-          `Room ${roomNumber} for ${trimmedFirst} ${trimmedLast}`
+          submittedRoomStays.length > 1 ? "Reservation created" : "Walk-in booking created",
+          submittedRoomStays.length > 1
+            ? `${submittedRoomStays.length} rooms (${submittedRoomStays.map((stay) => stay.roomNumber).join(", ")}) for ${trimmedFirst} ${trimmedLast}`
+            : `Room ${roomNumber} for ${trimmedFirst} ${trimmedLast}`
         );
       } else {
         toast.error("Failed to create walk-in booking", result.error);
@@ -3200,6 +3628,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
         >
           Confirm pay-at-hotel booking
+          {renderActionScope("room")}
         </button>
       );
     }
@@ -3212,6 +3641,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
         >
           Review proof in Folio
+          {renderActionScope("reservation")}
         </button>
       );
     }
@@ -3224,6 +3654,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
         >
           Confirm booking
+          {renderActionScope("room")}
         </button>
       );
     }
@@ -3242,6 +3673,7 @@ export function BookingsPage() {
         >
           <CreditCard size={15} aria-hidden="true" />
           Collect {formatPrice(selectedBookingFolio.balance)}
+          {renderActionScope("reservation")}
         </button>
       );
     }
@@ -3255,6 +3687,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
         >
           {selectedBookingCheckInReadiness?.ready ? "Verify guest ID & check in" : "Complete check-in requirements"}
+          {renderActionScope("room")}
         </button>
       );
     }
@@ -3407,11 +3840,17 @@ export function BookingsPage() {
           <button
             onClick={() => {
               setPriceOverride("");
-              if (availableRoomsOfType.length > 0) {
-                setRoomNumber(availableRoomsOfType[0].roomNumber);
-              } else {
-                setRoomNumber("");
-              }
+              // Per MRB-07 (2026-08-02, per decision #159): open on a
+              // single room stay, preselected to the first vacant room
+              // of the default type — the common single-room case is
+              // still one click away.
+              const defaultType = roomTypes[0]?.value || "";
+              const firstFree = rooms.find(
+                (r) => r.type === defaultType && r.status === "available"
+              );
+              setWalkinRoomStays([
+                { ...createWalkinRoomStay(defaultType), roomNumber: firstFree?.roomNumber || "" }
+              ]);
               setIsModalOpen(true);
             }}
             className="min-h-[44px] px-5 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark active:scale-[0.98] text-sm font-semibold text-white shadow-sm transition"
@@ -3701,9 +4140,18 @@ export function BookingsPage() {
         <>
           <DataTable
             columns={columns}
-            rows={filteredRows}
+            rows={groupedRows}
             onRowClick={handleRowClick}
             renderMobileCard={renderBookingCard}
+            // Per MRB-07 (2026-08-02, per decision #159): nest the
+            // room stays under their reservation row.
+            rowVariant={(row) =>
+              row.listRowKind === "reservation"
+                ? "parent"
+                : row.listRowKind === "roomStay"
+                  ? "child"
+                  : undefined
+            }
             emptyMessage="No bookings match the current filters."
           />
         </>
@@ -3740,6 +4188,48 @@ export function BookingsPage() {
             ? "flow-root space-y-6 text-sm"
             : "space-y-6 text-sm"
           }>
+            {/* Per MRB-07 (2026-08-02, per decision #159): the
+                reservation strip. A room inside a multi-room
+                reservation always shows which reservation it belongs
+                to, its position in the group, and one-tap navigation to
+                the sibling rooms — the desk works a group room by room,
+                and re-finding the next room through the list each time
+                is the friction that makes staff avoid group bookings.
+                Absent entirely for single-room and legacy bookings. */}
+            {selectedReservationContext && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-gray-700">
+                    Reservation {selectedReservationContext.reservationRef || "—"}
+                    <span className="ml-2 font-semibold text-gray-500">
+                      Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
+                    </span>
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                    Actions below apply to this room unless marked
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {selectedReservationContext.rooms.map((sibling) => (
+                    <button
+                      key={sibling.id}
+                      type="button"
+                      onClick={() => setSelectedBooking(sibling)}
+                      aria-current={sibling.id === selectedBooking.id ? "true" : undefined}
+                      className={cn(
+                        "min-h-[32px] rounded-lg px-2.5 text-[11px] font-semibold transition",
+                        sibling.id === selectedBooking.id
+                          ? "bg-primary text-white"
+                          : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-100"
+                      )}
+                    >
+                      Room {sibling.roomNumber}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
             <BookingDrawerWorkspaceHeader
               booking={selectedBooking}
@@ -4909,6 +5399,7 @@ export function BookingsPage() {
                 >
                   <ShieldCheck size={15} className="text-primary" aria-hidden="true" />
                   Confirm with Balance
+                  {renderActionScope("reservation")}
                 </button>
               )}
 
@@ -4920,6 +5411,7 @@ export function BookingsPage() {
                 >
                   <Move size={15} className="text-primary" aria-hidden="true" />
                   Move / upgrade room
+                  {renderActionScope("room")}
                 </button>
               )}
 
@@ -4942,6 +5434,7 @@ export function BookingsPage() {
                     className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-600 transition"
                   >
                     Cancel Booking
+                    {renderActionScope("room")}
                   </button>
                 )
               )}
@@ -5208,10 +5701,18 @@ export function BookingsPage() {
             <PrimaryButton
               type="submit"
               form="walkin-form"
-              disabled={!roomNumber || isWalkinSubmitting}
+              // Per MRB-07 (2026-08-02, per decision #159): every room
+              // stay must name a vacant room and fit its own type's
+              // caps — all of them are server rejects, so the desk is
+              // stopped before the round trip rather than after it.
+              disabled={!walkinReservationIsValid || isWalkinSubmitting}
               className="min-w-[150px]"
             >
-              {isWalkinSubmitting ? "Confirming..." : "Confirm Reservation"}
+              {isWalkinSubmitting
+                ? "Confirming..."
+                : walkinRoomStays.length > 1
+                  ? `Confirm ${walkinRoomStays.length} Rooms`
+                  : "Confirm Reservation"}
             </PrimaryButton>
           </div>
         }
@@ -5284,47 +5785,6 @@ export function BookingsPage() {
           </label>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Room Type
-            <select
-              value={roomType}
-              onChange={(e) => {
-                setRoomType(e.target.value);
-                const matching = rooms.filter(r => r.type === e.target.value && r.status === "available");
-                if (matching.length > 0) {
-                  setRoomNumber(matching[0].roomNumber);
-                } else {
-                  setRoomNumber("");
-                }
-              }}
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
-            >
-              {roomTypes.map(t => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Select Available Room Number
-            <select
-              value={roomNumber}
-              onChange={(e) => setRoomNumber(e.target.value)}
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
-              required
-            >
-                {availableRoomsOfType.length > 0 ? (
-                  availableRoomsOfType.map(r => (
-                    <option key={r.id} value={r.roomNumber}>
-                      Room {r.roomNumber} ({roomTypes.find(t => t.value === r.type)?.shortLabel || r.type}, ₱{roomTypes.find(t => t.value === r.type)?.pricePerNight ?? 0}/night)
-                    </option>
-                  ))
-                ) : (
-                  <option value="" disabled>No vacant rooms available</option>
-                )}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Check-In Date
             <input
               type="date"
@@ -5346,114 +5806,234 @@ export function BookingsPage() {
             />
           </label>
 
-          {/* Per EXB-07 (2026-08-01, per decision #155):
-              the walk-in modal's occupancy block. Three
-              steppers: adults (>= 1, required), children
-              (>= 0), and extra beds (>= 0, capped at
-              `maxExtraBeds` for the selected type, hidden
-              entirely when the type allows 0). The sum
-              (`numGuests`) auto-updates the price preview
-              below. The contextual overflow hint renders
-              when the requested split exceeds the type's
-              caps — strongest UX: tell the desk exactly
-              how many extra beds to add instead of letting
-              the server reject. */}
-          <div className="space-y-2">
+          {/* Per EXB-07 (2026-08-01, per decision #155) + MRB-07
+              (2026-08-02, per decision #159): the reservation's room
+              stays. Each stay picks a room type and a specific vacant
+              room, then carries its own occupancy steppers: adults
+              (>= 1, required), children (>= 0), and extra beds (>= 0,
+              capped at `maxExtraBeds` for that stay's type, hidden
+              entirely when the type allows 0). Totals auto-update the
+              price preview below. The contextual overflow hint renders
+              per stay when its split exceeds that type's caps —
+              strongest UX: tell the desk exactly how many extra beds to
+              add instead of letting the server reject. Rooms already
+              taken by another stay are filtered out of the picker, so
+              the desk cannot build a reservation the server would
+              refuse for selling the same room twice. */}
+          <div className="space-y-3">
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-500">
-              <span>Occupancy</span>
+              <span>
+                Rooms
+                {walkinRoomStays.length > 1 ? ` (${walkinRoomStays.length})` : ""}
+              </span>
               <span className="text-gray-400 normal-case font-normal">
                 {numGuests} guest{numGuests === 1 ? "" : "s"} total
               </span>
             </div>
-            <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
-              <span>Adults</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                  aria-label="Decrease adults"
-                  onClick={() => setWalkinNumAdults(Math.max(1, walkinNumAdults - 1))}
-                  disabled={walkinNumAdults <= 1}
+
+            {walkinRoomStays.map((stay, stayIndex) => {
+              const stayRooms = availableRoomsForStay(stayIndex);
+              const stayTypeEntry = roomTypes.find((t) => t.value === stay.roomType);
+              const stayMaxCapacity = Number(stayTypeEntry?.maxCapacity) || 0;
+              const stayMaxChildren = Number(stayTypeEntry?.maxChildren) || 0;
+              const stayMaxExtraBeds = Number(stayTypeEntry?.maxExtraBeds) || 0;
+              const stayExtraBedRate = Number(stayTypeEntry?.extraBedRate) || 0;
+              const stayOverflow = stayTypeEntry
+                ? requiredExtraBedsFor({
+                    numAdults: stay.numAdults,
+                    numChildren: stay.numChildren,
+                    maxCapacity: stayMaxCapacity,
+                    maxChildren: stayMaxChildren
+                  })
+                : { overflowAdults: 0, overflowChildren: 0, requiredExtraBeds: 0 };
+              const stayShowOverflowHint =
+                Boolean(stayTypeEntry) && stayOverflow.requiredExtraBeds > stay.extraBedCount;
+              const stayGuests = stay.numAdults + stay.numChildren;
+
+              return (
+                <div
+                  key={stay.key}
+                  className="space-y-2 rounded-xl border border-gray-200 bg-gray-50/40 p-3"
                 >
-                  <Minus size={14} />
-                </button>
-                <span className="w-6 text-center tabular-nums">{walkinNumAdults}</span>
-                <button
-                  type="button"
-                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                  aria-label="Increase adults"
-                  onClick={() => setWalkinNumAdults(walkinNumAdults + 1)}
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-            </label>
-            <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
-              <span>Children (0–11, free of room rate)</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                  aria-label="Decrease children"
-                  onClick={() => setWalkinNumChildren(Math.max(0, walkinNumChildren - 1))}
-                  disabled={walkinNumChildren <= 0}
-                >
-                  <Minus size={14} />
-                </button>
-                <span className="w-6 text-center tabular-nums">{walkinNumChildren}</span>
-                <button
-                  type="button"
-                  className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                  aria-label="Increase children"
-                  // Cap children at (numGuests - 1) so at least
-                  // one adult stays — matches the guest /book
-                  // picker's invariant.
-                  onClick={() => setWalkinNumChildren(Math.min(walkinNumChildren + 1, Math.max(0, numGuests - 1)))}
-                  disabled={walkinNumChildren >= Math.max(0, numGuests - 1)}
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-            </label>
-            {walkinTypeMaxExtraBeds > 0 ? (
-              <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
-                <span>Extra beds ({formatPrice(walkinTypeExtraBedRate)} / bed / night)</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                    aria-label="Decrease extra beds"
-                    onClick={() => setWalkinExtraBedCount(Math.max(0, walkinExtraBedCount - 1))}
-                    disabled={walkinExtraBedCount <= 0}
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <span className="w-6 text-center tabular-nums">{walkinExtraBedCount}</span>
-                  <button
-                    type="button"
-                    className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                    aria-label="Increase extra beds"
-                    onClick={() => setWalkinExtraBedCount(Math.min(walkinExtraBedCount + 1, walkinTypeMaxExtraBeds))}
-                    disabled={walkinExtraBedCount >= walkinTypeMaxExtraBeds}
-                  >
-                    <Plus size={14} />
-                  </button>
+                  {walkinRoomStays.length > 1 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-gray-600">
+                        Room {stayIndex + 1} of {walkinRoomStays.length}
+                        {walkinRoomChargeTotals[stayIndex] > 0
+                          ? ` — ${formatPrice(walkinRoomChargeTotals[stayIndex])}`
+                          : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeWalkinRoomStay(stayIndex)}
+                        className="min-h-[32px] rounded-lg px-2 text-[11px] font-semibold text-red-600 hover:bg-red-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Room Type
+                    <select
+                      value={stay.roomType}
+                      onChange={(e) => {
+                        const nextType = e.target.value;
+                        const claimed = new Set(
+                          walkinRoomStays
+                            .filter((_, idx) => idx !== stayIndex)
+                            .map((other) => other.roomNumber)
+                            .filter(Boolean)
+                        );
+                        const firstFree = rooms.find(
+                          (r) =>
+                            r.type === nextType &&
+                            r.status === "available" &&
+                            !claimed.has(r.roomNumber)
+                        );
+                        updateWalkinRoomStay(stayIndex, {
+                          roomType: nextType,
+                          roomNumber: firstFree?.roomNumber || "",
+                          // A different type has different caps, so a
+                          // carried-over extra-bed count could exceed
+                          // the new allowance.
+                          extraBedCount: 0
+                        });
+                      }}
+                      className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+                    >
+                      {roomTypes.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Select Available Room Number
+                    <select
+                      value={stay.roomNumber}
+                      onChange={(e) => updateWalkinRoomStay(stayIndex, { roomNumber: e.target.value })}
+                      className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
+                      required
+                    >
+                      {stayRooms.length > 0 ? (
+                        stayRooms.map((r) => (
+                          <option key={r.id} value={r.roomNumber}>
+                            Room {r.roomNumber} ({roomTypes.find((t) => t.value === r.type)?.shortLabel || r.type}, ₱{roomTypes.find((t) => t.value === r.type)?.pricePerNight ?? 0}/night)
+                          </option>
+                        ))
+                      ) : (
+                        <option value="" disabled>No vacant rooms available</option>
+                      )}
+                    </select>
+                  </label>
+
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <span>Occupancy</span>
+                    <span className="text-gray-400 normal-case font-normal">
+                      {stayGuests} guest{stayGuests === 1 ? "" : "s"} in this room
+                    </span>
+                  </div>
+
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Adults</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Decrease adults in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numAdults: Math.max(1, stay.numAdults - 1) })}
+                        disabled={stay.numAdults <= 1}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{stay.numAdults}</span>
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Increase adults in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numAdults: stay.numAdults + 1 })}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Children (0–11, free of room rate)</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Decrease children in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numChildren: Math.max(0, stay.numChildren - 1) })}
+                        disabled={stay.numChildren <= 0}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{stay.numChildren}</span>
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Increase children in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numChildren: stay.numChildren + 1 })}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+
+                  {stayMaxExtraBeds > 0 ? (
+                    <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                      <span>Extra beds ({formatPrice(stayExtraBedRate)} / bed / night)</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          aria-label={`Decrease extra beds in room ${stayIndex + 1}`}
+                          onClick={() => updateWalkinRoomStay(stayIndex, { extraBedCount: Math.max(0, stay.extraBedCount - 1) })}
+                          disabled={stay.extraBedCount <= 0}
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="w-6 text-center tabular-nums">{stay.extraBedCount}</span>
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          aria-label={`Increase extra beds in room ${stayIndex + 1}`}
+                          onClick={() => updateWalkinRoomStay(stayIndex, { extraBedCount: Math.min(stay.extraBedCount + 1, stayMaxExtraBeds) })}
+                          disabled={stay.extraBedCount >= stayMaxExtraBeds}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </label>
+                  ) : null}
+
+                  {stayShowOverflowHint && stayTypeEntry ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                      {stayMaxExtraBeds > 0 ? (
+                        <>
+                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} (or {stayMaxCapacity + stayMaxExtraBeds}/{stayMaxChildren + stayMaxExtraBeds} with {stayMaxExtraBeds} extra bed{stayMaxExtraBeds === 1 ? "" : "s"}). Add {stayOverflow.requiredExtraBeds} extra bed{stayOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit this room's guests, move someone to another room, or pick a different room type.
+                        </>
+                      ) : (
+                        <>
+                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} and does not allow extra beds. Move someone to another room or pick a different room type.
+                        </>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
-              </label>
-            ) : null}
-            {walkinShowOverflowHint && walkinTypeEntry ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-                {walkinTypeMaxExtraBeds > 0 ? (
-                  <>
-                    This room type allows up to {walkinTypeMaxCapacity} adult{walkinTypeMaxCapacity === 1 ? "" : "s"} + {walkinTypeMaxChildren} child{walkinTypeMaxChildren === 1 ? "" : "ren"} (or {walkinTypeMaxCapacity + walkinTypeMaxExtraBeds}/{walkinTypeMaxChildren + walkinTypeMaxExtraBeds} with {walkinTypeMaxExtraBeds} extra bed{walkinTypeMaxExtraBeds === 1 ? "" : "s"}). Add {walkinOverflow.requiredExtraBeds} extra bed{walkinOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit your group, or pick a different room.
-                  </>
-                ) : (
-                  <>
-                    This room type allows up to {walkinTypeMaxCapacity} adult{walkinTypeMaxCapacity === 1 ? "" : "s"} + {walkinTypeMaxChildren} child{walkinTypeMaxChildren === 1 ? "" : "ren"} and does not allow extra beds. Pick a different room type to fit your group.
-                  </>
-                )}
-              </div>
-            ) : null}
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={addWalkinRoomStay}
+              className="min-h-[44px] w-full rounded-lg border border-dashed border-gray-300 text-xs font-semibold text-gray-600 hover:border-primary hover:text-primary"
+            >
+              + Add another room
+            </button>
           </div>
 
           <div className="space-y-2 pt-1">
@@ -5554,8 +6134,19 @@ export function BookingsPage() {
               <span>Duration:</span>
               <span className="font-bold">{numNights} night(s)</span>
             </div>
+            {/* Per MRB-07 (2026-08-02, per decision #159): a
+                multi-room reservation states its room count so the
+                accommodation figure below is unambiguous. */}
+            {walkinRoomStays.length > 1 && (
+              <div className="flex justify-between">
+                <span>Rooms:</span>
+                <span className="font-bold">
+                  {walkinRoomStays.length} ({walkinRoomStays.map((stay) => stay.roomNumber || "—").join(", ")})
+                </span>
+              </div>
+            )}
             <div className="flex justify-between text-gray-600">
-              <span>Accommodation Cost:</span>
+              <span>Accommodation Cost{walkinRoomStays.length > 1 ? " (all rooms)" : ""}:</span>
               <span>{formatPrice(roomChargeTotal)}</span>
             </div>
             {hasBreakfast && (

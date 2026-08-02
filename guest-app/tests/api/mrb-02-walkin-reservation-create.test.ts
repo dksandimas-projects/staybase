@@ -95,8 +95,12 @@ describe("MRB-02.x walk-in reservation create", () => {
       // room doc is read) and BEFORE the booking doc
       // read (so the canonical idempotency anchor is the
       // reservation, not the booking).
+      // Per MRB-07 (2026-08-02, per decision #159): the room read is
+      // now a loop over every room stay in the reservation, but the
+      // ordering invariant is unchanged — all rooms are read before
+      // the reservation header, which is read before the booking doc.
       const roomReadIdx = walkin.search(
-        /const roomRef = adminDb\.collection\("rooms"\)\.doc\(roomId\)/
+        /const lineRoomDoc = await transaction\.get\(lineRoomRef\)/
       );
       const reservationReadIdx = walkin.search(
         /const existingReservationSnap = await transaction\.get\(reservationDocRef\)/
@@ -146,21 +150,27 @@ describe("MRB-02.x walk-in reservation create", () => {
       );
     });
 
-    it("walk-in fingerprint uses the room's `type` (not the roomId) for byte-equivalence", () => {
-      // The walk-in submits a `roomId` and reads the
-      // type from the room doc. The fingerprint's
-      // `roomLines[0].type` is the type label (e.g.
-      // "Deluxe"), not the roomId. This is the same
-      // contract as the public path (which uses
-      // `roomType` from the body) so the byte-equivalence
-      // rule holds across both surfaces.
-      const fingerprintBlock = walkin.match(
-        /computeRequestFingerprint\(\{[\s\S]+?\}\);[\s\S]{0,100}const sameRequest/
+    it("walk-in fingerprint uses each room's `type` (not the roomId) for byte-equivalence", () => {
+      // The walk-in submits room ids and reads each type from its
+      // room doc. Every `roomLines[]` entry's `type` is the type
+      // label (e.g. "Deluxe"), not the roomId. This is the same
+      // contract as the public path (which uses `roomType` from the
+      // body) so the byte-equivalence rule holds across both
+      // surfaces.
+      //
+      // Per MRB-07 (2026-08-02, per decision #159): the lines are
+      // built one per room stay (`quantity: 1` each), so a
+      // single-room walk-in still produces exactly the one-entry
+      // array the pre-MRB-07 code built and an in-flight
+      // single-room replay still matches its stored fingerprint.
+      const roomLinesBlock = walkin.match(
+        /const walkinFingerprintRoomLines = walkinAssignedRooms\.map\(\(assigned\) => \(\{[\s\S]+?\}\)\);/
       );
-      expect(fingerprintBlock).toBeTruthy();
-      expect(fingerprintBlock![0]).toMatch(
-        /type:\s*String\(roomData\.type \|\| ""\)\.trim\(\)/
+      expect(roomLinesBlock).toBeTruthy();
+      expect(roomLinesBlock![0]).toMatch(
+        /type:\s*String\(assigned\.data\.type \|\| ""\)\.trim\(\)/
       );
+      expect(roomLinesBlock![0]).toMatch(/quantity:\s*1,/);
     });
   });
 
@@ -206,16 +216,22 @@ describe("MRB-02.x walk-in reservation create", () => {
       );
     });
 
-    it("single-room walk-in header sets roomCount: 1, activeRoomCount: 1, cancelledRoomCount: 0", () => {
-      // The single-room walk-in case stamps the header
-      // with `roomCount: 1` + the matching
-      // active/cancelled counters. `checkedInRoomCount`
-      // is conditional on the resolved `status` (the
-      // walk-in can land on `checked-in` directly), and
-      // `checkedOutRoomCount` similarly.
-      expect(walkin).toMatch(/roomCount:\s*1,/);
-      expect(walkin).toMatch(/activeRoomCount:\s*1/);
+    it("walk-in header counters reflect the reservation's actual room count", () => {
+      // Per MRB-07 (2026-08-02, per decision #159): the header's
+      // aggregate counters are the N room stays the reservation
+      // actually created, so the admin reservation row can show
+      // room count, status and balance without fanning out to the
+      // children. For a single-room walk-in `walkinRoomCount` is 1
+      // — the historical values. `checkedInRoomCount` is
+      // conditional on the resolved `status` (the walk-in can land
+      // on `checked-in` directly), in which case every room in the
+      // reservation is occupied.
+      expect(walkin).toMatch(/roomCount:\s*walkinRoomCount,/);
+      expect(walkin).toMatch(/activeRoomCount:\s*walkinRoomCount,/);
       expect(walkin).toMatch(/cancelledRoomCount:\s*0/);
+      expect(walkin).toMatch(
+        /checkedInRoomCount:\s*status === "checked-in" \? walkinRoomCount : 0/
+      );
     });
 
     it("walk-in paymentStatus mirrors the child's resolved status (in-house for checked-in, confirmed otherwise)", () => {
@@ -250,8 +266,17 @@ describe("MRB-02.x walk-in reservation create", () => {
       // placeholders for `discountScope` + `termsVersion`
       // + `privacyVersion` as the public path. Same
       // byte-equivalence rule.
+      //
+      // Per MRB-07 (2026-08-02, per decision #159): the header and
+      // the idempotency check share ONE hoisted builder
+      // (`buildWalkinFingerprint`) so the two cannot drift apart —
+      // a drift would make every replay of an N-room walk-in look
+      // like a fingerprint conflict.
       expect(walkin).toMatch(
-        /requestFingerprint:\s*computeRequestFingerprint\(\{/
+        /requestFingerprint:\s*buildWalkinFingerprint\(guestName\)/
+      );
+      expect(walkin).toMatch(
+        /const buildWalkinFingerprint = \(leadGuestName: string\) => computeRequestFingerprint\(\{/
       );
     });
 

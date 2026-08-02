@@ -67,11 +67,17 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
     // is derived server-side from `numAdults + numChildren`.
     // The walk-in modal mirrors that derivation locally so
     // the price preview stays in lockstep.
-    expect(bookingsPageSrc).toMatch(/const \[walkinNumAdults/);
-    expect(bookingsPageSrc).toMatch(/const \[walkinNumChildren/);
-    expect(bookingsPageSrc).toMatch(/const \[walkinExtraBedCount/);
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the three values live
+    // on each room stay rather than in three page-level useStates, so a
+    // reservation distributes its guests across its rooms. The
+    // reservation total is the sum across every stay.
+    expect(bookingsPageSrc).toMatch(/const \[walkinRoomStays/);
+    expect(bookingsPageSrc).toMatch(/numAdults: number;/);
+    expect(bookingsPageSrc).toMatch(/numChildren: number;/);
+    expect(bookingsPageSrc).toMatch(/extraBedCount: number;/);
     expect(bookingsPageSrc).toMatch(
-      /const numGuests = walkinNumAdults \+ walkinNumChildren/
+      /const numGuests = walkinRoomStays\.reduce\(\s*\(sum, stay\) => sum \+ stay\.numAdults \+ stay\.numChildren/
     );
   });
 
@@ -103,15 +109,19 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
     // gated on `walkinTypeMaxExtraBeds > 0` so a type
     // that doesn't allow extra beds doesn't render
     // a dead control.
-    expect(bookingsPageSrc).toMatch(/aria-label="Decrease adults"/);
-    expect(bookingsPageSrc).toMatch(/aria-label="Increase adults"/);
-    expect(bookingsPageSrc).toMatch(/aria-label="Decrease children"/);
-    expect(bookingsPageSrc).toMatch(/aria-label="Increase children"/);
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the steppers render
+    // once per room stay, so each label is scoped to its room number
+    // (screen readers announce which room is being adjusted) and the
+    // extra-bed gate reads that stay's own type allowance.
+    expect(bookingsPageSrc).toMatch(/aria-label=\{`Decrease adults in room \$\{stayIndex \+ 1\}`\}/);
+    expect(bookingsPageSrc).toMatch(/aria-label=\{`Increase adults in room \$\{stayIndex \+ 1\}`\}/);
+    expect(bookingsPageSrc).toMatch(/aria-label=\{`Decrease children in room \$\{stayIndex \+ 1\}`\}/);
+    expect(bookingsPageSrc).toMatch(/aria-label=\{`Increase children in room \$\{stayIndex \+ 1\}`\}/);
     expect(bookingsPageSrc).toMatch(
-      /walkinTypeMaxExtraBeds > 0[\s\S]{0,2000}aria-label="Decrease extra beds"/
+      /stayMaxExtraBeds > 0[\s\S]{0,2000}aria-label=\{`Decrease extra beds in room \$\{stayIndex \+ 1\}`\}/
     );
-    expect(bookingsPageSrc).toMatch(/aria-label="Decrease extra beds"/);
-    expect(bookingsPageSrc).toMatch(/aria-label="Increase extra beds"/);
+    expect(bookingsPageSrc).toMatch(/aria-label=\{`Increase extra beds in room \$\{stayIndex \+ 1\}`\}/);
   });
 
   it("the walk-in modal renders the 'blocked by cap → add extra bed' contextual hint", () => {
@@ -125,15 +135,20 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
     // see the actual cap they're working with. We assert
     // each piece independently because the JSX block
     // can be large (200K+ chars).
-    expect(bookingsPageSrc).toMatch(/walkinShowOverflowHint/);
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the hint is per room
+    // stay, and it now also offers moving a guest to another room as a
+    // way through — the option that only exists once a reservation can
+    // hold more than one room.
+    expect(bookingsPageSrc).toMatch(/stayShowOverflowHint/);
     expect(bookingsPageSrc).toMatch(
-      /Add\s+\{walkinOverflow\.requiredExtraBeds\} extra bed/
+      /Add\s+\{stayOverflow\.requiredExtraBeds\} extra bed/
     );
     expect(bookingsPageSrc).toMatch(
-      /This room type allows up to\s+\{walkinTypeMaxCapacity\} adult/
+      /This room type allows up to\s+\{stayMaxCapacity\} adult/
     );
     expect(bookingsPageSrc).toMatch(
-      /does not allow extra beds[\s\S]{0,2000}Pick a different room type/
+      /does not allow extra beds[\s\S]{0,2000}pick a different room type/
     );
   });
 
@@ -144,11 +159,15 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
     // client preview and the server check would produce
     // a confusing UX (the desk sees "OK" locally and
     // then a 400 from the server).
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the preview runs the
+    // helper per room stay against that stay's own type caps, mirroring
+    // the server's per-room-stay check.
     expect(bookingsPageSrc).toMatch(
-      /requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults:\s*walkinNumAdults,[\s\S]{0,200}numChildren:\s*walkinNumChildren,[\s\S]{0,200}maxCapacity:\s*walkinTypeMaxCapacity,[\s\S]{0,200}maxChildren:\s*walkinTypeMaxChildren/
+      /requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults:\s*stay\.numAdults,[\s\S]{0,200}numChildren:\s*stay\.numChildren,[\s\S]{0,200}maxCapacity:\s*stayMaxCapacity,[\s\S]{0,200}maxChildren:\s*stayMaxChildren/
     );
     expect(bookingsPageSrc).toMatch(
-      /walkinOverflow\.requiredExtraBeds > walkinExtraBedCount/
+      /stayOverflow\.requiredExtraBeds > stay\.extraBedCount/
     );
   });
 
@@ -177,9 +196,18 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
       /if \(result\.success\) \{[\s\S]*?setIsModalOpen\(false\);/
     );
     expect(resetBlock).toBeTruthy();
-    expect(resetBlock![0]).toMatch(/setWalkinNumAdults\(1\)/);
-    expect(resetBlock![0]).toMatch(/setWalkinNumChildren\(0\)/);
-    expect(resetBlock![0]).toMatch(/setWalkinExtraBedCount\(0\)/);
+    //
+    // Per MRB-07 (2026-08-02, per decision #159): the reset drops the
+    // whole room list back to one fresh stay, which restores the
+    // 1-adult / 0-children / 0-extra-bed defaults (see
+    // `createWalkinRoomStay`) AND prevents the previous group's extra
+    // rooms carrying into the next booking.
+    expect(resetBlock![0]).toMatch(
+      /setWalkinRoomStays\(\[createWalkinRoomStay\(roomTypes\[0\]\?\.value \|\| ""\)\]\)/
+    );
+    expect(bookingsPageSrc).toMatch(
+      /const createWalkinRoomStay = \(roomType: string\): WalkinRoomStay => \(\{[\s\S]{0,300}numAdults: 1,[\s\S]{0,120}numChildren: 0,[\s\S]{0,120}extraBedCount: 0/
+    );
   });
 });
 
