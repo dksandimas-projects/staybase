@@ -26,40 +26,70 @@ const dashboardSrc = readFileSync(
 );
 
 describe("Phase 11.6 Batch 6 — small polish fixes", () => {
-  // Per BF-16 (booking-flow audit 2026-06-26): the cancel block
-  // list was relaxed to block only the terminal states
-  // (checked-in, checked-out, cancelled). `confirmed` and
-  // `payment-confirmed` are now self-cancellable. The
-  // batch-6 tests below were written under the old S1.4
-  // policy; this revision flips them to assert the new
-  // behavior.
-  describe("S1.4 — self-cancel block list (BF-16 relaxed policy)", () => {
+  // Per BF-16 (booking-flow audit 2026-06-26): the cancel
+  // block list was relaxed to block only the terminal
+  // states (checked-in, checked-out, cancelled).
+  // `confirmed` and `payment-confirmed` are now
+  // self-cancellable.
+  //
+  // Per MRB-05 PR #2 (2026-08-02, per decision #159): the
+  // block list was relaxed ONE STEP further — `checked-out`
+  // is now allowed for staff-initiated cancellation (the
+  // post-settlement cancellation path is the loyalty
+  // clawback scenario: the booking's `status` flips to
+  // `cancelled` and a negative `pointsHistory` entry is
+  // recorded against the awarding member). The remaining
+  // blocked states are `checked-in` (in-house cancellation
+  // is a separate flow) + `cancelled` (idempotent
+  // rejection of an already-cancelled booking). The
+  // batch-6 tests below were updated to assert the new
+  // MRB-05 PR #2 2-state list (was the BF-16 3-state
+  // list before PR #2).
+  describe("S1.4 — self-cancel block list (BF-16 + MRB-05 PR #2 policy)", () => {
+    // NOTE: the regex below anchors on the status literal
+    // (`bookingData.status === "checked-in"`) instead of
+    // on `if (`. The status literal is unique to the
+    // pre-transaction guard (the in-transaction mirror
+    // uses `freshBooking.status`), so anchoring on the
+    // literal avoids accidentally matching an unrelated
+    // `if (...)` block earlier in the file. The MRB-05
+    // PR #2 comment block lives between `if (` and the
+    // status literal; the regex ignores that gap.
+    const guardMatch = bookingsSrc.match(
+      /bookingData\.status\s*===\s*["']checked-in["'][\s\S]*?return\s+res\.status\(400\)/
+    );
+
     it("no longer blocks cancellation for payment-confirmed bookings", () => {
-      // Find the cancel status-guard block; payment-confirmed
-      // must NOT be in it.
-      const guardMatch = bookingsSrc.match(
-        /if\s*\(\s*bookingData\.status\s*===\s*["']checked-in["'][\s\S]*?return\s+res\.status\(400\)/
-      );
+      // payment-confirmed must NOT be in the guard.
       expect(guardMatch, "expected to find the cancel status guard").toBeTruthy();
       expect(guardMatch![0]).not.toMatch(/["']payment-confirmed["']/);
     });
 
     it("no longer blocks cancellation for confirmed bookings", () => {
-      const guardMatch = bookingsSrc.match(
-        /if\s*\(\s*bookingData\.status\s*===\s*["']checked-in["'][\s\S]*?return\s+res\.status\(400\)/
-      );
       expect(guardMatch).toBeTruthy();
       expect(guardMatch![0]).not.toMatch(/["']confirmed["']/);
     });
 
-    it("still blocks cancellation for the three terminal states", () => {
-      const guardMatch = bookingsSrc.match(
-        /if\s*\(\s*bookingData\.status\s*===\s*["']checked-in["'][\s\S]*?return\s+res\.status\(400\)/
-      );
+    it("still blocks cancellation for the two remaining terminal states", () => {
+      // Per MRB-05 PR #2: `checked-out` is no longer in
+      // the block list (the clawback scenario is the
+      // post-settlement cancellation path). The two
+      // remaining blocked states are `checked-in` +
+      // `cancelled`.
       expect(guardMatch).toBeTruthy();
       expect(guardMatch![0]).toMatch(/["']checked-in["']/);
-      expect(guardMatch![0]).toMatch(/["']checked-out["']/);
       expect(guardMatch![0]).toMatch(/["']cancelled["']/);
+      // Explicitly assert `checked-out` is NOT in the
+      // block — the PR #2 change. The status literal in
+      // the actual condition uses double quotes
+      // (e.g. `bookingData.status === "checked-out"`),
+      // and the comment block uses backticks
+      // (`` `checked-out` ``), so a bare
+      // /["']checked-out["']/ negation would not false-
+      // match the backtick form. (Verified by reading
+      // the current code: only double-quoted status
+      // literals appear in the actual `if (...)` clause.)
+      expect(guardMatch![0]).not.toMatch(/["']checked-out["']/);
     });
   });
 

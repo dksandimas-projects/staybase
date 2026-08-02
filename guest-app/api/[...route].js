@@ -227320,7 +227320,27 @@ async function handleCancelBooking(req, res) {
       bookingDocumentRef = snapshot.docs[0].ref;
       bookingData2 = snapshot.docs[0].data();
     }
-    if (bookingData2.status === "checked-in" || bookingData2.status === "checked-out" || bookingData2.status === "cancelled") {
+    if (
+      // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+      // the terminal-status reject now excludes
+      // `checked-out`. The MRB-05 spec body says
+      // "A production cancellation never deletes the
+      // reservation; an all-cancelled reservation
+      // remains the audit/financial record." The
+      // post-settlement cancellation path (cancel a
+      // stayed booking) is the clawback scenario for
+      // the loyalty points — the reservation is the
+      // audit record, not deleted; the booking's
+      // `status` flips to `cancelled` and a negative
+      // `pointsHistory` entry is recorded (the
+      // `rewardsPoints` field is unchanged, the
+      // invariant `rewardsPoints == sum(pointsHistory.points)`
+      // is preserved). The `checked-in` and
+      // `cancelled` cases remain rejected (in-house
+      // cancellation is a separate flow; idempotent
+      // rejection of an already-cancelled booking).
+      bookingData2.status === "checked-in" || bookingData2.status === "cancelled"
+    ) {
       return res.status(400).json({
         success: false,
         error: `Booking cannot be cancelled because its status is already ${bookingData2.status}. Please contact the front desk.`
@@ -227338,7 +227358,17 @@ async function handleCancelBooking(req, res) {
         throw new Error("Booking not found.");
       }
       const freshBooking = freshBookingDoc.data() || {};
-      if (freshBooking.status === "checked-in" || freshBooking.status === "checked-out" || freshBooking.status === "cancelled") {
+      if (
+        // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+        // the in-transaction terminal-status reject
+        // mirrors the pre-transaction check above —
+        // excludes `checked-out` (allowed for the
+        // clawback scenario) and still rejects
+        // `checked-in` (in-house cancellation is a
+        // separate flow) + `cancelled` (idempotent
+        // rejection).
+        freshBooking.status === "checked-in" || freshBooking.status === "cancelled"
+      ) {
         throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
       }
       if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(String(freshBooking.status || ""))) {
@@ -227403,6 +227433,34 @@ async function handleCancelBooking(req, res) {
           paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
           updatedAt: now
         });
+      }
+      if (freshBooking.loyaltyAwardStatus === "awarded" && Number(freshBooking.pointsAwarded || 0) > 0) {
+        const memberIdForClawback = String(freshBooking.memberId || "").trim();
+        if (memberIdForClawback) {
+          const clawbackMemberRef = adminDb.collection("members").doc(memberIdForClawback);
+          const clawbackMemberDoc = await transaction.get(clawbackMemberRef);
+          if (clawbackMemberDoc.exists) {
+            const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
+            const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
+            transaction.set(clawbackHistoryRef, {
+              type: "clawback",
+              points: clawbackPoints,
+              bookingId,
+              bookingRef: freshBooking.bookingRef,
+              description: `Cancellation clawback for cancelled stay (${freshBooking.bookingRef})`,
+              by: cancelledBy,
+              createdAt: now
+            });
+            bookingUpdate.pointsAwarded = 0;
+            bookingUpdate.loyaltyAwardStatus = "clawback-recorded";
+            bookingUpdate.pointsAwardedAt = null;
+            transaction.update(bookingDocumentRef, {
+              pointsAwarded: 0,
+              loyaltyAwardStatus: "clawback-recorded",
+              pointsAwardedAt: null
+            });
+          }
+        }
       }
       if (voucherDoc?.exists && voucherRef) {
         const voucherData = voucherDoc.data() || {};
@@ -228344,7 +228402,7 @@ async function handleCheckoutBooking(req, res) {
       const originalCheckIn = toDateOrNull(freshBookingData.checkIn);
       const originalCheckOut = toDateOrNull(freshBookingData.checkOut);
       const shouldTruncateStay = originalCheckIn && originalCheckOut && checkoutDate > originalCheckIn && checkoutDate < originalCheckOut;
-      const bookingUpdate = {
+      const bookingUpdate2 = {
         status: "checked-out",
         checkedOutAt: now,
         checkedOutBy,
@@ -228354,35 +228412,35 @@ async function handleCheckoutBooking(req, res) {
         updatedAt: now
       };
       if (checkedOutWithBalance > 0) {
-        bookingUpdate.unpaidCheckoutReason = safeUnpaidReason;
-        bookingUpdate.unpaidCheckoutApprovalThreshold = unpaidCheckoutThreshold;
-        bookingUpdate.unpaidCheckoutApprovedBy = unpaidCheckoutApprovedBy;
-        bookingUpdate.unpaidCheckoutApprovedAt = now;
-        bookingUpdate.unpaidCheckoutSnapshotFolioTotal = checkoutFolioTotal;
-        bookingUpdate.unpaidCheckoutSnapshotCollectedTotal = collectedTotal;
-        bookingUpdate.unpaidCheckoutSnapshotBalance = checkedOutWithBalance;
+        bookingUpdate2.unpaidCheckoutReason = safeUnpaidReason;
+        bookingUpdate2.unpaidCheckoutApprovalThreshold = unpaidCheckoutThreshold;
+        bookingUpdate2.unpaidCheckoutApprovedBy = unpaidCheckoutApprovedBy;
+        bookingUpdate2.unpaidCheckoutApprovedAt = now;
+        bookingUpdate2.unpaidCheckoutSnapshotFolioTotal = checkoutFolioTotal;
+        bookingUpdate2.unpaidCheckoutSnapshotCollectedTotal = collectedTotal;
+        bookingUpdate2.unpaidCheckoutSnapshotBalance = checkedOutWithBalance;
       }
       if (memberId && freshBookingData.memberId !== memberId) {
-        bookingUpdate.memberId = memberId;
+        bookingUpdate2.memberId = memberId;
       }
       if (shouldTruncateStay && originalCheckIn) {
         const truncatedNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 864e5), 1);
-        bookingUpdate.checkOut = Timestamp.fromDate(checkoutDate);
-        bookingUpdate.numNights = truncatedNights;
-        bookingUpdate.earlyCheckoutOriginalCheckOut = freshBookingData.checkOut;
-        bookingUpdate.rateBreakdown = rebuildEarlyCheckoutRateBreakdown(freshBookingData, truncatedNights);
+        bookingUpdate2.checkOut = Timestamp.fromDate(checkoutDate);
+        bookingUpdate2.numNights = truncatedNights;
+        bookingUpdate2.earlyCheckoutOriginalCheckOut = freshBookingData.checkOut;
+        bookingUpdate2.rateBreakdown = rebuildEarlyCheckoutRateBreakdown(freshBookingData, truncatedNights);
       }
       const canAwardPoints = Boolean(memberId && eligiblePoints > 0 && memberRef && memberDocInTransaction?.exists);
       const awardNow = canAwardPoints && checkedOutWithBalance <= 0;
       pointsAwarded = awardNow ? eligiblePoints : 0;
-      Object.assign(bookingUpdate, {
+      Object.assign(bookingUpdate2, {
         pointsAwarded,
         pendingLoyaltyPoints: canAwardPoints && !awardNow ? eligiblePoints : 0,
         loyaltyAwardStatus: canAwardPoints ? awardNow ? "awarded" : "pending-payment" : "ineligible",
         pointsAwardedAt: awardNow ? now : null
       });
       const bookingReservationId2 = String(freshBookingData.reservationId || "").trim();
-      transaction.update(bookingRef, bookingUpdate);
+      transaction.update(bookingRef, bookingUpdate2);
       if (bookingData2.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
         transaction.update(roomRef, {

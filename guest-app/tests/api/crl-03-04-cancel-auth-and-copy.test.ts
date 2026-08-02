@@ -35,17 +35,34 @@ describe("CRL-03 server-side cancellation status matrix", () => {
       expect(shared).toMatch(/STAFF_CANCELLABLE_STATUSES = \[\s*"pending",\s*"payment-uploaded",\s*"payment-confirmed",\s*"confirmed"\s*\] as const/);
     });
 
-    it("TERMINAL_CANCELLATION_STATUSES is the universal reject list (3 values)", () => {
-      expect(shared).toMatch(/TERMINAL_CANCELLATION_STATUSES = \[\s*"checked-in",\s*"checked-out",\s*"cancelled"\s*\] as const/);
+    it("TERMINAL_CANCELLATION_STATUSES is the universal reject list (2 values — MRB-05 PR #2)", () => {
+      // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+      // `checked-out` moved out of the universal reject
+      // list — staff-initiated cancellation is now
+      // allowed for the post-settlement path (with a
+      // loyalty clawback recorded in the awarding
+      // member's `pointsHistory`). The constant is now
+      // 2 values (`checked-in` + `cancelled`).
+      expect(shared).toMatch(/TERMINAL_CANCELLATION_STATUSES = \[\s*"checked-in",\s*"cancelled"\s*\] as const/);
     });
   });
 
   describe("handleCancelBooking — the new dual-gate check", () => {
-    it("rejects every terminal status with the existing universal 400", () => {
+    it("rejects every terminal status with the existing universal 400 (the new 2-value list — MRB-05 PR #2)", () => {
       const body = isolateHandleCancelBooking();
+      // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+      // the universal reject list shrunk to 2 values
+      // (`checked-in` + `cancelled`). `checked-out`
+      // moved out — it's now allowed for staff-
+      // initiated cancellation (the clawback scenario).
       expect(body).toMatch(/bookingData\.status === "checked-in"/);
-      expect(body).toMatch(/bookingData\.status === "checked-out"/);
       expect(body).toMatch(/bookingData\.status === "cancelled"/);
+      // The pre-transaction reject block must NOT
+      // include `bookingData.status === "checked-out"`
+      // anymore (the MRB-05 PR #2 policy change). The
+      // comment block uses backticks, not double
+      // quotes, so the /["']...["']/ form is safe.
+      expect(body).not.toMatch(/bookingData\.status === "checked-out"/);
     });
 
     it("adds a guest-specific 400 keyed off GUEST_CANCELLABLE_STATUSES (not the staff set)", () => {

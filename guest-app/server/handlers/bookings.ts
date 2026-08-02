@@ -4050,8 +4050,25 @@ export async function handleCancelBooking(req: any, res: any) {
     //   the front desk — the safer default for the "no refund
     //   issued automatically" rule (CRL-04).
     if (
+      // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+      // the terminal-status reject now excludes
+      // `checked-out`. The MRB-05 spec body says
+      // "A production cancellation never deletes the
+      // reservation; an all-cancelled reservation
+      // remains the audit/financial record." The
+      // post-settlement cancellation path (cancel a
+      // stayed booking) is the clawback scenario for
+      // the loyalty points — the reservation is the
+      // audit record, not deleted; the booking's
+      // `status` flips to `cancelled` and a negative
+      // `pointsHistory` entry is recorded (the
+      // `rewardsPoints` field is unchanged, the
+      // invariant `rewardsPoints == sum(pointsHistory.points)`
+      // is preserved). The `checked-in` and
+      // `cancelled` cases remain rejected (in-house
+      // cancellation is a separate flow; idempotent
+      // rejection of an already-cancelled booking).
       bookingData.status === "checked-in"
-      || bookingData.status === "checked-out"
       || bookingData.status === "cancelled"
     ) {
       return res.status(400).json({
@@ -4082,8 +4099,15 @@ export async function handleCancelBooking(req: any, res: any) {
       // the handler captured at entry (req.staff) — a `req.staff`
       // value cannot change mid-handler, so capturing once is safe.
       if (
+        // Per MRB-05 PR #2 (2026-08-02, per decision #159):
+        // the in-transaction terminal-status reject
+        // mirrors the pre-transaction check above —
+        // excludes `checked-out` (allowed for the
+        // clawback scenario) and still rejects
+        // `checked-in` (in-house cancellation is a
+        // separate flow) + `cancelled` (idempotent
+        // rejection).
         freshBooking.status === "checked-in"
-        || freshBooking.status === "checked-out"
         || freshBooking.status === "cancelled"
       ) {
         throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
@@ -4180,18 +4204,116 @@ export async function handleCancelBooking(req: any, res: any) {
       // Q1) — recompute the points the new settled
       // total would have earned + record a negative
       // `pointsHistory` entry when a room is cancelled
-      // post-settlement — is INTENTIONALLY out of
-      // scope for this PR. Per the MRB-05 split, the
-      // clawback lands in MRB-05 PR #2 as a separable
-      // change (it touches the points ledger shape +
-      // the existing loyalty-award transaction path,
-      // which is a non-trivial blast radius).
+      // post-settlement — ships in THIS PR
+      // (MRB-05 PR #2). The clawback code is below
+      // (after the reservation header mirror). The
+      // terminal-status reject above was also updated
+      // to exclude `checked-out` (per the spec body
+      // "A production cancellation never deletes the
+      // reservation; an all-cancelled reservation
+      // remains the audit/financial record").
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
           paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
           updatedAt: now
         });
+      }
+
+      // Per MRB-05 PR #2 (2026-08-02, per decision
+      // #159, MRB open-question Q1): the loyalty
+      // clawback. When a `checked-out` booking with
+      // `loyaltyAwardStatus === "awarded"` and a
+      // positive `pointsAwarded` is cancelled, the
+      // member's `pointsHistory` receives a new
+      // negative entry of `-(pointsAwarded)` (the
+      // booking's settled total is now 0, so the
+      // recomputed eligible points are 0, the delta
+      // is the full awarded amount). The
+      // `rewardsPoints` field is NOT decremented in
+      // place — the negative ledger entry offsets
+      // the original award so the invariant
+      // `rewardsPoints == sum(pointsHistory.points)`
+      // is preserved (a future change to the rewards
+      // invariant that DECREMENTED the field would
+      // be a silent corruption; the negative ledger
+      // entry is the only correct mechanism). The
+      // `pointsHistory` doc id uses the same
+      // `clawback-${bookingId}` shape as the existing
+      // `earn-${bookingId}` so the two entries are
+      // paired + auditable. The transaction's read
+      // happened BEFORE the booking's status flip,
+      // so `freshBooking.loyaltyAwardStatus` and
+      // `freshBooking.pointsAwarded` are the
+      // pre-cancellation values.
+      //
+      // For the N=1 case (today's entire active
+      // surface) the clawback zeroes the
+      // `pointsAwarded`. For the N>1 case (future,
+      // when MRB-06 lands + the per-reservation award
+      // refactor lands) the recompute reads the
+      // reservation's net settled total (NOT the
+      // cancelled booking's) and computes the
+      // delta against the per-reservation award. PR
+      // #2 ships only the N=1 case — the N>1 case
+      // is the same shape, scaled to read N child
+      // bookings' settled totals instead of 1.
+      if (
+        freshBooking.loyaltyAwardStatus === "awarded"
+        && Number(freshBooking.pointsAwarded || 0) > 0
+      ) {
+        const memberIdForClawback = String(freshBooking.memberId || "").trim();
+        if (memberIdForClawback) {
+          const clawbackMemberRef = adminDb.collection("members").doc(memberIdForClawback);
+          const clawbackMemberDoc = await transaction.get(clawbackMemberRef);
+          if (clawbackMemberDoc.exists) {
+            const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
+            const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
+            transaction.set(clawbackHistoryRef, {
+              type: "clawback",
+              points: clawbackPoints,
+              bookingId,
+              bookingRef: freshBooking.bookingRef,
+              description: `Cancellation clawback for cancelled stay (${freshBooking.bookingRef})`,
+              by: cancelledBy,
+              createdAt: now
+            });
+            // Per the invariant: rewardsPoints is NOT
+            // decremented in place. The negative
+            // ledger entry is the only mechanism.
+            // The member's `rewardsPoints` field is
+            // unchanged.
+            //
+            // The booking's `pointsAwarded` field is
+            // ALSO reset to 0 on the cancellation
+            // (the original award has been "reversed"
+            // via the negative ledger entry). This
+            // is informational (the field is a
+            // derived snapshot of the ledger sum);
+            // the ledger is the source of truth.
+            bookingUpdate.pointsAwarded = 0;
+            bookingUpdate.loyaltyAwardStatus = "clawback-recorded";
+            bookingUpdate.pointsAwardedAt = null;
+            // Apply the post-cancellation stamp
+            // atomically with the cancellation status
+            // flip. The earlier
+            // `transaction.update(bookingDocumentRef, ...)`
+            // call at the top of this block already
+            // fired — this is a SECOND write to the
+            // same doc in the same transaction
+            // (Firestore transactions allow multiple
+            // writes to the same doc; the final write
+            // wins). The stamp marks the booking as
+            // clawback-recorded + zeroes the
+            // informational `pointsAwarded` field (the
+            // ledger is the source of truth).
+            transaction.update(bookingDocumentRef, {
+              pointsAwarded: 0,
+              loyaltyAwardStatus: "clawback-recorded",
+              pointsAwardedAt: null
+            });
+          }
+        }
       }
 
       if (voucherDoc?.exists && voucherRef) {
