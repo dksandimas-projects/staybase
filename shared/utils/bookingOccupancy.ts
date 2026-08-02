@@ -115,3 +115,21 @@ export const EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
 // `holdExpiresAt` stamped from `paymentRejectedAt`. Pinned by the
 // same tests as `EXPIRED_HOLD_CANCELLATION_REASON`.
 export const PAYMENT_REJECTED_FRESH_DEADLINE_FROM = "paymentRejectedAt";
+
+// Cancellation source discriminator (CRL-02, 2026-08-02).
+// "guest" — a guest self-service cancellation through /api/bookings/cancel
+//   (the apiRouter only sets req.staff if authenticateStaff succeeded;
+//   a non-staff request routes through guestCancelSchema and the lookup
+//   branch). No PII is written into `cancelledBy`; we just stamp "guest"
+//   so the audit row is legible.
+// "staff" — an authenticated staff member through /api/bookings/cancel
+//   (req.staff.role is "admin" or "staff"). cancelledBy is the staff UID.
+// "system" — a server-initiated cancellation: the PEX-03 in-transaction
+//   retirement that fires when a new booking displaces an expired hold,
+//   or the PEX-06 daily cron at /api/holds/expire. cancelledBy is the
+//   literal "system"; EXPIRED_HOLD_CANCELLATION_REASON is the canonical
+//   cancellationReason for this source. Per the CRL-02 spec, the system
+//   expiry keeps its reason string — the new `cancellationSource` is a
+//   parallel discriminator, not a replacement.
+export const CANCELLATION_SOURCES = ["guest", "staff", "system"] as const;
+export type CancellationSource = (typeof CANCELLATION_SOURCES)[number];

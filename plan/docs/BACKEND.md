@@ -164,7 +164,10 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `guestRegistration` | object | Physical check-in registry data: nationality, address, DOB, gender, **purpose of stay** (`purposeOfStay` + optional `otherPurpose` when `purposeOfStay === "other"`), ID type/number, emergency contact, vehicle plate, signature status. Per Decision #121, `purposeOfStay` defaults to `leisure` and is required at physical check-in; `otherPurpose` is required when the staff picks `other`. |
 | `breakfastSelections` | map | Canonical silog selection store. Wire format `yyyy-mm-dd-guest-n` → selected silog item name; updated by staff in the admin booking drawer and exported by Reports. |
 | `breakfastServed` | map | Per-date/per-guest served flag written by the dashboard's "Mark Served" toggle. Wire format `yyyy-mm-dd-guest-n` → `boolean`; same key shape as `breakfastSelections`. Allows `bookings/{id}` staff updates per `firebase/firestore.rules`. Absent on bookings created before BSP-01 (2026-07-25); mapper defaults to `{}`. |
-| `cancellationReason` | string | |
+| `cancellationReason` | string | Required free-form reason (sliced to 500 chars on the server). Bounded 0..500, trims whitespace. The reason persists on the booking doc even after status flip — no path rewrites or clears it. |
+| `cancelledAt` | timestamp \| null | Per CRL-02 (2026-08-02): the server-time stamp for the cancellation. `null` on bookings cancelled before CRL-02 or on never-cancelled bookings. Written in the same transaction as the status flip. |
+| `cancelledBy` | string \| null | Per CRL-02: who performed the cancellation. Staff UID for `"staff"` source, the literal `"guest"` (no PII) for `"guest"` source, the literal `"system"` for PEX auto-expiry. `null` on never-cancelled bookings. |
+| `cancellationSource` | enum \| null | Per CRL-02: parallel discriminator to `cancellationReason`. One of `"guest"` \| `"staff"` \| `"system"`. Server-derived at the route (no client-supplied source). Pinned by the `CANCELLATION_SOURCES` constant in `shared/utils/bookingOccupancy.ts` so a typo on any write site breaks the type. `null` on never-cancelled bookings. |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
 

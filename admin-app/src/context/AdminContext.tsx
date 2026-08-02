@@ -1268,6 +1268,19 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             guestIdPhotoUrl: data.guestIdPhotoUrl || null,
             handledBy: data.handledBy || "",
             cancellationReason: data.cancellationReason || "",
+            // Per CRL-02 (2026-08-02): hydrate the full
+            // cancellation audit metadata. `cancelledAt` is the
+            // server-time stamp; `cancelledBy` is the staff UID
+            // (for "staff" source) or the literal "guest" /
+            // "system" (for the matching sources); `cancellationSource`
+            // is the parallel discriminator. Legacy bookings
+            // without these fields read as `null` (the type
+            // already declares them as nullable). The hydration
+            // is the read path that powers the booking drawer's
+            // audit row in a follow-up CRL-09 UI pass.
+            cancelledAt: data.cancelledAt ? parseDateTimeString(data.cancelledAt) : null,
+            cancelledBy: data.cancelledBy || null,
+            cancellationSource: data.cancellationSource || null,
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
             breakfastSelections: data.breakfastSelections || {},

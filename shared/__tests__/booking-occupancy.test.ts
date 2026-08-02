@@ -5,6 +5,7 @@ import {
   normalizePaymentHoldWindowHours,
   BOOKING_OCCUPYING_STATUSES,
   EXPIRED_HOLD_CANCELLATION_REASON,
+  CANCELLATION_SOURCES,
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
   MIN_PAYMENT_HOLD_WINDOW_HOURS,
   MAX_PAYMENT_HOLD_WINDOW_HOURS
@@ -156,5 +157,14 @@ describe("bookingOccupancy — constants (PEX-02 + PEX-03)", () => {
     // handler. A typo would silently break Reports + guest lookup
     // filters that key off this string.
     expect(EXPIRED_HOLD_CANCELLATION_REASON).toBe("payment-hold-expired");
+  });
+
+  it("CANCELLATION_SOURCES is the three-source discriminator pinned by CRL-02", () => {
+    // The list is the contract for every cancellation write path.
+    // A typo on any stamp would break Reports / emails / future
+    // refund-liability (CRL-07) which key off this string. Adding
+    // a fourth value requires a coordinated type + every write
+    // site + a test for the new value.
+    expect(CANCELLATION_SOURCES).toEqual(["guest", "staff", "system"]);
   });
 });

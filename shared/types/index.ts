@@ -4,6 +4,7 @@ import type {
   ROOM_STATUSES
 } from "../constants";
 import type { DiscountScope } from "../utils/bookingDiscounts";
+import type { CancellationSource } from "../utils/bookingOccupancy";
 
 export type RoomType = string;
 export type RoomStatus = (typeof ROOM_STATUSES)[number];
@@ -345,6 +346,20 @@ export interface Booking {
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
+  // CRL-02 (2026-08-02): full cancellation audit metadata. `cancelledAt`
+  // and `cancelledBy` were already on the type (PEX-03 stamped them for
+  // system expiry); CRL-02 extends stamping to the main cancel handler
+  // and adds `cancellationSource` as a parallel discriminator to the
+  // reason string. Legacy bookings without these fields read as `null`.
+  // Source: "guest" | "staff" | "system" — see shared/utils/bookingOccupancy.ts
+  // `CANCELLATION_SOURCES`. For the "guest" source `cancelledBy` is the
+  // literal "guest" (no PII); for "staff" it is the staff UID; for
+  // "system" it is the literal "system". All four fields are written in
+  // the same Firestore transaction as the status flip, so a partial
+  // failure cannot leave a half-stamped cancellation.
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancellationSource: CancellationSource | null;
   earlyCheckIn?: EarlyCheckInDetails | null;
   createdAt: Date;
   updatedAt: Date;
