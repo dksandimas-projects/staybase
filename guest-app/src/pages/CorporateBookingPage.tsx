@@ -44,7 +44,17 @@ import {
   requiredExtraBedsFor,
   staggerChild,
   staggerContainer,
-  VERSION
+  VERSION,
+  // Per MRB-02.x corporate (2026-08-02, per decision
+  // #164): the reservation-level idempotency key.
+  // Preallocated client-side so a
+  // retry-after-uncertain-response uses the same
+  // `reservationId`; the server's transaction reads it
+  // first and either replays the original commit (same
+  // `requestFingerprint`) or returns a 409 (different
+  // `requestFingerprint`). Same pattern as the public
+  // `/book` flow (`BookingPage.tsx`).
+  generateReservationId
 } from "@spark-inn/shared";
 import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
 import { ref, uploadBytes } from "firebase/storage";
@@ -87,6 +97,16 @@ export function CorporateBookingPage() {
   const shouldReduceMotion = useReducedMotion();
   const currentStepKey = searchParams.get("step") ?? "gate";
   const [bookingId] = useState(() => doc(collection(getFirestore(), "bookings")).id);
+  // Per MRB-02.x corporate (2026-08-02, per decision
+  // #164): the reservation-level idempotency key,
+  // preallocated client-side for the same reason as
+  // `bookingId`. Held in a `useState` lazy init so the
+  // same id survives across renders and
+  // retry-after-uncertain-response. Generated via the
+  // shared `generateReservationId` helper so the id
+  // shape is guaranteed to pass `RESERVATION_ID_REGEX`
+  // validation on the server.
+  const [reservationId] = useState(() => generateReservationId());
 
   // Per BI-01 (booking-intercom audit 2026-07-06): two REAL
   // Turnstile challenges. The gate widget covers
@@ -772,6 +792,20 @@ export function CorporateBookingPage() {
         corporateFlatRate: isFlatRate && !activeCode,
         // Per BI-01: real Turnstile token from the review-step widget.
         turnstileToken: reviewTurnstile.token,
+        // Per MRB-02.x corporate (2026-08-02, per
+        // decision #164): the client-preallocated
+        // reservation id. The server's transaction
+        // uses it as the canonical idempotency key
+        // for the create (same as the public
+        // `/book` flow's `reservationId`). The
+        // server auto-mints when absent; the
+        // preallocation lets a
+        // retry-after-uncertain-response reuse the
+        // same id so the server replays the original
+        // commit (same `requestFingerprint`) or
+        // returns a 409 (different
+        // `requestFingerprint`).
+        reservationId,
         _hp: guestDetails._hp || "",
       };
 
