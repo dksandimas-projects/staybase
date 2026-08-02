@@ -131,6 +131,23 @@ import {
   createCancellationPolicySnapshot,
   computeReservationAggregatePaymentStatus
 } from "@spark-inn/shared";
+// Per CRL-06 (2026-08-02): the preview helper
+// (per-scope breakdown). The preview
+// handler reads the same `ref + (email | token)`
+// credential as the destructive cancel, but
+// precomputes the financial effect WITHOUT mutating
+// anything. The guest + admin modals render the
+// breakdown before the user taps confirm. Imports
+// live in a separate block (not appended to the
+// MRB-05 import list above) so the existing
+// `mrb-05-aggregate-and-handler-mirror.test.ts`
+// source-text pattern — which asserts the
+// `computeReservationAggregatePaymentStatus,?`
+// entry is the last in the import block — still
+// matches.
+import {
+  evaluateCancelPreview
+} from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
 // Per PMH-02 (2026-07-31): the server's inline folio math (used
@@ -772,6 +789,40 @@ const guestCancelSchema = z
       .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
       .optional(),
     reason: z.string().trim().max(500).optional().default(""),
+    scope: z.enum(["room", "reservation"]).optional().default("room")
+  })
+  .refine(
+    (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+    "Provide either an email or a lookup token (not both)."
+  );
+
+// Per CRL-06 (2026-08-02): the cancellation preview
+// schema. Same `ref + (email | token)` credential as
+// the destructive cancel, plus the optional `scope`
+// selector. The schema deliberately has no
+// `turnstileToken` requirement (the destructive
+// cancel does — H1 hardening); the preview is a
+// read-only endpoint gated by the same credential as
+// the cancel, and the apiRouter applies a 10/min/IP
+// rate limit so a brute-force probe is bounded
+// independently of the cancel bucket. The `reason`
+// field is intentionally absent — the preview is
+// non-mutating, the reason is captured at confirm
+// time.
+const guestCancelPreviewSchema = z
+  .object({
+    bookingRef: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+    guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
+    token: z
+      .string()
+      .trim()
+      .max(64)
+      .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
+      .optional(),
     scope: z.enum(["room", "reservation"]).optional().default("room")
   })
   .refine(
@@ -4946,21 +4997,18 @@ export async function handleCancelBooking(req: any, res: any) {
     //       guest is on-property or past checkout, the status
     //       cannot flip back. Same 400 the BF-16 block produced.
     //
-    //   (b) Source-specific authorisation — the guest self-service
-    //       path is restricted to `pending` / `payment-uploaded`
-    //       (no money may have been collected). The staff path
-    //       covers every pre-arrival status. The split is enforced
+    //   (b) Source-specific authorisation — CRL-06 expands guest
+    //       self-service to every pre-arrival status after adding
+    //       the policy-derived financial preview. The staff path
+    //       also covers every pre-arrival status. The split is enforced
     //       server-side so a client cannot POST a crafted body to
     //       bypass the guest restriction; the apiRouter's
     //       `authenticateStaff` check is the source of truth for
     //       the boolean.
     //
-    //   CRL-06 (secure cancellation preview) will deliberately
-    //   expand `GUEST_CANCELLABLE_STATUSES` after the guest sees
-    //   a policy-derived financial preview first. Until then, any
-    //   guest attempting to cancel a paid booking is funnelled to
-    //   the front desk — the safer default for the "no refund
-    //   issued automatically" rule (CRL-04).
+    //   Paid guest cancellations remain non-automatic financially:
+    //   the cancellation commits, while any policy refund is left
+    //   for staff processing (CRL-04/06).
     if (
       // Per MRB-05 PR #2 (2026-08-02, per decision #159):
       // the terminal-status reject now excludes
@@ -5533,6 +5581,291 @@ export async function handleCancelBooking(req: any, res: any) {
       });
     }
     console.error("Booking cancellation handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
+// Per CRL-06 (2026-08-02): the cancellation preview
+// handler. Returns the financial effect of a cancel
+// WITHOUT mutating anything — the guest + admin
+// modals call this on open (and on scope flip in the
+// admin modal) and render the breakdown before the
+// user taps confirm. The destructive cancel never
+// auto-refunds (CRL-04); the preview makes that
+// explicit by surfacing `staffProcessingRequired`
+// when the policy refunds money AND the guest has
+// paid.
+//
+// Auth is the same as the destructive cancel: staff
+// requests bypass the body schema and look up by
+// `bookingId` / `bookingRef`; guest requests go
+// through `guestCancelPreviewSchema` and require the
+// `bookingRef + (email | token)` credential. The
+// apiRouter applies a 10/min/IP rate limit so a
+// flood of previews is bounded independently of the
+// cancel bucket. The handler is read-only — no
+// `runTransaction`, no writes to Firestore.
+export async function handleCancelPreview(req: any, res: any) {
+  const { bookingId, bookingRef } = req.body || {};
+
+  // Derive the scope selector the same way the cancel
+  // handler does (see `handleCancelBooking`): the staff
+  // path reads `req.body.scope` directly (no schema
+  // gate on the staff body), the guest path uses the
+  // schema-validated value. Default `"room"` keeps
+  // the legacy single-child behavior for every
+  // existing caller that omits the field.
+  let requestedScope: "room" | "reservation" = req.staff
+    ? (String((req.body || {}).scope || "").trim().toLowerCase() === "reservation"
+      ? "reservation"
+      : "room")
+    : "room";
+
+  try {
+    let bookingDocumentRef: any;
+    let bookingData: any;
+
+    if (req.staff) {
+      // Per CRL-06: staff preview bypasses the
+      // guest credential (the staff is already
+      // authenticated). Same resolution shape as
+      // the cancel handler — `bookingId` preferred,
+      // `bookingRef` as a fallback.
+      if (bookingId) {
+        bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
+      } else if (bookingRef) {
+        const query = adminDb.collection("bookings").where("bookingRef", "==", bookingRef).limit(1);
+        const snapshot = await query.get();
+        if (snapshot.empty) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+        bookingDocumentRef = snapshot.docs[0].ref;
+      } else {
+        return res.status(400).json({ success: false, error: "Booking ID or Reference is required." });
+      }
+
+      const doc = await bookingDocumentRef.get();
+      if (!doc.exists) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      bookingData = doc.data();
+    } else {
+      // Per CRL-06: the guest preview goes through
+      // `guestCancelPreviewSchema` (the credential
+      // gate) and reads the booking the same way the
+      // cancel handler does. No Turnstile (the
+      // preview is read-only, the credential is the
+      // gate, the apiRouter rate limit is the
+      // secondary defence).
+      const parsed = guestCancelPreviewSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide a valid booking reference and email or lookup token."
+        });
+      }
+      requestedScope = parsed.data.scope;
+      const compositeFilter = parsed.data.token
+        ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() }
+        : { field: "guestEmail", value: parsed.data.guestEmail };
+
+      const query = adminDb.collection("bookings")
+        .where("bookingRef", "==", parsed.data.bookingRef)
+        .where(compositeFilter.field, "==", compositeFilter.value)
+        .limit(1);
+      const snapshot = await query.get();
+      if (snapshot.empty) {
+        return res.status(404).json({
+          success: false,
+          error: parsed.data.token
+            ? "Booking not found with matching token."
+            : "Booking not found with matching email."
+        });
+      }
+      bookingDocumentRef = snapshot.docs[0].ref;
+      bookingData = snapshot.docs[0].data();
+    }
+
+    // The reservation-scope path needs the looked-up
+    // booking's `reservationId` to read the siblings
+    // + the reservation header. The per-child path
+    // (scope === "room" OR legacy null-
+    // `reservationId`) skips the sibling read.
+    const lookedUpReservationId = String(bookingData.reservationId || "").trim();
+    const hasReservation = lookedUpReservationId.length > 0;
+    const isReservationScope = requestedScope === "reservation" && lookedUpReservationId.length > 0;
+
+    // Per CRL-06: the canonical `now` for the
+    // policy evaluation. Captured here (not inside
+    // the helper) so the previews triggered by the
+    // same modal open stay consistent — a re-render
+    // on scope flip uses a fresh `now` (the policy
+    // cutoff can move between renders).
+    const now = new Date();
+
+    // Per CRL-06: read the reservation header + N
+    // children (when reservation-scope) or the single
+    // looked-up booking (per-child). The same shape
+    // the cancel handler uses for the reservation-
+    // scope branch.
+    let reservation: { id: string; reservationRef: string; totalPrice: number } | null = null;
+    let cancellableChildren: Array<{
+      id: string;
+      bookingRef: string;
+      status: string;
+      roomType: string;
+      totalPrice: number;
+      reservationPosition: number | null;
+      cancellationPolicySnapshot: any;
+    }> = [];
+    let allocationSubtotal = Math.max(Number(bookingData.totalPrice) || 0, 0);
+
+    if (hasReservation) {
+      const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
+      const [reservationDoc, childrenSnap] = await Promise.all([
+        reservationRef.get(),
+        adminDb.collection("bookings")
+          .where("reservationId", "==", lookedUpReservationId)
+          .get()
+      ]);
+      if (!reservationDoc.exists) {
+        return res.status(404).json({ success: false, error: "Reservation not found." });
+      }
+      const reservationSnapshot = reservationDoc.data() || {};
+      reservation = {
+        id: lookedUpReservationId,
+        reservationRef: String(reservationSnapshot.reservationRef || ""),
+        totalPrice: Number(reservationSnapshot.totalPrice) || 0
+      };
+      const eligibleChildren = childrenSnap.docs
+        .map((d: any) => {
+          const data = d.data() || {};
+          // The preview's cancellable set mirrors the
+          // cancel handler's filter: terminal
+          // (`checked-in` / `cancelled`) + source-
+          // mismatched statuses are skipped. The
+          // guest preview is always the guest path
+          // (the staff preview uses the staff
+          // source). For the source-specific filter:
+          // - guest path: only `GUEST_CANCELLABLE_STATUSES`
+          //   (per CRL-03)
+          // - staff path: every pre-arrival status
+          //   (the cancel handler covers all of them)
+          const status = String(data.status || "");
+          if (status === "checked-in" || status === "cancelled") return null;
+          if (
+            !req.staff
+            && !(GUEST_CANCELLABLE_STATUSES as readonly string[]).includes(status)
+          ) {
+            return null;
+          }
+          return {
+            id: d.id,
+            bookingRef: String(data.bookingRef || ""),
+            status,
+            roomType: String(data.roomType || ""),
+            totalPrice: Number(data.totalPrice) || 0,
+            reservationPosition: Number(data.reservationPosition) || null,
+            cancellationPolicySnapshot: data.cancellationPolicySnapshot || null
+          };
+        })
+        .filter(Boolean) as typeof cancellableChildren;
+      allocationSubtotal = eligibleChildren.reduce(
+        (sum, child) => sum + Math.max(Number(child.totalPrice) || 0, 0),
+        0
+      );
+      cancellableChildren = isReservationScope
+        ? eligibleChildren
+        : eligibleChildren.filter((child) => child.id === bookingDocumentRef.id);
+    } else {
+      // The per-child path is byte-equivalent to the
+      // destructive cancel's per-child branch — a
+      // single child with the looked-up booking's
+      // own snapshot. The legacy null-`reservationId`
+      // path is the same shape (no sibling read).
+      cancellableChildren = [{
+        id: bookingDocumentRef.id,
+        bookingRef: String(bookingData.bookingRef || ""),
+        status: String(bookingData.status || ""),
+        roomType: String(bookingData.roomType || ""),
+        totalPrice: Number(bookingData.totalPrice) || 0,
+        reservationPosition: Number(bookingData.reservationPosition) || null,
+        cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+      }];
+    }
+
+    // Per CRL-06: read the reservation folio (or
+    // the legacy per-booking folio) to compute the
+    // net-collected total. The reservation case
+    // reads `reservations/{id}/payments` +
+    // `reservations/{id}/refunds`; the legacy case
+    // reads `bookings/{id}/payments` +
+    // `bookings/{id}/refunds`. The sign-aware sum
+    // (refunds are negative on the wire, per CRL-01)
+    // is the same shape `getReservationFolioSummary`
+    // uses internally — we inline the math here so
+    // the preview stays a single read pass with no
+    // extra helper overhead.
+    let reservationNetCollected = 0;
+    if (hasReservation && reservation) {
+      const [reservationPaymentsSnap, reservationRefundsSnap] = await Promise.all([
+        adminDb.collection("reservations").doc(reservation.id).collection("payments").get(),
+        adminDb.collection("reservations").doc(reservation.id).collection("refunds").get()
+      ]);
+      reservationNetCollected =
+        reservationPaymentsSnap.docs.reduce(
+          (sum: number, d: any) => sum + (Number(d.data()?.amount) || 0),
+          0
+        ) +
+        reservationRefundsSnap.docs.reduce(
+          (sum: number, d: any) => sum + (Number(d.data()?.amount) || 0),
+          0
+        );
+    } else {
+      // Legacy per-booking path. The bookings/{id}/
+      // payments subcollection carries both payments
+      // (positive) and refunds (negative, per CRL-01)
+      // in the legacy adapter — the sign-aware sum
+      // gives the net collected.
+      const legacyFolioSnap = await adminDb.collection("bookings")
+        .doc(bookingDocumentRef.id)
+        .collection("payments")
+        .get();
+      reservationNetCollected = legacyFolioSnap.docs.reduce(
+        (sum: number, d: any) => sum + (Number(d.data()?.amount) || 0),
+        0
+      );
+    }
+
+    // Per CRL-06: shape the looked-up booking for the
+    // helper. The `lookedUpBooking` is the room the
+    // guest opened the preview on (the anchor); the
+    // `cancellableChildren` is the full set the
+    // policy applies to (a single child for `"room"`
+    // scope, N children for `"reservation"` scope).
+    const lookedUpBookingForHelper = {
+      id: bookingDocumentRef.id,
+      bookingRef: String(bookingData.bookingRef || ""),
+      status: String(bookingData.status || ""),
+      roomType: String(bookingData.roomType || ""),
+      totalPrice: Number(bookingData.totalPrice) || 0,
+      reservationPosition: Number(bookingData.reservationPosition) || null,
+      cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+    };
+
+    const preview = evaluateCancelPreview({
+      scope: requestedScope,
+      now,
+      lookedUpBooking: lookedUpBookingForHelper,
+      reservation,
+      cancellableChildren,
+      reservationNetCollected,
+      allocationSubtotal
+    });
+
+    return res.status(200).json({ success: true, preview });
+  } catch (error: any) {
+    console.error("Booking cancellation preview error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }

@@ -887,8 +887,9 @@ function bookingCancelledEmail(booking: any) {
   // because the underlying fact — no refund is automatic — is
   // true in all three cases:
   //
-  //   guest  — server-restricted to pre-payment statuses by
-  //            CRL-03, so no money was ever collected
+  //   guest  — CRL-06 permits paid pre-arrival cancellation
+  //            after the financial preview; any applicable
+  //            refund still requires staff processing
   //   staff  — money may or may not have been collected; the
   //            front desk assesses refund eligibility out of band
   //   system — PEX auto-expiry of an unpaid `pending` hold, so

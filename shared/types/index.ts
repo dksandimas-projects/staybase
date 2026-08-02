@@ -761,3 +761,84 @@ export interface TestRun {
   cleanupResult?: TestRunCleanupResult | null;
 }
 
+
+// Per CRL-06 (2026-08-02): the cancellation preview
+// response. The new `POST /api/bookings/cancel-preview`
+// endpoint returns this shape — same `kind` discriminator
+// as the lookup endpoint (`"single"` for N=1 / legacy
+// per-child, `"reservation"` for N>1). The endpoint is
+// rate-limited and reads the same `ref + (email | token)`
+// credential as the destructive cancel; it never writes
+// anything. The two scopes share the policy-derived
+// `refundPct` / `isBeforeCutoff` / `cutoffTimeMs` /
+// `hoursRemaining` fields — the staff + guest modals
+// render the breakdown before the user taps confirm.
+//
+// Financial fields (per room + aggregate):
+// - `subtotal`: the room's `totalPrice` (or the sum
+//   across cancellable children for the reservation).
+// - `netCollected`: the room's pro-rata share of the
+//   reservation's collected payments (sign-aware;
+//   refunds counted as negative). For a legacy
+//   per-booking path this is the booking's own net.
+// - `policyRefund`: `netCollected * refundPct` (a
+//   refund cannot exceed money the guest paid).
+// - `retainedAmount`: `netCollected - policyRefund`
+//   (the collected portion the hotel keeps under
+//   the policy; unpaid balance is not "retained").
+// - `staffProcessingRequired`: `true` when the
+//   policy refunds money AND the guest has paid
+//   (so a staff action is required to issue the
+//   refund). The destructive cancel never
+//   auto-refunds per CRL-04.
+//
+// The `rooms[]` array is only present on
+// `kind: "reservation"`; it carries the per-room
+// preview the staff can show alongside the aggregate.
+// The `policyText` echoes the snapshotted policy
+// the reservation captured at create time
+// (CRL-05, decision #165) so the modal can render
+// the "no refund is issued automatically" callout
+// next to the breakdown.
+export interface CancellationPreviewRoom {
+  bookingId: string;
+  bookingRef: string;
+  position: number | null;
+  roomType: string;
+  status: string;
+  subtotal: number;
+  netCollected: number;
+  policyRefund: number;
+  retainedAmount: number;
+  refundPct: number;
+  isBeforeCutoff: boolean;
+  hoursRemaining: number;
+}
+
+export interface CancellationPreview {
+  kind: "single" | "reservation";
+  scope: "room" | "reservation";
+  bookingRef: string;
+  reservationRef: string | null;
+  // Per-scope breakdown — for `"single"` the `room` field
+  // is populated and `rooms` is `null`; for `"reservation"`
+  // `rooms` carries the per-room projections and `room` is
+  // `null`. The aggregate fields are populated for both
+  // kinds (a `"single"` preview's aggregate == its `room`).
+  room: CancellationPreviewRoom | null;
+  rooms: CancellationPreviewRoom[] | null;
+  subtotal: number;
+  netCollected: number;
+  policyRefund: number;
+  retainedAmount: number;
+  staffProcessingRequired: boolean;
+  // Policy fields (shared across scope — the snapshot
+  // comes from the looked-up booking's `cancellationPolicySnapshot`).
+  cutoffHours: number;
+  cutoffTimeMs: number;
+  hoursRemaining: number;
+  isBeforeCutoff: boolean;
+  refundPct: number;
+  policyText: string;
+  policySource: "settings" | "corporate-override" | "legacy-fallback";
+}

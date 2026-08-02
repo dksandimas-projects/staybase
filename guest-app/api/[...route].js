@@ -221700,7 +221700,12 @@ function normalizePaymentHoldWindowHours(raw) {
   return clamped;
 }
 var EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
-var GUEST_CANCELLABLE_STATUSES = ["pending", "payment-uploaded"];
+var GUEST_CANCELLABLE_STATUSES = [
+  "pending",
+  "payment-uploaded",
+  "payment-confirmed",
+  "confirmed"
+];
 
 // ../shared/utils/extraBedInventory.ts
 function countExtraBedsInUse(bookings, rangeStart, rangeEnd, excludeBookingId, now = /* @__PURE__ */ new Date()) {
@@ -222290,6 +222295,36 @@ function getCheckInInstant(dateKey2, timeStr, timeZone) {
 function getLegacyCancellationPolicy() {
   return "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.";
 }
+function evaluateCancellation(cancellationTime, snapshot, fallbackContext) {
+  const cancellationMs = typeof cancellationTime === "number" ? cancellationTime : cancellationTime.getTime();
+  const cutoffHours = snapshot?.cutoffHours ?? 48;
+  const refundPctBefore = snapshot?.refundPctBefore ?? 100;
+  const refundPctAfter = snapshot?.refundPctAfter ?? 0;
+  const policySource = snapshot?.source ?? "legacy-fallback";
+  let checkInMs;
+  if (snapshot?.scheduledCheckInTime) {
+    checkInMs = new Date(snapshot.scheduledCheckInTime).getTime();
+  } else if (fallbackContext?.checkInDateKey) {
+    checkInMs = getCheckInInstant(
+      fallbackContext.checkInDateKey,
+      fallbackContext.checkInTime || "14:00",
+      fallbackContext.timeZone || "Asia/Manila"
+    ).getTime();
+  } else {
+    checkInMs = Date.now();
+  }
+  const hoursRemaining = (checkInMs - cancellationMs) / (1e3 * 60 * 60);
+  const isBeforeCutoff = hoursRemaining >= cutoffHours;
+  const cutoffTimeMs = checkInMs - cutoffHours * 60 * 60 * 1e3;
+  const refundPct = isBeforeCutoff ? refundPctBefore : refundPctAfter;
+  return {
+    refundPct,
+    isBeforeCutoff,
+    cutoffTimeMs,
+    hoursRemaining,
+    policySource
+  };
+}
 function createCancellationPolicySnapshot(params) {
   const tz = params.hotelConfig.timezone || "Asia/Manila";
   const stdCheckInTime = params.hotelConfig.checkInTime || "14:00";
@@ -222329,6 +222364,93 @@ function createCancellationPolicySnapshot(params) {
     policyText,
     scheduledCheckInTime: checkInInstant.toISOString(),
     source
+  };
+}
+function evaluateCancelPreview(input) {
+  const evalRoom = (child) => {
+    const evaluation = evaluateCancellation(
+      input.now,
+      child.cancellationPolicySnapshot,
+      // The fallback `fallbackContext` is unused when
+      // the snapshot is present; we still pass it for
+      // the legacy null-snapshot case so a child without
+      // a snapshotted policy (pre-CRL-05) still evaluates
+      // against the standard 48h / 100% / 0% rules.
+      {
+        checkInDateKey: "",
+        checkInTime: "14:00",
+        timeZone: "Asia/Manila"
+      }
+    );
+    const subtotal = Math.max(Number(child.totalPrice) || 0, 0);
+    return {
+      child,
+      evaluation,
+      subtotal
+    };
+  };
+  const children = input.scope === "room" ? [input.lookedUpBooking] : input.cancellableChildren;
+  const roomRows = children.map(evalRoom);
+  const cancellableSubtotal = roomRows.reduce((sum, r3) => sum + r3.subtotal, 0);
+  const allocationSubtotal = Math.max(
+    Number(input.allocationSubtotal) || cancellableSubtotal,
+    cancellableSubtotal
+  );
+  const availableNetCollected = Math.max(Number(input.reservationNetCollected) || 0, 0);
+  const netCollectedByRoom = roomRows.map((r3) => {
+    if (allocationSubtotal === 0) return 0;
+    return Math.round(
+      r3.subtotal / allocationSubtotal * availableNetCollected * 100
+    ) / 100;
+  });
+  const perRoom = roomRows.map((r3, idx) => {
+    const netCollected = netCollectedByRoom[idx];
+    const policyRefund = Math.round(netCollected * (r3.evaluation.refundPct / 100) * 100) / 100;
+    const retainedAmount = Math.round((netCollected - policyRefund) * 100) / 100;
+    return {
+      bookingId: r3.child.id,
+      bookingRef: r3.child.bookingRef,
+      position: r3.child.reservationPosition ?? null,
+      roomType: r3.child.roomType,
+      status: r3.child.status,
+      subtotal: r3.subtotal,
+      netCollected,
+      policyRefund,
+      retainedAmount,
+      refundPct: r3.evaluation.refundPct,
+      isBeforeCutoff: r3.evaluation.isBeforeCutoff,
+      hoursRemaining: r3.evaluation.hoursRemaining
+    };
+  });
+  const aggregateSubtotal = cancellableSubtotal;
+  const aggregateNetCollected = Math.round(
+    netCollectedByRoom.reduce((sum, n2) => sum + n2, 0) * 100
+  ) / 100;
+  const aggregatePolicyRefund = perRoom.reduce((sum, r3) => sum + r3.policyRefund, 0);
+  const aggregateRetained = Math.round((aggregateNetCollected - aggregatePolicyRefund) * 100) / 100;
+  const aggregateRefundPct = perRoom.length > 0 ? Math.min(...perRoom.map((r3) => r3.refundPct)) : 0;
+  const representativeEvaluation = roomRows[0]?.evaluation;
+  const staffProcessingRequired = aggregateNetCollected > 0 && aggregatePolicyRefund > 0;
+  const isReservation = input.scope === "reservation" && input.reservation !== null;
+  return {
+    kind: isReservation ? "reservation" : "single",
+    scope: input.scope,
+    bookingRef: input.lookedUpBooking.bookingRef,
+    reservationRef: input.reservation?.reservationRef ?? null,
+    room: isReservation ? null : perRoom[0] ?? null,
+    rooms: isReservation ? perRoom : null,
+    subtotal: Math.round(aggregateSubtotal * 100) / 100,
+    netCollected: aggregateNetCollected,
+    policyRefund: Math.round(aggregatePolicyRefund * 100) / 100,
+    retainedAmount: aggregateRetained,
+    staffProcessingRequired,
+    cutoffHours: representativeEvaluation?.refundPct !== void 0 ? representativeEvaluation.cutoffTimeMs && input.lookedUpBooking.cancellationPolicySnapshot ? input.lookedUpBooking.cancellationPolicySnapshot.cutoffHours : 48 : 48,
+    cutoffTimeMs: representativeEvaluation?.cutoffTimeMs ?? 0,
+    hoursRemaining: representativeEvaluation?.hoursRemaining ?? 0,
+    isBeforeCutoff: representativeEvaluation?.isBeforeCutoff ?? false,
+    refundPct: aggregateRefundPct,
+    policyText: input.lookedUpBooking.cancellationPolicySnapshot?.policyText ?? getLegacyCancellationPolicy(),
+    policySource: representativeEvaluation?.policySource ?? "legacy-fallback"
   };
 }
 
@@ -225674,6 +225796,15 @@ var guestCancelSchema = external_exports.object({
   (data) => Boolean(data.guestEmail) !== Boolean(data.token),
   "Provide either an email or a lookup token (not both)."
 );
+var guestCancelPreviewSchema = external_exports.object({
+  bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+  guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
+  token: external_exports.string().trim().max(64).regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.").optional(),
+  scope: external_exports.enum(["room", "reservation"]).optional().default("room")
+}).refine(
+  (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+  "Provide either an email or a lookup token (not both)."
+);
 var guestDetailsSchema = external_exports.object({
   firstName: external_exports.string().trim().min(1).max(80),
   lastName: external_exports.string().trim().min(1).max(80),
@@ -228589,6 +228720,150 @@ async function handleCancelBooking(req, res) {
       });
     }
     console.error("Booking cancellation handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+async function handleCancelPreview(req, res) {
+  const { bookingId, bookingRef } = req.body || {};
+  let requestedScope = req.staff ? String((req.body || {}).scope || "").trim().toLowerCase() === "reservation" ? "reservation" : "room" : "room";
+  try {
+    let bookingDocumentRef;
+    let bookingData2;
+    if (req.staff) {
+      if (bookingId) {
+        bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
+      } else if (bookingRef) {
+        const query = adminDb.collection("bookings").where("bookingRef", "==", bookingRef).limit(1);
+        const snapshot = await query.get();
+        if (snapshot.empty) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+        bookingDocumentRef = snapshot.docs[0].ref;
+      } else {
+        return res.status(400).json({ success: false, error: "Booking ID or Reference is required." });
+      }
+      const doc = await bookingDocumentRef.get();
+      if (!doc.exists) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      bookingData2 = doc.data();
+    } else {
+      const parsed2 = guestCancelPreviewSchema.safeParse(req.body || {});
+      if (!parsed2.success) {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide a valid booking reference and email or lookup token."
+        });
+      }
+      requestedScope = parsed2.data.scope;
+      const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
+      const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+      const snapshot = await query.get();
+      if (snapshot.empty) {
+        return res.status(404).json({
+          success: false,
+          error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+        });
+      }
+      bookingDocumentRef = snapshot.docs[0].ref;
+      bookingData2 = snapshot.docs[0].data();
+    }
+    const lookedUpReservationId = String(bookingData2.reservationId || "").trim();
+    const hasReservation = lookedUpReservationId.length > 0;
+    const isReservationScope = requestedScope === "reservation" && lookedUpReservationId.length > 0;
+    const now = /* @__PURE__ */ new Date();
+    let reservation = null;
+    let cancellableChildren = [];
+    let allocationSubtotal = Math.max(Number(bookingData2.totalPrice) || 0, 0);
+    if (hasReservation) {
+      const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
+      const [reservationDoc, childrenSnap] = await Promise.all([
+        reservationRef.get(),
+        adminDb.collection("bookings").where("reservationId", "==", lookedUpReservationId).get()
+      ]);
+      if (!reservationDoc.exists) {
+        return res.status(404).json({ success: false, error: "Reservation not found." });
+      }
+      const reservationSnapshot = reservationDoc.data() || {};
+      reservation = {
+        id: lookedUpReservationId,
+        reservationRef: String(reservationSnapshot.reservationRef || ""),
+        totalPrice: Number(reservationSnapshot.totalPrice) || 0
+      };
+      const eligibleChildren = childrenSnap.docs.map((d) => {
+        const data = d.data() || {};
+        const status = String(data.status || "");
+        if (status === "checked-in" || status === "cancelled") return null;
+        if (!req.staff && !GUEST_CANCELLABLE_STATUSES.includes(status)) {
+          return null;
+        }
+        return {
+          id: d.id,
+          bookingRef: String(data.bookingRef || ""),
+          status,
+          roomType: String(data.roomType || ""),
+          totalPrice: Number(data.totalPrice) || 0,
+          reservationPosition: Number(data.reservationPosition) || null,
+          cancellationPolicySnapshot: data.cancellationPolicySnapshot || null
+        };
+      }).filter(Boolean);
+      allocationSubtotal = eligibleChildren.reduce(
+        (sum, child) => sum + Math.max(Number(child.totalPrice) || 0, 0),
+        0
+      );
+      cancellableChildren = isReservationScope ? eligibleChildren : eligibleChildren.filter((child) => child.id === bookingDocumentRef.id);
+    } else {
+      cancellableChildren = [{
+        id: bookingDocumentRef.id,
+        bookingRef: String(bookingData2.bookingRef || ""),
+        status: String(bookingData2.status || ""),
+        roomType: String(bookingData2.roomType || ""),
+        totalPrice: Number(bookingData2.totalPrice) || 0,
+        reservationPosition: Number(bookingData2.reservationPosition) || null,
+        cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+      }];
+    }
+    let reservationNetCollected = 0;
+    if (hasReservation && reservation) {
+      const [reservationPaymentsSnap, reservationRefundsSnap] = await Promise.all([
+        adminDb.collection("reservations").doc(reservation.id).collection("payments").get(),
+        adminDb.collection("reservations").doc(reservation.id).collection("refunds").get()
+      ]);
+      reservationNetCollected = reservationPaymentsSnap.docs.reduce(
+        (sum, d) => sum + (Number(d.data()?.amount) || 0),
+        0
+      ) + reservationRefundsSnap.docs.reduce(
+        (sum, d) => sum + (Number(d.data()?.amount) || 0),
+        0
+      );
+    } else {
+      const legacyFolioSnap = await adminDb.collection("bookings").doc(bookingDocumentRef.id).collection("payments").get();
+      reservationNetCollected = legacyFolioSnap.docs.reduce(
+        (sum, d) => sum + (Number(d.data()?.amount) || 0),
+        0
+      );
+    }
+    const lookedUpBookingForHelper = {
+      id: bookingDocumentRef.id,
+      bookingRef: String(bookingData2.bookingRef || ""),
+      status: String(bookingData2.status || ""),
+      roomType: String(bookingData2.roomType || ""),
+      totalPrice: Number(bookingData2.totalPrice) || 0,
+      reservationPosition: Number(bookingData2.reservationPosition) || null,
+      cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+    };
+    const preview = evaluateCancelPreview({
+      scope: requestedScope,
+      now,
+      lookedUpBooking: lookedUpBookingForHelper,
+      reservation,
+      cancellableChildren,
+      reservationNetCollected,
+      allocationSubtotal
+    });
+    return res.status(200).json({ success: true, preview });
+  } catch (error) {
+    console.error("Booking cancellation preview error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }
@@ -233976,6 +234251,23 @@ async function handler(req, res) {
       }
     }
     return await handleCancelBooking(req, res);
+  }
+  if (domain === "bookings" && action === "cancel-preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancel-preview:${ip}`, 10, 6e4)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many cancellation previews. Please try again in a minute."
+      });
+    }
+    let authResult = { success: false };
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        authResult = staffAuth;
+      }
+    }
+    req.staff = authResult.success ? authResult : null;
+    return await handleCancelPreview(req, res);
   }
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-lookup:${ip}`, 10, 6e4)) {

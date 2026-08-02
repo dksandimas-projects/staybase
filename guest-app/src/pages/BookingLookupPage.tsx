@@ -2,12 +2,13 @@ import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { scaleIn } from "@spark-inn/shared";
-import type { BookingRateBreakdown } from "@spark-inn/shared";
+import { GUEST_CANCELLABLE_STATUSES, scaleIn } from "@spark-inn/shared";
+import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
+import { CancellationPreviewPanel } from "../components/CancellationPreviewPanel";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
@@ -216,6 +217,21 @@ export function BookingLookupPage() {
   const [cancelReason, setCancelReason] = useState("");
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState("");
+  // Per CRL-06 (2026-08-02): the cancellation preview
+  // state. The guest cancel modal calls the new
+  // `POST /api/bookings/cancel-preview` endpoint on
+  // open and renders the financial breakdown BEFORE
+  // the user taps confirm. The preview is best-effort
+  // — the destructive cancel still proceeds if the
+  // preview errors (the error state surfaces a clear
+  // "breakdown unavailable" message). The state
+  // resets to `null` on close so a previous session's
+  // preview never bleeds into a new one.
+  const [cancelPreview, setCancelPreview] = useState<CancellationPreview | null>(null);
+  const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
+  const [cancelPreviewError, setCancelPreviewError] = useState<string | null>(null);
+  const [completedCancellationPreview, setCompletedCancellationPreview] = useState<CancellationPreview | null>(null);
+  const cancelPreviewRequestIdRef = useRef(0);
 
   const [isResending, setIsResending] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sent" | "rate-limited" | "error">("idle");
@@ -223,6 +239,83 @@ export function BookingLookupPage() {
   const [resendCooldownUntil, setResendCooldownUntil] = useState<number>(0);
   const [resendCooldownTick, setResendCooldownTick] = useState(0);
   const lastAutoLookupSignatureRef = useRef("");
+
+  // Per CRL-06 (2026-08-02): the cancellation preview
+  // fetch. The guest cancel modal calls this on open
+  // (and on the lookup re-render that swaps the
+  // booking) and renders the financial breakdown
+  // BEFORE the user taps confirm. The endpoint is
+  // `/api/bookings/cancel-preview`; the body reuses
+  // the same `ref + (email | token)` credential as
+  // the destructive cancel. The fetch never mutates
+  // anything — the guest can still confirm with the
+  // panel in the error state.
+  const fetchCancelPreview = async () => {
+    const requestId = ++cancelPreviewRequestIdRef.current;
+    const isReservationScope = Boolean(activeReservation);
+    const activeRef = isReservationScope
+      ? activeReservation?.primaryBookingRef
+      : activeBooking?.bookingRef;
+    if (!activeRef) return;
+    const previewScope: "room" | "reservation" = isReservationScope ? "reservation" : "room";
+    setCancelPreviewLoading(true);
+    setCancelPreviewError(null);
+    try {
+      const previewPayload: Record<string, string> = {
+        bookingRef: activeRef,
+        scope: previewScope
+      };
+      if (lookupAuthMode === "token" && activeLookupToken) {
+        previewPayload.token = activeLookupToken;
+      } else {
+        previewPayload.guestEmail = emailInput.trim();
+      }
+      const response = await fetch("/api/bookings/cancel-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(previewPayload)
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Could not load the cancellation preview.");
+      }
+      if (requestId !== cancelPreviewRequestIdRef.current) return;
+      setCancelPreview(result.preview);
+    } catch (err: any) {
+      // Best-effort: the destructive cancel still
+      // proceeds if the preview errors. The error
+      // state surfaces a clear "breakdown
+      // unavailable" message in the panel.
+      if (requestId === cancelPreviewRequestIdRef.current) {
+        setCancelPreview(null);
+        setCancelPreviewError(err?.message || "Could not load the cancellation preview.");
+      }
+    } finally {
+      if (requestId === cancelPreviewRequestIdRef.current) {
+        setCancelPreviewLoading(false);
+      }
+    }
+  };
+
+  // Per CRL-06: fire the preview fetch when the
+  // cancel modal opens. The `useEffect` is scoped to
+  // the `[showCancelModal, activeRef]` pair so a
+  // modal close + reopen with the same booking does
+  // not double-fetch (the destructive cancel handler
+  // closes the modal without clearing the preview —
+  // this `useEffect` handles the close path by
+  // short-circuiting on the closed state).
+  useEffect(() => {
+    if (showCancelModal) {
+      void fetchCancelPreview();
+    }
+    // We intentionally omit `fetchCancelPreview`
+    // from the deps — it captures fresh values from
+    // state on every render via closure, and the
+    // effect re-fires on the `[showCancelModal,
+    // activeRef]` change which is the right trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCancelModal, activeBooking?.bookingRef, activeReservation?.primaryBookingRef]);
 
   // Per H1 (hardening batch 2026-06-26): the lookup +
   // cancel POSTs are Turnstile-gated. The widget renders
@@ -249,6 +342,7 @@ export function BookingLookupPage() {
   // picks the token-vs-email query path based on which
   // is supplied.
   const performLookup = async (bookingRef: string, guestEmail?: string, token?: string) => {
+    setCompletedCancellationPreview(null);
     setIsSearching(true);
     setSearchError("");
     setActiveBooking(null);
@@ -491,6 +585,7 @@ export function BookingLookupPage() {
     setCancelError("");
     setShowCancelModal(false);
     setCancelReason("");
+    setCompletedCancellationPreview(null);
     // Per H2 (hardening batch 2026-06-26): clear the
     // cached auth mode + token when the user goes back
     // to the search screen so the next lookup starts
@@ -693,21 +788,35 @@ export function BookingLookupPage() {
 
       if (isReservationScope && activeReservation) {
         // The server cancelled every room in the
-        // transaction. Mark every room as cancelled in
-        // the local view so the card reflects the new
-        // state immediately. The next lookup fetches
-        // the canonical reservation header.
+        // transaction that remained guest-cancellable.
+        // Preserve terminal siblings in mixed-state
+        // reservations so the optimistic card mirrors
+        // the server's skip rules.
+        const cancellableIds = new Set(
+          activeReservation.rooms
+            .filter((room) =>
+              (GUEST_CANCELLABLE_STATUSES as readonly string[]).includes(room.status)
+            )
+            .map((room) => room.id)
+        );
+        const nextRooms = activeReservation.rooms.map((room) =>
+          cancellableIds.has(room.id) ? { ...room, status: "cancelled" } : room
+        );
+        const cancelledRoomCount = nextRooms.filter((room) => room.status === "cancelled").length;
+        const activeRoomCount = Math.max(activeReservation.roomCount - cancelledRoomCount, 0);
         setActiveReservation({
           ...activeReservation,
-          status: "cancelled",
-          rooms: activeReservation.rooms.map((room) => ({ ...room, status: "cancelled" })),
-          activeRoomCount: 0,
-          cancelledRoomCount: activeReservation.roomCount
+          status: activeRoomCount === 0 ? "cancelled" : activeReservation.status,
+          rooms: nextRooms,
+          activeRoomCount,
+          cancelledRoomCount
         });
       } else if (activeBooking) {
         setActiveBooking({ ...activeBooking, status: "cancelled" });
       }
+      setCompletedCancellationPreview(cancelPreview);
       setShowCancelModal(false);
+      cancelPreviewRequestIdRef.current += 1;
       setCancelReason("");
     } catch (err) {
       console.error("Cancel booking failed:", err);
@@ -743,8 +852,14 @@ export function BookingLookupPage() {
 
   const currentStepIndex = activeBooking ? getActiveStepIndex(activeBooking.status) : -1;
   const isCancelled = activeBooking?.status === "cancelled";
-  const canCancel =
-    activeBooking?.status === "pending" || activeBooking?.status === "payment-uploaded";
+  const canCancel = Boolean(
+    activeBooking
+    && (GUEST_CANCELLABLE_STATUSES as readonly string[]).includes(activeBooking.status)
+  );
+  const guestCancellableReservationRooms = activeReservation?.rooms.filter((room) =>
+      (GUEST_CANCELLABLE_STATUSES as readonly string[]).includes(room.status)
+    ) ?? [];
+  const canCancelReservation = guestCancellableReservationRooms.length > 0;
   const canResend = Boolean(activeBooking) && !isCancelled;
 
   const cooldownRemainingMs = Math.max(0, resendCooldownUntil - Date.now());
@@ -1077,9 +1192,20 @@ export function BookingLookupPage() {
                   <h2 className="text-lg font-bold text-gray-950 mb-5">Timeline</h2>
 
                   {isCancelled ? (
-                    <div className="flex items-center gap-3 rounded-lg bg-red-50 p-4 text-sm text-red-700">
+                    <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
+                      <div className="flex items-center gap-3">
                       <ShieldAlert size={20} className="shrink-0" />
                       <p>This reservation was cancelled. If this is an error, please contact the front desk.</p>
+                      </div>
+                      {completedCancellationPreview && (
+                        <p className="mt-3 border-t border-red-200 pt-3 text-xs leading-relaxed">
+                          {completedCancellationPreview.staffProcessingRequired
+                            ? `Your cancellation is complete. An applicable refund of up to ${formatPrice(completedCancellationPreview.policyRefund)} still requires staff processing and is not issued automatically.`
+                            : completedCancellationPreview.retainedAmount > 0
+                              ? `${formatPrice(completedCancellationPreview.retainedAmount)} is retained under the cancellation policy. No refund is issued automatically.`
+                              : "No payment refund is currently due under the cancellation preview."}
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <div className="relative flex flex-col gap-6 md:flex-row md:justify-between md:gap-0">
@@ -1252,12 +1378,14 @@ export function BookingLookupPage() {
                       ? `Wait ${cooldownSeconds}s`
                       : "Resend Email"}
                 </GhostButton>
-                <PrimaryButton
-                  onClick={() => setShowCancelModal(true)}
-                  className="bg-red-600 hover:bg-red-700"
-                >
-                  Cancel all rooms
-                </PrimaryButton>
+                {canCancelReservation && (
+                  <PrimaryButton
+                    onClick={() => setShowCancelModal(true)}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    Cancel all rooms
+                  </PrimaryButton>
+                )}
               </div>
             </div>
 
@@ -1316,6 +1444,19 @@ export function BookingLookupPage() {
               )}
             </div>
 
+            {activeReservation.status === "cancelled" && completedCancellationPreview && (
+              <div className="rounded-card border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="font-semibold">Cancellation complete</p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  {completedCancellationPreview.staffProcessingRequired
+                    ? `An applicable refund of up to ${formatPrice(completedCancellationPreview.policyRefund)} still requires staff processing and is not issued automatically.`
+                    : completedCancellationPreview.retainedAmount > 0
+                      ? `${formatPrice(completedCancellationPreview.retainedAmount)} is retained under the cancellation policy. No refund is issued automatically.`
+                      : "No payment refund is currently due under the cancellation preview."}
+                </p>
+              </div>
+            )}
+
             {/* Per-room list — every room in the reservation,
                 with its own ref + type + per-stay total. The
                 receipt PDF + the email helper use the same
@@ -1371,7 +1512,16 @@ export function BookingLookupPage() {
       </section>
 
       {(showCancelModal && (activeBooking || activeReservation)) && (
-        <Modal open={showCancelModal} onClose={() => !isCancelling && setShowCancelModal(false)} title="Cancel reservation?">
+        <Modal open={showCancelModal} onClose={() => {
+          if (isCancelling) return;
+          // Per CRL-06: drop the preview state on
+          // close so a previous session's
+          // breakdown never bleeds into a new one.
+          setShowCancelModal(false);
+          cancelPreviewRequestIdRef.current += 1;
+          setCancelPreview(null);
+          setCancelPreviewError(null);
+        }} title="Cancel reservation?">
           <form onSubmit={handleCancelBookingSubmit} className="space-y-4">
             {/* Per MRB-10 (2026-08-02, per decision #169):
                 the cancel modal copy is reservation-scope
@@ -1384,10 +1534,10 @@ export function BookingLookupPage() {
             {activeReservation ? (
               <>
                 <p className="text-sm text-gray-600 leading-relaxed">
-                  This will cancel all <strong>{activeReservation.roomCount} room{activeReservation.roomCount === 1 ? "" : "s"}</strong> in your reservation <span className="font-mono font-semibold text-gray-900">{activeReservation.reservationRef}</span>. This action is permanent.
+                  This will cancel all <strong>{guestCancellableReservationRooms.length} eligible room{guestCancellableReservationRooms.length === 1 ? "" : "s"}</strong> in your reservation <span className="font-mono font-semibold text-gray-900">{activeReservation.reservationRef}</span>. This action is permanent.
                 </p>
                 <ul className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 space-y-1">
-                  {activeReservation.rooms.map((room) => (
+                  {guestCancellableReservationRooms.map((room) => (
                     <li key={room.id} className="flex justify-between">
                       <span className="font-mono">{room.bookingRef} · {room.roomType}</span>
                       <span className="text-gray-500">Room {room.position}</span>
@@ -1400,16 +1550,29 @@ export function BookingLookupPage() {
                 Are you sure you want to cancel your booking <span className="font-mono font-semibold text-gray-900">{activeBooking.bookingRef}</span>? This action is permanent.
               </p>
             ) : null}
-            {/* Per CRL-04 (2026-08-02): the explicit "no refund is
+            {/* Per CRL-04/06 (2026-08-02): the explicit "no refund is
                 automatic" line is the same in the booking-cancelled
-                email and the admin confirm modal. The server already
-                restricts guest self-service to pre-payment statuses
-                (CRL-03), so no money will have been collected — but
-                the copy stays defensive in case the source list
-                expands under CRL-06's policy preview. */}
+                email and the admin confirm modal. CRL-06 allows paid
+                pre-arrival cancellations after this policy preview,
+                so the staff-processing distinction is material. */}
             <p className="text-sm text-gray-600 leading-relaxed">
               <strong>No refund is issued automatically</strong> by the cancellation. If you have already sent payment, our team will review your booking and reach out to arrange any applicable refund.
             </p>
+
+            {/* Per CRL-06 (2026-08-02): the financial-effect
+                preview. The panel is mounted below the
+                CRL-04 callout so the guest sees the
+                policy-derived breakdown before tapping
+                confirm. The panel is best-effort — the
+                destructive cancel still proceeds if the
+                preview errors. The state resets to `null`
+                on close (see the modal `onClose` +
+                `handleCancelBookingSubmit` paths). */}
+            <CancellationPreviewPanel
+              preview={cancelPreview}
+              isLoading={cancelPreviewLoading}
+              error={cancelPreviewError}
+            />
 
             <label className="grid gap-2 text-sm font-semibold text-gray-700">
               Reason for Cancellation (optional)
@@ -1431,7 +1594,16 @@ export function BookingLookupPage() {
             <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={() => setShowCancelModal(false)}
+                onClick={() => {
+                  setShowCancelModal(false);
+                  cancelPreviewRequestIdRef.current += 1;
+                  // Per CRL-06: drop the preview
+                  // state on close so a previous
+                  // session's breakdown never
+                  // bleeds into a new one.
+                  setCancelPreview(null);
+                  setCancelPreviewError(null);
+                }}
                 disabled={isCancelling}
                 className="min-h-11 rounded-lg border border-gray-200 px-5 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
               >

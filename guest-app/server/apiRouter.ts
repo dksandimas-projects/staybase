@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -755,8 +755,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    
+
     return await handleCancelBooking(req, res);
+  }
+
+  // Per CRL-06 (2026-08-02): the cancellation preview.
+  // The URL is `POST /api/bookings/cancel-preview` (the
+  // apiRouter splits on `/` and uses `[domain, action]`
+  // — a slash-separated path would drop the second
+  // segment, so the action name uses the same hyphen-
+  // separated shape as `add-payment` / `create-walkin` /
+  // `confirm-with-balance`). The preview is rate-limited
+  // independently of the cancel bucket (10/min/IP) so
+  // a flood of previews cannot starve a legitimate
+  // cancel attempt. The handler is read-only — no
+  // Turnstile, no `runTransaction`, no writes to
+  // Firestore. The same `ref + (email | token)` credential
+  // as the destructive cancel is the guest gate; the
+  // staff path bypasses (already authenticated).
+  if (domain === "bookings" && action === "cancel-preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancel-preview:${ip}`, 10, 60000)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many cancellation previews. Please try again in a minute."
+      });
+    }
+    let authResult: { success: boolean; uid?: string; email?: string } = { success: false };
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        authResult = staffAuth;
+      }
+    }
+    (req as any).staff = authResult.success ? authResult : null;
+    return await handleCancelPreview(req, res);
   }
 
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {

@@ -72,7 +72,7 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 ### Cancellation Rules (CRL)
 - Staff can cancel any pre-arrival status (`pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`).
 - Stamps `cancelledAt`, `cancelledBy`, and `cancellationSource` (`"staff"` vs `"guest"`) atomically inside transaction.
-- Guest self-service cancellation restricted to `pending` and `payment-uploaded`.
+- Guest self-service cancellation covers every pre-arrival status (`pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`) after CRL-06's authenticated financial preview. Any applicable refund still requires staff processing.
 
 ### Reservation-Scope Cancellation (MRB-13)
 > Decision: `plan/docs/DECISIONS-FEATURES.md #166` (spec) + `#170` (implementation record). Builds on MRB-01..06 (decision #159, reservation header) and CRL-02..05 (audit metadata + server-side status matrix + structured policy snapshot).

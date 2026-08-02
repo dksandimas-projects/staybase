@@ -241,7 +241,7 @@ describe("MRB-10 — BookingLookupPage renders the reservation view", () => {
 
   it("the cancel modal copy is reservation-scope when activeReservation is set", () => {
     expect(lookupPageSrc).toMatch(
-      /This will cancel all <strong>\{activeReservation\.roomCount\} room/
+      /This will cancel all <strong>\{guestCancellableReservationRooms\.length\} eligible room/
     );
     expect(lookupPageSrc).toMatch(/activeReservation\.reservationRef\}/);
   });
