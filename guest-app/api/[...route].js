@@ -225096,6 +225096,21 @@ var createBookingSchema = external_exports.object({
   corporateCode: external_exports.string().trim().max(120).optional().default(""),
   corporateFlatRate: external_exports.boolean().optional().default(false),
   linkedInquiryId: external_exports.string().trim().max(160).nullable().optional().default(null),
+  // Per MRB-06 (2026-08-02, per decision #159): the N>1
+  // generalization. The client requests N rooms of the
+  // same `roomType`; the server assigns N DISTINCT
+  // physical rooms in one transaction (same-room-twice
+  // guard — every assigned room is unique within the
+  // reservation). The fingerprint's `roomLines[0].quantity`
+  // matches this count so the idempotency check is
+  // N-aware. Default 1 (the historical single-room
+  // case — byte-equivalent to pre-MRB-06 for callers
+  // that don't supply the field). Bounded at 50 to
+  // match the existing `guests` upper bound (a 50-room
+  // reservation is the largest party size the
+  // occupancy check is designed for; larger would
+  // stress the transaction's read set).
+  roomCount: external_exports.coerce.number().int().min(1).max(50).optional().default(1),
   testToken: external_exports.string().trim().max(512).optional(),
   turnstileToken: external_exports.string().max(4096).optional(),
   // Per MRB-02 (2026-08-02, per decision #159): optional client
@@ -225167,6 +225182,11 @@ async function handleCreateBooking(req, res) {
     corporateCode,
     corporateFlatRate,
     linkedInquiryId,
+    // Per MRB-06 (2026-08-02, per decision #159): the N>1
+    // generalization. Defaults to 1 (the historical
+    // single-room case) so existing callers don't need
+    // to send the field.
+    roomCount,
     testToken
   } = body;
   const guestDetails = rawGuestDetails;
@@ -225233,7 +225253,18 @@ async function handleCreateBooking(req, res) {
     reservationId: String(body.reservationId || "").trim(),
     roomLines: [{
       type: String(roomType || "").trim(),
-      quantity: 1,
+      // Per MRB-06 (2026-08-02, per decision #159): the
+      // N>1 generalization. `quantity` is the number of
+      // rooms of this type the client requested. The
+      // fingerprint is N-aware — a retry with a
+      // different `roomCount` is a different request
+      // (409 conflict), a retry with the same
+      // `roomCount` is the same request (replay). The
+      // `roomLines` array can grow in MRB-06's N>1 +
+      // multi-type generalization (a follow-up lifts
+      // the single-type constraint and accepts multiple
+      // lines, one per type with its own `quantity`).
+      quantity: Math.max(1, Math.floor(Number(roomCount) || 1)),
       adults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
       children: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
       extraBeds: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0))
@@ -225403,71 +225434,83 @@ async function handleCreateBooking(req, res) {
       if (candidates.length === 0) {
         throw new Error("Room no longer available");
       }
-      let assignedRoom = null;
       let sawLingeringCheckedInConflict = false;
-      for (const candidate of candidates) {
-        const cData = candidate.data;
-        if (cData.status === "blocked") {
-          const blockedFrom = toDateOrNull(cData.blockedFrom);
-          const blockedTo = toDateOrNull(cData.blockedTo);
-          const windowActive = blockedFrom && blockedTo ? checkInDate < blockedTo && checkOutDate > blockedFrom : true;
-          if (windowActive) {
+      const assignedRooms = [];
+      const assignedRoomIds = [];
+      for (let outerIdx = 0; outerIdx < Math.max(1, Math.floor(Number(roomCount) || 1)); outerIdx++) {
+        let foundThisRound = null;
+        for (const candidate of candidates) {
+          if (assignedRoomIds.includes(candidate.id)) {
             continue;
           }
-        }
-        const overlapQuery = adminDb.collection("bookings").where("roomId", "==", candidate.id).where("status", "in", ROOM_OCCUPYING_STATUSES);
-        const overlapSnapshot = await transaction.get(overlapQuery);
-        let sawOverlap = false;
-        for (const doc of overlapSnapshot.docs) {
-          const bookingData2 = doc.data();
-          if (isExpiredPendingHold(bookingData2)) {
-            const existingCheckIn = toDateOrNull(bookingData2.checkIn);
-            const existingCheckOut = toDateOrNull(bookingData2.checkOut);
-            const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
-            if (dateOverlaps) {
-              expiredHoldRetirements.push({
-                ref: doc.ref,
-                previousData: bookingData2,
-                bookingRef: String(bookingData2.bookingRef || doc.id),
-                guestEmail: String(bookingData2.guestEmail || ""),
-                holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
-              });
+          const cData = candidate.data;
+          if (cData.status === "blocked") {
+            const blockedFrom = toDateOrNull(cData.blockedFrom);
+            const blockedTo = toDateOrNull(cData.blockedTo);
+            const windowActive = blockedFrom && blockedTo ? checkInDate < blockedTo && checkOutDate > blockedFrom : true;
+            if (windowActive) {
+              continue;
             }
+          }
+          const overlapQuery = adminDb.collection("bookings").where("roomId", "==", candidate.id).where("status", "in", ROOM_OCCUPYING_STATUSES);
+          const overlapSnapshot = await transaction.get(overlapQuery);
+          let sawOverlap = false;
+          for (const doc of overlapSnapshot.docs) {
+            const bookingData2 = doc.data();
+            if (isExpiredPendingHold(bookingData2)) {
+              const existingCheckIn = toDateOrNull(bookingData2.checkIn);
+              const existingCheckOut = toDateOrNull(bookingData2.checkOut);
+              const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+              if (dateOverlaps) {
+                expiredHoldRetirements.push({
+                  ref: doc.ref,
+                  previousData: bookingData2,
+                  bookingRef: String(bookingData2.bookingRef || doc.id),
+                  guestEmail: String(bookingData2.guestEmail || ""),
+                  holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
+                });
+              }
+              continue;
+            }
+            const reason = getOccupancyConflictReason({
+              bookingData: bookingData2,
+              requestedCheckIn: checkInDate,
+              requestedCheckOut: checkOutDate,
+              requestedCheckInKey: checkIn,
+              todayKey: manilaToday,
+              currentMinutes: currentManilaMinutes,
+              checkOutTime: hotelConfig.checkOutTime,
+              now
+            });
+            if (reason === "overlap" || reason === "lingering-checked-in") {
+              if (reason === "lingering-checked-in") {
+                sawLingeringCheckedInConflict = true;
+              }
+              sawOverlap = true;
+              break;
+            }
+          }
+          if (sawOverlap) {
             continue;
           }
-          const reason = getOccupancyConflictReason({
-            bookingData: bookingData2,
-            requestedCheckIn: checkInDate,
-            requestedCheckOut: checkOutDate,
-            requestedCheckInKey: checkIn,
-            todayKey: manilaToday,
-            currentMinutes: currentManilaMinutes,
-            checkOutTime: hotelConfig.checkOutTime,
-            now
-          });
-          if (reason === "overlap" || reason === "lingering-checked-in") {
-            if (reason === "lingering-checked-in") {
-              sawLingeringCheckedInConflict = true;
-            }
-            sawOverlap = true;
-            break;
+          const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, candidate.id, checkInDate, checkOutDate);
+          if (hasBlockConflict) {
+            continue;
           }
+          foundThisRound = candidate;
+          break;
         }
-        if (sawOverlap) {
-          continue;
+        if (!foundThisRound) {
+          throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, candidate.id, checkInDate, checkOutDate);
-        if (hasBlockConflict) {
-          continue;
-        }
-        assignedRoom = candidate;
-        break;
+        assignedRooms.push(foundThisRound);
+        assignedRoomIds.push(foundThisRound.id);
       }
-      if (!assignedRoom) {
+      if (assignedRooms.length === 0) {
         throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
-      const roomId = assignedRoom.id;
-      const roomData = assignedRoom.data;
+      const roomId = assignedRooms[0].id;
+      const roomData = assignedRooms[0].data;
       assignedRoomId = roomId;
       assignedRoomNumber = String(roomData.roomNumber || "");
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
@@ -225897,16 +225940,20 @@ async function handleCreateBooking(req, res) {
         // table "Mint one public `reservationRef` per
         // reservation and denormalize it onto child bookings
         // for existing admin search/display compatibility").
-        // The single-room case is `position: 1` /
-        // `roomCount: 1`; MRB-06's N>1 case will assign
-        // sequential positions and a `roomCount` matching
-        // the room-line count. The same `reservationRef`
-        // is also written to the header so the response
-        // shape is symmetric.
+        // Per MRB-06 (2026-08-02, per decision #159): the
+        // N>1 generalization. `reservationPosition: 1`
+        // is this specific room's position in the
+        // assigned-rooms list (the first room, 1 of N);
+        // `reservationRoomCount` is the total number of
+        // rooms in the reservation. The N booking docs
+        // are written in a loop below — each carries
+        // its own position (1..N). For N=1 (the default)
+        // this is byte-equivalent to the pre-MRB-06
+        // `reservationRoomCount: 1`.
         reservationId: effectiveReservationId,
         reservationRef: finalReservationRef,
         reservationPosition: 1,
-        reservationRoomCount: 1,
+        reservationRoomCount: assignedRooms.length,
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
