@@ -225227,6 +225227,7 @@ async function handleCreateBooking(req, res) {
     }
     validatedTestRunId = run.id;
   }
+  const isCorporateIntent = Boolean(corporateCode) || corporateFlatRate === true;
   const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
   const reservationRequestFingerprint = computeRequestFingerprint({
     reservationId: String(body.reservationId || "").trim(),
@@ -225242,10 +225243,22 @@ async function handleCreateBooking(req, res) {
     leadGuestName: guestNameForFingerprint,
     leadGuestEmail: String(rawGuestDetails.email || "").trim().toLowerCase(),
     leadGuestPhone: String(rawGuestDetails.phone || "").trim(),
-    source: String(corporateCode ? "corporate" : "online").trim(),
-    isCorporate: Boolean(corporateCode),
+    source: isCorporateIntent ? "corporate" : "online",
+    isCorporate: isCorporateIntent,
     corporateCode: String(corporateCode || "").trim().toUpperCase(),
-    companyName: String(corporateCode ? rawGuestDetails.companyName || "" : "").trim(),
+    // `companyName` is the body-entered name (the guest's
+    // stated company). For the "Continue without code"
+    // path the server stamps this same body-entered
+    // name; for the "with code" path the server stamps
+    // the doc's `companyName` (the "enforced" name from
+    // the corporateCodes doc, which may differ). The
+    // fingerprint's purpose is "client intent" -- the
+    // guest's stated name IS the intent -- so using the
+    // body value here is correct (a retry with a
+    // different stated name is a different intent,
+    // 409; a retry with the same stated name is the
+    // same intent, replay).
+    companyName: isCorporateIntent ? String(rawGuestDetails.companyName || "").trim() : "",
     voucherCode: String(voucherCode || "").trim().toUpperCase(),
     memberDiscountPct: 0,
     // public path has no member discount; MRB-06's signed-in path resolves this from the verified email token
