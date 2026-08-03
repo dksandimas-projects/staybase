@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -519,6 +519,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleAddRefund(req, res);
+  }
+
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // admin-only exception endpoint. The handler
+  // re-checks the admin role (front-desk staff are
+  // rejected with 403) — the apiRouter-level
+  // `authenticateStaff` only verifies the staff
+  // credential, not the role. Same pattern as
+  // `add-refund` (the handler is the source of
+  // truth for the admin role check). Rate-limited
+  // at 30/min — an exception is a deliberate
+  // admin mutation, not a tap-and-confirm action.
+  if (domain === "bookings" && action === "cancellation-exception" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancellation-exception:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many exception requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleRecordCancellationException(req, res);
+  }
+
+  // Per CRL-07 (2026-08-03, per decision #173):
+  // the read-only liability projection endpoint.
+  // The admin UI + future Reports (CRL-08) call
+  // this to render the live state without
+  // computing the cumulative processed refund
+  // client-side. Authenticated-staff (any role)
+  // — the data is non-sensitive (no PII, just
+  // money-state numbers) and the admin UI uses
+  // it for the drawer panel.
+  if (domain === "bookings" && action === "cancellation-liability" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleGetCancellationLiability(req, res);
   }
 
   if (domain === "bookings" && action === "verify-and-record-payment" && req.method === "POST") {

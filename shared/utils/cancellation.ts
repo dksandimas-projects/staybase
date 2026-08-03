@@ -469,3 +469,223 @@ export function evaluateCancelPreview(input: CancelPreviewInput): {
     policySource: representativeEvaluation?.policySource ?? "legacy-fallback"
   };
 }
+
+// Per CRL-07 (2026-08-03, per decision #173): the
+// state machine for the durable refund-liability
+// snapshot. Pure function — no Firestore, no React
+// state, no async. The caller supplies the stored
+// liability (read from the cancelled entity's
+// `cancellationLiability` field) + the derived
+// `processedAmount` (computed by summing the refunds
+// subcollection — see `computeReservationProcessedRefund`
+// in the server handler), and the helper returns the
+// current state + the breakdown the admin UI renders.
+//
+// The five states (per the spec body):
+//   - `not-required`: `policyRefund === 0`. Nothing to
+//     refund, the hotel keeps everything (or the guest
+//     paid nothing). No admin action required.
+//   - `retained`: `approvedAmount < policyRefund` —
+//     the admin applied an exception to reduce the
+//     refund. The retention is `policyRefund -
+//     approvedAmount` (the "extra we kept beyond what
+//     the policy gave"). This state INCLUDES the
+//     fully-processed exception case
+//     (`processedAmount >= approvedAmount`); once
+//     the reduced refund is fully paid out, the
+//     exception stays visible in the state until a
+//     later change moves it elsewhere.
+//   - `pending-processing`: `approvedAmount ===
+//     policyRefund` (no exception) AND
+//     `processedAmount === 0`. Full policy refund
+//     approved, nothing refunded yet.
+//   - `partially-processed`: `0 < processedAmount <
+//     approvedAmount`. Some refunds recorded, more
+//     to go. Independent of the exception flag —
+//     applies whether or not the admin reduced the
+//     approved amount.
+//   - `processed`: `processedAmount >=
+//     approvedAmount`. Fully refunded.
+//
+// **Defensive coercion** — every numeric input is
+// clamped to `≥ 0` (the helper is not a sanitizer; a
+// malformed input never throws). `null` / `undefined`
+// liability is treated as "not-required" so a
+// pre-CRL-07 cancel reads as the no-work state
+// (backward-compatible UI fall-through). The state
+// is computed in a single pass so the breakdown
+// fields + the state stay consistent at the math
+// level — no separate derivation that could drift.
+
+import type { CancellationLiability, CancellationLiabilityState, CancellationPolicyResult } from "../types";
+
+export interface CancellationLiabilityStateInput {
+  /** The stored liability. `null` / `undefined` → "not-required" (the pre-CRL-07 fall-through). */
+  liability: CancellationLiability | null | undefined;
+  /** The cumulative processed refund amount (positive, in PHP). Derived from the refunds subcollection — see `computeReservationProcessedRefund`. `0` when no refunds have been recorded. */
+  processedAmount: number;
+}
+
+export interface CancellationLiabilityStateOutput {
+  state: CancellationLiabilityState;
+  /** The stored liability, passed through for the UI. */
+  liability: CancellationLiability | null;
+  /** `|sum(refund entries)|` — the caller-supplied cumulative. Pass-through for the UI. */
+  processedAmount: number;
+  /** `approvedAmount - processedAmount`, clamped to `≥ 0`. The next refund the admin should record. `0` when state is `processed`. */
+  outstandingAmount: number;
+  /** `policyRefund - approvedAmount`, clamped to `≥ 0`. The "extra we kept beyond what the policy gave" via exception. `0` when no exception applied. */
+  retentionAmount: number;
+  /** Human-readable label per state — the UI uses this for the badge. Localisable at the call site if needed. */
+  stateLabel: string;
+}
+
+export function computeCancellationLiabilityState(
+  input: CancellationLiabilityStateInput
+): CancellationLiabilityStateOutput {
+  // Defensive: a null / undefined liability is the
+  // pre-CRL-07 fall-through. The UI shows the same
+  // "no liability work to do" view a fresh `not-required`
+  // state would show, and the absence of the field on
+  // the booking doc / reservation header is the same
+  // signal.
+  if (!input.liability) {
+    return {
+      state: "not-required",
+      liability: null,
+      processedAmount: 0,
+      outstandingAmount: 0,
+      retentionAmount: 0,
+      stateLabel: "No refund owed"
+    };
+  }
+  // Clamp every numeric input to `≥ 0`. The helper
+  // never throws on malformed input — a negative
+  // `processedAmount` (a writer bug, not a normal
+  // state) reads as 0.
+  const policyRefund = Math.max(Number(input.liability.policyResult?.policyRefund) || 0, 0);
+  const approvedAmount = Math.max(Math.min(
+    Number(input.liability.approvedAmount) || 0,
+    // The exception can only reduce, never increase. A
+    // writer bug that stamped `approvedAmount >
+    // policyRefund` is clamped to the policy result.
+    policyRefund
+  ), 0);
+  const processedAmount = Math.max(Number(input.processedAmount) || 0, 0);
+  const outstandingAmount = Math.max(approvedAmount - processedAmount, 0);
+  const retentionAmount = Math.max(policyRefund - approvedAmount, 0);
+
+  // The state transitions. The order matters: the
+  // exception check (`approvedAmount < policyRefund`)
+  // takes precedence over the processed-vs-pending
+  // check, because an exception changes the story —
+  // a fully-processed exception is still a
+  // "retained" state, not a "processed" one. The
+  // UI shows the retention amount as the dominant
+  // narrative.
+  let state: CancellationLiabilityState;
+  let stateLabel: string;
+  if (policyRefund === 0) {
+    state = "not-required";
+    stateLabel = "No refund owed";
+  } else if (approvedAmount < policyRefund) {
+    state = "retained";
+    stateLabel = processedAmount >= approvedAmount
+      ? "Exception applied · fully refunded"
+      : "Exception applied · refund in progress";
+  } else if (processedAmount === 0) {
+    state = "pending-processing";
+    stateLabel = "Pending refund";
+  } else if (processedAmount < approvedAmount) {
+    state = "partially-processed";
+    stateLabel = "Partially refunded";
+  } else {
+    state = "processed";
+    stateLabel = "Refunded";
+  }
+
+  return {
+    state,
+    liability: input.liability,
+    processedAmount,
+    outstandingAmount,
+    retentionAmount,
+    stateLabel
+  };
+}
+
+// Per CRL-07 (2026-08-03, per decision #173): the
+// pure helper that produces the stored liability
+// snapshot from a cancel-time preview. Called by
+// the destructive cancel handler (per-child +
+// reservation-scope branches) in the same
+// transaction as the status flip. The helper is
+// pure — no I/O, no React state. The caller is
+// responsible for reading the preview's
+// `policyResult`-shaped values + supplying the
+// `now` from the same `Date` the cancel's
+// `cancelledAt` uses (no clock skew between the
+// two stamps).
+//
+// The `source` field comes from the preview's
+// `policySource` (CRL-05's discriminator). The
+// `refundPct` is the aggregate (MIN per-room, per
+// CRL-06). The `netCollected` / `policyRefund` /
+// `retainedAmount` are the aggregate amounts from
+// the preview. The helper preserves the per-room
+// detail implicitly via the reservation/booking
+// subcollections — Reports (CRL-08) will read the
+// per-room projection from the cancelled
+// children's snapshots when N>1 lands.
+
+export interface CancellationLiabilitySnapshotInput {
+  /** The cancel-time `now`. Same Date as the cancel's `cancelledAt` — no clock skew. */
+  now: Date;
+  /** The aggregate policy result from the cancel-time preview. The `refundPct` is the MIN per-room (per CRL-06). */
+  policyRefund: number;
+  /** The aggregate net collected from the cancel-time preview. */
+  netCollected: number;
+  /** The aggregate retained amount from the cancel-time preview. */
+  retainedAmount: number;
+  /** The aggregate refundPct (MIN per-room). */
+  refundPct: number;
+  /** The cutoff hours from the snapshotted policy. */
+  cutoffHours: number;
+  /** The policy source discriminator. */
+  source: "settings" | "corporate-override" | "legacy-fallback";
+}
+
+export function buildCancellationLiabilitySnapshot(
+  input: CancellationLiabilitySnapshotInput
+): import("../types").CancellationLiability {
+  // Round to 2dp at the boundary so the stored
+  // snapshot is byte-equal to what the preview
+  // showed. The preview's `aggregatePolicyRefund`
+  // is already rounded (per CRL-06's `Math.round
+  // (... * 100) / 100`), but we re-round here to
+  // guard against a future caller that passes an
+  // unrounded value.
+  const policyRefund = Math.round(Math.max(Number(input.policyRefund) || 0, 0) * 100) / 100;
+  const netCollected = Math.round(Math.max(Number(input.netCollected) || 0, 0) * 100) / 100;
+  const retainedAmount = Math.round(Math.max(Number(input.retainedAmount) || 0, 0) * 100) / 100;
+  const policyResult: CancellationPolicyResult = {
+    refundPct: Math.max(Number(input.refundPct) || 0, 0),
+    policyRefund,
+    netCollected,
+    retainedAmount,
+    cutoffHours: Math.max(Number(input.cutoffHours) || 0, 0),
+    source: input.source,
+    snapshottedAt: input.now
+  };
+  return {
+    policyResult,
+    // `approvedAmount` defaults to the policy result. An
+    // exception is a separate admin-only mutation (the
+    // new `handleRecordCancellationException` endpoint)
+    // that reduces this value. The destructive cancel
+    // never auto-mutates `approvedAmount` beyond the
+    // default — CRL-04's "never auto-refund" rule.
+    approvedAmount: policyRefund,
+    exception: null
+  };
+}

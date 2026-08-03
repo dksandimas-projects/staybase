@@ -146,7 +146,8 @@ import {
 // entry is the last in the import block — still
 // matches.
 import {
-  evaluateCancelPreview
+  evaluateCancelPreview,
+  buildCancellationLiabilitySnapshot
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
@@ -161,6 +162,133 @@ import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreak
 
 export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
+}
+
+// Per CRL-07 (2026-08-03, per decision #173): the
+// in-transaction liability snapshot helper. Called by
+// both cancel branches (the per-child path and the
+// reservation-scope path) inside the same `runTransaction`
+// as the status flip, so the snapshot is atomic with
+// the audit stamps. Returns `null` when the policy
+// refunds nothing (`policyRefund === 0`) — the absence
+// of the `cancellationLiability` field on the cancelled
+// entity is the "no liability work to do" signal the
+// admin UI + Reports use to skip the panel.
+//
+// The function is read-only within the transaction
+// (no writes), so the caller is responsible for
+// including the returned snapshot in the appropriate
+// `transaction.update` call. The shape matches
+// `CancellationLiability` in `shared/types` so the
+// server + client + Reports all agree on the same
+// field structure.
+async function computeCancellationLiabilityInTransaction(
+  transaction: FirebaseFirestore.Transaction,
+  params: {
+    now: Date;
+    scope: "room" | "reservation";
+    lookedUpBooking: {
+      id: string;
+      bookingRef: string;
+      status: string;
+      roomType: string;
+      totalPrice: number;
+      reservationPosition: number | null;
+      cancellationPolicySnapshot: any;
+    };
+    reservation: {
+      id: string;
+      reservationRef: string;
+      totalPrice: number;
+    } | null;
+    cancellableChildren: Array<{
+      id: string;
+      bookingRef: string;
+      status: string;
+      roomType: string;
+      totalPrice: number;
+      reservationPosition: number | null;
+      cancellationPolicySnapshot: any;
+    }>;
+  }
+): Promise<import("@spark-inn/shared").CancellationLiability | null> {
+  // Read the reservation folio (new path) or the
+  // legacy booking payments subcollection. The
+  // sign-aware sum (refunds are negative per CRL-01)
+  // is the same shape the preview handler uses
+  // (mirrors `getReservationFolioSummary`'s internal
+  // math). For the legacy path the booking's own
+  // payments subcollection carries BOTH positive
+  // payments + negative refund entries (CRL-01's
+  // historical convention).
+  let reservationNetCollected = 0;
+  if (params.reservation) {
+    const reservationRef = adminDb.collection("reservations").doc(params.reservation.id);
+    const [reservationPaymentsSnap, reservationRefundsSnap] = await Promise.all([
+      transaction.get(reservationRef.collection("payments")),
+      transaction.get(reservationRef.collection("refunds"))
+    ]);
+    reservationNetCollected =
+      reservationPaymentsSnap.docs.reduce(
+        (sum: number, d: any) => sum + (Number(d.data()?.amount) || 0),
+        0
+      ) +
+      reservationRefundsSnap.docs.reduce(
+        (sum: number, d: any) => sum + (Number(d.data()?.amount) || 0),
+        0
+      );
+  } else {
+    const legacyFolioSnap = await transaction.get(
+      adminDb.collection("bookings").doc(params.lookedUpBooking.id).collection("payments")
+    );
+    reservationNetCollected = legacyFolioSnap.docs.reduce(
+      (sum: number, d: any) => sum + (Number(d.data()?.amount) || 0),
+      0
+    );
+  }
+  // The `allocationSubtotal` for the snapshot uses
+  // the cancellable subtotal — the same rule CRL-06
+  // applies to the preview (a room-scope preview on
+  // a multi-room reservation uses every currently
+  // cancellable sibling as the denominator, never
+  // attributes the whole reservation payment to one
+  // room). The cancellation mirrors the preview so
+  // the snapshot matches what the user saw on the
+  // modal.
+  const cancellableSubtotal = params.cancellableChildren.reduce(
+    (sum, c) => sum + Math.max(Number(c.totalPrice) || 0, 0),
+    0
+  );
+  const allocationSubtotal = params.scope === "reservation"
+    ? cancellableSubtotal
+    : Math.max(cancellableSubtotal, Math.max(Number(params.lookedUpBooking.totalPrice) || 0, 0));
+  const preview = evaluateCancelPreview({
+    scope: params.scope,
+    now: params.now,
+    lookedUpBooking: params.lookedUpBooking,
+    reservation: params.reservation,
+    cancellableChildren: params.cancellableChildren,
+    reservationNetCollected,
+    allocationSubtotal
+  });
+  // `policyRefund === 0` is the "no liability work to
+  // do" exit. The destructive cancel never auto-refunds
+  // (CRL-04), so a no-refund cancel doesn't need a
+  // snapshot — the absence of the field on the
+  // cancelled entity is the same signal a `not-required`
+  // state would give the UI.
+  if (preview.policyRefund <= 0) {
+    return null;
+  }
+  return buildCancellationLiabilitySnapshot({
+    now: params.now,
+    policyRefund: preview.policyRefund,
+    netCollected: preview.netCollected,
+    retainedAmount: preview.retainedAmount,
+    refundPct: preview.refundPct,
+    cutoffHours: preview.cutoffHours,
+    source: preview.policySource
+  });
 }
 
 // Per MRB-09 (2026-08-02, per decision #168): the
@@ -5149,6 +5277,53 @@ export async function handleCancelBooking(req: any, res: any) {
         }
         const cancelledCount = cancellableIds.size;
 
+        // Per CRL-07 (2026-08-03, per decision #173):
+        // the reservation-scope liability snapshot.
+        // Computed in the same transaction as the
+        // status flip so the snapshot is atomic with
+        // the audit stamps. The helper reads the
+        // reservation folio (the same dual-read
+        // pattern the cancel-preview uses — sign-aware
+        // sum of `payments/` + `refunds/`) + runs
+        // `evaluateCancelPreview` with the
+        // cancellable-children set. The returned
+        // snapshot is `null` when `policyRefund === 0`
+        // (no liability work to do) and the field is
+        // simply absent from the header update.
+        const cancellableChildren = children
+          .filter((c) => cancellableIds.has(c.id))
+          .map((c) => ({
+            id: c.id,
+            bookingRef: String(c.data.bookingRef || ""),
+            status: String(c.data.status || ""),
+            roomType: String(c.data.roomType || ""),
+            totalPrice: Number(c.data.totalPrice) || 0,
+            reservationPosition: Number(c.data.reservationPosition) || null,
+            cancellationPolicySnapshot: c.data.cancellationPolicySnapshot || null
+          }));
+        const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
+          transaction,
+          {
+            now,
+            scope: "reservation",
+            lookedUpBooking: cancellableChildren[0] || {
+              id: bookingDocumentRef.id,
+              bookingRef: String(bookingData.bookingRef || ""),
+              status: String(bookingData.status || ""),
+              roomType: String(bookingData.roomType || ""),
+              totalPrice: Number(bookingData.totalPrice) || 0,
+              reservationPosition: Number(bookingData.reservationPosition) || null,
+              cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+            },
+            reservation: {
+              id: lookedUpReservationId,
+              reservationRef: String(reservationData.reservationRef || ""),
+              totalPrice: Number(reservationData.totalPrice) || 0
+            },
+            cancellableChildren
+          }
+        );
+
         // Per MRB-13: dedup the voucher + corporate
         // code decrements. Each cancelled child
         // contributes its `voucherCode` (if any) and
@@ -5280,12 +5455,24 @@ export async function handleCancelBooking(req: any, res: any) {
         const postStatuses = children.map((c) =>
           cancellableIds.has(c.id) ? "cancelled" : String(c.data.status || "")
         );
-        transaction.update(reservationRef, {
+        // Per CRL-07 (2026-08-03, per decision #173):
+        // the liability snapshot is stamped onto the
+        // reservation header (the source of truth for
+        // the reservation-scope cancel) only when
+        // `policyRefund > 0` (the helper returns `null`
+        // for no-refund cancels). The header field
+        // shares the same `now` as the cancellation
+        // stamp — no clock skew between the two.
+        const reservationHeaderUpdate: Record<string, any> = {
           cancelledRoomCount: newCancelledRoomCount,
           activeRoomCount: newActiveRoomCount,
           paymentStatus: computeReservationAggregatePaymentStatus(postStatuses),
           updatedAt: now
-        });
+        };
+        if (liabilitySnapshot) {
+          reservationHeaderUpdate.cancellationLiability = liabilitySnapshot;
+        }
+        transaction.update(reservationRef, reservationHeaderUpdate);
       });
     } else {
       await adminDb.runTransaction(async (transaction) => {
@@ -5356,7 +5543,74 @@ export async function handleCancelBooking(req: any, res: any) {
         }
       }
 
-      transaction.update(bookingDocumentRef, {
+      // Per CRL-07 (2026-08-03, per decision #173):
+      // the per-child liability snapshot. Computed in
+      // the same transaction as the status flip so
+      // the snapshot is atomic with the audit
+      // stamps. The helper is the same
+      // `computeCancellationLiabilityInTransaction`
+      // the reservation-scope branch uses — the only
+      // difference is the `scope: "room"` flag and
+      // the cancellable-children set is just this one
+      // booking (per-child path). For new
+      // reservations the snapshot lives on the
+      // booking doc; for legacy null-`reservationId`
+      // bookings the booking IS the reservation and
+      // the snapshot lives here too. The header
+      // mirror below (per MRB-05) updates the
+      // reservation's `paymentStatus` but does NOT
+      // touch the header's `cancellationLiability`
+      // (the header has no liability field on a
+      // per-child cancel — the cancelled child
+      // carries the snapshot).
+      const bookingReservationIdForLiability = String(freshBooking.reservationId || "").trim();
+      const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
+        transaction,
+        {
+          now,
+          scope: "room",
+          lookedUpBooking: {
+            id: bookingDocumentRef.id,
+            bookingRef: String(freshBooking.bookingRef || ""),
+            status: String(freshBooking.status || ""),
+            roomType: String(freshBooking.roomType || ""),
+            totalPrice: Number(freshBooking.totalPrice) || 0,
+            reservationPosition: Number(freshBooking.reservationPosition) || null,
+            cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+          },
+          // For per-child cancel, the helper needs
+          // the reservation context (the folio read
+          // uses the new subcollections when a
+          // reservationId is present). For legacy
+          // null-`reservationId` bookings the helper
+          // falls through to the legacy per-booking
+          // payments read.
+          reservation: bookingReservationIdForLiability.length > 0
+            ? {
+              id: bookingReservationIdForLiability,
+              reservationRef: String((freshBooking as any).reservationRef || ""),
+              totalPrice: Number(freshBooking.totalPrice) || 0
+            }
+            : null,
+          cancellableChildren: [{
+            id: bookingDocumentRef.id,
+            bookingRef: String(freshBooking.bookingRef || ""),
+            status: String(freshBooking.status || ""),
+            roomType: String(freshBooking.roomType || ""),
+            totalPrice: Number(freshBooking.totalPrice) || 0,
+            reservationPosition: Number(freshBooking.reservationPosition) || null,
+            cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+          }]
+        }
+      );
+
+      // Per CRL-07: the booking doc update now also
+      // carries the liability snapshot (when one was
+      // produced). The status flip + audit stamps +
+      // snapshot share a single `transaction.update`
+      // call so a partial failure cannot leave a
+      // half-stamped cancellation.
+      const bookingUpdate: Record<string, any> = {
         status: "cancelled",
         cancellationReason: validReason,
         // Per CRL-02 (2026-08-02): the audit metadata is
@@ -5377,7 +5631,11 @@ export async function handleCancelBooking(req: any, res: any) {
         cancelledBy,
         cancellationSource,
         updatedAt: now
-      });
+      };
+      if (liabilitySnapshot) {
+        bookingUpdate.cancellationLiability = liabilitySnapshot;
+      }
+      transaction.update(bookingDocumentRef, bookingUpdate);
 
       // Per MRB-05 (2026-08-02, per decision #159):
       // the canonical `reservationId` derivation for
@@ -6390,6 +6648,273 @@ export async function handleAddRefund(req: any, res: any) {
     }
     const status = String(error.message || "").startsWith("Refund exceeds") ? 400 : 500;
     return res.status(status).json({ success: false, error: error.message || "Unable to record refund." });
+  }
+}
+
+// Per CRL-07 (2026-08-03, per decision #173): the
+// admin-only endpoint to apply a discretionary
+// exception to a cancelled booking's (or
+// reservation's) refund liability. The exception
+// reduces `approvedAmount` below the policy
+// result's `policyRefund`; it NEVER increases it
+// (the "exception can only retain, never refund
+// more than the policy says" invariant). The
+// policy result itself is read-only — the
+// endpoint mutates `approvedAmount` + the
+// `exception` audit field only.
+//
+// Auth is admin-only (mirroring `handleAddRefund`);
+// front-desk staff cannot record exceptions. The
+// caller must supply a non-empty `reason` (capped
+// at 500 chars to match CRL-02's `cancellationReason`
+// cap + the existing free-form string cap) and an
+// `approvedAmount` that is `0 ≤ amount ≤
+// liability.policyResult.policyRefund`. The
+// endpoint reads the `cancellationLiability` field
+// in the same transaction that writes the new
+// value, so a concurrent refund write cannot
+// race the exception read (Firestore transactions
+// serialise reads + writes atomically).
+//
+// Idempotency: the same `approvedAmount` + `reason`
+// from a retry-after-uncertain-response replays
+// the original commit (returns 200 with the
+// current snapshot, no double-write). A different
+// `approvedAmount` or `reason` with the same
+// booking/reservation ID is a fresh mutation
+// (the previous `exception` field is overwritten
+// in the new audit row).
+//
+// Lives at:
+//   - `reservations/{id}.cancellationLiability` when
+//     the booking has a `reservationId` AND the
+//     reservation was cancelled reservation-scope
+//     (CRL-07 stamps the header for reservation-
+//     scope cancels).
+//   - `bookings/{id}.cancellationLiability` for
+//     per-child cancels + legacy null-`reservationId`
+//     bookings.
+export async function handleRecordCancellationException(req: any, res: any) {
+  // Per CRL-07: the spec body says "only Admin may
+  // approve an exception" — admin-only. The check
+  // mirrors `handleAddRefund`'s gate. A non-admin
+  // staff role is rejected with 403 (a different
+  // 401/403 mix from the credential gate, but the
+  // apiRouter's `authenticateStaff` already returned
+  // 401/403 for unauthenticated requests, so the
+  // 403 here is the "authenticated, but not
+  // allowed" signal).
+  if (req.staff?.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only an administrator can approve a cancellation exception." });
+  }
+  // The body accepts either a `reservationId` (for
+  // reservation-scope cancels) or a `bookingId`
+  // (for per-child cancels + legacy bookings). One
+  // is required; the server picks the right
+  // document based on which is present. A body
+  // with both is rejected (the storage path is
+  // unambiguous on the cancellation type, not a
+  // client choice).
+  const { reservationId, bookingId, approvedAmount, reason } = req.body || {};
+  const safeReservationId = typeof reservationId === "string" ? reservationId.trim() : "";
+  const safeBookingId = typeof bookingId === "string" ? bookingId.trim() : "";
+  if (!safeReservationId && !safeBookingId) {
+    return res.status(400).json({ success: false, error: "Either reservationId or bookingId is required." });
+  }
+  if (safeReservationId && safeBookingId) {
+    return res.status(400).json({ success: false, error: "Provide exactly one of reservationId or bookingId, not both." });
+  }
+  const numericApproved = Number(approvedAmount);
+  if (!Number.isFinite(numericApproved) || numericApproved < 0 || numericApproved > 1_000_000) {
+    return res.status(400).json({ success: false, error: "Approved amount must be between 0 and 1,000,000." });
+  }
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  if (!safeReason) {
+    return res.status(400).json({ success: false, error: "A reason is required for a cancellation exception." });
+  }
+  // The admin's UID is the audit's `approvedBy`.
+  // Same pattern as `handleAddRefund.approvedBy` —
+  // the staff UID is the source of truth (no
+  // client-supplied UID).
+  const adminUid = req.staff.uid || "admin";
+  try {
+    let liabilityFieldPath: "cancellationLiability" = "cancellationLiability";
+    let snapshotAfter: any = null;
+    let idempotentReplay = false;
+    await adminDb.runTransaction(async (transaction) => {
+      // Pick the right document. The reservation
+      // path is the source of truth for
+      // reservation-scope cancels; the booking
+      // path is the source of truth for per-child
+      // + legacy cancels. The endpoint never
+      // "promotes" a per-child liability to the
+      // header — it writes to wherever the
+      // cancellation stamped the snapshot.
+      const targetRef = safeReservationId
+        ? adminDb.collection("reservations").doc(safeReservationId)
+        : adminDb.collection("bookings").doc(safeBookingId);
+      const targetDoc = await transaction.get(targetRef);
+      if (!targetDoc.exists) {
+        throw new Error("Target not found");
+      }
+      const targetData = targetDoc.data() || {};
+      const liability = (targetData as any)[liabilityFieldPath];
+      if (!liability || !liability.policyResult) {
+        throw new Error("No cancellation liability recorded for this target.");
+      }
+      const policyRefund = Math.max(Number(liability.policyResult.policyRefund) || 0, 0);
+      // The exception can only reduce. A client-
+      // supplied `approvedAmount` that exceeds the
+      // policy result is rejected (400) — the UI
+      // should never let this happen, but the
+      // server is the source of truth. The
+      // exception endpoint never increases the
+      // approved refund.
+      if (numericApproved > policyRefund) {
+        throw new Error("Approved amount cannot exceed the policy refund.");
+      }
+      const approvedRounded = Math.round(numericApproved * 100) / 100;
+      const now = new Date();
+      // Idempotency check: a re-submit with the
+      // same `approvedAmount` + `reason` replays
+      // the original commit. A different value
+      // overwrites the `exception` field (the
+      // audit row is the latest — the historical
+      // trail is the admin notifications
+      // collection CRL-08 adds). The numeric
+      // `approvedAmount` on the liability is
+      // updated to match the latest exception —
+      // the field is the current snapshot, not a
+      // history array.
+      const existingException = liability.exception;
+      if (
+        existingException
+        && Math.abs(Number(existingException.approvedAmount) || 0) === approvedRounded
+        && String(existingException.reason || "") === safeReason
+      ) {
+        snapshotAfter = liability;
+        idempotentReplay = true;
+        return;
+      }
+      const newException = {
+        approvedAmount: approvedRounded,
+        reason: safeReason,
+        approvedBy: adminUid,
+        approvedAt: now
+      };
+      const newLiability = {
+        ...liability,
+        approvedAmount: approvedRounded,
+        exception: newException
+      };
+      transaction.update(targetRef, {
+        [liabilityFieldPath]: newLiability,
+        updatedAt: now
+      });
+      snapshotAfter = newLiability;
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        cancellationLiability: snapshotAfter,
+        idempotentReplay
+      }
+    });
+  } catch (error: any) {
+    if (error.message === "Target not found") {
+      return res.status(404).json({ success: false, error: safeReservationId ? "Reservation not found." : "Booking not found." });
+    }
+    if (error.message === "No cancellation liability recorded for this target.") {
+      return res.status(400).json({ success: false, error: "This booking or reservation has no cancellation liability to apply an exception to." });
+    }
+    if (String(error.message || "").startsWith("Approved amount cannot exceed")) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    console.error("Record cancellation exception handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Unable to record cancellation exception." });
+  }
+}
+
+// Per CRL-07 (2026-08-03, per decision #173): the
+// read-only helper the admin UI + Reports call to
+// project the live liability state for a
+// reservation or booking. Pure function that
+// reads the stored liability + the current
+// `processedAmount` (sum of the refunds
+// subcollection) and returns the
+// `CancellationLiabilityStateOutput` the UI
+// renders. The reservation path reads
+// `reservations/{id}/refunds/` (the canonical
+// source for new reservations per MRB-04 Phase
+// 2.x); the legacy path reads
+// `bookings/{id}/payments/` filtered for
+// negative-amount entries (the CRL-01 historical
+// convention).
+export async function handleGetCancellationLiability(req: any, res: any) {
+  const { reservationId, bookingId } = req.body || {};
+  const safeReservationId = typeof reservationId === "string" ? reservationId.trim() : "";
+  const safeBookingId = typeof bookingId === "string" ? bookingId.trim() : "";
+  if (!safeReservationId && !safeBookingId) {
+    return res.status(400).json({ success: false, error: "Either reservationId or bookingId is required." });
+  }
+  if (safeReservationId && safeBookingId) {
+    return res.status(400).json({ success: false, error: "Provide exactly one of reservationId or bookingId, not both." });
+  }
+  try {
+    const isReservation = safeReservationId.length > 0;
+    const targetId = isReservation ? safeReservationId : safeBookingId;
+    const targetCollection = isReservation ? "reservations" : "bookings";
+    const targetRef = adminDb.collection(targetCollection).doc(targetId);
+    const targetDoc = await targetRef.get();
+    if (!targetDoc.exists) {
+      return res.status(404).json({ success: false, error: isReservation ? "Reservation not found." : "Booking not found." });
+    }
+    const targetData = targetDoc.data() || {};
+    const liability = (targetData as any).cancellationLiability || null;
+    // The `processedAmount` is the cumulative of
+    // the refunds subcollection. For new
+    // reservations the canonical source is
+    // `reservations/{id}/refunds/` (the writer
+    // for new reservations per MRB-04 Phase 2.x);
+    // for legacy null-`reservationId` bookings
+    // the refunds are negative-amount entries on
+    // `bookings/{id}/payments/` (the CRL-01
+    // historical convention — the
+    // `getReservationFolioSummary` helper sums
+    // both subcollections for new reservations
+    // as belt-and-suspenders). The state helper
+    // takes the absolute value (per the spec:
+    // "derived from immutable ledger entries",
+    // the cumulative is the absolute sum of the
+    // refund entries).
+    let processedAmount = 0;
+    if (isReservation) {
+      const refundsSnap = await targetRef.collection("refunds").get();
+      processedAmount = refundsSnap.docs.reduce(
+        (sum, d) => sum + Math.abs(Number(d.data()?.amount) || 0),
+        0
+      );
+    } else {
+      const paymentsSnap = await targetRef.collection("payments").get();
+      // Legacy filter: negative-amount entries are
+      // the refunds (per CRL-01's historical
+      // convention on `bookings/{id}/payments`).
+      processedAmount = paymentsSnap.docs
+        .filter((d) => Number(d.data()?.amount) < 0)
+        .reduce((sum, d) => sum + Math.abs(Number(d.data()?.amount) || 0), 0);
+    }
+    // Defer the import to avoid a circular
+    // dependency at module load time. The
+    // `computeCancellationLiabilityState` helper
+    // is a pure function in the shared package
+    // (no Firestore calls), so the dynamic
+    // import is cheap.
+    const { computeCancellationLiabilityState } = await import("@spark-inn/shared");
+    const projection = computeCancellationLiabilityState({ liability, processedAmount });
+    return res.status(200).json({ success: true, data: projection });
+  } catch (error: any) {
+    console.error("Get cancellation liability handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Unable to load cancellation liability." });
   }
 }
 

@@ -274,6 +274,19 @@ export interface Booking {
   cancelledAt?: string | null;
   cancelledBy?: string | null;
   cancellationSource?: "guest" | "staff" | "system" | null;
+  // Per CRL-07 (2026-08-03, per decision #173):
+  // the durable refund-liability snapshot. Mirrors
+  // `shared/types.Booking.cancellationLiability`.
+  // The destructive cancel stamps this field on
+  // the booking doc (per-child cancels) or on
+  // the reservation header (reservation-scope
+  // cancels — read separately via
+  // `selectedReservationContext.cancellationLiability`).
+  // Absence / `null` / `undefined` means "no
+  // liability work to do" — typically because
+  // `policyRefund === 0` or the booking was
+  // cancelled before CRL-07 shipped.
+  cancellationLiability?: import("@spark-inn/shared").CancellationLiability | null;
   // Per MRB-01 (2026-08-02, per decision #159): the reservation
   // header linkage. Mirror the shared `Booking.reservationId`
   // / `reservationRef` / `reservationPosition` /
@@ -1335,6 +1348,20 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             cancelledAt: data.cancelledAt ? parseDateTimeString(data.cancelledAt) : null,
             cancelledBy: data.cancelledBy || null,
             cancellationSource: data.cancellationSource || null,
+            // Per CRL-07 (2026-08-03, per decision #173):
+            // hydrate the liability snapshot from the
+            // booking doc. The destructive cancel
+            // stamps this field on the cancelled
+            // entity; reservation-scope cancels stamp
+            // it on the reservation header instead
+            // (read separately via the header's own
+            // hydration — the admin UI surfaces the
+            // reservation's liability when the
+            // selected booking is part of a
+            // multi-room reservation). Absence reads
+            // as `null` (the type already declares it
+            // nullable).
+            cancellationLiability: data.cancellationLiability || null,
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
             breakfastSelections: data.breakfastSelections || {},

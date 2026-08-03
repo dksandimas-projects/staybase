@@ -244,7 +244,7 @@ describe("MRB-13 — reservation-scope cancel updates the reservation header", (
     // per-child N=1 case) and a partial cancel
     // returns the aggregate of the survivors.
     const aggregateBlock = handlerSrc.match(
-      /const postStatuses = children\.map\([\s\S]{0,500}computeReservationAggregatePaymentStatus\(postStatuses\)/
+      /const postStatuses = children\.map\([\s\S]{0,1500}computeReservationAggregatePaymentStatus\(postStatuses\)/
     );
     expect(aggregateBlock, "expected the post-cancellation aggregate").toBeTruthy();
     expect(aggregateBlock![0]).toMatch(/cancellableIds\.has\(c\.id\) \? "cancelled" : String\(c\.data\.status \|\| ""\)/);
