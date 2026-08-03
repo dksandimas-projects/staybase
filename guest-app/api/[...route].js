@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.246.0";
+    VERSION2 = "0.247.0";
   }
 });
 
@@ -224104,6 +224104,17 @@ function buildReservationEmailView(reservation, children) {
     roomNumber: String(child.roomNumber || ""),
     roomType: String(child.roomType || ""),
     roomName: child.roomName || child.roomType || "",
+    // Per MRB-14 (2026-08-03, per decision #180): per-child
+    // dates on the room projection. The header's
+    // `checkIn` / `checkOut` is the original create-time
+    // shared range and may differ from the actual range
+    // once a room has been rescheduled; the email's
+    // reservation branch reads `actualDateRange` and the
+    // per-room `checkIn` / `checkOut` below when the
+    // children have diverged.
+    checkIn: child.checkIn,
+    checkOut: child.checkOut,
+    numNights: Number(child.numNights || 0),
     numGuests: Number(child.numGuests || 0),
     numAdults: Number(child.numAdults || 0),
     numChildren: Number(child.numChildren || 0),
@@ -224143,6 +224154,23 @@ function buildReservationEmailView(reservation, children) {
     activeRoomCount: Number(reservation.activeRoomCount ?? children.length),
     rooms: roomProjections,
     roomTypeLabels,
+    // Per MRB-14 (2026-08-03, per decision #180): the
+    // denormalised actual range (MIN of children.checkIn
+    // / MAX of children.checkOut) plus the divergent
+    // flag. Pre-MRB-14 reservations carry no field
+    // (`undefined` here); the email template falls
+    // through to the legacy shared-range render
+    // (byte-equivalent to pre-MRB-14). The `earliestCheckIn`
+    // / `latestCheckOut` are emitted as the original
+    // Firestore values (Date | Timestamp | ISO string —
+    // whatever the shared `computeReservationActualDateRange`
+    // produced) so the template can format them via the
+    // existing `formatDate` / `toDate` helpers.
+    actualDateRange: reservation.actualDateRange ? {
+      earliestCheckIn: reservation.actualDateRange.earliestCheckIn,
+      latestCheckOut: reservation.actualDateRange.latestCheckOut,
+      isDivergent: Boolean(reservation.actualDateRange.isDivergent)
+    } : null,
     // Per MRB-09: source / corporate context.
     source: reservation.source || first.source || "online",
     isCorporate: reservation.isCorporate === true,
@@ -224226,23 +224254,28 @@ function bookingRows(booking) {
   const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
   const isReservation = rooms && rooms.length > 0;
   if (isReservation) {
+    const actualRange = booking.actualDateRange;
+    const isDivergent = Boolean(actualRange && actualRange.isDivergent);
     const roomsTable = `
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${rooms.map((room) => `
-          ${row(
-      `Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
-      room.bookingRef ? `${escapeHtml(String(room.bookingRef))} \xB7 ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}` : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}`
-    )}
-        `).join("")}
+        ${rooms.map((room) => {
+      const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut ? ` \xB7 ${formatDate(room.checkIn)} \u2192 ${formatDate(room.checkOut)}` : "";
+      return row(
+        `Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
+        room.bookingRef ? `${escapeHtml(String(room.bookingRef))} \xB7 ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+      );
+    }).join("")}
       </table>
     `;
+    const checkInValue = isDivergent && actualRange.earliestCheckIn ? `${formatDate(actualRange.earliestCheckIn)} from ${hotel_config_default.checkInTime || "14:00"} (varies by room)` : `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`;
+    const checkOutValue = isDivergent && actualRange.latestCheckOut ? `${formatDate(actualRange.latestCheckOut)} by ${hotel_config_default.checkOutTime || "12:00"} (varies by room)` : `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`;
     return `
       ${booking.reservationRef ? row("Reservation reference", booking.reservationRef) : ""}
       ${row("Guest", booking.guestName)}
       ${row("Rooms", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`)}
       ${roomsTable}
-      ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
-      ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
+      ${row("Check-in", checkInValue)}
+      ${row("Check-out", checkOutValue)}
       ${row("Nights", `${booking.numNights || 0} night(s)`)}
       ${row("Total", formatMoney(booking.totalPrice))}
     `;
