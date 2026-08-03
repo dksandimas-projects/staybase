@@ -197,3 +197,35 @@ Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only le
 | `title` / `body` / `link` | string | Notification content & admin drawer deep-link |
 | `readBy` | map | Map of `staffUid` → `timestamp` for per-staff read tracking |
 | `createdAt` | timestamp | Server timestamp; pruned after 30 days by cron |
+
+---
+
+## Reservation Aggregate Counter Ownership (MRB-15)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03 sub-item, **REAL BUG FIX** shipped v0.250.0). Pre-MRB-15-03, `handleCheckinBooking` + `handleCheckoutBooking` updated the booking's own `status` but NEVER recomputed the header's `checkedInRoomCount` / `checkedOutRoomCount` in the same `runTransaction` — the counters were silently stuck at `0` forever for N>1. The aggregate `paymentStatus` was a hardcoded `["checked-in"]` / `["checked-out"]` array literal that was only correct for N=1.
+
+### Counter ownership contract (which handler may write which counter)
+
+| Counter | Owners (writes) | Notes |
+|---|---|---|
+| `roomCount` | `handleCreateBooking`, `handleCreateWalkin`, `handleAddRoomToReservation` | `+= 1` on each new child. Never decremented. |
+| `activeRoomCount` | `handleCreateBooking`, `handleCreateWalkin`, `handleAddRoomToReservation`, `handleCancelBooking` | `+= 1` on each new child; `-= cancelledCount` (floored at 0) on cancel. |
+| `cancelledRoomCount` | `handleCancelBooking` | `+= cancelledCount`. Never decremented. |
+| `checkedInRoomCount` | `handleCheckinBooking`, `handleCheckoutBooking` | Recomputed in the same `runTransaction` by reading the children via `where("reservationId", "==", id)`. Pre-MRB-15-03 was never written. |
+| `checkedOutRoomCount` | `handleCheckoutBooking` | Recomputed in the same `runTransaction` by reading the children. Pre-MRB-15-03 was never written. |
+
+### Aggregate `paymentStatus` derivation
+
+The `paymentStatus` field on `reservations/{id}` is now `computeReservationAggregatePaymentStatus(postStatuses)` where `postStatuses` is the array of child statuses read in the same `runTransaction`. Pre-MRB-15-03 it was a hardcoded `["checked-in"]` / `["checked-out"]` array literal — only correct for N=1. The aggregate now correctly reflects N>1 mixed states (a partially-checked-in 3-room reservation shows the aggregate of the three, not a single status).
+
+### Dual-source read pattern (legacy vs new reservations)
+
+The payment + refund subcollection reads use a dual-source pattern based on `bookingReservationId.length > 0`:
+
+- **New reservations** (post-MRB-01, `reservationId` present): reads `reservations/{id}/payments` + `reservations/{id}/refunds`.
+- **Legacy** (pre-MRB-01, no `reservationId`): reads `bookings/{id}/payments` (the CRL-01 historical contract — refunds are negative-amount entries on the booking's payments subcollection).
+
+The pattern applies to `handleAddPayment`, `handleAddRefund`, `readTransactionalFolioSnapshot`, `loadReservationEmailView`, `handleLookupBooking`, and the CRL-07 cancellation liability snapshot.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) + `mrb-15-03-transactional-counters.test.ts` (13 tests) + `mrb-15-08-legacy-fallback.test.ts` (19 tests) — 46 source-text tests pin the counter ownership + dual-source read contracts.

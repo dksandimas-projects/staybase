@@ -290,3 +290,19 @@ Step 1 shows adults, children, and extra-bed steppers; extra beds appear only wh
 The server snapshots `extraBedRate` on creation and preserves that snapshot during reschedule. Extra-bed cost is count × snapshotted rate × nights and remains independent of breakfast occupancy. Step 3 displays it as its own add-on line. Hotel-wide inventory, when configured above zero, is enforced transactionally; the field currently has no admin Settings editor.
 
 Coverage: room-type boundary tests, server cap guards, multi-night add-on tests, and `guest-app/tests/api/exb-09-rate-snapshotting-and-breakfast-coupling.test.ts`. See decisions #145, #153–#158 and `plan/docs/BACKEND.md` for the canonical data contracts.
+
+---
+
+## Lifecycle Invariants (MRB-15-01)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-01 sub-item, shipped v0.249.0). The full create → cancel lifecycle must produce exactly ONE of each cross-cutting effect: counter increment, email template render, loyalty earn/clawback entry, status flip. The MRB-15-01 audit pins these invariants in source-text form so a future refactor cannot silently double-fire any of them.
+
+### Cross-cutting invariants (the lifecycle "exactly-once" guarantees)
+
+- **Counter increments**: exactly ONE `roomCount` increment at create, exactly ONE `activeRoomCount` increment at create, exactly ONE `cancelledRoomCount` increment per cancelled child. See `plan/docs/BACKEND.md §Reservation Aggregate Counter Ownership (MRB-15)` for the full counter ownership table.
+- **Email template renders**: exactly ONE per-action email template render (no `booking-cancelled` AND `booking-cancelled-reservation` firing for the same destroy). The dispatch is in `handleCancelBooking`'s `postTransactionAction: "booking-cancelled" | "booking-cancelled-reservation"` local.
+- **Loyalty earn + clawback**: exactly ONE `earn-${bookingId}` pointsHistory entry on the eventual check-out, exactly ONE `clawback-${bookingId}` pointsHistory entry per cancelled child. The pairing uses deterministic doc ids (see `plan/docs/TYPES.md §Loyalty Earn + Clawback Pairing (MRB-15-07)`).
+- **Status flips**: exactly ONE status transition per child per lifecycle event. The status matrix is the server-authoritative source.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) — pins the "exactly-once" guarantees for every cross-cutting effect in the create → cancel lifecycle.

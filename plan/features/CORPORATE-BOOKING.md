@@ -131,3 +131,21 @@ The shared booking API re-derives and validates the total, normalizes the select
 - Cancellation scope: `plan/docs/DECISIONS-FEATURES.md #166` (MRB-13)
 - Helper test: `shared/__tests__/corporate-codes.test.ts` (the `requestedUses` cap check)
 - End-to-end source-text test: `guest-app/tests/api/mrb-08-corporate-multi-room.test.ts`
+
+---
+
+## Corporate Code `usageCount` Counter Ownership (MRB-15-03, MRB-15-08)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03 + MRB-15-08 sub-items, shipped v0.250.0 + v0.255.0). The corporate code `usageCount` field is incremented once per room added to a corporate reservation, and decremented once per room cancelled. The counter is per-reservation (not per-child) per MRB-08's "N rooms = N uses" rule.
+
+### Increment + decrement contract
+
+- **Create (`handleCreateBooking` / `handleCreateWalkin`)**: `corporateCodes.usageCount += assignedRooms.length` (decision #167). A 3-room corporate reservation increments by 3.
+- **Add room (`handleAddRoomToReservation`)**: `corporateCodes.usageCount += 1` (per MRB-08 rule — same `+= 1` per room added). The new child does NOT re-apply the corporate code (the spec keeps corporate per-reservation, not per-child).
+- **Cancel (`handleCancelBooking`)**:
+  - **Room scope**: `usageCount -= 1` (one room cancelled, one use removed).
+  - **Reservation scope**: deduplicates by building a `Map<code, count>` from every cancelled child — a code shared across N children decrements by N (matches the create-time `+= assignedRooms.length` increment).
+- **Legacy null-`reservationId` bookings**: the corporate code lives on the booking doc itself; the read is a single `bookings/{id}.corporateCode` field. The counter ownership contract still applies (a legacy single-room cancel decrements by 1).
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) + `mrb-15-03-transactional-counters.test.ts` (13 tests) + `mrb-15-08-legacy-fallback.test.ts` (19 tests) — 46 source-text tests pin the corporate code `usageCount` counter ownership contract.

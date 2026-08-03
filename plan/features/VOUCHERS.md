@@ -82,3 +82,29 @@ Promo vouchers allow admins to create discount codes redeemable during the guest
 - Validation API: `plan/docs/API-ROUTES.md §validate`
 - Booking flow redemption step: `plan/features/BOOKING-FLOW.md §Step 3`
 - Rates page location: `plan/features/RATE-MANAGEMENT.md`
+
+---
+
+## Voucher `usageCount` Counter Ownership (MRB-15-03, MRB-15-08)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03 + MRB-15-08 sub-items, shipped v0.250.0 + v0.255.0). Voucher `usageCount` is incremented once per child the voucher is applied to (per-child semantics, distinct from corporate's per-reservation semantics). A 3-room reservation with a voucher applied to only one child increments by 1, not by 3.
+
+### Increment + decrement contract (per-child semantics)
+
+- **Create (`handleCreateBooking` / `handleCreateWalkin`)**: for each child that has a `voucherCode` applied, `vouchers.usageCount += 1`. A 3-room reservation with the voucher on 1 child increments by 1; with the voucher on all 3 children, by 3.
+- **Add room (`handleAddRoomToReservation`)**: if a `voucherCode` is applied to the new child, `vouchers.usageCount += 1` (per-child rule — the spec keeps voucher per-child, not per-reservation).
+- **Cancel (`handleCancelBooking`)**:
+  - **Room scope**: `usageCount -= 1` if the cancelled child had a voucher applied.
+  - **Reservation scope**: deduplicates by building a `Map<code, count>` from every cancelled child that had a voucher — a code shared across N children decrements by N.
+
+### Distinction from corporate codes
+
+| Field | Voucher | Corporate |
+|---|---|---|
+| Semantics | Per-child (one use per child that has the code) | Per-reservation (one use per room added) |
+| Create-time increment | `+= childrenWithCode.length` | `+= assignedRooms.length` |
+| Add-room increment | `+= 1` if new child has the code | `+= 1` (always — per-reservation) |
+| Cancel decrement | `+= -childrenWithCode.length` (deduplicated) | `+= -assignedRooms.length` (deduplicated) |
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) + `mrb-15-03-transactional-counters.test.ts` (13 tests) + `mrb-15-08-legacy-fallback.test.ts` (19 tests) — 46 source-text tests pin the voucher `usageCount` counter ownership contract.

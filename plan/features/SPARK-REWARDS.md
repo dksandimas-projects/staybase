@@ -274,3 +274,22 @@ Findings from the Spark Rewards feature audit — full report in `plan/docs/AUDI
 - Rewards signup page: `plan/features/STATIC-PAGES.md §Spark Rewards`
 - RA 10173 erasure rights: `plan/docs/SECURITY.md §Data Subject Rights`
 - Member types: `plan/docs/TYPES.md §Member`
+
+---
+
+## Earn + Clawback Pairing (MRB-15-07)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-07 sub-item, shipped v0.254.0). The `pointsHistory` ledger uses paired doc ids: `earn-${bookingId}` for the positive earn entry (written on check-out) and `clawback-${bookingId}` for the negative clawback entry (written on cancel). The pairing is the deterministic link between an earn and its subsequent clawback.
+
+### Pairing contract (the "exactly-once" guarantees)
+
+- `earn-${bookingId}` is written **exactly once** per booking on a successful check-out. There are **2 constructions** of this id in the codebase: the check-out's `awardNow` flag (the standard path) and the post-settlement path (the deferred award, used when the check-out runs without a confirmed payment). A re-check-out of the same booking is forbidden by the status matrix (`status === "checked-out"` is terminal), so a second `earn-${bookingId}` write is impossible.
+- `clawback-${bookingId}` is written **exactly once** per cancelled booking. There is **1 construction** of this id in the codebase: `handleCancelBooking`'s per-child CRL-02 + MRB-05 audit stamp block. A re-cancel of the same booking is forbidden by the status matrix (`status === "cancelled"` is terminal).
+- The `pointsHistory.points` map-based invariant `rewardsPoints == sum(pointsHistory.points)` is preserved end-to-end: an `earn-${bookingId}` entry of `+100` is balanced by a `clawback-${bookingId}` entry of `-100` if a check-out is followed by a cancel.
+
+### Why the pairing matters
+
+The pairing is the source-text guard for the cross-cutting "no duplicate earn" + "no duplicate clawback" + "balanced ledger" invariants MRB-15-01 pins. A future refactor that adds a second `earn-${bookingId}` write (e.g. on a "reissue loyalty points" feature) would silently break the invariant and double-credit the member. The MRB-15-07 audit pins the exact count of constructions so the test fails on a new construction.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-07-checkout-loyalty-earn.test.ts` (13 tests) — pins the earn/clawback pairing + the construction count. `mrb-15-01-lifecycle-invariants.test.ts` (14 tests) — pins the no-duplicate-earn + no-duplicate-clawback invariants across the full lifecycle.
