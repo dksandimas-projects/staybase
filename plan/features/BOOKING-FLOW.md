@@ -560,6 +560,130 @@ The `Booking.extraBedCount` server-side write is unchanged — the cart still wr
 
 ---
 
+## EXB-11.1 — Bottom-of-Card Placement + Checkbox for `maxExtraBeds === 1`
+> Proposed 2026-08-04, per decision #189. Spec-only — no code yet. Two refinements to the EXB-11 "Extras" sub-section on `/book` Step 1: **(1) move the sub-section to the bottom of the card** (after the rate options + mixed-rates panel) and **(2) render a binary checkbox instead of a counter when `maxExtraBeds === 1`** (the counter `[−] 0 [+]` is the wrong shape for a yes/no decision). The data model is unchanged: `room.extraBedCount: number`, the `rebalanceGuestDistribution` clamping, the `updateExtraBedCount` helper, the cart URL serialization, the Step 2/3 aside aggregation — all stay the same. Only the placement + render shape change. Same screen as EXB-11 (room-type card on `/book`). The "Rejected alternatives" entry from EXB-11 ("Binary toggle (0 or maxExtraBeds) — too coarse") is REVERSED for the `maxExtraBeds === 1` case: a counter is the wrong shape for a binary choice, the checkbox is the right shape.
+
+### The problem (Part 1: placement)
+
+The EXB-11 spec placed the "Extras" sub-section between the CHD-11 capacity chip and the "Rooms" stepper on each room-type card. After shipping v0.257.0, operator UX feedback on 2026-08-04 surfaced that this is the wrong layer: the user is forced to make the extras decision *before* they've chosen how many rooms or which rate — backwards from the natural scan order. The extras counter is an opt-in add-on (same shape as the breakfast add-on, which is in the rate-option layer); it belongs with the other add-on choices, grouped at the bottom of the card.
+
+The current top-to-bottom order on a room-type card is: header → Fits/Tight/Doesn't fit chip → **Extras (wrong place)** → Rooms stepper → Room Only / Room + Breakfast → mixed-rates panel. The desired order: header → Fits/Tight/Doesn't fit chip → Rooms stepper → Room Only / Room + Breakfast → mixed-rates panel → **Extras (moved here)**. The placement change is a pure code move — same IIFE, different parent in the JSX tree.
+
+### The problem (Part 2: counter for a binary choice)
+
+When `maxExtraBeds === 1`, the EXB-11 counter `[−] 0 [+]` is the wrong shape. The user can only set 0 or 1 (the counter has 2 meaningful states), but the counter presents 3 affordances (decrement / display / increment) where 1 (the checkbox) would do. The spec's own "Rejected alternatives" entry acknowledged "Binary toggle (0 or maxExtraBeds) — too coarse" — but that rejection was framed for the *general* case where `maxExtraBeds` can be > 1. The *specific* case where `maxExtraBeds === 1` is precisely where a binary toggle is the right shape. A counter for a yes/no decision is a "wrong fit" UX that the user noticed.
+
+A counter for the binary case also has a soft-floor enforcement problem the checkbox avoids cleanly: the EXB-11 soft floor disables the `[−]` when `count <= softFloor`. For a 0-or-1 counter, the `[−]` is disabled at count=1 (the only meaningful value), making the counter a single-click UI anyway. The checkbox makes that single-click explicit.
+
+### The fix (Part 1: bottom-of-card placement)
+
+Move the existing "Extras" IIFE from `BookingPage.tsx:2456-2565` (right after the CHD-11 capacity chip IIFE) to right after the mixed-rates panel (currently at `BookingPage.tsx:2620-2644`). The IIFE body is unchanged; only the JSX parent changes. The `data-testid` markers (`extras-stepper-${type.value}` + `extras-count-${type.value}` / `extras-checkbox-${type.value}` + `extras-stay-total-${type.value}` + `extras-soft-floor-warning-${type.value}`) stay the same (no test churn for the move alone).
+
+**Discoverability hook**: the existing amenities row at `BookingPage.tsx:2348-2353` already shows "Up to N extra beds" for types with `maxExtraBeds > 0`. The visual cue is still at the top of the card, so the user knows the room type has an extra-bed option before they reach the bottom. The actual toggle lives at the bottom (where the action is) but the discoverability hint lives at the top (where the eye lands first). The `aria-label="${type.label} extras"` on the wrapper section means screen readers still land on the toggle when the user tabs through the card.
+
+### The fix (Part 2: checkbox when `maxExtraBeds === 1`)
+
+Add a branch in the Extras IIFE: if `typeMaxExtraBeds === 1`, render a checkbox + label + per-night price + stay total instead of the counter. The underlying `room.extraBedCount` stays a number (0 or 1) — only the rendered shape changes. `updateExtraBedCount` is unchanged (still takes 0 or 1 as `nextCount`).
+
+The new checkbox shape:
+- `<input type="checkbox" id="extras-checkbox-${type.value}" data-testid="extras-checkbox-${type.value}" />`
+- `<label for="extras-checkbox-${type.value}">` containing "Add an extra bed" + the per-night price inline ("Add an extra bed · ₱500 / bed / night")
+- The `[−] 0 [+]` counter is gone for this case (the `data-testid="extras-count-${type.value}"` testid is also gone for this case — the checkbox replaces it as the testable surface)
+- The stay total + soft-floor warning render the same as the counter case (the data is 0 or 1 either way; the `extras-stay-total-${type.value}` + `extras-soft-floor-warning-${type.value}` testids stay)
+
+**Soft-floor enforcement for the checkbox case** (3 states):
+
+  - **`softFloor === 0`** (no overflow; the user is free to choose): checkbox `unchecked`, `enabled`. The user clicks to toggle 0 ↔ 1. The per-night price + stay total update on toggle.
+  - **`softFloor === 1`** (overflow exactly matches the cap; the user MUST have the extra bed): checkbox `checked`, `disabled` (with `aria-describedby="extras-soft-floor-warning-${type.value}"` pointing at the warning text). The user can't uncheck it because the room doesn't fit without the bed. The visual is a grayed-out checked box — clear "this is on, and it has to be" affordance.
+  - **`overCap`** (`softFloor > maxExtraBeds`, e.g. 3 adults in a Single with `maxExtraBeds 1` → soft floor 2, cap 1): checkbox `checked`, `disabled`, the soft-floor warning text "This room needs 2 extra beds to fit your group. You can add up to 1 here." renders below. Same as the EXB-11 over-cap case for the counter.
+
+**The new `if/else` switch inside the IIFE** (sketch):
+
+```ts
+if (typeMaxExtraBeds === 0) return null;        // EXB-11: hidden
+if (typeMaxExtraBeds === 1) {
+  // EXB-11.1: checkbox branch
+  // ... <input type="checkbox" data-testid={`extras-checkbox-${type.value}`} />
+  //     <label>Add an extra bed · {per-bed-per-night price}</label>
+  //     stay total (same as counter case)
+  //     soft-floor warning (same condition, same text, same testid)
+} else {
+  // EXB-11: counter branch (typeMaxExtraBeds >= 2)
+  // ... existing `[−] count [+]` stepper
+}
+```
+
+### What this changes for EXB-11
+
+  - **Placement**: the existing IIFE moves ~30 lines down in the JSX tree. Same parent chain shape, different sibling. No state, no helper, no model change.
+  - **Render branch for `maxExtraBeds === 1`**: the IIFE returns a different JSX block. The `extras-count-${type.value}` testid is replaced by `extras-checkbox-${type.value}`. All other testids stay.
+  - **Data model**: unchanged. `room.extraBedCount: number` (0 or 1 for the checkbox case; 0..maxExtraBeds for the counter case). `rebalanceGuestDistribution` clamping unchanged. `updateExtraBedCount(typeValue, 0|1, maxExtraBeds)` unchanged. The cart URL serialization (`rooms=`) unchanged. The Step 2/3 aside aggregation unchanged. The per-type cart summary pill unchanged. The server-side create transaction unchanged.
+  - **Source-text tests** in `guest-app/tests/api/exb-11-user-controlled-extra-bed-toggle.test.ts`: the existing tests pin the counter shape + soft-floor + over-cap + stay total + cap = 0 hide. They still apply — only for the `maxExtraBeds >= 2` branch. EXB-11.1 adds ~6 new tests pinning the checkbox branch + the placement + the disabled-when-soft-floor-states. See "Tests" below.
+  - **Discoverability hook at `BookingPage.tsx:2348-2353`**: the "Up to N extra beds" line in the amenities row stays. The N value comes from `type.maxExtraBeds`, which still works for `maxExtraBeds === 1` (renders "Up to 1 extra bed" — singular, per the existing pluralization).
+
+### What this does NOT change
+
+  - The data model is unchanged. `room.extraBedCount: number` stays; the `0..maxExtraBeds` range stays; the cart serialization stays.
+  - The `rebalanceGuestDistribution` clamp is unchanged. The `updateExtraBedCount` helper is unchanged.
+  - The CHD-12 cart summary's per-type extra-bed count inline ("1× Family Room · 2 adults · 2 children · 2 extra beds") is unchanged — the data is the same, the placement move doesn't affect the cart surface.
+  - The CHD-11 capacity chip is unchanged. The Fits/Tight/Doesn't fit chip stays at the top of the card, right after the header.
+  - The Step 2/3 aside extra-bed pill is unchanged.
+  - The server-side create transaction's `extraBedCount` validation + rate snapshot is unchanged (per EXB-01..10 contract).
+
+### Edge cases
+
+  - **`maxExtraBeds === 0`** — section hidden (per EXB-11). Unchanged.
+  - **`maxExtraBeds === 1`, 0 rooms of this type in the cart** (`typeQuantity === 0`) — checkbox renders but is `disabled` (same as the counter's "both buttons disabled" case in EXB-11); the user has to add a room first. The helper text "Add at least one room to set extra beds" still renders (the spec's `typeQuantity === 0` guard in the EXB-11 IIFE covers both branches).
+  - **`maxExtraBeds === 1`, 1+ rooms, `softFloor === 0`** — checkbox unchecked, enabled, no warning.
+  - **`maxExtraBeds === 1`, 1+ rooms, `softFloor === 1`** — checkbox checked, disabled, no warning (the chosen value already matches the soft floor; no over-cap message needed). The disabled state is the "you must have this" affordance.
+  - **`maxExtraBeds === 1`, 1+ rooms, `overCap`** (`softFloor > 1`) — checkbox checked, disabled, soft-floor warning renders below. Same warning text as the counter case.
+  - **`maxExtraBeds >= 2`** — counter shape (EXB-11 unchanged). Counter soft-floor still works.
+  - **Race between two operators uploading the same room type's photos** — unrelated to this spec; the MRB-15-11 `runTransaction` fix handles that.
+
+### Tests
+
+  Extend `guest-app/tests/api/exb-11-user-controlled-extra-bed-toggle.test.ts` (source-text guards per `plan/docs/CONTRIBUTING.md §Testing` — cheap, deterministic, <5s). The behavioural emulator test (the user toggles the checkbox / counter on a real room type, sees the per-night price + stay total update) is out of scope for this sandbox.
+
+  New source-text guards (one tripwire per contract point):
+    - **Placement**: the Extras IIFE appears AFTER the mixed-rates panel and the rate options in the JSX tree (not between the CHD-11 capacity chip and the Rooms stepper). Sliced by anchoring on the IIFE's `data-testid="extras-stepper-${type.value}"` marker + asserting that the slice's preceding-sibling block ends with the `</div>` of the mixed-rates panel + the rate options.
+    - **Counter branch (`maxExtraBeds >= 2`)**: existing tests still pass. EXB-11's tests pin the counter shape + soft-floor + over-cap; they apply to the `else` branch of the new switch.
+    - **Checkbox branch (`maxExtraBeds === 1`)**: the slice contains `<input type="checkbox"` + `data-testid={`extras-checkbox-${type.value}`}` + a `<label for={`extras-checkbox-${type.value}`}>` containing "Add an extra bed" + the per-night price. The slice does NOT contain `data-testid={`extras-count-${type.value}`}` (the counter testid is gone in this branch).
+    - **Checkbox disabled-when-soft-floor-1**: the slice contains `disabled={... || softFloor >= 1 || ...}` (or equivalent expression) for the checkbox. The exact condition: `userExtraBeds === 0 && softFloor === 1` (forced on) OR `softFloor > 1` (over-cap forced on). The implementation may use a single expression like `disabled={typeQuantity === 0 || (softFloor >= 1 && userExtraBeds < softFloor)}`.
+    - **Checkbox default-checked-when-soft-floor-1**: `defaultChecked={... || softFloor >= 1 || ...}`. Same expression shape.
+    - **The switch**: the IIFE contains `if (typeMaxExtraBeds === 1)` (or `=== 0` then `=== 1` then `>= 2`) that branches the render.
+    - **Helper text for `typeQuantity === 0`** still renders in both branches (the EXB-11 "Add at least one room to set extra beds" message is outside the inner if/else so it covers both counter and checkbox).
+    - **Stay total + soft-floor warning** render the same way in both branches (the `extras-stay-total-${type.value}` + `extras-soft-floor-warning-${type.value}` testids + their text shape are shared).
+
+  Re-verify the existing `exb-11-user-controlled-extra-bed-toggle.test.ts` (16 source-text tests still pass — the counter branch is unchanged). Re-verify `chd-11-soft-constraint-picker-and-cart-summary.test.ts` (the CHD-11 capacity chip at the top of the card is unchanged) and `chd-05-guest-child-cap.test.ts` (the URL contract is unchanged).
+
+### Rejected alternatives
+
+  - **Always render the counter, never the checkbox** (the EXB-11 default) — wrong shape for the binary case. The counter for `maxExtraBeds === 1` is a 3-affordance UI for a 2-state decision; the checkbox is a 1-affordance UI for the same decision. The user noticed the wrong fit.
+  - **Always render the checkbox, even for `maxExtraBeds > 1`** — wrong shape for the N-ary case. Per EXB-11's "Binary toggle (0 or maxExtraBeds) — too coarse" rejection: the user might want exactly 1 (not all-or-nothing) for a 2+ room type, and the checkbox forces 0/1. The counter is the right shape for N >= 2.
+  - **A "dropdown" with 0/1/2/3 options for `maxExtraBeds <= 3`** — the counter is a more direct control (one click for increment vs. two clicks for dropdown-open + option-select). The dropdown adds a click before the click. Out of scope.
+  - **A "radio" group (0 / 1) for `maxExtraBeds === 1`** — radio is for "pick one of N where N >= 3". For a yes/no decision, the checkbox is the right shape (semantically "is it on?"). The screen reader + keyboard semantics differ: radio requires arrow-key navigation between options, checkbox is a single tap.
+  - **Keep Extras at the top of the card (between the CHD-11 chip and the Rooms stepper)** — the placement reasoning in "The problem (Part 1: placement)" above. The discoverability is handled by the amenities row; the action is at the bottom.
+  - **A combined "Add-ons" section that bundles Extras + Breakfast + Voucher** — out of scope (rejected in EXB-11's "Rejected alternatives" for the same reason — combines too many unrelated choices into one widget). The rate option (with breakfast) is the natural breakfast surface; Extras is a per-room-type opt-in (independent of rate choice); Voucher is a Step 3 discount. Three separate surfaces.
+  - **Hide the checkbox when `typeQuantity === 0`** (vs. render-but-disabled) — same trade-off as the EXB-11 "render counter but disable both buttons" choice. The render-but-disabled form keeps the section in the layout (no CLS when the user adds a room) and surfaces the helper text "Add at least one room to set extra beds" immediately.
+
+### Gates
+
+  - **EXB-11** — the underlying contract is unchanged (per-room `extraBedCount: number`, the per-type mirror via `updateExtraBedCount`, the soft-floor derived from `requiredExtraBedsFor`, the per-cart aggregation). Only the placement + render branch for the `maxExtraBeds === 1` case change.
+  - **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room `extraBedCount`. The server still validates against `maxExtraBeds` and snapshots `extraBedRate` onto the booking doc. The Step 3 add-on line is unchanged.
+  - **CHD-11** — the capacity chip is at the top of the card (unchanged). The Extras move doesn't touch the chip.
+  - **CHD-12** — the per-type cart summary's "N extra beds" inline pill is unchanged (the data is the same; the surface just renders it from the same cart field).
+  - **MRB-15-10** — the admin surface for editing `maxExtraBeds` and `extraBedRate` is the input side. EXB-11.1 only changes the *client-side selection surface* (placement + checkbox branch).
+  - **MRB-15-11** — unrelated (photo gallery, not extras toggle). The two specs are independent.
+
+### Phase 2 (deferred, NOT in EXB-11.1)
+
+  - **Per-room individual extra-bed toggles** — let the user add an extra bed to one Single but not the other. Carried over from EXB-11's Phase 2 list. A real UX work item; ship per-type first, then iterate.
+  - **A "you'd need N extra beds to fit your group" callout on the room-type card** — the per-type callout that mirrors the CHD-11 capacity indicator. Carried over from EXB-11's Phase 2 list. Same `deriveRoomTypeCapacityFit` helper can power this.
+  - **A "best fit" suggestion** — recommend a specific room-type combination when the user's group can't fit any single room. Carried over from EXB-11's Phase 2 list. A real recommendation engine; out of scope.
+  - **A "Set as hero" drag-to-front interaction on the first photo** — out of scope (the photo gallery's first-photo-is-hero contract is implicit; an explicit drag-to-front is a separate UX work item, mentioned in MRB-15-11's Phase 2 list).
+
+---
+
 ## Lifecycle Invariants (MRB-15-01)
 > Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-01 sub-item, shipped v0.249.0). The full create → cancel lifecycle must produce exactly ONE of each cross-cutting effect: counter increment, email template render, loyalty earn/clawback entry, status flip. The MRB-15-01 audit pins these invariants in source-text form so a future refactor cannot silently double-fire any of them.
 
