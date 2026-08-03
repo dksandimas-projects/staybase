@@ -122,6 +122,22 @@ function toDate(value: any): Date | null {
   return null;
 }
 
+// Per MRB-14 (2026-08-03, per decision #180 — proposed):
+// the per-child dates UI uses a short date string
+// ("MMM D" → "Jan 1") for the actual-range display. The
+// admin `checkIn` / `checkOut` row already renders the
+// longer ISO string from the booking; the new
+// divergent-dates pill reads the `Reservation`
+// header's `actualDateRange` (Date objects) and the
+// children's per-child `checkIn` / `checkOut` (ISO
+// strings from the booking listener). The helper
+// normalises both shapes.
+function formatShortDate(value: any): string {
+  const date = toDate(value);
+  if (!date) return "—";
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 // Per 2026-07-24 (refactor/unify-payment-reference-fields):
 // `getLatestPaymentReference` is now imported from
 // `@spark-inn/shared` so the bookings table, dashboard, drawer
@@ -1427,11 +1443,46 @@ export function BookingsPage() {
     {
       key: "checkIn",
       header: "Dates",
-      render: (row) => (
-        <span className="text-xs">
-          {row.checkIn} to {row.checkOut} ({row.numNights} nights)
-        </span>
-      )
+      render: (row) => {
+        // Per MRB-14 (2026-08-03, per decision #180 —
+        // proposed): for reservation rows where the
+        // children have diverged from the header's
+        // original shared dates, the Dates column
+        // shows the actual range (MIN(children.checkIn)
+        // / MAX(children.checkOut)) + a "varies by
+        // room" badge. N=1 + legacy null-`reservationId`
+        // rows keep the existing per-booking render
+        // (no children to diverge, no header to read).
+        // Pre-MRB-14 reservations have no
+        // `actualDateRange` (the field is `null`);
+        // they fall through to the per-child render.
+        if (row.listRowKind === "reservation" && row.listReservationHeader?.actualDateRange?.isDivergent) {
+          const range = row.listReservationHeader.actualDateRange;
+          const earliestStr = formatShortDate(range.earliestCheckIn);
+          const latestStr = formatShortDate(range.latestCheckOut);
+          return (
+            <span
+              className="inline-flex flex-col items-start gap-0.5 text-xs"
+              data-testid="reservation-dates-divergent"
+              title={
+                (row.listChildBookings || [])
+                  .map((child: any) => `Room ${child.roomNumber}: ${formatShortDate(child.checkIn)} – ${formatShortDate(child.checkOut)}`)
+                  .join("\n") || "Per-room dates available"
+              }
+            >
+              <span>{earliestStr} to {latestStr}</span>
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-inset ring-amber-200">
+                varies by room
+              </span>
+            </span>
+          );
+        }
+        return (
+          <span className="text-xs">
+            {row.checkIn} to {row.checkOut} ({row.numNights} nights)
+          </span>
+        );
+      }
     },
     {
       key: "totalPrice",
@@ -2988,6 +3039,21 @@ export function BookingsPage() {
             : `${b.roomNumber} (${b.roomType})`
         },
         { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
+        // Per MRB-14 (2026-08-03, per decision #180): when
+        // the reservation's children have diverged from the
+        // header's original shared dates, the receipt adds
+        // an "Actual range" line so the printed copy matches
+        // what the guest sees in the email + the desk sees
+        // in the Bookings table. The per-room dates are
+        // still printed per-row in the pricing breakdown
+        // below. Pre-MRB-14 reservations carry no
+        // `actualDateRange` and the line is hidden.
+        ...((isReservationReceipt && b.reservationId && reservationsMap.get(b.reservationId)?.actualDateRange?.isDivergent)
+          ? [{
+              label: "Actual range",
+              value: `${formatShortDate(reservationsMap.get(b.reservationId)!.actualDateRange!.earliestCheckIn)} to ${formatShortDate(reservationsMap.get(b.reservationId)!.actualDateRange!.latestCheckOut)} (varies by room)`
+            }]
+          : []),
         // Per EXB-08 (2026-08-01, per decision #156):
         // the receipt's "Stay" line shows the adult/child
         // split when both fields are present, with the
@@ -3046,6 +3112,25 @@ export function BookingsPage() {
           pdf.text(receiptBooking.bookingRef, amountX, y, { align: "right", charSpace: 0 });
           setPdfFont(pdf, "Inter");
           y += 4.4;
+
+          // Per MRB-14 (2026-08-03, per decision #180):
+          // when the reservation's children have diverged,
+          // print the per-room dates inline under the
+          // room label so the printed receipt matches the
+          // "Actual range" line in the Stay card above and
+          // the per-room dates in the email. Otherwise the
+          // per-room dates match the reservation header
+          // dates and are omitted (no duplication).
+          const reservationActualRange = b.reservationId
+            ? reservationsMap.get(b.reservationId)?.actualDateRange
+            : null;
+          if (reservationActualRange?.isDivergent && receiptBooking.checkIn && receiptBooking.checkOut) {
+            pdf.setFontSize(8.0);
+            pdf.setTextColor(120, 120, 120);
+            const roomDatesLabel = `  ${receiptBooking.checkIn} → ${receiptBooking.checkOut}`;
+            pdf.text(roomDatesLabel, labelColX, y, { charSpace: 0 });
+            y += 4.0;
+          }
 
           if (breakdown?.roomLines?.length) {
             breakdown.roomLines.forEach((line) => {
@@ -4592,6 +4677,43 @@ export function BookingsPage() {
                           {formatPrice(reservationBalance)}
                         </p>
                       </div>
+                    </div>
+                  );
+                })()}
+                {/* Per MRB-14 (2026-08-03, per decision #180): the
+                    "Actual range" pill row. Surfaces when the
+                    reservation's children have diverged from the
+                    header's original shared dates (a room has been
+                    rescheduled to a different check-in / check-out).
+                    The pill shows MIN(children.checkIn) →
+                    MAX(children.checkOut) and a "varies by room"
+                    badge. The per-room dates are still listed on the
+                    existing per-booking header below this strip.
+                    Hidden for N=1 / legacy reservations (no
+                    `actualDateRange` to read; no children to diverge). */}
+                {(() => {
+                  const reservationId = selectedReservationContext.reservationId;
+                  const reservationHeader = reservationsMap.get(reservationId);
+                  const actualRange = reservationHeader?.actualDateRange;
+                  if (!actualRange || !actualRange.isDivergent) return null;
+                  const earliestStr = formatShortDate(actualRange.earliestCheckIn);
+                  const latestStr = formatShortDate(actualRange.latestCheckOut);
+                  return (
+                    <div
+                      data-testid="reservation-strip-actual-range"
+                      className="mt-1.5 flex items-center gap-1.5 rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-amber-200"
+                      aria-label="Reservation actual range"
+                      title={
+                        selectedReservationContext.rooms
+                          .map((sibling) => `Room ${sibling.roomNumber}: ${formatShortDate(sibling.checkIn)} – ${formatShortDate(sibling.checkOut)}`)
+                          .join("\n") || "Per-room dates available"
+                      }
+                    >
+                      <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Actual range</p>
+                      <p className="text-xs font-bold text-gray-900">{earliestStr} → {latestStr}</p>
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-inset ring-amber-200">
+                        varies by room
+                      </span>
                     </div>
                   );
                 })()}

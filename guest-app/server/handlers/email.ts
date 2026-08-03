@@ -486,6 +486,17 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
     roomNumber: String(child.roomNumber || ""),
     roomType: String(child.roomType || ""),
     roomName: child.roomName || child.roomType || "",
+    // Per MRB-14 (2026-08-03, per decision #180): per-child
+    // dates on the room projection. The header's
+    // `checkIn` / `checkOut` is the original create-time
+    // shared range and may differ from the actual range
+    // once a room has been rescheduled; the email's
+    // reservation branch reads `actualDateRange` and the
+    // per-room `checkIn` / `checkOut` below when the
+    // children have diverged.
+    checkIn: child.checkIn,
+    checkOut: child.checkOut,
+    numNights: Number(child.numNights || 0),
     numGuests: Number(child.numGuests || 0),
     numAdults: Number(child.numAdults || 0),
     numChildren: Number(child.numChildren || 0),
@@ -525,6 +536,25 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
     activeRoomCount: Number(reservation.activeRoomCount ?? children.length),
     rooms: roomProjections,
     roomTypeLabels,
+    // Per MRB-14 (2026-08-03, per decision #180): the
+    // denormalised actual range (MIN of children.checkIn
+    // / MAX of children.checkOut) plus the divergent
+    // flag. Pre-MRB-14 reservations carry no field
+    // (`undefined` here); the email template falls
+    // through to the legacy shared-range render
+    // (byte-equivalent to pre-MRB-14). The `earliestCheckIn`
+    // / `latestCheckOut` are emitted as the original
+    // Firestore values (Date | Timestamp | ISO string —
+    // whatever the shared `computeReservationActualDateRange`
+    // produced) so the template can format them via the
+    // existing `formatDate` / `toDate` helpers.
+    actualDateRange: reservation.actualDateRange
+      ? {
+          earliestCheckIn: reservation.actualDateRange.earliestCheckIn,
+          latestCheckOut: reservation.actualDateRange.latestCheckOut,
+          isDivergent: Boolean(reservation.actualDateRange.isDivergent)
+        }
+      : null,
     // Per MRB-09: source / corporate context.
     source: reservation.source || first.source || "online",
     isCorporate: reservation.isCorporate === true,
@@ -646,24 +676,51 @@ function bookingRows(booking: any) {
     // The reservation header is the source of truth
     // for the lead guest + dates + nights. The
     // per-room list reads the rooms[] array.
+    //
+    // Per MRB-14 (2026-08-03, per decision #180):
+    // when the children's per-child dates have
+    // diverged from the header's original shared
+    // range (`actualDateRange.isDivergent === true`),
+    // the email surfaces the actual range +
+    // "(varies by room)" and renders per-room dates
+    // in the rooms table. Pre-MRB-14 reservations
+    // carry no `actualDateRange` and fall through
+    // to the legacy shared-range render — the
+    // guest sees the original create-time range
+    // just as before.
+    const actualRange = booking.actualDateRange;
+    const isDivergent = Boolean(actualRange && actualRange.isDivergent);
     const roomsTable = `
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${rooms.map((room: any) => `
-          ${row(`Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
+        ${rooms.map((room: any) => {
+          // Per-room dates: when divergent, show the
+          // child's own checkIn / checkOut; otherwise
+          // the room line stays compact (header
+          // dates apply to all rooms).
+          const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut
+            ? ` · ${formatDate(room.checkIn)} → ${formatDate(room.checkOut)}`
+            : "";
+          return row(`Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
             room.bookingRef
-              ? `${escapeHtml(String(room.bookingRef))} · ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}`
-              : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}`
-          )}
-        `).join("")}
+              ? `${escapeHtml(String(room.bookingRef))} · ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+              : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+          );
+        }).join("")}
       </table>
     `;
+    const checkInValue = isDivergent && actualRange.earliestCheckIn
+      ? `${formatDate(actualRange.earliestCheckIn)} from ${config.checkInTime || "14:00"} (varies by room)`
+      : `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`;
+    const checkOutValue = isDivergent && actualRange.latestCheckOut
+      ? `${formatDate(actualRange.latestCheckOut)} by ${config.checkOutTime || "12:00"} (varies by room)`
+      : `${formatDate(booking.checkOut)} by ${config.checkOutTime || "12:00"}`;
     return `
       ${booking.reservationRef ? row("Reservation reference", booking.reservationRef) : ""}
       ${row("Guest", booking.guestName)}
       ${row("Rooms", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`)}
       ${roomsTable}
-      ${row("Check-in", `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`)}
-      ${row("Check-out", `${formatDate(booking.checkOut)} by ${config.checkOutTime || "12:00"}`)}
+      ${row("Check-in", checkInValue)}
+      ${row("Check-out", checkOutValue)}
       ${row("Nights", `${booking.numNights || 0} night(s)`)}
       ${row("Total", formatMoney(booking.totalPrice))}
     `;
