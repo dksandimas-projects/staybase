@@ -1506,6 +1506,26 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // The full collection is cheap at this scale (~14 active
   // reservations at the hotel's current size; the cap is
   // bounded by room inventory, not bookings volume).
+  //
+  // Per MRB-15-09 (2026-08-03, per decision #182): the
+  // `isStaff()` rule on `/reservations/{id}` requires the
+  // current ID token to carry the `role` custom claim.
+  // The auth gate above (`onAuthStateChanged` at L809)
+  // calls `getIdTokenResult(firebaseUser, true)` to
+  // validate the role, but the Firestore SDK uses its own
+  // cached ID token for the listener handshake — if the
+  // SDK's cache is one refresh behind the `currentUser`
+  // state (e.g. the staff claim was just minted server-side
+  // and the cached token still lacks it), the listener
+  // attaches with the stale token and the server replies
+  // `Missing or insufficient permissions` on the first
+  // query. The fix is to force a token refresh inside this
+  // effect, BEFORE `onSnapshot` is called, so the SDK
+  // issues the listener request with the up-to-date claims.
+  // The async IIFE is the same shape the bookings listener
+  // uses; the `cancelled` flag protects against the
+  // unmount-mid-refresh race (a stale refresh resolving
+  // after cleanup must NOT re-attach the listener).
   useEffect(() => {
     if (!currentUser) {
       setReservations([]);
@@ -1529,85 +1549,110 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // date is harmless.
     const parseDateOrEpoch = (val: any): Date => parseDateOrNull(val) ?? new Date(0);
 
-    const unsubscribe = onSnapshot(
-      collection(db, "reservations"),
-      (snapshot) => {
-        const list: Reservation[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() as any;
-          return {
-            id: docSnap.id,
-            reservationRef: data.reservationRef || "",
-            leadGuestName: data.leadGuestName || "",
-            leadGuestEmail: data.leadGuestEmail || "",
-            leadGuestPhone: data.leadGuestPhone || "",
-            memberId: data.memberId ?? null,
-            checkIn: parseDateOrEpoch(data.checkIn),
-            checkOut: parseDateOrEpoch(data.checkOut),
-            numNights: Number(data.numNights) || 0,
-            originalSubtotal: Number(data.originalSubtotal) || 0,
-            discountScopeSnapshot: data.discountScopeSnapshot ?? null,
-            subtotal: Number(data.subtotal) || 0,
-            totalPrice: Number(data.totalPrice) || 0,
-            source: data.source || "online",
-            isCorporate: !!data.isCorporate,
-            corporateCode: data.corporateCode || "",
-            companyName: data.companyName || "",
-            voucherCode: data.voucherCode || "",
-            memberDiscountPct: Number(data.memberDiscountPct) || 0,
-            paymentStatus: data.paymentStatus || "awaiting-payment",
-            paymentMethod: data.paymentMethod || "",
-            paymentProofUrl: data.paymentProofUrl ?? null,
-            paymentProofPath: data.paymentProofPath ?? null,
-            termsAccepted: !!data.termsAccepted,
-            termsAcceptedAt: parseDateOrNull(data.termsAcceptedAt),
-            termsVersion: data.termsVersion || "",
-            privacyAccepted: !!data.privacyAccepted,
-            privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
-            privacyVersion: data.privacyVersion || "",
-            cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
-            roomCount: Number(data.roomCount) || 0,
-            activeRoomCount: Number(data.activeRoomCount) || 0,
-            cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
-            checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
-            checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
-            holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
-            requestFingerprint: data.requestFingerprint || "",
-            createdAt: parseDateOrEpoch(data.createdAt),
-            updatedAt: parseDateOrEpoch(data.updatedAt),
-            createdBy: data.createdBy || "guest",
-            cancellationLiability: data.cancellationLiability ?? null,
-            aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
-            // Per MRB-14 (2026-08-03, per decision #180
-            // — proposed): the `actualDateRange` field.
-            // Pre-MRB-14 reservations have no field
-            // (`undefined` falls through to the legacy
-            // per-child read in the UI + email).
-            // Post-MRB-14 reservations always carry
-            // the field. The admin surfaces + email
-            // switch to per-child dates when
-            // `isDivergent: true`.
-            actualDateRange: (() => {
-              const raw = (data as any).actualDateRange;
-              if (!raw || typeof raw !== "object") return null;
-              const earliestCheckIn = parseDateOrNull(raw.earliestCheckIn);
-              const latestCheckOut = parseDateOrNull(raw.latestCheckOut);
-              if (!earliestCheckIn || !latestCheckOut) return null;
-              return {
-                earliestCheckIn,
-                latestCheckOut,
-                isDivergent: Boolean(raw.isDivergent)
-              };
-            })()
-          } satisfies Reservation;
-        });
-        setReservations(list);
-      },
-      (error) => {
-        console.error("Error listening to reservations collection:", error);
-      }
-    );
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
 
-    return unsubscribe;
+    // Force-refresh the ID token so the listener's
+    // handshake carries the staff `role` custom claim.
+    // `getIdToken(true)` is idempotent — if the cached
+    // token is already fresh, the SDK returns it without
+    // a network round-trip; if it's stale, the SDK
+    // exchanges the refresh token for a fresh ID token
+    // with the up-to-date claims. The await is what
+    // makes the listener attach after the refresh.
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+
+      unsubscribe = onSnapshot(
+        collection(db, "reservations"),
+        (snapshot) => {
+          const list: Reservation[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as any;
+            return {
+              id: docSnap.id,
+              reservationRef: data.reservationRef || "",
+              leadGuestName: data.leadGuestName || "",
+              leadGuestEmail: data.leadGuestEmail || "",
+              leadGuestPhone: data.leadGuestPhone || "",
+              memberId: data.memberId ?? null,
+              checkIn: parseDateOrEpoch(data.checkIn),
+              checkOut: parseDateOrEpoch(data.checkOut),
+              numNights: Number(data.numNights) || 0,
+              originalSubtotal: Number(data.originalSubtotal) || 0,
+              discountScopeSnapshot: data.discountScopeSnapshot ?? null,
+              subtotal: Number(data.subtotal) || 0,
+              totalPrice: Number(data.totalPrice) || 0,
+              source: data.source || "online",
+              isCorporate: !!data.isCorporate,
+              corporateCode: data.corporateCode || "",
+              companyName: data.companyName || "",
+              voucherCode: data.voucherCode || "",
+              memberDiscountPct: Number(data.memberDiscountPct) || 0,
+              paymentStatus: data.paymentStatus || "awaiting-payment",
+              paymentMethod: data.paymentMethod || "",
+              paymentProofUrl: data.paymentProofUrl ?? null,
+              paymentProofPath: data.paymentProofPath ?? null,
+              termsAccepted: !!data.termsAccepted,
+              termsAcceptedAt: parseDateOrNull(data.termsAcceptedAt),
+              termsVersion: data.termsVersion || "",
+              privacyAccepted: !!data.privacyAccepted,
+              privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
+              privacyVersion: data.privacyVersion || "",
+              cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
+              roomCount: Number(data.roomCount) || 0,
+              activeRoomCount: Number(data.activeRoomCount) || 0,
+              cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
+              checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
+              checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
+              holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
+              requestFingerprint: data.requestFingerprint || "",
+              createdAt: parseDateOrEpoch(data.createdAt),
+              updatedAt: parseDateOrEpoch(data.updatedAt),
+              createdBy: data.createdBy || "guest",
+              cancellationLiability: data.cancellationLiability ?? null,
+              aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
+              // Per MRB-14 (2026-08-03, per decision #180
+              // — proposed): the `actualDateRange` field.
+              // Pre-MRB-14 reservations have no field
+              // (`undefined` falls through to the legacy
+              // per-child read in the UI + email).
+              // Post-MRB-14 reservations always carry
+              // the field. The admin surfaces + email
+              // switch to per-child dates when
+              // `isDivergent: true`.
+              actualDateRange: (() => {
+                const raw = (data as any).actualDateRange;
+                if (!raw || typeof raw !== "object") return null;
+                const earliestCheckIn = parseDateOrNull(raw.earliestCheckIn);
+                const latestCheckOut = parseDateOrNull(raw.latestCheckOut);
+                if (!earliestCheckIn || !latestCheckOut) return null;
+                return {
+                  earliestCheckIn,
+                  latestCheckOut,
+                  isDivergent: Boolean(raw.isDivergent)
+                };
+              })()
+            } satisfies Reservation;
+          });
+          setReservations(list);
+        },
+        (error) => {
+          console.error("Error listening to reservations collection:", error);
+        }
+      );
+    }).catch((refreshError) => {
+      // If the refresh itself fails (e.g. network down or
+      // refresh token revoked), surface it — the listener
+      // never attached, so the UI just stays on its last
+      // known state. A future refresh + sign-in will retry.
+      if (cancelled) return;
+      console.error("Error refreshing auth token before reservations listener:", refreshError);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [currentUser]);
 
   // Per MRB-12 (2026-08-03, per decision #179 — proposed):
