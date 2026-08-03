@@ -317,6 +317,43 @@ export interface Reservation {
   // `CancellationLiability` + `computeCancellationLiabilityState`
   // for the state machine.
   cancellationLiability?: CancellationLiability | null;
+
+  // Per MRB-11 (2026-08-03, per decision #177): the
+  // aggregate of every child booking's `revenueAllocation`,
+  // recomputed transactionally in MRB-04 whenever a child
+  // is created / rescheduled / cancelled. Reports reads
+  // this for fast reservation-level revenue stream totals
+  // (no need to iterate the children in the common case).
+  // Absence (or `null`) means "no stored children yet" —
+  // a freshly-minted reservation before the first child
+  // commits. `getReservationRevenueStreams` handles this
+  // case by summing whatever children are available.
+  aggregateRevenueAllocation?: BookingRevenueAllocation | null;
+}
+
+/**
+ * Per MRB-11 (2026-08-03, per decision #177): the
+ * stored per-stream revenue allocation. Every booking
+ * created after MRB-11 lands carries a snapshot of this
+ * shape on the doc, computed by `computeBookingRevenueAllocation`
+ * in `shared/utils/bookingFolio.ts` before the write. The
+ * `roomNet` + `breakfastNet` + `addOnNet` - `deductionNet`
+ * equals `totalNet` by construction; the invariant is
+ * asserted at the write boundary. The reservation header
+ * carries the aggregate (`Reservation.aggregateRevenueAllocation`)
+ * for fast Reports reads.
+ */
+export interface BookingRevenueAllocation {
+  /** Room rate share the guest pays (roomGross − room's pro-rated share of deductions). */
+  roomNet: number;
+  /** Breakfast add-on share the guest pays (breakfastGross − breakfast's pro-rated share of deductions). */
+  breakfastNet: number;
+  /** Add-on (extra bed + future add-ons) share the guest pays. */
+  addOnNet: number;
+  /** Total deductions applied (sum of senior + voucher + member + corporate code adjustments). The per-stream nets above already net this out — this is the headline "discounts given" number for reporting. */
+  deductionNet: number;
+  /** The final bill. Equals `booking.totalPrice` by construction. */
+  totalNet: number;
 }
 
 // Per MRB-04 (2026-08-02, per decision #159): the
@@ -717,8 +754,52 @@ export interface Booking {
   // `computeCancellationLiabilityState` for the state machine.
   cancellationLiability?: CancellationLiability | null;
   earlyCheckIn?: EarlyCheckInDetails | null;
+
+  // Per MRB-11 (2026-08-03, per decision #177): the
+  // stored revenue allocation snapshotted at create time
+  // (and recomputed on reschedule). The four per-stream
+  // nets sum to `totalPrice` by construction:
+  //   `roomNet + breakfastNet + addOnNet - deductionNet === totalNet`
+  // where `totalNet === booking.totalPrice`. The invariant is
+  // asserted at the create-write boundary (see
+  // `assertBookingRevenueAllocationInvariant` in
+  // `shared/utils/bookingFolio.ts`). Absence (or `null`)
+  // means "pre-MRB-11 booking" — the helper
+  // `getBookingRevenueStreams` falls back to the legacy
+  // proportional split and tags the export row
+  // `"allocation: legacy-heuristic"`. The field-on-entity
+  // is simpler than a separate `revenueAllocations/` collection
+  // (rejected in #177) and the `rateBreakdown` already carries
+  // the per-line gross + deduction data needed to compute it.
+  revenueAllocation?: BookingRevenueAllocation | null;
+
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Per MRB-11 (2026-08-03, per decision #177): the
+ * stored per-stream revenue allocation. Every booking
+ * created after MRB-11 lands carries a snapshot of this
+ * shape on the doc, computed by `computeBookingRevenueAllocation`
+ * in `shared/utils/bookingFolio.ts` before the write. The
+ * `roomNet` + `breakfastNet` + `addOnNet` − `deductionNet`
+ * equals `totalNet` by construction; the invariant is
+ * asserted at the write boundary. The reservation header
+ * carries the aggregate (`Reservation.aggregateRevenueAllocation`)
+ * for fast Reports reads.
+ */
+export interface BookingRevenueAllocation {
+  /** Room rate share the guest pays (roomGross − room's pro-rated share of deductions). */
+  roomNet: number;
+  /** Breakfast add-on share the guest pays (breakfastGross − breakfast's pro-rated share of deductions). */
+  breakfastNet: number;
+  /** Add-on (extra bed + future add-ons) share the guest pays. */
+  addOnNet: number;
+  /** Total deductions applied (sum of senior + voucher + member + corporate code adjustments). The per-stream nets above already net this out — this is the headline "discounts given" number for reporting. */
+  deductionNet: number;
+  /** The final bill. Equals `booking.totalPrice` by construction. */
+  totalNet: number;
 }
 
 export type IncidentalChargeCategory =

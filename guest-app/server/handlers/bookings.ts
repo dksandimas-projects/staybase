@@ -151,6 +151,13 @@ import {
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
+// Per MRB-11 (2026-08-03, per decision #177): the
+// optional revenue allocation input. Per the 2026-08-03
+// design call, the server always recomputes this before
+// the write — the input is accepted but the server's
+// `computeBookingRevenueAllocation` is the only value
+// written to the doc. Pre-MRB-11 callers omit it.
+import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/booking";
 // Per PMH-02 (2026-07-31): the server's inline folio math (used
 // by the create / confirm-with-balance / post-checkout transactions)
 // now routes through the shared `computeServerFolioTotals` helper
@@ -1166,6 +1173,15 @@ const createBookingSchema = z.object({
   // against the same `RESERVATION_ID_REGEX` from
   // `shared/utils/references.ts`.
   reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+  // Per MRB-11 (2026-08-03, per decision #177): the
+  // optional revenue allocation. Per the 2026-08-03
+  // design call, the server always computes this before
+  // the write — the input is accepted but the server
+  // recomputes via the same pricing chain and asserts
+  // the `totalNet === booking.totalPrice` invariant at
+  // the write boundary. Pre-MRB-11 callers omit it; the
+  // server fills it in.
+  revenueAllocation: BookingRevenueAllocationSchema.optional(),
   _hp: z.string().max(200).optional().default("")
 }).strict();
 

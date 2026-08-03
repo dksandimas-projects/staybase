@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.239.0";
+    VERSION2 = "0.240.0";
   }
 });
 
@@ -221478,7 +221478,7 @@ var init_references = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     init_zod();
@@ -221516,6 +221516,13 @@ var init_booking = __esm({
       phone: external_exports.string().trim().min(2).max(32),
       requests: external_exports.string().trim().max(1e3).optional().default(""),
       consent: external_exports.boolean().optional()
+    }).strict();
+    BookingRevenueAllocationSchema = external_exports.object({
+      roomNet: external_exports.coerce.number().finite().min(0),
+      breakfastNet: external_exports.coerce.number().finite().min(0),
+      addOnNet: external_exports.coerce.number().finite().min(0),
+      deductionNet: external_exports.coerce.number().finite().min(0),
+      totalNet: external_exports.coerce.number().finite().min(0)
     }).strict();
     WalkinRoomLineSchema = external_exports.object({
       roomId: external_exports.string().trim().min(1).max(64),
@@ -221589,7 +221596,18 @@ var init_booking = __esm({
       // form with a new `bookingId`); the optional field is here
       // so a future walk-in client that does preallocate can
       // ride the same idempotency contract.
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      // Per MRB-11 (2026-08-03, per decision #177): the
+      // optional revenue allocation. Per the 2026-08-03
+      // design call, the server always computes this before
+      // the write — the input is accepted but the server
+      // recomputes via the same pricing chain and asserts
+      // the `totalNet === booking.totalPrice` invariant at
+      // the write boundary. Pre-MRB-11 callers omit it; the
+      // server fills it in. A future client preview may
+      // supply it to skip the server recompute, but the
+      // server's value is the only one written to the doc.
+      revenueAllocation: BookingRevenueAllocationSchema.optional()
     }).strict();
     RescheduleBookingSchema = external_exports.object({
       bookingId: external_exports.string().trim().min(1).max(64),
@@ -221892,6 +221910,62 @@ var init_bookingDates = __esm({
   }
 });
 
+// ../shared/utils/bookingDiscounts.ts
+function calculatePercentDiscount(base, pct) {
+  return (Number(base) || 0) * ((Number(pct) || 0) / 100);
+}
+function calculateVoucherBase(subtotal, deduction) {
+  return Math.max(
+    (Number(subtotal) || 0) - (Number(deduction) || 0),
+    0
+  );
+}
+function normalizeDiscountScope(scope) {
+  if (!scope) return BROAD_DISCOUNT_SCOPE;
+  const fill = (cls) => ({
+    room: cls?.room !== false,
+    breakfast: cls?.breakfast !== false,
+    extraBed: cls?.extraBed !== false
+  });
+  return {
+    senior: fill(scope.senior),
+    voucher: fill(scope.voucher),
+    member: fill(scope.member)
+  };
+}
+function calculateDiscountChain(input) {
+  const roomTotal = Number(input.roomTotal) || 0;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const extraBedTotal = Number(input.extraBedTotal) || 0;
+  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
+  const scope = normalizeDiscountScope(input.scope);
+  const scopeBase = (cls) => (cls.room ? roomTotal : 0) + (cls.breakfast ? breakfastTotal : 0) + (cls.extraBed ? extraBedTotal : 0);
+  const seniorBase = scopeBase(scope.senior);
+  const seniorRaw = seniorBase * ((Number(input.seniorPct) || 0) / 100);
+  const seniorDeduction = input.round ? Math.round(seniorRaw) : seniorRaw;
+  const voucherBase = Math.max(0, scopeBase(scope.voucher) - seniorDeduction);
+  const voucherAmount = Number(input.voucherAmount) || 0;
+  const voucherDeduction = Math.min(Math.max(0, voucherAmount), voucherBase);
+  const memberBase = Math.max(
+    0,
+    scopeBase(scope.member) - seniorDeduction - voucherDeduction
+  );
+  const memberRaw = memberBase * ((Number(input.memberPct) || 0) / 100);
+  const memberDeduction = input.round ? Math.round(memberRaw) : memberRaw;
+  const total = Math.max(0, subtotal - seniorDeduction - voucherDeduction - memberDeduction);
+  return { seniorDeduction, voucherDeduction, memberDeduction, total };
+}
+var BROAD_DISCOUNT_SCOPE;
+var init_bookingDiscounts = __esm({
+  "../shared/utils/bookingDiscounts.ts"() {
+    BROAD_DISCOUNT_SCOPE = {
+      senior: { room: true, breakfast: true, extraBed: true },
+      voucher: { room: true, breakfast: true, extraBed: true },
+      member: { room: true, breakfast: true, extraBed: true }
+    };
+  }
+});
+
 // ../shared/utils/bookingFolio.ts
 function computeBookingFolio(input) {
   const { booking, storeOrders } = input;
@@ -222003,8 +222077,116 @@ function computeReservationAggregatePaymentStatus(childStatuses) {
   }
   return "in-house";
 }
+function round2(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+function assertBookingRevenueAllocationInvariant(allocation, totalPrice) {
+  const computed = round2(
+    round2(allocation.roomNet) + round2(allocation.breakfastNet) + round2(allocation.addOnNet) - round2(allocation.deductionNet)
+  );
+  const expected = round2(totalPrice);
+  if (Math.abs(computed - expected) > 0.05) {
+    throw new Error(
+      `[MRB-11] revenue allocation invariant violation: roomNet(${allocation.roomNet}) + breakfastNet(${allocation.breakfastNet}) + addOnNet(${allocation.addOnNet}) - deductionNet(${allocation.deductionNet}) = ${computed}, expected totalNet(${expected}). This is a server-side bug \u2014 the pricing chain returned an inconsistent allocation.`
+    );
+  }
+  return allocation;
+}
+function getBookingRevenueStreams(booking) {
+  if (booking.revenueAllocation) {
+    return { ...booking.revenueAllocation, allocation: "stored" };
+  }
+  const total = round2(Number(booking.totalPrice) || 0);
+  const roomSubtotalRaw = Number(booking.rateBreakdown?.roomSubtotal);
+  const roomSubtotal = Number.isFinite(roomSubtotalRaw) && roomSubtotalRaw > 0 ? roomSubtotalRaw : round2(Number(booking.ratePerNight) || 0) * Math.max(0, Number(booking.numNights) || 0);
+  const nights = Math.max(0, Number(booking.numNights) || 0);
+  const breakfastGross = round2(
+    (booking.hasBreakfast ? Number(booking.breakfastRate) || 0 : 0) * Math.max(0, Number(booking.numGuests) || 0) * nights
+  );
+  let room = total;
+  let breakfast = 0;
+  if (total > 0 && breakfastGross > 0 && roomSubtotal > 0) {
+    const grossTotal = roomSubtotal + breakfastGross;
+    breakfast = round2(total * breakfastGross / grossTotal);
+    room = round2(total - breakfast);
+  }
+  return {
+    roomNet: room,
+    breakfastNet: breakfast,
+    addOnNet: 0,
+    deductionNet: 0,
+    totalNet: total,
+    allocation: "legacy-heuristic"
+  };
+}
+function getReservationRevenueStreams(reservation, children) {
+  if (reservation.aggregateRevenueAllocation) {
+    return { ...reservation.aggregateRevenueAllocation, allocation: "stored" };
+  }
+  let roomNet = 0;
+  let breakfastNet = 0;
+  let addOnNet = 0;
+  let deductionNet = 0;
+  let totalNet = 0;
+  let anyChildLegacy = false;
+  let anyChild = false;
+  for (const child of children) {
+    anyChild = true;
+    const streams = getBookingRevenueStreams(child);
+    roomNet = round2(roomNet + streams.roomNet);
+    breakfastNet = round2(breakfastNet + streams.breakfastNet);
+    addOnNet = round2(addOnNet + streams.addOnNet);
+    deductionNet = round2(deductionNet + streams.deductionNet);
+    totalNet = round2(totalNet + streams.totalNet);
+    if (streams.allocation !== "stored") {
+      anyChildLegacy = true;
+    }
+  }
+  const allocation = !anyChild || anyChildLegacy ? "legacy-heuristic" : "stored";
+  return {
+    roomNet,
+    breakfastNet,
+    addOnNet,
+    deductionNet,
+    totalNet,
+    allocation
+  };
+}
+function computeBookingRevenueAllocation(input) {
+  const ratePerNight = Number(input.ratePerNight) || 0;
+  const numNights = Math.max(0, Number(input.numNights) || 0);
+  const roomTotal = round2(ratePerNight * numNights);
+  const breakfastTotal = round2(
+    (input.hasBreakfast ? Number(input.breakfastRate) || 0 : 0) * Math.max(0, Number(input.numGuests) || 0) * numNights
+  );
+  const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
+  const chain2 = calculateDiscountChain({
+    roomTotal,
+    breakfastTotal,
+    extraBedTotal,
+    seniorPct: input.discountPct,
+    voucherAmount: input.voucherDiscount,
+    memberPct: input.memberDiscountPct,
+    scope: input.discountScope,
+    round: true
+  });
+  const deductionNet = round2(
+    chain2.seniorDeduction + chain2.voucherDeduction + chain2.memberDeduction
+  );
+  const roomNet = roomTotal;
+  const breakfastNet = breakfastTotal;
+  const addOnNet = extraBedTotal;
+  const totalNet = round2(Number(input.totalPrice) || 0);
+  return assertBookingRevenueAllocationInvariant(
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
+    totalNet
+  );
+}
 var init_bookingFolio = __esm({
   "../shared/utils/bookingFolio.ts"() {
+    init_bookingDiscounts();
   }
 });
 
@@ -222036,62 +222218,6 @@ function calculateExtraBedAddOn(input) {
 }
 var init_bookingAddOns = __esm({
   "../shared/utils/bookingAddOns.ts"() {
-  }
-});
-
-// ../shared/utils/bookingDiscounts.ts
-function calculatePercentDiscount(base, pct) {
-  return (Number(base) || 0) * ((Number(pct) || 0) / 100);
-}
-function calculateVoucherBase(subtotal, deduction) {
-  return Math.max(
-    (Number(subtotal) || 0) - (Number(deduction) || 0),
-    0
-  );
-}
-function normalizeDiscountScope(scope) {
-  if (!scope) return BROAD_DISCOUNT_SCOPE;
-  const fill = (cls) => ({
-    room: cls?.room !== false,
-    breakfast: cls?.breakfast !== false,
-    extraBed: cls?.extraBed !== false
-  });
-  return {
-    senior: fill(scope.senior),
-    voucher: fill(scope.voucher),
-    member: fill(scope.member)
-  };
-}
-function calculateDiscountChain(input) {
-  const roomTotal = Number(input.roomTotal) || 0;
-  const breakfastTotal = Number(input.breakfastTotal) || 0;
-  const extraBedTotal = Number(input.extraBedTotal) || 0;
-  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
-  const scope = normalizeDiscountScope(input.scope);
-  const scopeBase = (cls) => (cls.room ? roomTotal : 0) + (cls.breakfast ? breakfastTotal : 0) + (cls.extraBed ? extraBedTotal : 0);
-  const seniorBase = scopeBase(scope.senior);
-  const seniorRaw = seniorBase * ((Number(input.seniorPct) || 0) / 100);
-  const seniorDeduction = input.round ? Math.round(seniorRaw) : seniorRaw;
-  const voucherBase = Math.max(0, scopeBase(scope.voucher) - seniorDeduction);
-  const voucherAmount = Number(input.voucherAmount) || 0;
-  const voucherDeduction = Math.min(Math.max(0, voucherAmount), voucherBase);
-  const memberBase = Math.max(
-    0,
-    scopeBase(scope.member) - seniorDeduction - voucherDeduction
-  );
-  const memberRaw = memberBase * ((Number(input.memberPct) || 0) / 100);
-  const memberDeduction = input.round ? Math.round(memberRaw) : memberRaw;
-  const total = Math.max(0, subtotal - seniorDeduction - voucherDeduction - memberDeduction);
-  return { seniorDeduction, voucherDeduction, memberDeduction, total };
-}
-var BROAD_DISCOUNT_SCOPE;
-var init_bookingDiscounts = __esm({
-  "../shared/utils/bookingDiscounts.ts"() {
-    BROAD_DISCOUNT_SCOPE = {
-      senior: { room: true, breakfast: true, extraBed: true },
-      voucher: { room: true, breakfast: true, extraBed: true },
-      member: { room: true, breakfast: true, extraBed: true }
-    };
   }
 });
 
@@ -223524,6 +223650,7 @@ __export(shared_exports, {
   BOOKING_STATUSES: () => BOOKING_STATUSES,
   BROAD_DISCOUNT_SCOPE: () => BROAD_DISCOUNT_SCOPE,
   BookingDatesSchema: () => BookingDatesSchema,
+  BookingRevenueAllocationSchema: () => BookingRevenueAllocationSchema,
   BrandingConfigSchema: () => BrandingConfigSchema,
   CANCELLATION_SOURCES: () => CANCELLATION_SOURCES,
   CHECK_IN_ELIGIBLE_STATUSES: () => CHECK_IN_ELIGIBLE_STATUSES,
@@ -223583,6 +223710,7 @@ __export(shared_exports, {
   applyRoomTypeDefaults: () => applyRoomTypeDefaults,
   applyVoucherDiscount: () => applyVoucherDiscount,
   assertBookingFinanceInvariant: () => assertBookingFinanceInvariant,
+  assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
@@ -223604,6 +223732,7 @@ __export(shared_exports, {
   clearSweepHistory: () => clearSweepHistory,
   compressImageFile: () => compressImageFile,
   computeBookingFolio: () => computeBookingFolio,
+  computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeRequestFingerprint: () => computeRequestFingerprint,
@@ -223624,6 +223753,7 @@ __export(shared_exports, {
   generateMemberNumber: () => generateMemberNumber,
   generateReservationId: () => generateReservationId,
   generateStoreOrderRef: () => generateStoreOrderRef,
+  getBookingRevenueStreams: () => getBookingRevenueStreams,
   getBookingVatBreakdown: () => getBookingVatBreakdown,
   getCheckInInstant: () => getCheckInInstant,
   getCheckInReadiness: () => getCheckInReadiness,
@@ -223635,6 +223765,7 @@ __export(shared_exports, {
   getManilaDateInfo: () => getManilaDateInfo,
   getNumNights: () => getNumNights,
   getReservationFolioSummary: () => getReservationFolioSummary,
+  getReservationRevenueStreams: () => getReservationRevenueStreams,
   getSeasonalRateForNight: () => getSeasonalRateForNight,
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
@@ -226709,6 +226840,7 @@ init_notifications();
 init_shared();
 init_shared();
 init_shared();
+init_booking();
 init_shared();
 init_zod();
 init_hotel_config();
@@ -227425,6 +227557,15 @@ var createBookingSchema = external_exports.object({
   // against the same `RESERVATION_ID_REGEX` from
   // `shared/utils/references.ts`.
   reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+  // Per MRB-11 (2026-08-03, per decision #177): the
+  // optional revenue allocation. Per the 2026-08-03
+  // design call, the server always computes this before
+  // the write — the input is accepted but the server
+  // recomputes via the same pricing chain and asserts
+  // the `totalNet === booking.totalPrice` invariant at
+  // the write boundary. Pre-MRB-11 callers omit it; the
+  // server fills it in.
+  revenueAllocation: BookingRevenueAllocationSchema.optional(),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
 async function handleCreateBooking(req, res) {
