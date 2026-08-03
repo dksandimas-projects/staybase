@@ -283,6 +283,97 @@ The server validates `numAdults + numChildren === numGuests` inside both public 
 
 ---
 
+## Soft-Constraint Children Picker (CHD-11)
+> Proposed 2026-08-03, per decision #184. Spec-only — no code yet.
+
+### The problem
+
+CHD-05 enforces the per-type child cap (`RoomTypeEntry.maxChildren`, see CHD-02) at the picker level: the +/− stepper for "Children (0–11)" on `/book` is disabled at the cap, and the helper text reads "You have reached this room type's limit for the current group." The constraint is real — a Single Room cannot physically sleep three children — but enforcing it at the picker is the wrong layer:
+
+1. **It's a dead-end at the exploration stage.** The guest is still choosing room type and/or quantity. They might know they have three kids before they know which room type works. Greyed-out + is a hard "no" with no path forward.
+2. **It hides the multi-room escape hatch.** Two adjacent Single Rooms can sleep the same three children; the picker doesn't surface that path because the cap is computed against one room, not the cart.
+3. **It treats the picker as if the cart were final.** The cart is a draft until Step 3. The cap belongs at the commit surface, not at the draft surface.
+
+The single-source change: let the picker be unbounded, and move the cap to (a) a live indicator on each room-type card, and (b) a single hard validation at the Step 1 → Step 2 transition. The picker becomes a draft; the room-type card + the submit gate become the truth.
+
+### The pattern: exploration-first, validation-on-commit
+
+Three layers, with the constraint surfacing at the right one for each.
+
+**Layer 1 — Children picker: unbounded (within a sane soft cap).**
+
+- Drop the `disabled` condition on the `+` button at `guest-app/src/pages/BookingPage.tsx:2055-2058` (the `numChildren >= selectedMaxSelectableChildren || numChildren >= Math.max(0, guests - 1)` guard). The `-` button stays gated at `numChildren > 0` (the existing invariant — you can't have negative children).
+- Soft-cap the picker at `MIN(10, guests - 1)` (the existing `Math.max(0, guests - 1)` invariant — at least one adult is always required). No hard upper bound from the room type. The soft cap is "no one in their right mind books 10 kids into one room" — it's a guard against the + going to 100, not a capacity rule.
+- Drop the "You have reached this room type's limit for the current group" tail at `BookingPage.tsx:2080`. Replace with: "Children stay free of the room charge. Pick a room type that fits your group, or add a second room." — a forward-looking nudge instead of a back-looking dead-end.
+- Keep the existing "Up to N can fit when extra beds cover the overflow" sentence at `BookingPage.tsx:2076-2078` — it's a real and useful hint about the extra-bed escape hatch and stays accurate with the cap removed (it now describes a soft limit, not a hard one).
+
+**Layer 2 — Room-type card: live per-type capacity indicator.**
+
+The room-type card at `BookingPage.tsx:2203-2283` is the surface that responds to the guest count. Today it shows static text — "Up to N adults + M children" + "X of Y available" + the room quantity stepper. Add a third chip: a per-type **Fits / Tight / Doesn't fit** badge that recomputes live against the current `(numAdults, numChildren)` and the cart's current room count.
+
+The indicator is a derived view, not a gating control. The three states:
+
+- **Fits** (green / primary-tint) — `requiredExtraBedsFor({ numAdults, numChildren, maxCapacity, maxChildren })` returns `requiredExtraBeds <= type.maxExtraBeds` for the type as a single-room choice, OR the total fits in the cart's current room count (sum across rooms ≥ total occupants). Soft-passes; the card stays clickable.
+- **Tight** (amber) — fits exactly at the cap with zero extra beds (`requiredExtraBeds === 0` and `numAdults === maxCapacity` and `numChildren === maxChildren`). The user is at the edge; the card stays clickable but the "Rooms" quantity stepper highlights the cap.
+- **Doesn't fit** (red / muted) — `requiredExtraBedsFor(...) > type.maxExtraBeds` for the single-room case AND the cart's current room count is below what the total needs. The card stays clickable (the user is still exploring) but the quantity stepper caps the selectable rooms at what would be required.
+
+For multi-room, the indicator shows a small "You'd need 2 of [type]" callout when the total exceeds a single room's capacity. The callout is informational; the cart can be increased to satisfy it.
+
+The indicator is computed by a new pure helper in `shared/utils/roomTypes.ts` — `deriveRoomTypeCapacityFit({ type, numAdults, numChildren, currentCartCount })` returns `{ state: "fits" | "tight" | "doesnt-fit", roomsNeeded: number, extraBedsNeeded: number }`. The helper is the single derivation point; both the card and the submit-time validator use it.
+
+**Layer 3 — Step 1 → Step 2 submit: hard validation.**
+
+The `disabled` on the "Next" button at the bottom of Step 1 currently checks some pre-distribution conditions. Extend it with one additional check:
+
+```
+const cartFitsGroup = distributedRoomCart.every((room, i) => {
+  const type = roomTypes.find((t) => t.value === room.roomType);
+  if (!type) return false;
+  return requiredExtraBedsFor({
+    numAdults: room.numAdults,
+    numChildren: room.numChildren,
+    maxCapacity: Number(type.maxCapacity) || 0,
+    maxChildren: Number(type.maxChildren) || 0,
+  }).requiredExtraBeds <= (Number(type.maxExtraBeds) || 0);
+});
+const totalFits = distributedRoomCart.reduce((sum, r) => sum + r.numAdults, 0) === numAdults
+                && distributedRoomCart.reduce((sum, r) => sum + r.numChildren, 0) === numChildren;
+```
+
+The Next button stays disabled while `!cartFitsGroup || !totalFits`. The helper text under the cart renders a single error message: **"Room N ([type label]) maxes at [cap] children. Pick a different room type, add a second room, or remove a child."** with a small "Adjust room" CTA that scrolls to and highlights the offending room card.
+
+The server's existing transaction validation (the `requiredExtraBedsFor` check inside `handleCreateBooking` and the `numAdults + numChildren === numGuests` check) is the authoritative gate — the client-side submit gate is UX feedback, not security. Per the standing rule in `plan/docs/GOTCHAS.md`, server-side is authoritative; client-side is advisory.
+
+### What this changes for the existing CHDs
+
+- **CHD-02** stays as the source of truth. `RoomTypeEntry.maxChildren` is still the per-type cap, still admin-editable (the MRB-15-10 fix made the admin surface work).
+- **CHD-05** stays — the contract (server validates `numAdults + numChildren === numGuests`, adult + child caps enforced independently) doesn't change. Only the *layer* of enforcement on the client moves from the picker to the submit gate.
+- **CHD-10** (breakfast includes children default) is unaffected.
+- **EXB-01..10** stays — extra beds are the existing escape hatch for overflow; CHD-11 just stops blocking the picker from exploring the overflow path.
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+- `shared/__tests__/room-types.test.ts` (extend) — new `deriveRoomTypeCapacityFit` test cases: Single with 1 adult 0 children (fits), Single with 1 adult 1 child (doesnt-fit), Family with 2 adults 2 children (fits), Family with 3 adults 1 child (tight — 1 overflow adult + 0 overflow children = 1 extra bed), cart 2× Single with 1 adult 1 child (fits — sum of caps ≥ total).
+- `guest-app/tests/api/chd-11-soft-constraint-picker.test.ts` (new) — source-text guards on `BookingPage.tsx`: the `+` button on the children stepper is no longer `disabled` when the count exceeds the single-type cap; the "You have reached this room type's limit" tail is gone; the new soft-cap text is present; the per-type capacity indicator renders all three states (Fits / Tight / Doesn't fit); the submit gate's `disabled` condition includes `!cartFitsGroup || !totalFits`; the error message renders with the room type label + cap + the "Adjust room" CTA; the existing `requiredExtraBedsFor` import is reused (no new client-side math).
+- `guest-app/tests/api/chd-children-occupancy.test.ts` (existing) — re-verify CHD-05 contract is preserved (server still validates `numAdults + numChildren === numGuests`, server still rejects per-type overflow, legacy `numGuests > maxCapacity` check does not return).
+
+### Phase 2 (deferred, NOT in this CHD-11)
+
+- The "you'd need N of [type]" multi-room estimate on the room-type card. Useful but a larger UX work item; ship the single-room indicator first, then iterate.
+- An automatic "add a second room" CTA that pre-fills the cart with the right room type when the indicator flips to "Doesn't fit" + single-room. The cart always requires explicit confirmation; don't auto-mutate user state.
+- A breakfast-occupancy-aware capacity indicator (children who are breakfast-included count as a different unit for breakfast cost but not for capacity). Out of scope for CHD-11 — the capacity indicator uses physical occupancy only.
+
+### Rejected alternatives
+
+- **Keep the picker cap, add a "switch to family" CTA inside the warning.** Same dead-end, just dressed up. The constraint belongs at the cart, not at the picker.
+- **Drop the per-type cap from the model entirely.** Removes the constraint, not the wrong enforcement. A Single is still a Single — `maxChildren: 0` is the operator's expression of the type's physical reality.
+- **Move the cap to the room quantity stepper instead of the children picker.** Same problem, different surface. The guest would still hit a "you've reached the cap" dead-end, just when adjusting rooms instead of children.
+- **Auto-add a second room when the picker crosses the single-type cap.** Surprises the user — the cart mutates under their hand. Bad UX. The indicator + the "Adjust room" CTA on submit is the user-respecting version.
+- **Implement as a `useRoomTypeCapacityAdvisor` hook with a separate indicator component.** The derivation is small (5 lines of math, see `deriveRoomTypeCapacityFit` above) and the indicator is a single badge inside an existing card. The hook + component pattern is over-engineered for the size of the change. Re-evaluate if a second consumer (e.g. the corporate booking page or the admin New Booking modal) needs the same indicator — that's the right trigger to extract.
+- **Add the soft cap (e.g. 10) to the picker but also gate the indicator's "Fits" state behind the same soft cap.** Mixing physical capacity with UI ergonomics — they have different reasons to exist. The soft cap is a "stop the + at 100" guard, the indicator is the "this room can fit your group" answer.
+
+---
+
 ## Extra Bed (EXB-01..10)
 
 Step 1 shows adults, children, and extra-bed steppers; extra beds appear only when the selected room type allows them and reset when the type changes. The shared overflow rule requires enough beds for adult and child occupancy above the type caps, while the server separately rejects counts above `maxExtraBeds`.
@@ -290,6 +381,182 @@ Step 1 shows adults, children, and extra-bed steppers; extra beds appear only wh
 The server snapshots `extraBedRate` on creation and preserves that snapshot during reschedule. Extra-bed cost is count × snapshotted rate × nights and remains independent of breakfast occupancy. Step 3 displays it as its own add-on line. Hotel-wide inventory, when configured above zero, is enforced transactionally; the field currently has no admin Settings editor.
 
 Coverage: room-type boundary tests, server cap guards, multi-night add-on tests, and `guest-app/tests/api/exb-09-rate-snapshotting-and-breakfast-coupling.test.ts`. See decisions #145, #153–#158 and `plan/docs/BACKEND.md` for the canonical data contracts.
+
+---
+
+## Cart-Style Summary (CHD-12)
+> Proposed 2026-08-03, per decision #185. Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:2089-2115` (the current "Guest distribution" block). Follows CHD-11 in the same screen but a different concern — CHD-11 is about the *constraint surface*, CHD-12 is about the *cart display*.
+
+### The problem
+
+The current "Guest distribution" block on `/book` Step 1 lists one line per room in the cart:
+
+```
+Room 1 · Single Room           1 adult · 2 children
+Room 2 · Standard Double Room  2 adults
+Room 3 · Standard Twin Room    2 adults
+Room 4 · Family Double Room    1 adult
+```
+
+Three reasons this is the wrong shape:
+
+1. **The label says "distribution" but it's an auto-rebalance** — the system assigns 1 adult to each room and fills the rest. The user didn't choose "Room 4 · Family Double · 1 adult" — the algorithm did. So the label implies a user decision that never happened.
+2. **The "Room 1 / Room 2 / Room 3 / Room 4" naming is positional and meaningless** — there's no way to tell which Single Room is "Room 1" vs "Room 2" in a cart with two of them. The type name is the real identifier; the index is filler.
+3. **The per-room occupancy is the only actually useful info** — the rest is just "you have N rooms of type T". Showing the cart contents and the per-room occupancy as one line per type is denser and more scannable, especially for 3+ rooms where the current list starts to scroll.
+
+### The pattern: one line per distinct room type, with the per-type occupancy inline
+
+**Replace the "Guest distribution" section with a cart summary that mirrors the mental model "your cart is the source of truth, the per-room occupancy is derived from it":**
+
+```
+Your cart
+  1× Single Room           1 adult · 2 children
+  1× Standard Double Room  2 adults
+  1× Standard Twin Room    2 adults
+  1× Family Double Room    1 adult
+```
+
+(Or, for the common case of 1 of each, the format can compress to "4 rooms · 6 adults · 2 children" plus a small per-type chip strip. The spec leans toward the explicit per-type line because it makes the per-room occupancy visible without a second interaction — the chip strip is a Phase 2 micro-improvement.)
+
+### Why this is better
+
+- **One line per distinct type** — not one line per room. 4 Single Rooms = 1 line, not 4.
+- **Per-room occupancy inline** — "1× Single Room · 1 adult · 2 children" tells you both the cart entry and the auto-rebalanced guest count in one read. No need to mentally join "1 of Single Room" with "Room 1 has 1 adult" + "Room 1 has 2 children" from a separate list.
+- **The "Room N" naming goes away** — the type name is the real identifier.
+- **Scannable for 3+ rooms** — the current list at 4 rooms already takes ~4 lines; for a 5-6 room group it's a wall.
+
+### What this changes for the data model
+
+**Nothing.** The auto-rebalance stays as the source of truth — `rebalanceGuestDistribution` in `guest-app/src/utils/bookingRoomCart.ts` is the function that computes the per-room occupancy. The change is purely the display layer — render `distributedRoomCart` as a per-type list grouped by `roomType`, summing the `numAdults` + `numChildren` within each type. No new user input, no new state, no new validation, no new helper.
+
+### What this changes for CHD-11 (the soft-constraint picker)
+
+**Slightly good news** — the cart summary is a natural home for the per-type **Fits / Tight / Doesn't fit** indicator from CHD-11. The current CHD-11 spec puts the indicator on the room-type card (the selector surface). With the cart summary, the same `deriveRoomTypeCapacityFit` derivation can also drive a small capacity chip on each cart line — so the user sees the capacity state both at the selection surface (the card) and at the cart surface (the summary). Same green/amber/red semantics, no new code in the helper.
+
+The card-level indicator stays the primary surface (it's where the selection happens), the cart-line indicator is the secondary read (it's where the user verifies their cart fits). Both derive from the same pure helper.
+
+### Edge cases
+
+- **Two rooms of the same type** — "2× Standard Double Room · 4 adults" implies the sum of occupancy across both rooms. If the user wants per-room individuality (e.g. "1× Standard Double with 2 adults, 1× Standard Double with 1 adult + 1 child"), they can't — the auto-rebalance treats them symmetrically. That manual assignment is a bigger UX work item and stays out of scope (see "Phase 2 (deferred)" below).
+- **Cart of 0 rooms** — the section is hidden (same as today).
+- **Cart of 1 room** — the section shows one line. Still cleaner than the current "Room 1 · [type] · [count]" because the type name leads and the index doesn't appear.
+- **Same type with mixed extras** (e.g. "2× Family Room, 1 with extra bed, 1 without") — the per-type line collapses the difference. Out of scope for CHD-12; aligns with the per-type-not-per-room extra-bed toggle in EXB-11 (the toggles are per-type, not per-room).
+
+### Phase 2 (deferred, NOT in CHD-12)
+
+- A per-room individual toggle for extra beds (vs. the per-type toggle in EXB-11). The cart line would then show the breakdown by room: "1× Family Room (Room 1: 1 extra bed, Room 2: 0 extra beds)". A real UX work item — ship per-type first, then iterate.
+- A manual per-room occupancy assignment (let the user drag-and-drop adults/children across specific rooms). Out of scope for the post-MRB reservation-scope work; a future CHD-13.
+- The compressed "N rooms · X adults · Y children" header line + per-type chip strip variant. Pure styling — the explicit per-type line is the primary form.
+
+### Rejected alternatives
+
+- **Keep the "Guest distribution" list, just rename to "Your rooms"** — same dead-end naming, just relabeled. The auto-rebalance result is still showing as if the user chose it.
+- **One line per room (per the current shape) but rename "Room N" to the booking's `roomId`** — leaks server-assigned identity into the draft surface (the room isn't assigned until booking creation). The user shouldn't see `roomId` at this stage.
+- **Show only the cart contents, no per-room occupancy** — loses the useful "1 adult + 2 children" signal. The occupancy is the whole reason the cart summary needs to exist as more than a numeric total.
+- **Auto-collapse identical room types into a single line with a "+N more" expansion** — clever but adds a click. The explicit per-type line is more scannable for the common case.
+- **Add the CHD-11 capacity indicator only to the cart line, not the card** — the card is the *action* surface (where the user picks the type + quantity), the cart is the *read* surface (where the user verifies the cart fits). The indicator belongs on both.
+
+---
+
+## User-Controlled Extra Bed Toggle (EXB-11)
+> Proposed 2026-08-03, per decision #186. Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:2270-2290` (the current "Rooms" stepper block on the room-type card). Follows EXB-01..10 in the extra-bed system; same screen as CHD-11 + CHD-12.
+
+### The problem
+
+The current extra-bed flow auto-requires extra beds based on the overflow rule. If 3 adults pick a Single Room (max 1 adult, maxExtraBeds 1), the system requires 2 extra beds and silently adds them to the cart — there's no point where the user is asked "do you want an extra bed here?" or sees the per-bed-per-night price until the Step 3 review. Three reasons this is the wrong shape:
+
+1. **The user is in control of the cart, not the system** — if the user wants 2 extra beds (one in each of 2 Single Rooms), the auto-rebalance has to guess. The guess is usually right but it's still a guess.
+2. **The price is hidden until Step 3** — the user can't see "this will cost ₱X extra" until the review screen. Surprises on a money decision are bad UX.
+3. **Extra beds are a real product** — the operator has set a `maxExtraBeds` per type and a `extraBedRate` per bed per night. The guest should see this as an opt-in add-on, like breakfast, with the price visible at the point of decision.
+
+### The pattern: per-type counter (0..maxExtraBeds) with the rate and stay cost inline
+
+**On each room-type card, add a small "Extras" sub-section below the room description and above the "Rooms" stepper:**
+
+```
+┌──────────────────────────────────────────┐
+│ Single Room                              │
+│ Up to 1 adult · 0 children               │
+│                                          │
+│ Extras:                                  │
+│   Extra beds  [−] 0 [+]   ₱500/bed/night │
+│                               ₱0 for 2 nights │
+│                                          │
+│ Rooms    [−] 0 [+]                        │
+│ Up to N available                        │
+└──────────────────────────────────────────┘
+```
+
+The control is a **counter (0..maxExtraBeds)** rather than a binary toggle because:
+
+- `maxExtraBeds` can be 1, 2, 3, or up to 5 (per the admin Edit form's `max={5}`).
+- The required overflow can be > 1 (3 adults in a Single = 2 extra beds required).
+- A counter naturally subsumes the binary case (when `maxExtraBeds === 1`, the counter reads as on/off).
+- The shape is consistent with the existing Adults / Children steppers (same `−` / counter / `+` UI affordance, same 44px touch target, same `aria-label` + `aria-live="polite"` pattern).
+
+### The soft-floor pattern: counter min is `max(0, requiredExtraBeds)`
+
+If the user's group has overflow that the room type's `maxExtraBeds` can't cover, the counter is clamped at the soft floor:
+
+```
+Extras:
+  Extra beds  [−] 2 [+]   ₱500/bed/night
+                          ₱1,000 for 2 nights
+
+  ⚠ Room needs 2 extra beds to fit your group. You can add up to 1 here.
+```
+
+The `[−]` is disabled at the soft floor (clamped at `max(0, requiredExtraBeds)`). The `[+]` is disabled at the soft ceiling (`maxExtraBeds`). The user can still scroll up to see the room-type card's CHD-11 capacity indicator (Fits / Tight / Doesn't fit) and the submit gate catches the overflow at Step 1 → Step 2.
+
+The cart summary (CHD-12) shows the per-type extra-bed count inline: "1× Single Room · 1 adult · 2 children · 2 extra beds".
+
+### What the toggle shows
+
+- **Per-bed-per-night rate** — `formatPrice(extraBedRate) + " / bed / night"`, pulled from the type's `extraBedRate` field (EXB-01).
+- **Stay total** — `formatPrice(extraBedRate * extraBedCount * numNights) + " for " + numNights + " nights"`. Hidden when `extraBedCount === 0` (don't show "₱0 for 2 nights" — it's noise).
+- **Soft-floor warning** — "Room needs N extra beds to fit your group" when `requiredExtraBeds > 0` and `requiredExtraBeds < extraBedCount` (the counter is above the soft floor but the room still doesn't have enough capacity to cover the overflow at the type's cap).
+
+### What the toggle does NOT do
+
+- **No auto-add of extra beds** — the user is in control. If they need 2 extra beds to fit 3 adults in a Single and `maxExtraBeds === 1`, the system surfaces the constraint (CHD-11 capacity indicator + soft-floor warning + submit-gate error) and lets the user decide: pick a different room, add a second room, or remove a guest.
+- **No auto-remove** — if the user manually sets extra beds to 0 when overflow requires > 0, the system surfaces the constraint (soft floor) but does NOT auto-bump. The cart mutates only on explicit user action.
+
+### What this changes for the data model
+
+**Nothing.** `room.extraBedCount` is already a per-room field in the cart shape (`distributedRoomCart[i].extraBedCount` per the cart type). The change is:
+- `extraBedCount` becomes a per-type value the user sets (0..maxExtraBeds), mirrored onto each room of that type in the cart.
+- The auto-rebalance's `requiredExtraBeds` becomes a soft floor on the counter, not an auto-set.
+
+The `Booking.extraBedCount` server-side write is unchanged — the cart still writes the same per-room count.
+
+### What this changes for EXB-01..10
+
+**EXB-01..10 contract preserved** — `maxExtraBeds` is still the per-type cap (admin-editable, the MRB-15-10 fix made the admin surface work), `extraBedRate` is still the per-bed-per-night rate (server-snapshotted at create), the overflow rule still applies (server validates the count), Step 3 still shows the extra-bed add-on line. EXB-11 only changes the *client-side selection surface* — the user is now in control of the extra-bed count, not the system.
+
+### Edge cases
+
+- **`maxExtraBeds === 0`** — the entire "Extras" sub-section is hidden. The room type doesn't offer extra beds; nothing to toggle.
+- **`maxExtraBeds === 1`** — the counter effectively becomes a toggle (0 or 1). Same shape, same UX, same minimum-touch interaction.
+- **`maxExtraBeds > 1` and no overflow** — the counter starts at 0, the `[+]` is enabled up to `maxExtraBeds`, the stay total is hidden (no extra beds yet).
+- **`maxExtraBeds > 1` and overflow > 1** — the counter starts at `requiredExtraBeds` (clamped at `maxExtraBeds`); if `requiredExtraBeds > maxExtraBeds`, the soft-floor warning fires and the submit gate catches the over-cap case.
+- **Per-type vs per-room** — the toggle is per-type: if the user has 2× Single Room and toggles "Extra beds: 1", both Singles get 1 extra bed. The per-room case (1 extra bed in one Single, 0 in the other) is a Phase 2 follow-up (see below).
+- **Breakfast occupancy** — extra beds don't affect the breakfast occupancy. The existing EXB-01 contract is preserved: extra-bed cost is independent of breakfast cost.
+
+### Phase 2 (deferred, NOT in EXB-11)
+
+- **Per-room individual extra-bed toggles** — let the user add an extra bed to one Single but not the other. The cart summary would then show the breakdown by room. The current "Extras" sub-section becomes a small expandable list per room in the cart. A real UX work item; ship per-type first.
+- **A "you'd need N extra beds to fit your group" callout on the room-type card** — the per-type callout that mirrors the CHD-11 capacity indicator. Same `deriveRoomTypeCapacityFit` helper can power this; out of scope for EXB-11.
+- **A "best fit" suggestion** — if the user has overflow that no single room type can cover, suggest a specific room-type combination (e.g. "Consider 2× Standard Twin with 1 extra bed each — fits 4 adults and 2 children"). A real recommendation engine; out of scope for EXB-11.
+
+### Rejected alternatives
+
+- **Binary toggle (0 or maxExtraBeds)** — too coarse. `maxExtraBeds` can be > 1, and the user might want exactly 1 (not all-or-nothing).
+- **Auto-add extra beds to cover the overflow** — the current behavior; the user is asking to flip it. The auto-rebalance is a guess; the user knows their group better than the algorithm.
+- **Hide the price until Step 3** — the current behavior; the user is asking to surface it. Hidden prices on a money decision are a known UX anti-pattern.
+- **A "Breakfast / Extra bed / Voucher" add-on bundle selector** — combines too many unrelated choices into one widget. Each add-on is its own opt-in with its own price; combine them later if the data shows users want it.
+- **A separate "Extras" page / modal** — over-engineered for a 1-line counter. The card-level sub-section is the right surface.
+- **Show the per-bed-per-night rate only on hover / "more info"** — hidden prices are the problem this spec is solving. The rate is the primary signal, not a detail.
+- **Apply the toggle to the cart summary (CHD-12) instead of the room-type card** — the card is the *action* surface (where the user picks the type + quantity), the cart is the *read* surface (where the user verifies the cart). The toggle belongs on the card; the cart summary mirrors the result.
 
 ---
 
