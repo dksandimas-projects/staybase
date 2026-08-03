@@ -4826,7 +4826,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           maxCapacity: Number(t.maxCapacity) || 1,
           pricePerNight: Number(t.pricePerNight) || 0,
           weekendRate: Number(t.weekendRate) || 0,
-          corporateRate: Number(t.corporateRate) || 0
+          corporateRate: Number(t.corporateRate) || 0,
+          // Per MRB-15-10 (2026-08-03, per decision #183):
+          // the previous hydration mapping dropped the
+          // three CHD-03 / EXB-01 fields below, which
+          // silently reset them to `?? 0` on every snapshot
+          // echo. The Edit form's `defaultValue={editType
+          // .maxChildren ?? 0}` then rendered 0 in the
+          // input even when Firestore held a non-zero
+          // value, the table's `{type.maxChildren ?? 0}`
+          // always showed 0 children, and a save that
+          // DIDN'T touch the field would overwrite the
+          // stored value with the form's 0. Preserve
+          // every field the type's contract guarantees.
+          maxChildren: Math.max(0, Math.floor(Number(t.maxChildren) || 0)),
+          maxExtraBeds: Math.max(0, Math.floor(Number(t.maxExtraBeds) || 0)),
+          extraBedRate: Math.max(0, Number(t.extraBedRate) || 0)
         }))
       );
       setRoomTypesLoaded(true);
