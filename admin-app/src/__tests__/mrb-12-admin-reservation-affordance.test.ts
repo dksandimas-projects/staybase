@@ -220,3 +220,34 @@ describe("MRB-14 — AdminContext hydrates `actualDateRange` from the `reservati
     expect(adminContextSrc).toMatch(/isDivergent: Boolean\(raw\.isDivergent\)/);
   });
 });
+
+describe("MRB-14-02 — Add-room admin modal in BookingsPage", () => {
+  it("the add-room button in the drawer's More actions section gates on `selectedBooking.reservationId` + `RESCHEDULABLE_STATUSES`", () => {
+    // Hidden for legacy null-`reservationId`
+    // bookings (the add-room flow is a multi-room
+    // concept — the desk can't add a room to a
+    // single-booking row). Hidden for in-stay
+    // bookings (the in-stay path is the reschedule
+    // handler). The button carries the
+    // `renderActionScope("reservation")` chip so the
+    // desk knows the new room is part of the
+    // reservation.
+    expect(bookingsPageSrc).toMatch(
+      /selectedBooking\.reservationId && RESCHEDULABLE_STATUSES\.includes\(selectedBooking\.status\) && !showAddRoomForm &&/
+    );
+    expect(bookingsPageSrc).toMatch(/Add room to this reservation/);
+  });
+
+  it("the add-room modal posts to `POST /api/bookings/add-room` with `{ reservationId, roomId, numAdults, numChildren, extraBedCount }`", () => {
+    // The dates are NEVER in the body — the server
+    // reads them from the header. The submit
+    // handler awaits `auth.currentUser?.getIdToken`
+    // for the Bearer auth, surfaces a 400 on
+    // failure, and shows a success toast with the
+    // new `bookingRef` on success.
+    expect(bookingsPageSrc).toMatch(/\/api\/bookings\/add-room/);
+    expect(bookingsPageSrc).toMatch(
+      /body: JSON\.stringify\(\{[\s\S]*?reservationId: selectedBooking\.reservationId,[\s\S]*?roomId: addRoomRoomId,[\s\S]*?numAdults: addRoomNumAdults,[\s\S]*?numChildren: addRoomNumChildren,[\s\S]*?extraBedCount: addRoomExtraBedCount\s*\}\)/s
+    );
+  });
+});

@@ -910,6 +910,18 @@ export function BookingsPage() {
 
   // Move Form States
   const [showMoveForm, setShowMoveForm] = useState(false);
+  // Per MRB-14 (2026-08-03, per decision #180 —
+  // proposed): the add-room modal state. The new
+  // child's dates are NEVER in the form (the server
+  // reads them from the header). The form captures
+  // just the target room + occupancy.
+  const [showAddRoomForm, setShowAddRoomForm] = useState(false);
+  const [addRoomRoomId, setAddRoomRoomId] = useState("");
+  const [addRoomNumAdults, setAddRoomNumAdults] = useState(1);
+  const [addRoomNumChildren, setAddRoomNumChildren] = useState(0);
+  const [addRoomExtraBedCount, setAddRoomExtraBedCount] = useState(0);
+  const [isAddingRoom, setIsAddingRoom] = useState(false);
+  const [addRoomError, setAddRoomError] = useState<string | null>(null);
   const [moveRoomId, setMoveRoomId] = useState("");
   const [moveCheckIn, setMoveCheckIn] = useState("");
   const [moveCheckOut, setMoveCheckOut] = useState("");
@@ -5843,6 +5855,42 @@ export function BookingsPage() {
                 </button>
               )}
 
+              {/*
+                Per MRB-14 (2026-08-03, per decision #180 —
+                proposed): the "Add room to this
+                reservation" action. Staff picks a
+                vacant room; the server reads the
+                header's current dates (the new child
+                inherits them — the dates are NEVER in
+                the modal). Pre-arrival only. Hidden
+                for legacy null-`reservationId`
+                bookings (the add-room flow is a
+                multi-room concept). Hidden for single-
+                room reservations where the existing
+                children disagree on status (a stale
+                or `cancelled` child triggers a
+                server-side 400 — the desk should
+                clear the stale child first).
+              */}
+              {selectedBooking.reservationId && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showAddRoomForm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddRoomRoomId("");
+                    setAddRoomNumAdults(1);
+                    setAddRoomNumChildren(0);
+                    setAddRoomExtraBedCount(0);
+                    setShowAddRoomForm(true);
+                  }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                  data-testid="add-room-button"
+                >
+                  <Plus size={15} className="text-primary" aria-hidden="true" />
+                  Add room to this reservation
+                  {renderActionScope("reservation")}
+                </button>
+              )}
+
               {selectedBooking.status !== "checked-out" && selectedBooking.status !== "cancelled" && (
                 showBookingCancelForm ? (
                   <ConfirmForm
@@ -7184,6 +7232,167 @@ export function BookingsPage() {
               }
             })()} disabled={isApplyingStaffDiscount || (!staffDiscountType && !staffVoucherCode.trim())} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
               {isApplyingStaffDiscount ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Applying…</> : (staffDiscountScope === "reservation" && selectedReservationContext ? `Apply to all ${selectedReservationContext.roomCount} rooms` : "Apply and reprice booking")}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Per MRB-14 (2026-08-03, per decision #180 —
+          proposed): the "Add room to this reservation"
+          modal. Staff picks a vacant room; the
+          server reads the header's current dates
+          (the new child inherits them — the dates
+          are NEVER in the form). Pre-arrival only.
+          Hidden for legacy null-`reservationId`
+          bookings (the drawer's button gates on
+          `selectedBooking.reservationId`). The
+          modal is intentionally minimal — just
+          target room + occupancy. The pricing +
+          allocation snapshot is the server's job
+          (per MRB-11 the server always computes
+          before the write; the input is accepted
+          for the rare pre-computed case). */}
+      <Modal
+        title={selectedBooking ? `Add room — ${selectedBooking.reservationRef || "—"}` : "Add room"}
+        open={showAddRoomForm}
+        onClose={() => {
+          setShowAddRoomForm(false);
+          setAddRoomError(null);
+        }}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-600">
+            The new room inherits the reservation's current dates. The room must be vacant and pass bed-inventory validation.
+          </p>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Target room
+            <select
+              value={addRoomRoomId}
+              onChange={(e) => setAddRoomRoomId(e.target.value)}
+              data-testid="add-room-room-select"
+              className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+            >
+              <option value="">Choose a vacant room</option>
+              {rooms
+                .filter((r) => r.isActive !== false && r.status !== "blocked")
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    Room {r.roomNumber} — {r.type.replace(/-/g, " ")}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Adults
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={addRoomNumAdults}
+                onChange={(e) => setAddRoomNumAdults(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+                data-testid="add-room-num-adults"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Children
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={addRoomNumChildren}
+                onChange={(e) => setAddRoomNumChildren(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                data-testid="add-room-num-children"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Extra beds
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={addRoomExtraBedCount}
+                onChange={(e) => setAddRoomExtraBedCount(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                data-testid="add-room-extra-bed-count"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+              />
+            </label>
+          </div>
+          {addRoomError && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700" data-testid="add-room-error">
+              {addRoomError}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddRoomForm(false);
+                setAddRoomError(null);
+              }}
+              disabled={isAddingRoom}
+              className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!selectedBooking?.reservationId || !addRoomRoomId) {
+                  setAddRoomError("Choose a target room.");
+                  return;
+                }
+                setAddRoomError(null);
+                setIsAddingRoom(true);
+                try {
+                  const token = await auth.currentUser?.getIdToken(true);
+                  const response = await fetch(
+                    `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-room`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: token ? `Bearer ${token}` : ""
+                      },
+                      body: JSON.stringify({
+                        reservationId: selectedBooking.reservationId,
+                        roomId: addRoomRoomId,
+                        numAdults: addRoomNumAdults,
+                        numChildren: addRoomNumChildren,
+                        extraBedCount: addRoomExtraBedCount
+                      })
+                    }
+                  );
+                  const payload = await response.json();
+                  if (!response.ok || !payload.success) {
+                    throw new Error(payload.error || "Unable to add room.");
+                  }
+                  toast.success(
+                    "Room added",
+                    `New room ${payload.data?.bookingRef || ""} added to ${selectedBooking.reservationRef || "reservation"}`
+                  );
+                  setShowAddRoomForm(false);
+                } catch (error: any) {
+                  setAddRoomError(error?.message || "Failed to add room. Please try again.");
+                } finally {
+                  setIsAddingRoom(false);
+                }
+              }}
+              disabled={isAddingRoom || !addRoomRoomId}
+              data-testid="add-room-submit"
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50"
+            >
+              {isAddingRoom ? (
+                <>
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Adding…
+                </>
+              ) : (
+                "Add room"
+              )}
             </button>
           </div>
         </div>

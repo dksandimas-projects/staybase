@@ -23,6 +23,7 @@ import {
   getLockedManualNightlyRate,
   WalkinBookingSchema,
   RescheduleBookingSchema,
+  AddRoomBookingSchema,
   MAX_STAY_NIGHTS,
   MAX_ADVANCE_DAYS,
   // Per PEX-02 (2026-08-01, per decision #147): the shared
@@ -163,7 +164,7 @@ import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/bookin
 // by the create / confirm-with-balance / post-checkout transactions)
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
-import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange } from "@spark-inn/shared";
+import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange, generateBookingRef } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -9958,5 +9959,595 @@ export async function handleRescheduleBooking(req: any, res: any) {
       });
     }
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
+  }
+}
+
+// Per MRB-14 (2026-08-03, per decision #180 — proposed):
+// the add-room surface. Staff adds a room to an existing
+// pre-arrival reservation using the header's current
+// dates — the dates are NEVER in the body (the server
+// reads them from the header). The new child is created
+// with the same `reservationId` / `reservationRef` as the
+// existing children; the public ref for the new room is
+// a fresh `SI-YYYYMMDD-NNN`. The header is updated in the
+// same transaction: `roomCount += 1`,
+// `activeRoomCount += 1`, the totals + aggregate allocation
+// + `actualDateRange` (recomputed, but `isDivergent` stays
+// `false` because the new child shares the header's
+// dates). Corporate `usageCount` increments by 1 if the
+// reservation is corporate; voucher `usageCount` increments
+// by 1 if a `voucherCode` is applied to the new child
+// (per MRB-08's "N rooms = N uses" rule for the corporate
+// path + the per-child voucher rule). One
+// `booking-rescheduled` email fires after the commit (the
+// reservation-scope view carries the new room).
+export async function handleAddRoomToReservation(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsedAddRoom = AddRoomBookingSchema.safeParse(req.body || {});
+  if (!parsedAddRoom.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the add-room details — a required field is missing or invalid."
+    });
+  }
+  const {
+    reservationId,
+    roomId,
+    numAdults,
+    numChildren,
+    extraBedCount,
+    discountType: requestedDiscountType,
+    voucherCode: requestedVoucherCode,
+    totalPriceOverride
+  } = parsedAddRoom.data;
+
+  try {
+    let newBookingId: string | null = null;
+    let newBookingRef: string | null = null;
+    let updatedHeader: any = null;
+    let fullBookingForEmail: any = null;
+
+    await adminDb.runTransaction(async (transaction) => {
+      // 1. Read the reservation header. The header
+      // carries the dates the new child inherits (per
+      // MRB-14: the header's `checkIn` / `checkOut` are
+      // the ORIGINAL shared-dates snapshot from create
+      // time and are now IMMUTABLE — add-room does NOT
+      // re-anchor the header's range).
+      const reservationRef = adminDb.collection("reservations").doc(reservationId);
+      const reservationSnap = await transaction.get(reservationRef);
+      if (!reservationSnap.exists) {
+        throw new Error("RESERVATION_NOT_FOUND");
+      }
+      const reservation = reservationSnap.data() || {};
+      const headerCheckIn = toDateOrNull(reservation.checkIn);
+      const headerCheckOut = toDateOrNull(reservation.checkOut);
+      if (!headerCheckIn || !headerCheckOut) {
+        throw new Error("Reservation header is missing dates.");
+      }
+      const headerNumNights = Number(reservation.numNights) || 0;
+      if (headerNumNights < 1) {
+        throw new Error("Reservation header has invalid numNights.");
+      }
+      const headerDateString = (() => {
+        const y = headerCheckIn.getUTCFullYear();
+        const m = String(headerCheckIn.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(headerCheckIn.getUTCDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      })();
+      const headerCheckOutString = (() => {
+        const y = headerCheckOut.getUTCFullYear();
+        const m = String(headerCheckOut.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(headerCheckOut.getUTCDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      })();
+
+      // 2. Read the target room. Validate availability
+      // + the room type's capacity / extra-bed caps.
+      const targetRoomRef = adminDb.collection("rooms").doc(roomId);
+      const targetRoomSnap = await transaction.get(targetRoomRef);
+      if (!targetRoomSnap.exists) {
+        throw new Error("Target room not found.");
+      }
+      const targetRoom = targetRoomSnap.data() || {};
+      if (targetRoom.isActive === false) {
+        throw new Error("Target room is inactive.");
+      }
+      if (targetRoom.status === "blocked") {
+        const blockedFrom = toDateOrNull(targetRoom.blockedFrom);
+        const blockedTo = toDateOrNull(targetRoom.blockedTo);
+        const windowActive = blockedFrom && blockedTo
+          ? rangesOverlap(blockedFrom, blockedTo, headerCheckIn, headerCheckOut)
+          : true;
+        if (windowActive) {
+          throw new Error("Target room is blocked for those dates.");
+        }
+      }
+      // Per CHD-04 + EXB-01: the target room's type
+      // caps + the requested occupancy. Same
+      // `requiredExtraBedsFor` math the walkin handler
+      // uses.
+      const targetRoomType = String(targetRoom.type || "").trim();
+      if (!targetRoomType) {
+        throw new Error("Target room is missing a type.");
+      }
+      const requiredExtraBeds = requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: Number(targetRoom.maxCapacity) || 0,
+        maxChildren: Number(targetRoom.maxChildren) || 0
+      });
+      if (requiredExtraBeds.requiredExtraBeds > extraBedCount) {
+        throw new Error(
+          `Target room needs ${requiredExtraBeds.requiredExtraBeds} extra bed(s) for ${numAdults} adult(s) + ${numChildren} child(ren), but only ${extraBedCount} provided.`
+        );
+      }
+      if (Number(targetRoom.maxExtraBeds) >= 0 && extraBedCount > Number(targetRoom.maxExtraBeds)) {
+        throw new Error(`Target room allows at most ${targetRoom.maxExtraBeds} extra bed(s).`);
+      }
+
+      // 3. Read the existing children. Per MRB-07: the
+      // new child's `reservationPosition` is the next
+      // consecutive integer. Per the filter-scope
+      // contract: a child whose `checkIn` / `checkOut`
+      // matches the header is `isDivergent: false`;
+      // add-room always matches the header so the
+      // recomputed `actualDateRange` stays
+      // `isDivergent: false`. Per sibling-claim guard:
+      // the new roomId must NOT be claimed by another
+      // child in the same reservation.
+      const existingChildrenQuery = adminDb
+        .collection("bookings")
+        .where("reservationId", "==", reservationId);
+      const existingChildrenSnap = await transaction.get(existingChildrenQuery);
+      const existingChildren = existingChildrenSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        data: docSnap.data() || {}
+      }));
+      const siblingClaimedRoom = existingChildren.find(
+        (child) => String(child.data.roomId || "") === String(roomId)
+      );
+      if (siblingClaimedRoom) {
+        throw new Error("Target room is already claimed by another stay in this reservation.");
+      }
+      // Pre-arrival guard: the reservation has at
+      // least one child in a non-pre-arrival state
+      // (`checked-in` or `cancelled`) ⇒ reject. The
+      // add-room surface is pre-arrival only — the
+      // in-stay path is the reschedule handler. The
+      // `RESCHEDULABLE_STATUSES` set is the pre-arrival
+      // + `checked-in` set per the existing reschedule
+      // contract; we tighten it to "no checked-in or
+      // cancelled children anywhere in the
+      // reservation" by inspecting the children's
+      // statuses (the header's `activeRoomCount` is
+      // the canonical counter — `activeRoomCount ===
+      // roomCount` is the "all pre-arrival" invariant).
+      const cancelledCount = existingChildren.filter(
+        (child) => String(child.data.status || "") === "cancelled"
+      ).length;
+      const checkedInCount = existingChildren.filter(
+        (child) => String(child.data.status || "") === "checked-in"
+      ).length;
+      if (cancelledCount > 0) {
+        throw new Error("Reservation has cancelled rooms — staff must clear those before adding a new room.");
+      }
+      if (checkedInCount > 0) {
+        throw new Error("Reservation has a checked-in room — the in-stay reschedule path applies to date changes for an existing room.");
+      }
+      // The new child's `reservationPosition` is the
+      // current max + 1. The header's existing
+      // children carry the sequence (the create
+      // path writes them as 1..N); the new child
+      // is N+1.
+      const maxPosition = existingChildren.reduce(
+        (max, child) => Math.max(max, Number(child.data.reservationPosition) || 0),
+        0
+      );
+      const newPosition = maxPosition + 1;
+
+      // 4. Read hotel config (for the rate lookup +
+      // payment hold window) + the room-type entry.
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() || {} : {};
+      const roomTypesConfig: any[] = Array.isArray((hotelConfig as any).roomTypes)
+        ? (hotelConfig as any).roomTypes
+        : DEFAULT_ROOM_TYPES;
+      const targetTypeEntry = roomTypesConfig.find(
+        (entry: any) => String(entry.value) === targetRoomType
+      );
+      if (!targetTypeEntry) {
+        throw new Error("Target room type is not configured.");
+      }
+      const typeBaseRate = Number(targetTypeEntry.pricePerNight) || 0;
+      const typeWeekendRate = Number(targetTypeEntry.weekendRate) || typeBaseRate;
+
+      // 5. Compute the per-line pricing for the new
+      // child. Per MRB-08: corporate rates apply at
+      // the room-type level (the negotiated rate or
+      // the standard `corporateRate` fallback). Per
+      // the public create + walkin surfaces.
+      const isCorporateReservation = Boolean(reservation.isCorporate);
+      const corporateCode = String(reservation.corporateCode || "").trim().toUpperCase();
+      const perRoomTypeCorporateRate = (() => {
+        if (!isCorporateReservation) return 0;
+        const negotiatedRate = corporateCode && Array.isArray((targetTypeEntry as any).corporateRateByCode)
+          ? Number((targetTypeEntry as any).corporateRateByCode[corporateCode]) || 0
+          : 0;
+        return negotiatedRate > 0
+          ? negotiatedRate
+          : Number(targetTypeEntry.corporateRate) || 0;
+      })();
+      const activeBaseRate = perRoomTypeCorporateRate > 0
+        ? perRoomTypeCorporateRate
+        : typeBaseRate;
+      const activeWeekendRate = perRoomTypeCorporateRate > 0
+        ? perRoomTypeCorporateRate
+        : typeWeekendRate;
+
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides((hotelConfig as any).seasonalRateOverrides || []);
+      const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
+        checkIn: headerCheckIn,
+        checkOut: headerCheckOut,
+        roomType: targetRoomType,
+        baseRate: activeBaseRate,
+        weekendRate: activeWeekendRate,
+        seasonalRateOverrides
+      });
+      const roomTotal = roomBreakdown.roomSubtotal;
+
+      // Per CHD-10 + EXB-01: breakfast + extra-bed
+      // totals follow the same rules as create /
+      // walkin. The new child's `hasBreakfast` is
+      // snapshotted from the header's
+      // `mealPreference` (the reservation-level
+      // default — the new room inherits the
+      // guest's existing breakfast choice; the
+      // per-room override is out of scope for
+      // MRB-14 v1).
+      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() || {} : {};
+      const breakfastRate = Number((breakfastConfig as any).ratePerPersonPerNight) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
+      const hasBreakfast = Boolean((reservation as any).hasBreakfast ?? false);
+      const breakfastIncludesChildren = (reservation as any).breakfastIncludesChildren ?? true;
+      const breakfastTotal = hasBreakfast
+        ? calculateBreakfastAddOn({
+            hasBreakfast: true,
+            breakfastRate,
+            numGuests: numAdults + numChildren,
+            numNights: headerNumNights,
+            breakfastIncludesChildren
+          })
+        : 0;
+      const extraBedRate = Number(targetTypeEntry.extraBedRate) || 0;
+      const extraBedTotal = extraBedCount > 0
+        ? extraBedCount * extraBedRate * headerNumNights
+        : 0;
+      const subtotal = roomTotal + breakfastTotal + extraBedTotal;
+
+      // 6. Apply the discount chain. Per DSC-01..05 +
+      // CVQ-06: the chain routes through the shared
+      // `calculateDiscountChain` helper. Per-child
+      // senior + voucher; the corporate code is the
+      // reservation-level path (it already
+      // discounted the per-room rate via the
+      // `perRoomTypeCorporateRate` selection above).
+      const discountType = requestedDiscountType || "";
+      const discountPct = discountType === "senior" || discountType === "pwd" ? 20 : 0;
+      const seniorPwdDiscount = Math.round(
+        calculatePercentDiscount(subtotal, discountPct)
+      );
+      const afterSeniorPwd = subtotal - seniorPwdDiscount;
+      const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
+
+      let voucherDiscount = 0;
+      let voucherUsageUpdate: { ref: any; data: any } | null = null;
+      const formattedVoucherCode = String(requestedVoucherCode || "").trim().toUpperCase();
+      if (formattedVoucherCode) {
+        const voucherRef = adminDb.collection("vouchers").doc(formattedVoucherCode);
+        const voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          throw new Error("Voucher not found.");
+        }
+        const vData = voucherDoc.data() || {};
+        if (!vData.isActive) {
+          throw new Error("Voucher is inactive.");
+        }
+        // Per MRB-09: a percentage voucher applies
+        // once per eligible line. A flat voucher
+        // applies once per reservation (capped at the
+        // remaining subtotal). For add-room v1, a
+        // voucher applied to the new child is treated
+        // as a per-line flat-equivalent (a single
+        // share of the flat value, since the new
+        // child is a single line). Per-child
+        // percentage vouchers apply to the new
+        // child's eligible subtotal.
+        if (vData.discountType === "percent") {
+          const applicable = (vData.applicableRoomTypes?.length ?? 0) === 0
+            || (vData.applicableRoomTypes || []).includes(targetRoomType);
+          if (!applicable) {
+            throw new Error("Voucher is not applicable to the target room type.");
+          }
+          voucherDiscount = Math.round(
+            calculateVoucherDiscount({
+              discountType: "percent",
+              discountValue: Number(vData.discountValue) || 0
+            }, voucherBase)
+          );
+        } else {
+          // Flat voucher: per MRB-09 the voucher
+          // applies once per reservation. If the
+          // header already had the same voucher
+          // applied, this is a second application
+          // (the new child is a new line). For
+          // MRB-14 v1 the desk can apply a flat
+          // voucher to the new child only by
+          // re-submitting the original code; we
+          // accept a single share (the full flat
+          // value) here for the new child. The
+          // per-child share is the simpler v1
+          // contract — a future MRB-14.1 can
+          // distribute across children.
+          voucherDiscount = Math.min(
+            Math.round(calculateVoucherDiscount({
+              discountType: "flat",
+              discountValue: Number(vData.discountValue) || 0
+            }, voucherBase)),
+            afterSeniorPwd
+          );
+        }
+        const capOk = vData.usageCap == null
+          || Number(vData.usageCount || 0) + 1 <= Number(vData.usageCap);
+        if (!capOk) {
+          throw new Error("Voucher is at its usage cap.");
+        }
+        voucherUsageUpdate = {
+          ref: voucherRef,
+          data: { usageCount: Number(vData.usageCount || 0) + 1, updatedAt: new Date() }
+        };
+      }
+
+      // 7. The optional `totalPriceOverride` (manual
+      // front-desk rate). When present, the new
+      // child's `subtotal` is overridden; the
+      // `deductionNet` collapses to 0 (manual rate
+      // means no senior/voucher chain — the
+      // override IS the total).
+      const hasManualOverride = totalPriceOverride !== undefined && totalPriceOverride !== null;
+      const manualSubtotal = hasManualOverride ? Math.round(Number(totalPriceOverride)) : 0;
+      const finalSubtotal = hasManualOverride ? manualSubtotal : subtotal;
+      const finalVoucherDiscount = hasManualOverride ? 0 : voucherDiscount;
+      const finalSeniorDiscount = hasManualOverride ? 0 : seniorPwdDiscount;
+      const finalTotalPrice = Math.max(0, finalSubtotal - finalSeniorDiscount - finalVoucherDiscount);
+
+      // 8. Per MRB-11 (2026-08-03, per decision #177):
+      // the stored per-stream revenue allocation.
+      // Per-stream values are GROSS (pre-deduction);
+      // `deductionNet` is the single line for senior
+      // + voucher deductions. The invariant
+      // `room + breakfast + addOn - deduction === finalTotalPrice`
+      // holds by construction.
+      const newChildRevenueAllocation = assertBookingRevenueAllocationInvariant(
+        {
+          roomNet: hasManualOverride ? finalSubtotal : roomTotal,
+          breakfastNet: hasManualOverride ? 0 : breakfastTotal,
+          addOnNet: hasManualOverride ? 0 : extraBedTotal,
+          deductionNet: hasManualOverride ? 0 : (seniorPwdDiscount + voucherDiscount),
+          totalNet: finalTotalPrice
+        },
+        finalTotalPrice
+      );
+
+      // 9. Mint the booking ref. Per H3 (hardening
+      // batch 2026-06-26): sequence width is 5
+      // digits. Per MRB-06 Phase 2: every room stay
+      // is its own booking with its own guest-facing
+      // reference. The counter is per-day.
+      const { todayStr: counterDay, todayCompact } = getManilaDateInfo();
+      const counterRef = adminDb.collection("counters").doc(`bookings-${counterDay}`);
+      const counterDoc = await transaction.get(counterRef);
+      const nextSequence = counterDoc.exists ? (counterDoc.data()?.count || 0) + 1 : 1;
+      transaction.set(counterRef, { count: nextSequence, updatedAt: new Date() }, { merge: true });
+      const bookingId = parsedAddRoom.data.requestFingerprint
+        ? `add-room-${reservationId}-${roomId}-${String(parsedAddRoom.data.requestFingerprint).slice(0, 16)}`
+        : `add-room-${reservationId}-${roomId}-${nextSequence}-${Date.now()}`;
+      const newBookingRefValue = generateBookingRef("SI", headerCheckIn, nextSequence);
+
+      // 10. Compose the new booking doc. Mirrors the
+      // per-child write in the create + walkin paths.
+      const newBookingDoc = {
+        id: bookingId,
+        bookingRef: newBookingRefValue,
+        reservationId,
+        reservationRef: String(reservation.reservationRef || ""),
+        reservationPosition: newPosition,
+        reservationRoomCount: existingChildren.length + 1,
+        roomId: String(roomId),
+        roomNumber: String(targetRoom.roomNumber || ""),
+        roomType: targetRoomType,
+        guestName: String(reservation.leadGuestName || "").trim(),
+        guestEmail: String(reservation.leadGuestEmail || "").trim().toLowerCase(),
+        guestPhone: String(reservation.leadGuestPhone || "").trim(),
+        numGuests: numAdults + numChildren,
+        numAdults,
+        numChildren,
+        extraBedCount,
+        extraBedRate,
+        extraBedTotal,
+        checkIn: Timestamp.fromDate(headerCheckIn),
+        checkOut: Timestamp.fromDate(headerCheckOut),
+        numNights: headerNumNights,
+        ratePerNight: headerNumNights > 0 ? Math.round((hasManualOverride ? finalSubtotal : roomTotal) / headerNumNights) : (hasManualOverride ? finalSubtotal : roomTotal),
+        totalPrice: finalTotalPrice,
+        originalTotalPrice: subtotal,
+        discountType,
+        discountPct,
+        discountIdPhotoUrl: null,
+        discountIdPhotoPath: null,
+        discountVerified: Boolean(discountType),
+        discountVerifiedBy: discountType ? (req.staff?.uid || "staff") : null,
+        discountRejected: false,
+        discountRejectedBy: null,
+        discountRejectionReason: "",
+        voucherCode: formattedVoucherCode,
+        voucherDiscount: finalVoucherDiscount,
+        isCorporate: isCorporateReservation,
+        corporateCode,
+        companyName: String(reservation.companyName || "").trim(),
+        specialRequests: "",
+        status: "confirmed",
+        paymentMethod: String(reservation.paymentMethod || "pay-at-hotel").trim(),
+        paymentProofUrl: reservation.paymentProofUrl ?? null,
+        paymentProofPath: reservation.paymentProofPath ?? null,
+        lookupToken: generateLookupToken(),
+        source: String(reservation.source || "online").trim(),
+        notes: "Room added via staff add-room action.",
+        memberId: reservation.memberId ?? null,
+        pointsRedeemed: 0,
+        pointsRedeemedValue: 0,
+        pointsRedeemedBy: null,
+        pointsRedeemedAt: null,
+        hasBreakfast,
+        breakfastRate,
+        breakfastTotal,
+        reminderSentAt: null,
+        guestIdPhotoUrl: null,
+        handledBy: req.staff?.uid || "staff",
+        cancellationReason: "",
+        cancelledAt: null,
+        cancelledBy: null,
+        cancellationSource: null,
+        cancellationLiability: null,
+        createdAt: new Date(),
+        breakfastSelections: {},
+        breakfastServed: {},
+        rateBreakdown: buildRateBreakdown({
+          roomLines: roomBreakdown.roomLines,
+          roomSubtotal: hasManualOverride ? finalSubtotal : roomTotal,
+          breakfastTotal: hasManualOverride ? 0 : breakfastTotal,
+          extraBedTotal: hasManualOverride ? 0 : extraBedTotal,
+          extraBedCount,
+          extraBedRate,
+          discountType,
+          discountPct,
+          voucherDiscount: finalVoucherDiscount,
+          memberDiscountPct: 0,
+          finalTotal: finalTotalPrice
+        }),
+        revenueAllocation: newChildRevenueAllocation,
+        holdExpiresAt: reservation.holdExpiresAt ?? null,
+        updatedAt: new Date()
+      };
+      const newBookingRefDoc = adminDb.collection("bookings").doc(bookingId);
+      transaction.set(newBookingRefDoc, newBookingDoc);
+      newBookingId = bookingId;
+      newBookingRef = newBookingRefValue;
+      fullBookingForEmail = {
+        ...newBookingDoc,
+        id: bookingId,
+        bookingId
+      };
+
+      // 11. Update the reservation header. Counters
+      // + totals + aggregate allocation +
+      // `actualDateRange` (recomputed, but
+      // `isDivergent` stays `false` because the new
+      // child shares the header's dates — the
+      // recompute is still done because the children
+      // set changed and the admin surfaces read
+      // `actualDateRange.earliestCheckIn` /
+      // `latestCheckOut` to render the dates).
+      const newSubtotal = Number(reservation.subtotal || 0) + subtotal;
+      const newTotalPrice = Number(reservation.totalPrice || 0) + finalTotalPrice;
+      const newAggregateRevenueAllocation = (() => {
+        const existingAlloc = (reservation as any).aggregateRevenueAllocation;
+        if (!existingAlloc) {
+          return newChildRevenueAllocation;
+        }
+        return assertBookingRevenueAllocationInvariant(
+          {
+            roomNet: Number(existingAlloc.roomNet || 0) + newChildRevenueAllocation.roomNet,
+            breakfastNet: Number(existingAlloc.breakfastNet || 0) + newChildRevenueAllocation.breakfastNet,
+            addOnNet: Number(existingAlloc.addOnNet || 0) + newChildRevenueAllocation.addOnNet,
+            deductionNet: Number(existingAlloc.deductionNet || 0) + newChildRevenueAllocation.deductionNet,
+            totalNet: Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+          },
+          Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+        );
+      })();
+      const newChildrenDates = [
+        ...existingChildren.map((child) => ({
+          checkIn: child.data.checkIn,
+          checkOut: child.data.checkOut
+        })),
+        { checkIn: headerCheckIn, checkOut: headerCheckOut }
+      ];
+      const newActualDateRange = computeReservationActualDateRange(
+        headerCheckIn,
+        headerCheckOut,
+        newChildrenDates
+      );
+      // Per MRB-08: corporate `usageCount` is per
+      // reservation, but the cap arithmetic counts
+      // N rooms = N uses. Adding a room increments
+      // by 1. Vouchers are per-child (the new
+      // child's `voucherUsageUpdate` already
+      // handled the increment above).
+      const corporateUsageUpdate: { ref: any; data: any } | null = (() => {
+        if (!isCorporateReservation || !corporateCode) return null;
+        const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        return {
+          ref: corpRef,
+          data: { usageCount: Number((reservation as any).corporateUsageCount || 0) + 1, updatedAt: new Date() }
+        };
+      })();
+      updatedHeader = {
+        roomCount: existingChildren.length + 1,
+        activeRoomCount: existingChildren.length + 1,
+        subtotal: newSubtotal,
+        totalPrice: newTotalPrice,
+        aggregateRevenueAllocation: newAggregateRevenueAllocation,
+        actualDateRange: newActualDateRange,
+        updatedAt: new Date()
+      };
+      transaction.update(reservationRef, updatedHeader);
+      if (voucherUsageUpdate) {
+        transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      }
+      if (corporateUsageUpdate) {
+        transaction.update(corporateUsageUpdate.ref, corporateUsageUpdate.data);
+      }
+    });
+
+    // 12. Email — `booking-rescheduled` action fires
+    // after the commit. The reservation-scope view
+    // carries the new room; the subject reads
+    // "Reservation updated: R-… (N rooms)" via the
+    // existing template.
+    if (fullBookingForEmail) {
+      try {
+        await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
+      } catch (emailErr) {
+        console.error("Failed to send add-room email:", emailErr);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        bookingId: newBookingId,
+        bookingRef: newBookingRef,
+        reservationId,
+        reservationRef: updatedHeader?.reservationRef || null
+      }
+    });
+  } catch (error: any) {
+    if (error?.message === "RESERVATION_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Reservation not found." });
+    }
+    return res.status(400).json({ success: false, error: error?.message || "Failed to add room." });
   }
 }
