@@ -61,12 +61,24 @@ export function rebalanceGuestDistribution(
   totalChildren: number
 ): GuestDistributionResult {
   const capacities = new Map(roomTypes.map((type) => [type.value, type]));
-  const nextRooms = rooms.map((room) => ({
-    ...room,
-    numAdults: 0,
-    numChildren: 0,
-    extraBedCount: 0
-  }));
+  // Per EXB-11 (2026-08-04, per decision #186): the user is
+  // in control of the extra-bed count. The cart's per-room
+  // `extraBedCount` is the source of truth — we clamp it to
+  // the type's `maxExtraBeds` cap but otherwise preserve it.
+  // The previous behaviour auto-computed the bed count from
+  // the overflow rule, which silently overrode the user
+  // choice and hid the price until Step 3.
+  const nextRooms = rooms.map((room) => {
+    const type = capacities.get(room.roomType);
+    const maxExtraBeds = Math.max(0, Math.floor(Number(type?.maxExtraBeds) || 0));
+    const requestedBeds = Math.max(0, Math.floor(Number(room.extraBedCount) || 0));
+    return {
+      ...room,
+      numAdults: 0,
+      numChildren: 0,
+      extraBedCount: Math.min(requestedBeds, maxExtraBeds)
+    };
+  });
   let adultsRemaining = Math.max(0, Math.floor(totalAdults));
   let childrenRemaining = Math.max(0, Math.floor(totalChildren));
 
@@ -94,12 +106,15 @@ export function rebalanceGuestDistribution(
     childrenRemaining -= roomForChildren;
   }
 
-  // Remaining guests may use configured rollaway slots. Allocate
-  // adults first, then children, and snapshot the exact bed count
-  // required by the resulting room occupancy.
+  // Remaining guests may use the user-set rollaway slots.
+  // Allocate adults first, then children; the bed count on
+  // the room is whatever the user picked (clamped to the
+  // type cap), not a derived overflow count. If the user
+  // picked fewer beds than the group needs, the overflow
+  // is surfaced as `unassignedAdults` / `unassignedChildren`
+  // and the Step 1 submit gate (per CHD-11) catches it.
   for (const room of nextRooms) {
-    const type = capacities.get(room.roomType);
-    let extraSlots = Math.max(0, Math.floor(Number(type?.maxExtraBeds) || 0));
+    let extraSlots = room.extraBedCount;
     const overflowAdults = Math.min(adultsRemaining, extraSlots);
     room.numAdults += overflowAdults;
     adultsRemaining -= overflowAdults;
@@ -107,7 +122,6 @@ export function rebalanceGuestDistribution(
     const overflowChildren = Math.min(childrenRemaining, extraSlots);
     room.numChildren += overflowChildren;
     childrenRemaining -= overflowChildren;
-    room.extraBedCount = overflowAdults + overflowChildren;
   }
 
   return {
@@ -116,4 +130,3 @@ export function rebalanceGuestDistribution(
     unassignedChildren: childrenRemaining
   };
 }
-
