@@ -164,10 +164,18 @@ describe("MRB-07 — Bookings list: reservation rows with nested room stays", ()
 
   it("shows the reservation's aggregate money, room count and mixed status", () => {
     // The reservation row must be triageable without expanding it.
+    // Per MRB-12 (2026-08-03, per decision #179): the row's
+    // `totalPrice` and `listReservationBalance` are read from the
+    // `Reservation` header (and the reservation-scope `paidAmount`
+    // aggregate) rather than summing the filtered in-memory
+    // children — the old behaviour silently dropped any child
+    // hidden by an active filter.
     expect(bookingsPageSrc).toMatch(
-      /const reservationTotal = sorted\.reduce\(\(sum, child\) => sum \+ \(child\.totalPrice \|\| 0\), 0\)/
+      /const reservationTotal = reservationHeader\s*\?\s*reservationHeader\.totalPrice/
     );
-    expect(bookingsPageSrc).toMatch(/getBookingFolio\(child\)\.balance/);
+    expect(bookingsPageSrc).toMatch(
+      /Math\.max\(0, reservationHeader\.totalPrice - paidAmount\)/
+    );
     expect(bookingsPageSrc).toMatch(/\{row\.listRoomCount\} rooms/);
     // A group whose rooms disagree says so rather than picking one
     // room's status to stand for the whole group.

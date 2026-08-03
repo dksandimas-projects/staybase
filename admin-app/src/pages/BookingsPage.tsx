@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -86,6 +86,21 @@ type BookingListRow = Booking & {
   listRoomCount?: number;
   listChildBookings?: Booking[];
   listReservationBalance?: number;
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the `Reservation` header is attached to the row so the
+  // Status column can render the aggregate `paymentStatus`
+  // + the cancellation-count chip (MRB-12-02) without a
+  // second lookup. Absent for N=1 / legacy null-
+  // `reservationId` rows (the existing byte-equivalent path).
+  listReservationHeader?: Reservation;
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the reservation-scope paid amount (sum of positive
+  // payment entries + negative refund entries on
+  // `reservations/{id}/payments/`). Used by the row's
+  // Total + Balance rendering and the drawer reservation
+  // strip's Paid + Balance pills (MRB-12-03). Absent
+  // for N=1 / legacy.
+  listReservationPaidAmount?: number;
 };
 
 let walkinRoomStayKeySeq = 0;
@@ -510,6 +525,15 @@ export function BookingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { 
     bookings, 
+    // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+    // reservation headers + the reservation-scope paid-amount
+    // aggregate. The Bookings table row reads these so the
+    // row's `totalPrice` and `listReservationBalance` are
+    // independent of the active filter (the old code summed
+    // the filtered in-memory children and silently dropped
+    // any child hidden by the filter).
+    reservations,
+    reservationPaidAmount,
     rooms, 
     updateBookingStatus, 
     resolveEarlyCheckin,
@@ -1007,6 +1031,16 @@ export function BookingsPage() {
   const [staffDiscountType, setStaffDiscountType] = useState<"" | "senior" | "pwd">("");
   const [staffVoucherCode, setStaffVoucherCode] = useState("");
   const [isApplyingStaffDiscount, setIsApplyingStaffDiscount] = useState(false);
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed): the
+  // discount-form scope selector (MRB-12-05). Mirrors the
+  // MRB-13 cancel-modal `bookingCancelScope` pattern. Default
+  // `"room"` is the safer choice — staff must opt into the
+  // whole-reservation path explicitly. Resets to `"room"` on
+  // close so a previous session's choice never bleeds into a
+  // new one. Absent (null) is the uninitialised state; the
+  // `useEffect` on `showDiscountForm` flips it to `"room"`
+  // when the modal opens.
+  const [staffDiscountScope, setStaffDiscountScope] = useState<"room" | "reservation" | null>(null);
 
   // Per NBS-07 (2026-07-31): memo for the New Booking modal's source
   // selector. Filters the configured list to entries that are
@@ -1409,15 +1443,58 @@ export function BookingsPage() {
       header: "Status",
       render: (row) => (
         <div className="flex items-center gap-1.5">
-          {/* Per MRB-07: when a reservation's rooms disagree the row
-              says so rather than picking one room's status to stand
-              for the whole group. */}
-          {row.listRowKind === "reservation" && new Set((row.listChildBookings || []).map((child) => child.status)).size > 1 ? (
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+              the reservation row's Status column reads the
+              `Reservation.paymentStatus` from the header
+              (populated by MRB-12-01's listener). The aggregate
+              pill is the desk's at-a-glance read of the group
+              state — it replaces the previous "Mixed" fallback
+              (which collapsed to a generic chip when the
+              children's per-booking statuses disagreed) with a
+              concrete payment state. The legacy "Mixed" wording
+              is kept as the cold-start fallback for the
+              first paint (when the listener hasn't hydrated yet);
+              the next snapshot replaces it with the aggregate
+              pill. N=1 + legacy null-`reservationId` rows keep
+              the per-booking `StatusBadge` byte-equivalent to
+              pre-MRB-12. */}
+          {row.listRowKind === "reservation" && row.listReservationHeader ? (
+            renderReservationPaymentStatusPill(
+              row.listReservationHeader.paymentStatus,
+              row.listReservationHeader.totalPrice,
+              row.listReservationPaidAmount || 0
+            )
+          ) : row.listRowKind === "reservation" && new Set((row.listChildBookings || []).map((child) => child.status)).size > 1 ? (
             <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 ring-1 ring-gray-200">
               Mixed
             </span>
           ) : (
             <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+          )}
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+              the cancellation-count chip. Renders only on
+              reservation rows (N>1) when the denormalized
+              `cancelledRoomCount` is > 0 — the desk never
+              has to expand a row to know a group has
+              cancellations in it. Legacy N=1 single-row
+              path keeps the existing per-booking
+              `StatusBadge` (the `cancelled` tone is
+              already on the badge). The chip's tooltip
+              lists the cancelled room numbers for
+              quick triage. */}
+          {row.listRowKind === "reservation" && row.listReservationHeader && row.listReservationHeader.cancelledRoomCount > 0 && (
+            <span
+              title={
+                "Cancelled rooms in this reservation: " +
+                (row.listChildBookings || [])
+                  .filter((child) => child.status === "cancelled")
+                  .map((child) => `Room ${child.roomNumber}`)
+                  .join(", ")
+              }
+              className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-200"
+            >
+              {row.listReservationHeader.cancelledRoomCount} cancelled
+            </span>
           )}
           {row.earlyCheckIn?.status === "requested" && (
             <span
@@ -1648,6 +1725,16 @@ export function BookingsPage() {
   ]);
   const bookingListIsGrouped = !OPERATIONAL_QUICK_VIEWS.has(bookingQuickView);
 
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // a `Map<reservationId, Reservation>` lookup so the row builder
+  // can read the header in O(1). Rebuilt only when the
+  // `reservations` array reference changes (i.e. on snapshot
+  // updates, not on every render).
+  const reservationsMap = useMemo(
+    () => new Map(reservations.map((reservation) => [reservation.id, reservation])),
+    [reservations]
+  );
+
   // Which reservations the desk has expanded. Collapsed by default so
   // a group booking reads as one line until the desk asks for the
   // rooms.
@@ -1698,11 +1785,27 @@ export function BookingsPage() {
       const sorted = [...group].sort(
         (a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0)
       );
-      const reservationTotal = sorted.reduce((sum, child) => sum + (child.totalPrice || 0), 0);
-      const reservationBalance = sorted.reduce(
-        (sum, child) => sum + getBookingFolio(child).balance,
-        0
-      );
+      // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+      // the row's `totalPrice` and `listReservationBalance` are
+      // read from the `Reservation` header + the reservation-scope
+      // paid-amount aggregate (`reservations` + `reservationPaidAmount`
+      // from the AdminContext listener). The header doesn't filter,
+      // so the previously-existing bug — where the row's
+      // `listReservationBalance` summed the FILTERED children and
+      // silently dropped any child hidden by an active filter —
+      // is fixed by construction. When the header is not yet in
+      // memory (cold-start race; the listener hydrates on the
+      // first snapshot), fall back to the child sum so the first
+      // paint byte-matches the pre-MRB-12 surface; the listener's
+      // next tick replaces the row with the header-sourced values.
+      const reservationHeader = reservationsMap.get(reservationId);
+      const paidAmount = reservationPaidAmount[reservationId] || 0;
+      const reservationTotal = reservationHeader
+        ? reservationHeader.totalPrice
+        : sorted.reduce((sum, child) => sum + (child.totalPrice || 0), 0);
+      const reservationBalance = reservationHeader
+        ? Math.max(0, reservationHeader.totalPrice - paidAmount)
+        : sorted.reduce((sum, child) => sum + getBookingFolio(child).balance, 0);
       // The reservation row borrows the lead room's identity for the
       // fields every column already knows how to read, and overrides
       // the ones that are reservation-scoped (money, room label,
@@ -1717,7 +1820,14 @@ export function BookingsPage() {
         listChildBookings: sorted,
         listReservationBalance: reservationBalance,
         totalPrice: reservationTotal,
-        numGuests: sorted.reduce((sum, child) => sum + (child.numGuests || 0), 0)
+        numGuests: sorted.reduce((sum, child) => sum + (child.numGuests || 0), 0),
+        // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+        // attach the header + paid-amount aggregate so the
+        // Status column (MRB-12-02) can render the aggregate
+        // `paymentStatus` + cancellation-count chip without a
+        // second lookup.
+        listReservationHeader: reservationHeader,
+        listReservationPaidAmount: paidAmount
       });
       emitted.add(booking.id);
 
@@ -1731,7 +1841,7 @@ export function BookingsPage() {
       }
     }
     return rows;
-  }, [filteredRows, bookingListIsGrouped, expandedReservationIds]);
+  }, [filteredRows, bookingListIsGrouped, expandedReservationIds, reservationsMap, reservationPaidAmount]);
 
   // Per MRB-07 (2026-08-02, per decision #159): the reservation context
   // for whatever booking the drawer currently has open. `null` for a
@@ -1775,10 +1885,59 @@ export function BookingsPage() {
     );
   };
 
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed): the
+  // reservation-scope payment-state pill rendered in the
+  // Bookings table's Status column for reservation rows
+  // (MRB-12-02). The pill is the aggregate read: it states the
+  // group's payment state from the `Reservation.paymentStatus`
+  // header field (populated by MRB-12-01's listener) and
+  // surfaces the due amount when the group is not yet settled.
+  // The legacy "Mixed" wording is gone — the desk sees a
+  // concrete state instead of a generic chip when the children
+  // disagree. N=1 + legacy null-`reservationId` paths do not
+  // render this pill (the per-booking `StatusBadge` byte-
+  // equivalent is preserved).
+  const renderReservationPaymentStatusPill = (
+    status: string,
+    totalPrice: number,
+    paidAmount: number
+  ) => {
+    // Map the reservation's `paymentStatus` to the same tone
+    // set `StatusBadge` uses for booking statuses (the
+    // reservation enum mirrors the booking status flow but
+    // uses kebab-cased labels). The `Awaiting` variant
+    // surfaces the outstanding amount — the desk sees the
+    // group's due total in one glance without expanding the
+    // row.
+    const tone: Record<string, { label: string; className: string }> = {
+      "awaiting-payment": { label: "Awaiting", className: "bg-blue-50 text-blue-700 ring-blue-200" },
+      "payment-uploaded": { label: "Proof pending", className: "bg-violet-50 text-violet-700 ring-violet-200" },
+      "payment-confirmed": { label: "Verified", className: "bg-blue-50 text-blue-700 ring-blue-200" },
+      confirmed: { label: "Confirmed", className: "bg-green-50 text-green-700 ring-green-200" },
+      "in-house": { label: "In-house", className: "bg-primary-light text-primary-dark ring-primary" },
+      completed: { label: "Completed", className: "bg-gray-100 text-gray-600 ring-gray-200" },
+      cancelled: { label: "Cancelled", className: "bg-red-50 text-red-700 ring-red-200" }
+    };
+    const entry = tone[status] || tone["awaiting-payment"];
+    const balance = Math.max(0, totalPrice - paidAmount);
+    // Per MRB-12-02: surface the outstanding amount when
+    // the group is not yet settled. Settled groups show the
+    // state label only (no "₱0 due" noise).
+    const showDue = balance > 0 && status !== "cancelled";
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold ring-1 ring-inset",
+          entry.className
+        )}
+      >
+        <span>{entry.label}</span>
+        {showDue && <span className="text-[9px] font-semibold opacity-80">₱{Math.round(balance).toLocaleString()} due</span>}
+      </span>
+    );
+  };
+
   const handleRowClick = (row: BookingListRow) => {
-    // Clicking a reservation row expands it rather than opening a
-    // drawer — a reservation has no single booking workspace, and the
-    // desk's next decision is always "which room".
     if (row.listRowKind === "reservation") {
       toggleReservationExpanded(row.listReservationId!);
       return;
@@ -4357,6 +4516,73 @@ export function BookingsPage() {
                     Actions below apply to this room unless marked
                   </span>
                 </div>
+                {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+                    the reservation-scope money pills. The Total /
+                    Paid / Balance come from the `Reservation` header
+                    + the reservation-scope paid-amount aggregate
+                    (MRB-12-01) — independent of which room the
+                    desk is currently looking at. The per-room
+                    `BookingDrawerWorkspaceHeader` below (line 4426+)
+                    keeps its own per-room money; the strip's pills
+                    are the GROUP-level read, not a replacement. The
+                    pills appear as soon as the header + the paid
+                    aggregate are in memory; otherwise the row falls
+                    back to the per-child sum so the first paint is
+                    never empty. Hidden when the reservation context
+                    is null (N=1 / legacy) — the strip already gates
+                    on that. */}
+                {(() => {
+                  const reservationId = selectedReservationContext.reservationId;
+                  const reservationHeader = reservationsMap.get(reservationId);
+                  const paidAmount = reservationPaidAmount[reservationId] || 0;
+                  const reservationTotal = reservationHeader
+                    ? reservationHeader.totalPrice
+                    : selectedReservationContext.rooms.reduce(
+                        (sum, child) => sum + (child.totalPrice || 0),
+                        0
+                      );
+                  // Per-room paid = totalPrice - balance (capped at 0;
+                  // a negative balance means overpayment, which the
+                  // strip renders as the overpayment). The fallback
+                  // keeps the first paint byte-equivalent to the
+                  // pre-MRB-12 surface; the listener's next tick
+                  // replaces it with the header-sourced values.
+                  const reservationPaid = reservationHeader
+                    ? paidAmount
+                    : selectedReservationContext.rooms.reduce(
+                        (sum, child) => {
+                          const folio = getBookingFolio(child);
+                          return sum + Math.max(0, (folio.grandTotal || 0) - folio.balance);
+                        },
+                        0
+                      );
+                  const reservationBalance = Math.max(0, reservationTotal - reservationPaid);
+                  return (
+                    <div
+                      data-testid="reservation-strip-money"
+                      className="mt-2 grid grid-cols-3 gap-1.5"
+                      aria-label="Reservation money"
+                    >
+                      <div className="rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-gray-200">
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Total</p>
+                        <p className="mt-0.5 text-xs font-bold text-gray-900">{formatPrice(reservationTotal)}</p>
+                      </div>
+                      <div className="rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-gray-200">
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Paid</p>
+                        <p className="mt-0.5 text-xs font-bold text-gray-900">{formatPrice(reservationPaid)}</p>
+                      </div>
+                      <div className="rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-gray-200">
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Balance</p>
+                        <p className={cn(
+                          "mt-0.5 text-xs font-bold",
+                          reservationBalance > 0 ? "text-amber-700" : "text-status-green-text"
+                        )}>
+                          {formatPrice(reservationBalance)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {selectedReservationContext.rooms.map((sibling) => (
                     <button
@@ -5008,6 +5234,16 @@ export function BookingsPage() {
                     >
                       <Plus size={14} />
                       Apply discount
+                      {/* Per MRB-12 (2026-08-03, per decision #179 —
+                          proposed): the discount action is per-room
+                          by default. The form gains a "This room" /
+                          "All N rooms" segmented control in
+                          MRB-12-05; the chip here is informational
+                          so the desk sees the scope before opening
+                          the modal. Hidden for N=1 / legacy (the
+                          `renderActionScope` helper gates on
+                          `selectedReservationContext`). */}
+                      {renderActionScope("room")}
                     </button>
                   )}
                 </div>
@@ -6779,13 +7015,88 @@ export function BookingsPage() {
 
       {/* BDUX-05: Discount / Voucher modal */}
       <Modal
-        title={selectedBooking ? `Apply discount — ${selectedBooking.bookingRef}` : "Apply discount / voucher"}
+        title={
+          selectedBooking
+            ? staffDiscountScope === "reservation" && selectedReservationContext
+              ? `Apply discount — all ${selectedReservationContext.roomCount} rooms (${selectedReservationContext.reservationRef || "—"})`
+              : `Apply discount — ${selectedBooking.bookingRef}`
+            : "Apply discount / voucher"
+        }
         open={showDiscountForm}
-        onClose={() => setShowDiscountForm(false)}
+        onClose={() => {
+          setShowDiscountForm(false);
+          // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+          // reset the discount scope on close so a previous
+          // session's choice never bleeds into a new one (mirrors
+          // the MRB-13 cancel-modal `bookingCancelScope` reset).
+          setStaffDiscountScope(null);
+        }}
         className="max-w-lg"
       >
         <div className="space-y-4">
           <p className="text-xs text-gray-600">Apply after sighting a valid Senior/PWD ID, or enter a promo code. Pricing is recalculated and audited by the server.</p>
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+              the discount scope selector. Mirrors the MRB-13
+              cancel-modal `bookingCancelScope` segmented control.
+              Default `"room"` is the safer choice; staff must
+              opt into the whole-reservation path explicitly. The
+              scope selector is hidden when the selected booking
+              is single-room or legacy (no `selectedReservationContext`)
+              — the segmented control is meaningless for those
+              rows and would always read the same. */}
+          {selectedReservationContext && (
+            <div
+              data-testid="staff-discount-scope-selector"
+              className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+                Discount scope
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                This booking is part of reservation {selectedReservationContext.reservationRef || "—"} ({selectedReservationContext.roomCount} rooms). Pick what to discount.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  data-testid="staff-discount-scope-room"
+                  onClick={() => setStaffDiscountScope("room")}
+                  className={cn(
+                    "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                    (staffDiscountScope ?? "room") === "room"
+                      ? "border-primary bg-primary text-white shadow-sm"
+                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  <span className="block text-xs font-bold">This room</span>
+                  <span className={cn(
+                    "mt-0.5 block text-[10px]",
+                    (staffDiscountScope ?? "room") === "room" ? "text-white/80" : "text-gray-500"
+                  )}>
+                    Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="staff-discount-scope-reservation"
+                  onClick={() => setStaffDiscountScope("reservation")}
+                  className={cn(
+                    "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                    staffDiscountScope === "reservation"
+                      ? "border-primary bg-primary text-white shadow-sm"
+                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
+                  <span className={cn(
+                    "mt-0.5 block text-[10px]",
+                    staffDiscountScope === "reservation" ? "text-white/80" : "text-gray-500"
+                  )}>
+                    Reservation total
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
           <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
             Government discount
             <select value={staffDiscountType} onChange={(e) => setStaffDiscountType(e.target.value as "" | "senior" | "pwd")} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs">
@@ -6800,32 +7111,79 @@ export function BookingsPage() {
           </label>
           {discountError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{discountError}</p>}
           <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={() => setShowDiscountForm(false)} disabled={isApplyingStaffDiscount} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => {
+              setShowDiscountForm(false);
+              setStaffDiscountScope(null);
+            }} disabled={isApplyingStaffDiscount} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
             <button type="button" onClick={() => void (async () => {
               if (!selectedBooking || (!staffDiscountType && !staffVoucherCode.trim())) return;
               setDiscountError(null);
               setIsApplyingStaffDiscount(true);
               try {
+                // Per MRB-12 (2026-08-03, per decision #179 —
+                // proposed): when the staff picks the reservation
+                // scope, loop over every room in
+                // `selectedReservationContext.rooms` and call the
+                // existing per-booking `apply-discount` endpoint
+                // for each. The server has no `applyReservationDiscount`
+                // endpoint today (MRB-14+ follow-up if atomicity
+                // ever matters); the loop is the same code path
+                // the desk would manually run for each room
+                // today. Errors on a single room abort the loop
+                // and surface the failure to the desk — already-
+                // repriced rooms keep their new totals; the
+                // operator retries the failed room.
+                const scope = staffDiscountScope ?? "room";
+                const targetIds = scope === "reservation" && selectedReservationContext
+                  ? selectedReservationContext.rooms.map((room) => room.id)
+                  : [selectedBooking.id];
                 const token = await auth.currentUser?.getIdToken(true);
-                const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-                  body: JSON.stringify({ bookingId: selectedBooking.id, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() })
-                });
-                const payload = await response.json();
-                if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to apply discount.");
-                syncSelectedBooking(payload.data);
+                const errors: string[] = [];
+                for (const targetId of targetIds) {
+                  const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+                    body: JSON.stringify({ bookingId: targetId, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() })
+                  });
+                  const payload = await response.json();
+                  if (!response.ok || !payload.success) {
+                    errors.push(payload.error || `Room ${targetId} failed.`);
+                    continue;
+                  }
+                  if (targetId === selectedBooking.id) {
+                    // The drawer's `selectedBooking` is the only
+                    // one the page hydrates locally via
+                    // `syncSelectedBooking`; the sibling rooms
+                    // refresh via the AdminContext listener.
+                    syncSelectedBooking(payload.data);
+                  }
+                }
+                if (errors.length > 0) {
+                  throw new Error(
+                    errors.length === targetIds.length
+                      ? errors[0]
+                      : `${errors.length} of ${targetIds.length} rooms failed: ${errors[0]}`
+                  );
+                }
                 setStaffDiscountType("");
                 setStaffVoucherCode("");
                 setShowDiscountForm(false);
-                toast.success("Booking repriced", `New total: ${formatPrice(payload.data.totalPrice)}`);
+                setStaffDiscountScope(null);
+                toast.success(
+                  scope === "reservation" && selectedReservationContext
+                    ? `Reservation repriced (${targetIds.length} rooms)`
+                    : "Booking repriced",
+                  scope === "reservation" && selectedReservationContext
+                    ? `Applied across ${targetIds.length} rooms in ${selectedReservationContext.reservationRef || "—"}`
+                    : `New total: ${formatPrice(selectedBooking.totalPrice || 0)}`
+                );
               } catch (error: any) {
                 setDiscountError(error.message || "Please check the details and try again.");
               } finally {
                 setIsApplyingStaffDiscount(false);
               }
             })()} disabled={isApplyingStaffDiscount || (!staffDiscountType && !staffVoucherCode.trim())} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
-              {isApplyingStaffDiscount ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Applying…</> : "Apply and reprice booking"}
+              {isApplyingStaffDiscount ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Applying…</> : (staffDiscountScope === "reservation" && selectedReservationContext ? `Apply to all ${selectedReservationContext.roomCount} rooms` : "Apply and reprice booking")}
             </button>
           </div>
         </div>
