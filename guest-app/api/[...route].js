@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.255.3";
+    VERSION2 = "0.256.0";
   }
 });
 
@@ -222978,6 +222978,41 @@ function applyRoomTypeDefaults(raw) {
     extraBedRate: Number(r3.extraBedRate) || 0
   };
 }
+function deriveRoomTypeCapacityFit(input) {
+  const maxCapacity = Math.max(0, Math.floor(Number(input.type.maxCapacity) || 0));
+  const maxChildren = Math.max(0, Math.floor(Number(input.type.maxChildren) || 0));
+  const maxExtraBeds = Math.max(0, Math.floor(Number(input.type.maxExtraBeds) || 0));
+  const numAdults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
+  const numChildren = Math.max(0, Math.floor(Number(input.numChildren) || 0));
+  const currentCartCount = Math.max(0, Math.floor(Number(input.currentCartCount) || 0));
+  const totalAdultCap = currentCartCount * maxCapacity;
+  const totalChildrenCap = currentCartCount * maxChildren;
+  const totalExtraBeds = currentCartCount * maxExtraBeds;
+  const overflowAdults = Math.max(0, numAdults - totalAdultCap);
+  const overflowChildren = Math.max(0, numChildren - totalChildrenCap);
+  const totalOverflow = overflowAdults + overflowChildren;
+  let state;
+  if (numAdults === 0 && numChildren === 0) {
+    state = "fits";
+  } else if (totalOverflow > totalExtraBeds) {
+    state = "doesnt-fit";
+  } else if (totalOverflow === 0) {
+    const adultsAtCap = numAdults === totalAdultCap;
+    const childrenAtCap = numChildren === totalChildrenCap;
+    state = adultsAtCap && childrenAtCap ? "tight" : "fits";
+  } else {
+    state = "tight";
+  }
+  const safeAdultCap = Math.max(1, maxCapacity);
+  const safeChildrenCap = Math.max(1, maxChildren);
+  const roomsNeeded = Math.max(
+    1,
+    Math.ceil(numAdults / safeAdultCap),
+    Math.ceil(numChildren / safeChildrenCap)
+  );
+  const extraBedsNeeded = totalOverflow > 0 && totalOverflow <= totalExtraBeds ? totalOverflow : 0;
+  return { state, roomsNeeded, extraBedsNeeded };
+}
 var DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY, FALLBACK_MAX_CHILDREN;
 var init_roomTypes = __esm({
   "../shared/utils/roomTypes.ts"() {
@@ -223784,6 +223819,7 @@ __export(shared_exports, {
   createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
   createFailureBackoffState: () => createFailureBackoffState,
   datesOverlap: () => datesOverlap,
+  deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
   evaluateCancelPreview: () => evaluateCancelPreview,
