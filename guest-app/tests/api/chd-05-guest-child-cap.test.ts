@@ -65,17 +65,42 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
   });
 
-  it("caps the child stepper visibly and explains the selected room's limit", () => {
+  it("soft-caps the child stepper (CHD-11) and explains the room's hint", () => {
+    // Per CHD-11 (2026-08-04, per decision #184): the children
+    // picker is no longer bounded by the per-type `maxChildren`
+    // cap. The hard cap was a dead-end at the exploration stage
+    // — the cap belongs at the commit surface (the submit gate
+    // + the room-type card's Fits/Tight/Doesn't fit indicator),
+    // not the picker. The soft cap is `MIN(10, guests - 1)` —
+    // a sanity guard, not a domain constraint. The
+    // `guests - 1` floor preserves the "at least one adult"
+    // invariant. The "You have reached this room type's limit"
+    // dead-end tail is gone.
     expect(bookingPageSrc).toMatch(/Children \(0–11\)/);
     expect(bookingPageSrc).toMatch(
       /updateChildren\(numChildren \+ 1\)/
     );
+    // Soft cap: the + button is gated at the soft-floor
+    // `MIN(10, guests - 1)`, not the per-type cap.
     expect(bookingPageSrc).toMatch(
-      /numChildren >= selectedMaxSelectableChildren/
+      /numChildren >= Math\.min\(10, Math\.max\(0, guests - 1\)\)/
+    );
+    // The pre-CHD-11 per-type cap is no longer enforced at
+    // the picker. The per-type `selectedMaxSelectableChildren`
+    // useMemo is still used (for the "Up to N can fit when
+    // extra beds cover the overflow" hint) but does NOT
+    // gate the picker.
+    expect(bookingPageSrc).not.toMatch(
+      /numChildren >= selectedMaxSelectableChildren\s*\|\|/
     );
     expect(bookingPageSrc).toMatch(/id="children-cap-help"/);
     expect(bookingPageSrc).toMatch(/aria-describedby="children-cap-help"/);
-    expect(bookingPageSrc).toMatch(/You have reached this room type’s limit for the current group/);
+    // The dead-end "You have reached this room type's limit"
+    // message is gone; replaced with a forward-looking
+    // "Pick a room type that fits your group, or add a
+    // second room." nudge.
+    expect(bookingPageSrc).not.toMatch(/You have reached this room type.s limit for the current group/);
+    expect(bookingPageSrc).toMatch(/Pick a room type that fits your group, or add a second room\./);
   });
 
   it("states that children are free of the room charge in the picker and price summary", () => {

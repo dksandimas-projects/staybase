@@ -42,6 +42,15 @@ import {
   calculateExtraBedAddOn,
   requiredExtraBedsFor
 } from "@spark-inn/shared";
+// Per CHD-11 (2026-08-04, per decision #184): the per-type
+// capacity-fit indicator derivation. The helper is the
+// single derivation point for both the Fits / Tight / Doesn't
+// fit chip on the room-type card AND (per CHD-12) the small
+// capacity chip on each line of the cart summary. Imported
+// in a separate block to keep the CHD-05 import-ordering guard
+// (which requires `calculateExtraBedAddOn` + `requiredExtraBedsFor`
+// to be adjacent in the same import) intact.
+import { deriveRoomTypeCapacityFit } from "@spark-inn/shared";
 // Per MRB-02 (2026-08-02, per decision #164): the
 // reservation-level idempotency key, imported separately to
 // keep the CHD-05 import-ordering guard (which requires
@@ -441,7 +450,41 @@ export function BookingPage() {
     && cartDistribution.unassignedAdults === 0
     && cartDistribution.unassignedChildren === 0
     && distributedRoomCart.every((room) => room.numAdults >= 1);
-  const cartIsReady = cartHasAvailability && cartDistributionComplete;
+  // Per CHD-11 (2026-08-04, per decision #184): the
+  // per-room cap is enforced at the submit gate, not the
+  // picker. Every room in the cart must fit its per-type cap
+  // (with the type's `maxExtraBeds` covering any overflow).
+  // The first failing room drives the error message + the
+  // "Adjust room" CTA — the CTA scrolls to and highlights
+  // the offending room-type card on the right-hand side.
+  const cartFitsGroup = distributedRoomCart.every((room) => {
+    const type = roomTypes.find((t) => t.value === room.roomType);
+    if (!type) return false;
+    const overflow = requiredExtraBedsFor({
+      numAdults: room.numAdults,
+      numChildren: room.numChildren,
+      maxCapacity: Number(type.maxCapacity) || 0,
+      maxChildren: Number(type.maxChildren) || 0
+    });
+    return overflow.requiredExtraBeds <= (Number(type.maxExtraBeds) || 0);
+  });
+  const firstFailingRoom = cartFitsGroup
+    ? null
+    : distributedRoomCart.find((room) => {
+      const type = roomTypes.find((t) => t.value === room.roomType);
+      if (!type) return true;
+      const overflow = requiredExtraBedsFor({
+        numAdults: room.numAdults,
+        numChildren: room.numChildren,
+        maxCapacity: Number(type.maxCapacity) || 0,
+        maxChildren: Number(type.maxChildren) || 0
+      });
+      return overflow.requiredExtraBeds > (Number(type.maxExtraBeds) || 0);
+    });
+  const firstFailingType = firstFailingRoom
+    ? roomTypes.find((t) => t.value === firstFailingRoom.roomType)
+    : null;
+  const cartIsReady = cartHasAvailability && cartDistributionComplete && cartFitsGroup;
   const selectedTypeIsAvailable = Boolean(
     selectedTypeEntry
     && availableRoomTypes.some((entry) => entry.type.value === selectedTypeEntry.value)
@@ -2024,12 +2067,19 @@ export function BookingPage() {
                 </div>
               </label>
 
-              {/* Per CHD-10 (2026-07-31, per CVQ-01): the
-                  children/0-11 split. The room rate is free for
-                  children (per the CHD-01 decision #1), but the
-                  breakfast toggle below can add them back in.
-                  `numAdults` is derived as `guests - numChildren`
-                  (validated to stay ≥ 1). */}
+              {/* Per CHD-11 (2026-08-04, per decision #184): the
+                  children picker is no longer bounded by the
+                  per-type `maxChildren` cap. The hard cap was a
+                  dead-end at the exploration stage — the guest
+                  is still choosing room type and/or quantity,
+                  and the cap belongs at the commit surface
+                  (the Step 1 → Step 2 submit gate + the
+                  room-type card's Fits/Tight/Doesn't fit
+                  indicator), not at the picker. Soft cap is
+                  `MIN(10, guests - 1)` — a sanity guard, not a
+                  domain constraint. The `guests - 1` floor
+                  preserves the existing "at least one adult"
+                  invariant. */}
               <label className="grid gap-2 text-sm font-medium text-gray-700">
                 Children (0–11)
                 <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
@@ -2052,21 +2102,20 @@ export function BookingPage() {
                     aria-label="Increase children count"
                     aria-describedby="children-cap-help"
                     onClick={() => updateChildren(numChildren + 1)}
-                    disabled={
-                      numChildren >= selectedMaxSelectableChildren
-                      || numChildren >= Math.max(0, guests - 1)
-                    }
+                    // Soft cap: MIN(10, guests - 1). The 10 is a
+                    // "stop the + at 100" sanity guard, not a
+                    // capacity rule. The `guests - 1` floor is
+                    // the existing "at least one adult"
+                    // invariant (preserved from the pre-CHD-11
+                    // shape).
+                    disabled={numChildren >= Math.min(10, Math.max(0, guests - 1))}
                   >
                     <Plus size={16} />
                   </button>
                 </div>
                 <span
                   id="children-cap-help"
-                  className={`text-xs font-normal leading-relaxed ${
-                    numChildren >= selectedMaxSelectableChildren
-                      ? "text-amber-700"
-                      : "text-gray-500"
-                  }`}
+                  className="text-xs font-normal leading-relaxed text-gray-500"
                   aria-live="polite"
                 >
                   {selectedTypeEntry ? (
@@ -2076,8 +2125,13 @@ export function BookingPage() {
                       {selectedMaxSelectableChildren > selectedMaxChildren
                         ? ` Up to ${selectedMaxSelectableChildren} can fit when extra beds cover the overflow.`
                         : ""}
-                      {numChildren >= selectedMaxSelectableChildren
-                        ? " You have reached this room type’s limit for the current group."
+                      {/* Per CHD-11: replace the dead-end
+                          "you have reached this room type's
+                          limit" tail with a forward-looking
+                          nudge. The cap belongs at the submit
+                          gate + the room-type card, not here. */}
+                      {numChildren >= Math.min(10, Math.max(0, guests - 1))
+                        ? " Pick a room type that fits your group, or add a second room."
                         : ""}
                     </>
                   ) : (
@@ -2086,29 +2140,72 @@ export function BookingPage() {
                 </span>
               </label>
 
+              {/* Per CHD-12 (2026-08-04, per decision #185):
+                  cart-style summary that lists one line per
+                  distinct room type, with the per-type
+                  occupancy inline. Replaces the legacy
+                  per-room "Guest distribution" list whose
+                  "Room 1 / Room 2 / Room N" naming was
+                  positional and meaningless, and whose
+                  per-room occupancy was an auto-rebalance
+                  result (the user didn't choose it). The
+                  cart summary is the read surface; the
+                  room-type card is the action surface — the
+                  per-type Fits / Tight / Doesn't fit chip
+                  (per CHD-11) is wired below on each card. */}
               <div className="rounded-card border border-gray-200 bg-gray-50 p-4">
-                <p className="text-sm font-semibold text-gray-950">Guest distribution</p>
+                <p className="text-sm font-semibold text-gray-950">Your cart</p>
                 {distributedRoomCart.length > 0 ? (
                   <div className="mt-3 space-y-2">
-                    {distributedRoomCart.map((room, index) => {
-                      const type = roomTypes.find((entry) => entry.value === room.roomType);
-                      return (
-                        <div key={room.bookingId} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
-                          <span>
-                            <span className="block font-semibold text-gray-900">
-                              Room {index + 1} · {type?.label || room.roomType}
+                    {(() => {
+                      // Group distributedRoomCart by roomType.
+                      // Per-type: quantity + sum(numAdults) +
+                      // sum(numChildren) + sum(extraBedCount).
+                      // Re-derives the per-type capacity
+                      // indicator from the same helper the
+                      // room-type card uses (per CHD-11 +
+                      // CHD-12 composition).
+                      const byType = new Map<string, { quantity: number; adults: number; children: number; extraBeds: number; label: string }>();
+                      for (const room of distributedRoomCart) {
+                        const entry = byType.get(room.roomType) || { quantity: 0, adults: 0, children: 0, extraBeds: 0, label: "" };
+                        const type = roomTypes.find((t) => t.value === room.roomType);
+                        entry.quantity += 1;
+                        entry.adults += room.numAdults;
+                        entry.children += room.numChildren;
+                        entry.extraBeds += room.extraBedCount || 0;
+                        if (!entry.label && type) entry.label = type.label;
+                        byType.set(room.roomType, entry);
+                      }
+                      return Array.from(byType.entries()).map(([roomType, agg]) => {
+                        const fit = deriveRoomTypeCapacityFit({
+                          type: roomTypes.find((t) => t.value === roomType) || { maxCapacity: 0, maxChildren: 0, maxExtraBeds: 0 },
+                          numAdults: agg.adults,
+                          numChildren: agg.children,
+                          currentCartCount: agg.quantity
+                        });
+                        const fitChip =
+                          fit.state === "fits"
+                            ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Fits</span>
+                            : fit.state === "tight"
+                              ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Tight</span>
+                              : <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">Doesn't fit</span>;
+                        return (
+                          <div key={roomType} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
+                            <span className="flex-1">
+                              <span className="block font-semibold text-gray-900">
+                                {agg.quantity}× {agg.label || roomType} {fitChip}
+                              </span>
+                              {agg.adults} adult{agg.adults === 1 ? "" : "s"}{agg.children > 0 ? ` · ${agg.children} child${agg.children === 1 ? "" : "ren"}` : ""}
                             </span>
-                            {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
-                            {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
-                          </span>
-                          {room.extraBedCount > 0 ? (
-                            <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
-                              {room.extraBedCount} extra bed{room.extraBedCount === 1 ? "" : "s"}
-                            </span>
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                            {agg.extraBeds > 0 ? (
+                              <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
+                                {agg.extraBeds} extra bed{agg.extraBeds === 1 ? "" : "s"}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 ) : (
                   <p className="mt-2 text-xs text-gray-500">Add at least one room to begin.</p>
@@ -2260,6 +2357,48 @@ export function BookingPage() {
                           </span>
                         </div>
 
+                        {/* Per CHD-11 (2026-08-04, per decision #184):
+                            the per-type Fits / Tight / Doesn't fit
+                            capacity indicator. Drives off
+                            `deriveRoomTypeCapacityFit` against
+                            the current group size + the current
+                            cart count of this type. The card stays
+                            clickable in all three states — the
+                            indicator is a derived view, not a
+                            gating control. The same derivation
+                            powers the cart-line chip in the CHD-12
+                            cart summary above (single helper,
+                            two surfaces). The "You'd need N of
+                            [type]" callout fires when the cart is
+                            short (roomsNeeded > currentCartCount),
+                            the natural nudge for the user to add a
+                            room of this type. */}
+                        {(() => {
+                          const fit = deriveRoomTypeCapacityFit({
+                            type,
+                            numAdults,
+                            numChildren,
+                            currentCartCount: typeQuantity
+                          });
+                          const chip =
+                            fit.state === "fits"
+                              ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700" data-testid={`room-type-fit-${type.value}`}>Fits your group</span>
+                              : fit.state === "tight"
+                                ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700" data-testid={`room-type-fit-${type.value}`}>Tight — at the cap</span>
+                                : <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700" data-testid={`room-type-fit-${type.value}`}>Doesn't fit your group</span>;
+                          const needMore = fit.roomsNeeded > typeQuantity;
+                          return (
+                            <div className="mt-3 flex flex-wrap items-center gap-2" aria-live="polite">
+                              {chip}
+                              {needMore ? (
+                                <span className="text-xs font-medium text-amber-700" data-testid={`room-type-rooms-needed-${type.value}`}>
+                                  You&apos;d need {fit.roomsNeeded} of {type.label} for your group.
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+
                         <div className="mt-6 grid gap-3">
                           <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
                             <span>
@@ -2386,14 +2525,48 @@ export function BookingPage() {
 	              aria-describedby="step-one-occupancy-error"
 	              className="sm:min-w-56"
 	            >
-	              {distributedRoomCart.length > 0 ? "Assign every guest" : "Add at least one room"}
+	              {!cartFitsGroup
+	                ? "Adjust room"
+	                : distributedRoomCart.length > 0
+	                  ? "Assign every guest"
+	                  : "Add at least one room"}
 	            </PrimaryButton>
 	          )}
 	        </div>
 	        {!cartIsReady ? (
-	          <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
-	            Add enough available rooms to fit every guest, with at least one adult assigned to each room.
-	          </p>
+          // Per CHD-11 (2026-08-04, per decision #184):
+          // the error message references the type label
+          // (matching the CHD-12 cart-style summary) plus
+          // a three-action "Adjust room" CTA that scrolls
+          // to and highlights the offending room-type
+          // card. The legacy "Add enough available rooms..."
+          // text stays for the cart-distribution failure
+          // case.
+          firstFailingType && firstFailingRoom ? (
+            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700" role="alert">
+              {firstFailingType.label} maxes at {firstFailingType.maxChildren} child{firstFailingType.maxChildren === 1 ? "" : "ren"}.{" "}
+              <button
+                type="button"
+                className="underline hover:text-amber-900"
+                data-testid="adjust-room-cta"
+                onClick={() => {
+                  const el = document.querySelector(
+                    `[data-testid="room-type-fit-${firstFailingType.value}"]`
+                  );
+                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  el?.classList.add("ring-2", "ring-amber-400");
+                  setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400"), 2000);
+                }}
+              >
+                Adjust room
+              </button>
+              {" "}or pick a different room type, or remove a guest.
+            </p>
+          ) : (
+            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
+              Add enough available rooms to fit every guest, with at least one adult assigned to each room.
+            </p>
+          )
 	        ) : null}
 	      </div>
     </>
