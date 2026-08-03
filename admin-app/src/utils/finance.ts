@@ -173,6 +173,25 @@ function nonNegativeFinite(value: unknown): number {
 // that net total proportionally across the locked gross room/breakfast amounts
 // so the two report streams are disjoint and always add back to totalPrice.
 // Legacy bookings fall back to ratePerNight × numNights for the room basis.
+//
+// Per MRB-11 (2026-08-03, per decision #177): this is now the
+// LEGACY-ONLY fallback. Post-MRB-11 bookings carry a stored
+// `revenueAllocation` field on the doc; Reports + the new
+// `getBookingRevenueStreams` helper in `shared/utils/bookingFolio.ts`
+// read the stored field directly. This function stays exported
+// because:
+//   (1) pre-MRB-11 docs have no `revenueAllocation` — the
+//       helper's `getBookingRevenueStreams` re-derives the
+//       same math here for the legacy fallback (so a
+//       single-day report on historical data returns the
+//       same numbers as before the upgrade);
+//   (2) the helper's byte-equivalence to this function is
+//       pinned by `shared/__tests__/mrb-11-revenue-streams.test.ts`.
+//
+// Reports no longer calls this function directly — the 6
+// call sites in `ReportsPage.tsx` switched to
+// `getBookingRevenueStreams` in PR3 of the MRB-11 series.
+// New code should call `getBookingRevenueStreams` instead.
 export function splitBookingRevenue(booking: BookingRevenueInput): { room: number; breakfast: number } {
   const total = nonNegativeFinite(booking.totalPrice);
   const nights = nonNegativeFinite(booking.numNights);

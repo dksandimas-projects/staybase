@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -30,7 +30,6 @@ import {
   dateKeyInTimeZone,
   getTimeZoneDayRange,
   shiftDateKey,
-  splitBookingRevenue,
   summarizeFolioSnapshot
 } from "../utils/finance";
 import { Modal } from "../components/Modal";
@@ -494,7 +493,7 @@ export function ReportsPage() {
     return rangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).room * fraction;
+      return sum + getBookingRevenueStreams(b).roomNet * fraction;
     }, 0);
   }, [rangeBookings, periodStart, periodEnd]);
 
@@ -507,7 +506,7 @@ export function ReportsPage() {
     return breakfastBookingsInRange.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).breakfast * fraction;
+      return sum + getBookingRevenueStreams(b).breakfastNet * fraction;
     }, 0);
   }, [breakfastBookingsInRange, periodStart, periodEnd]);
 
@@ -890,9 +889,9 @@ export function ReportsPage() {
       const checkIn = toDate(b.checkIn);
       if (!checkIn) return;
       const slot = ensureMonth(checkIn);
-      const bookingRevenue = splitBookingRevenue(b);
-      slot.room += bookingRevenue.room;
-      slot.breakfast += bookingRevenue.breakfast;
+      const bookingRevenue = getBookingRevenueStreams(b);
+      slot.room += bookingRevenue.roomNet;
+      slot.breakfast += bookingRevenue.breakfastNet;
     });
 
     deliveredStoreOrders.forEach(o => {
@@ -1738,7 +1737,7 @@ export function ReportsPage() {
     return prevRangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).room * fraction;
+      return sum + getBookingRevenueStreams(b).roomNet * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
@@ -1746,7 +1745,7 @@ export function ReportsPage() {
     return prevRangeBookings.filter(b => b.hasBreakfast).reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).breakfast * fraction;
+      return sum + getBookingRevenueStreams(b).breakfastNet * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
@@ -1801,7 +1800,7 @@ export function ReportsPage() {
         .reduce((sum, b) => {
           const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
           const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-          return sum + splitBookingRevenue(b).room * fraction;
+          return sum + getBookingRevenueStreams(b).roomNet * fraction;
         }, 0);
       return { name: rt.label, revenue };
     });
