@@ -200,3 +200,23 @@ describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
     );
   });
 });
+
+describe("MRB-14 — AdminContext hydrates `actualDateRange` from the `reservations` listener", () => {
+  it("the reservations listener maps the `actualDateRange` field onto the `Reservation` shape", () => {
+    // The hydration must defensively coerce the
+    // `earliestCheckIn` / `latestCheckOut` fields
+    // (Firestore `Timestamp` or ISO `string`) and
+    // return `null` for missing + invalid values.
+    // Pre-MRB-14 reservations (no field) fall through
+    // to the `null` branch and the admin surfaces
+    // read the children's per-child dates directly.
+    expect(adminContextSrc).toMatch(/actualDateRange: \(\(\) => \{/);
+    expect(adminContextSrc).toMatch(
+      /const earliestCheckIn = parseDateOrNull\(raw\.earliestCheckIn\)/
+    );
+    expect(adminContextSrc).toMatch(
+      /const latestCheckOut = parseDateOrNull\(raw\.latestCheckOut\)/
+    );
+    expect(adminContextSrc).toMatch(/isDivergent: Boolean\(raw\.isDivergent\)/);
+  });
+});

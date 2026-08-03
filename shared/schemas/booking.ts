@@ -213,3 +213,44 @@ export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;
 export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;
 export type WalkinRoomLineInput = z.infer<typeof WalkinRoomLineSchema>;
 
+// Per MRB-14 (2026-08-03, per decision #180 — proposed):
+// the add-room surface. Staff adds a room to an existing
+// pre-arrival reservation using the header's current
+// dates — the dates are NEVER in the body (the server
+// reads them from the header). The schema is `strict()`
+// (matches the create + walkin + reschedule posture).
+// The room occupancy mirrors the per-line shape the
+// walkin handler uses; the discount / voucher fields
+// apply to the new child only (the header's existing
+// discount / voucher stay untouched per the
+// "per-child voucher + per-reservation corporate" rule
+// from MRB-08). The optional `totalPriceOverride` is
+// the same walkin escape hatch (manual pricing for
+// staff-set walkin totals); the server still asserts
+// the MRB-11 invariant via the same `assertBookingRevenueAllocationInvariant`
+// write-boundary guard.
+export const AddRoomBookingSchema = z
+  .object({
+    reservationId: z.string().trim().regex(RESERVATION_ID_REGEX),
+    roomId: z.string().trim().min(1).max(64),
+    numAdults: z.coerce.number().int().min(1).max(100),
+    numChildren: z.coerce.number().int().min(0).max(100).optional().default(0),
+    extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
+    discountType: z.enum(["", "senior", "pwd"]).optional().default(""),
+    voucherCode: z.string().trim().max(40).optional().default(""),
+    // The optional `totalPriceOverride` matches the walkin
+    // surface; absent → server-computed.
+    totalPriceOverride: z.coerce.number().finite().min(0).max(1_000_000).optional(),
+    // The optional `requestFingerprint` lets a future
+    // client preallocate the idempotency key for a
+    // retry-after-uncertain-response. The current staff
+    // modal doesn't preallocate — the server auto-mints
+    // `add-room-${reservationId}-${roomId}-${now}` and
+    // writes it onto the header (the same pattern the
+    // reschedule handler uses for `rescheduleFingerprint`).
+    requestFingerprint: z.string().trim().min(1).max(256).optional()
+  })
+  .strict();
+
+export type AddRoomBookingInput = z.infer<typeof AddRoomBookingSchema>;
+

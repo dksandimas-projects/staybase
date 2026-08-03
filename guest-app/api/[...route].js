@@ -221478,7 +221478,7 @@ var init_references = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, AddRoomBookingSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     init_zod();
@@ -221627,6 +221627,26 @@ var init_booking = __esm({
       // explicitly provided — a defensive path for a
       // future migration tool).
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+    }).strict();
+    AddRoomBookingSchema = external_exports.object({
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX),
+      roomId: external_exports.string().trim().min(1).max(64),
+      numAdults: external_exports.coerce.number().int().min(1).max(100),
+      numChildren: external_exports.coerce.number().int().min(0).max(100).optional().default(0),
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
+      discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
+      voucherCode: external_exports.string().trim().max(40).optional().default(""),
+      // The optional `totalPriceOverride` matches the walkin
+      // surface; absent → server-computed.
+      totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
+      // The optional `requestFingerprint` lets a future
+      // client preallocate the idempotency key for a
+      // retry-after-uncertain-response. The current staff
+      // modal doesn't preallocate — the server auto-mints
+      // `add-room-${reservationId}-${roomId}-${now}` and
+      // writes it onto the header (the same pattern the
+      // reschedule handler uses for `rescheduleFingerprint`).
+      requestFingerprint: external_exports.string().trim().min(1).max(256).optional()
     }).strict();
   }
 });
@@ -222183,6 +222203,26 @@ function computeBookingRevenueAllocation(input) {
     { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
     totalNet
   );
+}
+function computeReservationActualDateRange(headerCheckIn, headerCheckOut, children) {
+  if (children.length === 0) return null;
+  const headerIn = new Date(headerCheckIn).getTime();
+  const headerOut = new Date(headerCheckOut).getTime();
+  if (!Number.isFinite(headerIn) || !Number.isFinite(headerOut)) return null;
+  let earliest = new Date(headerIn);
+  let latest = new Date(headerOut);
+  let isDivergent = false;
+  for (const child of children) {
+    const childIn = new Date(child.checkIn).getTime();
+    const childOut = new Date(child.checkOut).getTime();
+    if (!Number.isFinite(childIn) || !Number.isFinite(childOut)) continue;
+    if (childIn < earliest.getTime()) earliest = new Date(childIn);
+    if (childOut > latest.getTime()) latest = new Date(childOut);
+    if (childIn !== headerIn || childOut !== headerOut) {
+      isDivergent = true;
+    }
+  }
+  return { earliestCheckIn: earliest, latestCheckOut: latest, isDivergent };
 }
 var init_bookingFolio = __esm({
   "../shared/utils/bookingFolio.ts"() {
@@ -223644,6 +223684,7 @@ var shared_exports = {};
 __export(shared_exports, {
   ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
   AboutContentSchema: () => AboutContentSchema,
+  AddRoomBookingSchema: () => AddRoomBookingSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
   BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
   BOOKING_SOURCES: () => BOOKING_SOURCES,
@@ -223736,6 +223777,7 @@ __export(shared_exports, {
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeRequestFingerprint: () => computeRequestFingerprint,
+  computeReservationActualDateRange: () => computeReservationActualDateRange,
   computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
   computeServerFolioTotals: () => computeServerFolioTotals,
   countExtraBedsInUse: () => countExtraBedsInUse,
@@ -228621,6 +228663,19 @@ async function handleCreateBooking(req, res) {
         checkedOutRoomCount: 0,
         holdExpiresAt: newBooking.holdExpiresAt ? newBooking.holdExpiresAt : null,
         requestFingerprint: reservationRequestFingerprint,
+        // Per MRB-14 (2026-08-03, per decision #180 —
+        // proposed): the actual range snapshot. At create
+        // time every child shares the header's dates, so
+        // `isDivergent` is `false` by construction. The
+        // helper is overkill here; the reschedule +
+        // add-room paths use it. Pre-MRB-14 reservations
+        // keep `actualDateRange: null` and fall back to
+        // reading the children's per-child dates directly.
+        actualDateRange: {
+          earliestCheckIn: checkInDate,
+          latestCheckOut: checkOutDate,
+          isDivergent: false
+        },
         createdAt: now,
         updatedAt: now,
         createdBy: "guest"
@@ -229722,6 +229777,18 @@ async function handleCreateWalkin(req, res) {
         // idempotency check above used, so a replay of an N-room
         // walk-in compares like for like.
         requestFingerprint: buildWalkinFingerprint(guestName2),
+        // Per MRB-14 (2026-08-03, per decision #180 —
+        // proposed): the actual range snapshot. Walk-ins
+        // create all N children in the same transaction
+        // with the same dates, so `isDivergent` is
+        // `false` by construction. The reschedule +
+        // add-room paths use `computeReservationActualDateRange`
+        // to recompute on every child mutation.
+        actualDateRange: {
+          earliestCheckIn: checkInDate,
+          latestCheckOut: checkOutDate,
+          isDivergent: false
+        },
         createdAt: now,
         updatedAt: now,
         createdBy: "staff"
@@ -232647,6 +232714,26 @@ async function handleRescheduleBooking(req, res) {
       }
       transaction.update(bookingRef, updatedBooking);
       if (reservationDocRef && existingReservationData2) {
+        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
+        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
+        const rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
+          const childData = docSnap.data();
+          if (docSnap.id === String(bookingId)) {
+            return {
+              checkIn: checkInDate,
+              checkOut: checkOutDate
+            };
+          }
+          return {
+            checkIn: childData.checkIn,
+            checkOut: childData.checkOut
+          };
+        });
+        const rescheduleActualDateRange = computeReservationActualDateRange(
+          existingReservationData2.checkIn,
+          existingReservationData2.checkOut,
+          rescheduleChildrenDates
+        );
         const rescheduleFingerprint = computeRequestFingerprint({
           reservationId: bookingReservationId2,
           roomLines: [{
@@ -232672,9 +232759,31 @@ async function handleRescheduleBooking(req, res) {
           privacyVersion: String(existingReservationData2.privacyVersion || DEFAULT_TERMS_VERSION)
         });
         transaction.update(reservationDocRef, {
-          checkIn: Timestamp.fromDate(checkInDate),
-          checkOut: Timestamp.fromDate(checkOutDate),
-          numNights,
+          // Per MRB-14 (2026-08-03, per decision #180
+          // — proposed): the header's `checkIn` /
+          // `checkOut` / `numNights` are the ORIGINAL
+          // shared-dates snapshot from create time
+          // and are now IMMUTABLE. A reschedule of
+          // one child no longer mutates the header's
+          // "shared" range — every other surface
+          // (email subject, receipt PDF, dashboard
+          // date filter, checkin reminder cron)
+          // reads the header's original dates, not
+          // the rescheduled child's new dates. The
+          // child's new dates are its own
+          // `bookings/{id}.checkIn` / `checkOut` /
+          // `numNights`. The header's
+          // `actualDateRange` (denormalized) tracks
+          // the per-child spread + an `isDivergent`
+          // flag for the UI + email surface to switch
+          // between "one shared range" and "per-child
+          // dates" without re-fetching the children.
+          // (Removed lines: `checkIn`,
+          // `checkOut`, `numNights` — pre-MRB-14 the
+          // reschedule updated them to the new
+          // child's dates, which silently leaked the
+          // rescheduled child's range into every
+          // other surface's "shared" view.)
           // The reservation-level totals track the
           // child booking's `totalPrice` for the
           // single-room case (the reschedule
@@ -232708,6 +232817,20 @@ async function handleRescheduleBooking(req, res) {
           // different fingerprint is the natural
           // reschedule flow, not a conflict.
           requestFingerprint: rescheduleFingerprint,
+          // Per MRB-14 (2026-08-03, per decision #180
+          // — proposed): the recomputed
+          // `actualDateRange`. Built by the helper
+          // above from every child's post-write
+          // dates. `isDivergent: true` ⇔ the
+          // just-rescheduled child (or any other
+          // child) now has dates that differ from
+          // the header's original. The admin surface
+          // + email switch to per-child dates when
+          // this flag flips. Null when the helper
+          // returned null (no children, which is a
+          // never-true invariant — the transaction
+          // never lands with 0 children).
+          actualDateRange: rescheduleActualDateRange,
           updatedAt: now
         });
       }

@@ -1576,7 +1576,28 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             updatedAt: parseDateOrEpoch(data.updatedAt),
             createdBy: data.createdBy || "guest",
             cancellationLiability: data.cancellationLiability ?? null,
-            aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null
+            aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
+            // Per MRB-14 (2026-08-03, per decision #180
+            // — proposed): the `actualDateRange` field.
+            // Pre-MRB-14 reservations have no field
+            // (`undefined` falls through to the legacy
+            // per-child read in the UI + email).
+            // Post-MRB-14 reservations always carry
+            // the field. The admin surfaces + email
+            // switch to per-child dates when
+            // `isDivergent: true`.
+            actualDateRange: (() => {
+              const raw = (data as any).actualDateRange;
+              if (!raw || typeof raw !== "object") return null;
+              const earliestCheckIn = parseDateOrNull(raw.earliestCheckIn);
+              const latestCheckOut = parseDateOrNull(raw.latestCheckOut);
+              if (!earliestCheckIn || !latestCheckOut) return null;
+              return {
+                earliestCheckIn,
+                latestCheckOut,
+                isDivergent: Boolean(raw.isDivergent)
+              };
+            })()
           } satisfies Reservation;
         });
         setReservations(list);
