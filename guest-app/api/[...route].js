@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.240.0";
+    VERSION2 = "0.241.0";
   }
 });
 
@@ -228564,6 +228564,40 @@ async function handleCreateBooking(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal,
         totalPrice,
+        // Per MRB-11 (2026-08-03, per decision #177):
+        // the aggregate of every child booking's
+        // `revenueAllocation`. Reports reads this for
+        // fast reservation-level revenue stream totals.
+        // The invariant
+        // `aggregateRoomNet + aggregateBreakfastNet + aggregateAddOnNet - aggregateDeductionNet === aggregateTotalNet`
+        // holds by construction (the aggregate is the
+        // sum of children, each of which already passes
+        // the invariant). The totalPrice match is exact.
+        aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
+          {
+            roomNet: childPricing2.reduce(
+              (sum, pricing) => sum + (Number(pricing.roomTotal) || 0),
+              0
+            ),
+            breakfastNet: childPricing2.reduce(
+              (sum, pricing) => sum + (Number(pricing.breakfastTotal) || 0),
+              0
+            ),
+            addOnNet: childPricing2.reduce(
+              (sum, pricing) => sum + (Number(pricing.extraBedTotal) || 0),
+              0
+            ),
+            deductionNet: allocatedDeductions.reduce(
+              (sum, deduction) => sum + deduction.amounts.reduce(
+                (deductionSum, amount) => deductionSum + (Number(amount) || 0),
+                0
+              ),
+              0
+            ),
+            totalNet: totalPrice
+          },
+          totalPrice
+        ),
         source: corporateDetails2.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails2.isCorporate,
         corporateCode: corporateDetails2.corporateCode,
@@ -228634,6 +228668,33 @@ async function handleCreateBooking(req, res) {
             breakfastIncludesChildren: pricingForRoom.finalHasBreakfast ? pricingForRoom.breakfastIncludesChildren : false,
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
+            // Per MRB-11 (2026-08-03, per decision #177):
+            // the per-child revenue allocation snapshot.
+            // The per-stream values are the GROSS amounts
+            // (room rate × nights, breakfast rate × guests ×
+            // nights, extra-bed subtotal); `deductionNet` is
+            // the sum of the allocated per-deduction amounts
+            // for this child. `totalNet` is the allocated
+            // child total. The invariant
+            // `roomNet + breakfastNet + addOnNet - deductionNet === totalNet`
+            // holds by construction (the allocations are
+            // derived from the same `calculateDiscountChain`
+            // call that produced the aggregate). The assert
+            // below catches any rounding drift that would
+            // surface to Reports.
+            revenueAllocation: assertBookingRevenueAllocationInvariant(
+              {
+                roomNet: pricingForRoom.roomTotal,
+                breakfastNet: pricingForRoom.breakfastTotal,
+                addOnNet: pricingForRoom.extraBedTotal,
+                deductionNet: allocatedDeductions.reduce(
+                  (sum, deduction) => sum + (Number(deduction.amounts[bookingIdx]) || 0),
+                  0
+                ),
+                totalNet: pricingForRoom.totalPrice
+              },
+              pricingForRoom.totalPrice
+            ),
             reservationPosition: bookingIdx + 1,
             reservationRoomCount: assignedRooms.length,
             // Per-booking lookup token. The
@@ -229398,12 +229459,29 @@ async function handleCreateWalkin(req, res) {
           scope: snapshottedDiscountScope,
           round: true
         };
-        const lineTotal = calculateDiscountChain(lineChainInput).total;
+        const lineChainResult = calculateDiscountChain(lineChainInput);
+        const lineTotal = lineChainResult.total;
         return {
           ...line,
           pricingSubtotal: linePricingSubtotal,
           voucherDiscount: lineVoucherDiscount,
           totalPrice: lineTotal,
+          // Per MRB-11 (2026-08-03, per decision #177):
+          // the per-line revenue allocation. Walk-in has
+          // no member step (`memberPct: 0`), so the
+          // deduction sum is `seniorDeduction + voucherDeduction`.
+          // The per-stream values are GROSS (pre-deduction);
+          // the invariant holds by construction.
+          revenueAllocation: assertBookingRevenueAllocationInvariant(
+            {
+              roomNet: hasManualOverride ? linePricingSubtotal : line.roomTotal,
+              breakfastNet: hasManualOverride ? 0 : line.breakfastTotal,
+              addOnNet: hasManualOverride ? 0 : line.extraBedTotal,
+              deductionNet: lineChainResult.seniorDeduction + lineChainResult.voucherDeduction,
+              totalNet: lineTotal
+            },
+            lineTotal
+          ),
           rateBreakdown: buildRateBreakdown({
             roomLines: hasManualOverride ? [{
               source: "manual",
@@ -229569,6 +229647,36 @@ async function handleCreateWalkin(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal: pricingSubtotal,
         totalPrice: finalTotalPrice,
+        // Per MRB-11 (2026-08-03, per decision #177):
+        // the aggregate revenue allocation (sum of
+        // the N per-line allocations). Reports reads
+        // this for fast reservation-level revenue
+        // stream totals; the invariant
+        // `aggregateRoomNet + aggregateBreakfastNet + aggregateAddOnNet - aggregateDeductionNet === aggregateTotalNet`
+        // holds by construction (each line already
+        // passed the invariant at the per-line map).
+        aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
+          {
+            roomNet: walkinRoomStayFinancials.reduce(
+              (sum, line) => sum + (Number(line.revenueAllocation?.roomNet) || 0),
+              0
+            ),
+            breakfastNet: walkinRoomStayFinancials.reduce(
+              (sum, line) => sum + (Number(line.revenueAllocation?.breakfastNet) || 0),
+              0
+            ),
+            addOnNet: walkinRoomStayFinancials.reduce(
+              (sum, line) => sum + (Number(line.revenueAllocation?.addOnNet) || 0),
+              0
+            ),
+            deductionNet: walkinRoomStayFinancials.reduce(
+              (sum, line) => sum + (Number(line.revenueAllocation?.deductionNet) || 0),
+              0
+            ),
+            totalNet: finalTotalPrice
+          },
+          finalTotalPrice
+        ),
         source: "walk-in",
         isCorporate: false,
         corporateCode: "",
@@ -229649,6 +229757,13 @@ async function handleCreateWalkin(req, res) {
           totalPrice: lineFinancials.totalPrice,
           originalTotalPrice: lineFinancials.pricingSubtotal,
           rateBreakdown: lineFinancials.rateBreakdown,
+          // Per MRB-11 (2026-08-03, per decision #177):
+          // the per-line revenue allocation. Computed
+          // above in the `walkinRoomStayFinancials` map;
+          // the invariant `room + breakfast + addOn - deduction === total`
+          // was already asserted when the value was
+          // built, so the write here is straight-through.
+          revenueAllocation: lineFinancials.revenueAllocation,
           reservationPosition: lineIdx + 1,
           reservationRoomCount: walkinRoomCount,
           // Each room stay gets its own lookup token so its magic link
@@ -232493,6 +232608,30 @@ async function handleRescheduleBooking(req, res) {
         rateBreakdown,
         originalTotalPrice,
         voucherDiscount,
+        // Per MRB-11 (2026-08-03, per decision #177):
+        // the rescheduled revenue allocation. The
+        // per-stream values are the GROSS amounts for
+        // the new dates; `deductionNet` includes the
+        // chain's senior + voucher + member deductions
+        // AND the snapshotted `pointsRedeemedValue`
+        // (a separate deduction layer the chain does
+        // not see — see `finalTotalPrice = totalPrice
+        // - pointsRedeemedValue`). The invariant
+        // `room + breakfast + addOn - deduction === finalTotalPrice`
+        // holds by construction. Reschedule is the
+        // only path that re-snapshots a `revenueAllocation`
+        // because the dates (and therefore the gross
+        // amounts) have changed.
+        revenueAllocation: assertBookingRevenueAllocationInvariant(
+          {
+            roomNet: roomTotal,
+            breakfastNet: breakfastTotal,
+            addOnNet: extraBedTotal,
+            deductionNet: rescheduleChain.seniorDeduction + rescheduleChain.voucherDeduction + rescheduleChain.memberDeduction + (Number(booking.pointsRedeemedValue) || 0),
+            totalNet: finalTotalPrice
+          },
+          finalTotalPrice
+        ),
         rescheduleHistory: [...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [], rescheduleEntry],
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -232547,6 +232686,20 @@ async function handleRescheduleBooking(req, res) {
           totalPrice: finalTotalPrice,
           subtotal: originalTotalPrice,
           originalSubtotal: originalTotalPrice,
+          // Per MRB-11 (2026-08-03, per decision #177):
+          // the reschedule's per-stream aggregate. For
+          // the single-room reschedule (the current
+          // scope of the handler — the reschedule
+          // path is per-child, not per-reservation),
+          // the aggregate equals the per-child
+          // allocation. The N>1 case is a pre-existing
+          // limitation: the aggregate (and the
+          // reservation `totalPrice`) is stale for a
+          // multi-child reschedule; Reports falls
+          // back to summing children via
+          // `getReservationRevenueStreams(reservation, children)`,
+          // which is always correct.
+          aggregateRevenueAllocation: updatedBooking.revenueAllocation,
           // The fingerprint is INTENTIONALLY allowed
           // to change on reschedule — the reschedule
           // IS the legitimate request to change the
