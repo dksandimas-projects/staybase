@@ -950,29 +950,35 @@ describe("/api/bookings/create", () => {
     });
 
     test("returns 'Room no longer available' when every room of the type is booked", async () => {
+      const { todayStr } = getManilaDateInfo();
+      const targetCheckIn = offsetDateKey(todayStr, 10);
+      const targetCheckOut = offsetDateKey(todayStr, 12);
+      const blockStart = offsetDateKey(todayStr, 8);
+      const blockEnd = offsetDateKey(todayStr, 14);
+
       // Block every room of standard-double with overlapping bookings.
       mockBookings.push({
         id: "occupy_101",
         bookingId: "occupy_101",
         roomId: "room_101",
         status: "confirmed",
-        checkIn: { toDate: () => new Date("2026-08-01T00:00:00Z") },
-        checkOut: { toDate: () => new Date("2026-08-05T00:00:00Z") }
+        checkIn: { toDate: () => new Date(`${blockStart}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${blockEnd}T00:00:00Z`) }
       });
       mockBookings.push({
         id: "occupy_102",
         bookingId: "occupy_102",
         roomId: "room_102",
         status: "confirmed",
-        checkIn: { toDate: () => new Date("2026-08-01T00:00:00Z") },
-        checkOut: { toDate: () => new Date("2026-08-05T00:00:00Z") }
+        checkIn: { toDate: () => new Date(`${blockStart}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${blockEnd}T00:00:00Z`) }
       });
 
       const body = {
         bookingId: "bookingNoRoom1",
         roomType: "standard-double",
-        checkIn: "2026-08-02",
-        checkOut: "2026-08-04",
+        checkIn: targetCheckIn,
+        checkOut: targetCheckOut,
         guests: 2,
         hasBreakfast: false,
         guestDetails: {
