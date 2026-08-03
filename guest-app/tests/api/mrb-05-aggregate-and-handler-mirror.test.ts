@@ -125,15 +125,22 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       expect(handlers).toMatch(/computeReservationAggregatePaymentStatus\(/);
     });
 
-    it("derives the mirror value from `checked-in` (the only possible new status for this handler)", () => {
-      // The readiness + room gates guarantee the
-      // booking transitioned to `checked-in`. The
-      // mirror value is
-      // `computeReservationAggregatePaymentStatus(["checked-in"])`
-      // = `"in-house"` (tier 5 catch-all for the
-      // single-room case).
+    it("derives the mirror value from the actual children statuses (read in the same transaction)", () => {
+      // Per MRB-15-03 (2026-08-03): the check-in
+      // handler now reads all children of the
+      // reservation in the same runTransaction and
+      // passes their statuses (not a hardcoded
+      // `["checked-in"]`) to the aggregate helper.
+      // The pre-MRB-15-03 hardcoded array was
+      // correct for the N=1 case but wrong for the
+      // N>1 case: a 2-room reservation where 1 room
+      // is checked-in and 1 is still pending would
+      // report `"in-house"` (the aggregate of
+      // `["checked-in"]`) when the correct answer
+      // is `"payment-confirmed"` (the aggregate of
+      // `["checked-in", "payment-confirmed"]`).
       expect(handlers).toMatch(
-        /paymentStatus: computeReservationAggregatePaymentStatus\(\["checked-in"\]\)/
+        /paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
       );
     });
 
@@ -142,10 +149,11 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       // the same transaction: the booking
       // (`status: "checked-in"`), the room
       // (`status: "occupied"`), and now the
-      // reservation header (the mirror). All 3
+      // reservation header (the mirror + the
+      // recomputed `checkedInRoomCount`). All 3
       // share the same `now`.
       expect(handlers).toMatch(
-        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: computeReservationAggregatePaymentStatus\(\["checked-in"\]\)/
+        /transaction\.update\(reservationRef, \{[\s\S]{0,400}?paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
       );
     });
 
@@ -161,15 +169,21 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       expect(handlers).toMatch(/computeReservationAggregatePaymentStatus\(/);
     });
 
-    it("derives the mirror value from `checked-out` (the only possible new status for this handler)", () => {
-      // The pre-transaction check guarantees the
-      // prior status was `checked-in`, and the new
-      // status is always `checked-out`. The mirror
-      // value is
-      // `computeReservationAggregatePaymentStatus(["checked-out"])`
-      // = `"completed"` (tier 4, any-checked-out).
+    it("derives the mirror value from the actual children statuses (read in the same transaction)", () => {
+      // Per MRB-15-03 (2026-08-03): same as the
+      // check-in handler — the checkout handler
+      // reads all children in the same
+      // runTransaction and passes their statuses
+      // (not a hardcoded `["checked-out"]`) to the
+      // aggregate helper. The pre-MRB-15-03
+      // hardcoded array was wrong for the N>1 case
+      // (a 2-room reservation where 1 is checked-out
+      // and 1 is still checked-in would report
+      // `"completed"` when the correct answer is
+      // `"in-house"` — the aggregate of
+      // `["checked-out", "checked-in"]`).
       expect(handlers).toMatch(
-        /paymentStatus: computeReservationAggregatePaymentStatus\(\["checked-out"\]\)/
+        /paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
       );
     });
 
@@ -179,10 +193,12 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       // (status flip + UCO stamps + loyalty stamps),
       // the room (`status: "available"`), the
       // intercom thread (`resolved: true`), and
-      // now the reservation header (the mirror).
-      // All 4 share the same `now`.
+      // now the reservation header (the mirror +
+      // the recomputed `checkedInRoomCount` +
+      // `checkedOutRoomCount`). All 4 share the
+      // same `now`.
       expect(handlers).toMatch(
-        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: computeReservationAggregatePaymentStatus\(\["checked-out"\]\)/
+        /transaction\.update\(reservationRef, \{[\s\S]{0,400}?paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
       );
     });
 
