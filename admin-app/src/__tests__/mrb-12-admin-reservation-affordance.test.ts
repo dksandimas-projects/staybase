@@ -106,3 +106,97 @@ describe("MRB-12-01 — Bookings table reservation row reads the header, not the
     expect(useMemoDeps[0]).toMatch(/reservationPaidAmount/);
   });
 });
+
+describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
+  it("`BookingListRow` carries `listReservationHeader` + `listReservationPaidAmount` so the Status column can read the aggregate without a second lookup", () => {
+    // The row builder attaches the header so MRB-12-02's
+    // `renderReservationPaymentStatusPill` reads from the row,
+    // not a separate `useMemo` keyed on the row's id.
+    expect(bookingsPageSrc).toMatch(/listReservationHeader\?: Reservation;/);
+    expect(bookingsPageSrc).toMatch(/listReservationPaidAmount\?: number;/);
+    // The row builder populates both fields. Slice the
+    // reservation-row push block and assert both keys land
+    // there.
+    const rowBuilder = bookingsPageSrc.match(
+      /rows\.push\(\{[\s\S]*?id: `reservation_\$\{reservationId\}`[\s\S]*?\}\);/
+    );
+    expect(rowBuilder, "expected the reservation row's `rows.push` block").toBeTruthy();
+    if (!rowBuilder) return;
+    expect(rowBuilder[0]).toMatch(/listReservationHeader: reservationHeader/);
+    expect(rowBuilder[0]).toMatch(/listReservationPaidAmount: paidAmount/);
+  });
+
+  it("MRB-12-02: the reservation row's Status column renders the aggregate `paymentStatus` pill (not the legacy `Mixed` chip)", () => {
+    // The new pill helper maps each `ReservationPaymentStatus`
+    // value to a tone + label and surfaces the outstanding
+    // amount when the group is not settled.
+    expect(bookingsPageSrc).toMatch(/renderReservationPaymentStatusPill/);
+    expect(bookingsPageSrc).toMatch(/"Awaiting"/);
+    expect(bookingsPageSrc).toMatch(/"Verified"/);
+    expect(bookingsPageSrc).toMatch(/"Confirmed"/);
+    expect(bookingsPageSrc).toMatch(/"Cancelled"/);
+    // The pill is rendered when the header is present; the
+    // legacy "Mixed" chip is the cold-start fallback only.
+    expect(bookingsPageSrc).toMatch(/renderReservationPaymentStatusPill\(\s*row\.listReservationHeader\.paymentStatus/);
+  });
+
+  it("MRB-12-02: the reservation row renders a `X cancelled` chip when `cancelledRoomCount > 0`", () => {
+    expect(bookingsPageSrc).toMatch(/row\.listReservationHeader\.cancelledRoomCount > 0/);
+    expect(bookingsPageSrc).toMatch(/cancelledRoomCount\} cancelled/);
+    // The chip's tooltip lists the cancelled room numbers.
+    expect(bookingsPageSrc).toMatch(/Cancelled rooms in this reservation/);
+    expect(bookingsPageSrc).toMatch(/Room \$\{child\.roomNumber\}/);
+  });
+
+  it("MRB-12-03: the drawer reservation strip shows the reservation-scope Total / Paid / Balance pills", () => {
+    // The pills are inside `selectedReservationContext` and
+    // read from the `Reservation` header + the
+    // reservation-scope paid-amount aggregate.
+    expect(bookingsPageSrc).toMatch(/data-testid="reservation-strip-money"/);
+    expect(bookingsPageSrc).toMatch(/aria-label="Reservation money"/);
+    // The Total pill reads `reservationHeader.totalPrice`; the
+    // Paid pill reads the `reservationPaidAmount` aggregate; the
+    // Balance pill is `Math.max(0, total - paid)`.
+    expect(bookingsPageSrc).toMatch(/reservationHeader\s*\?\s*reservationHeader\.totalPrice/);
+    expect(bookingsPageSrc).toMatch(/reservationBalance = Math\.max\(0, reservationTotal - reservationPaid\)/);
+  });
+
+  it("MRB-12-04: the `Apply discount` action carries the `renderActionScope(\"room\")` chip", () => {
+    // The discount action is per-room by default; the chip is
+    // informational so the desk sees the scope before opening
+    // the modal. Slice the button block so a comment between
+    // the label and the chip expression does not break the
+    // assertion.
+    const applyDiscountButton = bookingsPageSrc.match(
+      /setShowDiscountForm\(true\); \}\}[\s\S]*?Apply discount[\s\S]*?\{renderActionScope\("room"\)\}/
+    );
+    expect(applyDiscountButton, "Apply discount must carry the scope chip").toBeTruthy();
+  });
+
+  it("MRB-12-05: the discount form has a `This room` / `All N rooms` segmented control mirroring the MRB-13 cancel-modal", () => {
+    // The state + the selector markup.
+    expect(bookingsPageSrc).toMatch(
+      /const \[staffDiscountScope, setStaffDiscountScope\] = useState<"room" \| "reservation" \| null>\(null\)/
+    );
+    expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-selector"/);
+    expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-room"/);
+    expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-reservation"/);
+    // The submit loop calls `apply-discount` for every room
+    // when the scope is "reservation".
+    expect(bookingsPageSrc).toMatch(
+      /scope === "reservation" && selectedReservationContext\s*\?\s*selectedReservationContext\.rooms\.map\(\(room\) => room\.id\)\s*:\s*\[selectedBooking\.id\]/
+    );
+    // The "all rooms" submit button label + toast surface the
+    // reservation scope so the desk sees what was applied.
+    expect(bookingsPageSrc).toMatch(/Apply to all \$\{selectedReservationContext\.roomCount\} rooms/);
+    expect(bookingsPageSrc).toMatch(/Reservation repriced \(\$\{targetIds\.length\} rooms\)/);
+  });
+
+  it("MRB-12-05: the discount form's scope state resets to `null` on close (mirroring the MRB-13 cancel-modal reset)", () => {
+    // The `onClose` handler resets the scope so a previous
+    // session's choice never bleeds into a new one.
+    expect(bookingsPageSrc).toMatch(
+      /setShowDiscountForm\(false\);\s*\/\/ Per MRB-12[\s\S]*?setStaffDiscountScope\(null\);/
+    );
+  });
+});
