@@ -375,3 +375,16 @@ See `plan/features/STATIC-PAGES.md §Terms of Service` for UI implementation.
 - Privacy Policy page: `plan/features/STATIC-PAGES.md §Privacy Policy`
 - Booking consent checkbox: `plan/features/BOOKING-FLOW.md §Step 2`
 - PII gotchas: `plan/docs/GOTCHAS.md §Security`
+
+---
+
+## Legacy `kind: "single"` Lookup Branch (MRB-15-04, MRB-15-08)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-04 + MRB-15-08 sub-items, shipped v0.251.0 + v0.255.0). The guest lookup endpoint `/api/bookings/lookup` returns `kind: "single"` for two distinct cases that share the same privacy posture: (a) N=1 reservations (a multi-room reservation of size 1 falls through to the per-child view — byte-equivalent to a single booking); (b) legacy pre-MRB-01 bookings (no `reservationId` — the historical single-booking path).
+
+### Why the fall-through is privacy-positive
+
+The reservation-scope branch (`kind: "reservation"`) is gated on BOTH conditions: `lookedUpReservationId.length > 0` (the booking has a header) AND `children.length > 1` (the reservation has more than one room). When either condition fails, the response falls through to `kind: "single"`, which carries only the per-child fields the pre-MRB-09 single-booking page already renders. A guest looking up a pre-MRB-01 booking never sees a `kind: "reservation"` shape — they see the exact same shape they saw pre-MRB-01 (byte-equivalent). The privacy posture is unchanged: no `guestName` reflected, `maskedEmail` instead of `guestEmail`, "Booking not found." for every zero-match case.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-04-single-room-header-path.test.ts` (16 tests) + `mrb-15-08-legacy-fallback.test.ts` (19 tests) — 35 source-text tests pin the N=1 + legacy fall-through + the privacy posture on the lookup endpoint.

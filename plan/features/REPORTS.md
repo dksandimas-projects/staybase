@@ -485,3 +485,29 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 - jsPDF usage: `plan/features/EMAIL-PDF-STORAGE.md`
 - Recharts: already in stack — `plan/docs/DECISIONS-ARCH.md`
 - Status values for revenue queries: `plan/docs/TYPES.md §BookingStatus`
+
+---
+
+## Aggregate `paymentStatus` Derivation (MRB-15-03, MRB-15-08)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03 + MRB-15-08 sub-items, shipped v0.250.0 + v0.255.0). The `paymentStatus` field on `reservations/{id}` is now derived from the actual child statuses (not a hardcoded literal). Reports queries that aggregate by `paymentStatus` now use the correct aggregate for N>1 mixed states.
+
+### Pre-MRB-15-03 bug (the driving fix)
+
+`handleCheckinBooking` + `handleCheckoutBooking` updated the booking's own `status` but never recomputed the header's `paymentStatus` — the field was a hardcoded `["checked-in"]` / `["checked-out"]` array literal. For N=1, the literal happened to match the single child's status. For N>1, the literal was wrong: a 2-room reservation that fully checked in showed `paymentStatus: "checked-in"` on the header even though only one child had checked in (the other was still `confirmed`).
+
+### Post-MRB-15-03 contract
+
+The header's `paymentStatus` is now `computeReservationAggregatePaymentStatus(postStatuses)` where `postStatuses` is the array of child statuses read in the same `runTransaction` as the status flip. The aggregate now correctly reflects N>1 mixed states:
+
+| Child statuses | Aggregate `paymentStatus` |
+|---|---|
+| All `confirmed` | `pending` |
+| All `payment-confirmed` | `partial` |
+| Some `checked-in`, some `confirmed` | `partial` |
+| All `checked-in` | `checked-in` |
+| All `checked-out` | `checked-out` |
+| Any `cancelled` (full cancel) | `cancelled` |
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-03-transactional-counters.test.ts` (13 tests) — pins the aggregate `paymentStatus` derivation for N>1 mixed states.

@@ -96,3 +96,26 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 - Firestore transaction pattern: `plan/docs/GOTCHAS.md §Firebase`
 - Booking flow (guest): `plan/features/BOOKING-FLOW.md`
 - Walk-in booking creation: `plan/features/BOOKINGS-MANAGEMENT.md`
+
+---
+
+## PEX (Hold-Expires) Fan-out (MRB-15-06)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-06 sub-item, shipped v0.253.0). The `holdExpiresAt` field is shared across the reservation header + every child for new reservations (a pre-arrival reservation has a unified hold per PEX-01). The MRB-15-06 audit pins the fan-out contract so every `holdExpiresAt`-touching path follows the same pattern.
+
+### `computeHoldExpiresAt` — the single stamping helper
+
+`computeHoldExpiresAt(now, settings)` is the single helper that derives a `holdExpiresAt` timestamp from `now` + the settings (`holdMinutes` from `admin_settings`). Every `holdExpiresAt` write funnels through this helper; no inline `new Date(now.getTime() + ms)` calculations.
+
+### Fan-out contract (which handler may write `holdExpiresAt` to which doc)
+
+| Path | Stamp | Source | Notes |
+|---|---|---|---|
+| `handleCreateBooking` | Fresh | `computeHoldExpiresAt(now, settings)` | The guest booking flow stamps a fresh hold. |
+| `handleCreateWalkin` | `null` | Walkin | No hold for walkins (the desk has the keys). |
+| `handleAddRoomToReservation` | Inherit | `reservation.holdExpiresAt ?? null` | The new child inherits the header's hold (a pre-arrival reservation has a unified hold). |
+| `handleRescheduleBooking` | Preserve | Firestore field-level merge | The reschedule does not touch `holdExpiresAt` — the field-level merge preserves the existing value. |
+| `handleRejectPaymentProof` | Fresh | `computeHoldExpiresAt(now, settings)` | A rejected payment proof triggers a fresh hold (the staff rejection restarts the hold clock). |
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-06-pex-fan-out.test.ts` (15 tests) — pins the fan-out contract for every `holdExpiresAt`-touching path (PEX-01..06).

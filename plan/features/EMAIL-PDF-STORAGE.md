@@ -298,3 +298,25 @@ Used for: room photos, payment proof screenshots, QR notification sounds, websit
 ## Extra Bed (EXB-08)
 
 Receipts and booking emails render the stored adult/child split when present and retain the legacy total-only fallback. When `extraBedCount > 0`, both show the extra-bed quantity and the independently stored add-on amount; no extra-bed line appears for zero or absent counts. The authoritative add-on entry comes from the server-built `rateBreakdown.addOns[]`; display surfaces do not recompute pricing.
+
+---
+
+## Canonical Copy (MRB-15-05)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-05 sub-item, shipped v0.252.0). The audit pins the canonical copy across every email template, PDF receipt, and status badge so a future template addition cannot silently drift from the established contract.
+
+### Canonical copy contract
+
+- **British spelling "Cancelled"** (not American "Canceled"). Every email subject, body, and PDF receipt uses the British spelling. The pre-MRB-15 codebase was already consistent; the audit pins the contract.
+- **Title-case StatusBadge labels**: `Pending`, `Confirmed`, `Checked In`, `Checked Out`, `Cancelled`, `No Show`. Status badges do NOT use sentence-case or all-caps.
+- **Subject pattern**: `[${brandName}] <verb>: ${ref} (N room[s])`. The `${ref}` is the reservation reference (`R-YYYYMMDD-NNNNN` for new reservations, `B-YYYYMMDD-NNNNN` for legacy). The `N room[s]` uses the singular form when N=1, plural otherwise.
+- **Preheader pattern**: every email template's preheader ends with a period (`.`). The period is the visual marker that the preheader is complete; the reader knows the email body starts after.
+
+### Where the contract applies
+
+- **Email templates**: `guest-app/server/handlers/email.ts` (every `*Email` function) — subject + preheader + body.
+- **PDF receipts**: `guest-app/server/handlers/receipt.ts` (the receipt PDF builder) — Stay card labels + status line.
+- **Status badges**: `admin-app/src/components/StatusBadge.tsx` + the guest `/my-booking` page (the reservation status row).
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-05-canonical-copy.test.ts` (16 tests) — pins every rule above across the email templates, PDF receipt, and status badges.

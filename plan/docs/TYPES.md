@@ -1023,3 +1023,19 @@ computeCancellationLiabilityState({ liability, processedAmount }) → {
 //     idempotency: same (amount, reason) replays the original commit
 //     never increases approvedAmount above the stored policy result
 ```
+
+---
+
+## Loyalty Earn + Clawback Pairing (MRB-15-07)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-07 sub-item, shipped v0.254.0). The `pointsHistory` ledger uses paired doc ids: `earn-${bookingId}` for the positive earn entry (written on check-out) and `clawback-${bookingId}` for the negative clawback entry (written on cancel). The pairing is the deterministic link between an earn and its subsequent clawback — the same `bookingId` appears in both.
+
+### Pairing contract
+
+- `earn-${bookingId}` is the doc id for the positive earn `pointsHistory` entry on a successful check-out. **Exactly 2 constructions** of `earn-${bookingId}` exist in the codebase: the check-out's `awardNow` flag (the standard path) and the post-settlement path (the deferred award, used when the check-out runs without a confirmed payment). The JSDoc reference is not a construction.
+- `clawback-${bookingId}` is the doc id for the negative clawback `pointsHistory` entry on a cancel. **Exactly 1 construction** of `clawback-${bookingId}` exists in the codebase: `handleCancelBooking`'s per-child CRL-02 + MRB-05 audit stamp block.
+- The map-based invariant `rewardsPoints == sum(pointsHistory.points)` is preserved end-to-end: the earn entry's `+N` is balanced by the clawback entry's `-N` when a check-out is followed by a cancel (the cancel is a destructive action on a checked-out booking — the points were earned, then clawed back).
+- The pairing is the source-text guard for the cross-cutting "no duplicate earn" + "no duplicate clawback" invariants MRB-15-01 pins across the full create → cancel lifecycle.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) + `mrb-15-07-checkout-loyalty-earn.test.ts` (13 tests) — 27 source-text tests pin the earn/clawback pairing + the no-duplicate-earn + no-duplicate-clawback invariants.

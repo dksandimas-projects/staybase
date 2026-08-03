@@ -303,3 +303,19 @@ Always return appropriate HTTP status codes: `200`, `400`, `401`, `403`, `404`, 
 ## Environment Variables
 
 See `plan/docs/ENV-SETUP.md` for all required API environment variables including `RESEND_API_KEY` and Firebase Admin SDK credentials.
+
+---
+
+## MRB-15 Source-Text Audits (no new routes)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15 umbrella, shipped v0.249.0 → v0.255.0). The MRB-15 audits did not add any new API routes — they pin the cross-cutting invariants of the existing routes via source-text guards. The 8 audit sub-items cover:
+
+- **MRB-15-01**: lifecycle invariants (no-duplicate-counters/email/loyalty across the full create → cancel lifecycle).
+- **MRB-15-02**: payment-vs-room state (embedded in MRB-15-01).
+- **MRB-15-03**: transactional summary counters (the `checkedInRoomCount` / `checkedOutRoomCount` fix + the aggregate `paymentStatus` derivation).
+- **MRB-15-04**: N=1 + legacy null-`reservationId` byte-equivalence.
+- **MRB-15-05**: canonical copy (subject pattern + preheader period + British "Cancelled" + title-case badges).
+- **MRB-15-06**: PEX (`holdExpiresAt`) fan-out contract.
+- **MRB-15-07**: checkout + loyalty earn path audit.
+- **MRB-15-08**: legacy null-`reservationId` fallback audit.
+
+See `plan/docs/BACKEND.md §Reservation Aggregate Counter Ownership (MRB-15)` for the counter ownership table; `plan/docs/TYPES.md §Loyalty Earn + Clawback Pairing (MRB-15-07)` for the earn/clawback pairing; `plan/docs/SECURITY.md §Legacy kind: "single" Lookup Branch (MRB-15-04, MRB-15-08)` for the lookup privacy posture. 106 new source-text tests across 7 new test files + 4 updated MRB-05 tests + 1 MRB-12 rewrite = 111 net new tests in the MRB-15 umbrella.
