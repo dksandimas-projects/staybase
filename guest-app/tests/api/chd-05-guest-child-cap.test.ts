@@ -130,18 +130,27 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
   });
 
   it("persists the distributed room cart across booking-step URLs", () => {
-    expect(bookingPageSrc).toMatch(
-      /extraBedCount[\s\S]{0,100}searchParams\.get\("extraBeds"\)/
-    );
+    // Per EXB-11 (2026-08-04, per decision #186): the
+    // per-room `extraBedCount` is serialized via the cart
+    // (`rooms=` URL param via `serializeBookingRoomCart`),
+    // NOT a separate `extraBeds=` URL param. The cart is
+    // the single source of truth for the per-room count.
+    // The pre-EXB-11 shape had a `useState` for
+    // `extraBedCount` and a `setExtraBedCount` setter
+    // that mirrored the count into `extraBeds=`. Both are
+    // gone — the cart's per-room field is the only path.
     const continueParams = bookingPageSrc.match(
       /const continueParams = new URLSearchParams\(\{[\s\S]*?\}\);/
     );
     expect(continueParams).toBeTruthy();
     expect(continueParams![0]).toMatch(/children:\s*String\(numChildren\)/);
-    expect(continueParams![0]).toMatch(/extraBeds:\s*String\(extraBedCount\)/);
+    // The `extraBeds` URL param is gone.
+    expect(continueParams![0]).not.toMatch(/extraBeds:\s*String\(/);
     expect(bookingPageSrc).toMatch(
       /continueParams\.set\("rooms", serializeBookingRoomCart\(distributedRoomCart\)\)/
     );
+    // The old `searchParams.get("extraBeds")` reader is gone.
+    expect(bookingPageSrc).not.toMatch(/searchParams\.get\("extraBeds"\)/);
   });
 
   it("keeps every touched occupancy control at least 44px", () => {

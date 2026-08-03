@@ -227,15 +227,16 @@ export function BookingPage() {
   const [breakfastIncludesChildren, setBreakfastIncludesChildren] = useState(
     breakfastConfig.breakfastIncludesChildrenDefault !== false
   );
-  // Per EXB-01 (2026-07-31): extra-bed count. Defaults to 0 (the
-  // "no extra bed" case). The selector only renders when the
-  // selected room type has `maxExtraBeds > 0` (the spec's "no
-  // separate `allowsExtraBed` boolean" rule). The server
-  // validates against `maxExtraBeds` and snapshots `extraBedRate`
-  // onto the booking doc.
-  const [extraBedCount, setExtraBedCount] = useState(
-    Math.max(0, Number(searchParams.get("extraBeds") ?? 0))
-  );
+  // Per EXB-11 (2026-08-04, per decision #186): extra beds
+  // are now a per-type user-set value, not a single global
+  // counter. The user toggles the count on each room-type
+  // card; the cart's per-room `extraBedCount` is the source
+  // of truth (mirrored to the URL via `serializeBookingRoomCart`).
+  // The single-state shape that this replaces was the old
+  // EXB-01 flow that auto-computed the bed count from the
+  // overflow rule and silently overrode the user choice.
+  // The downstream `selectedTypeExtraBeds` derivation below
+  // (and the `totalExtraBeds` sum) replace every read site.
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
   // the server auto-assigns a physical room of that type inside
@@ -445,6 +446,16 @@ export function BookingPage() {
     const quantity = cartQuantityByType.get(entry.type.value) || 0;
     return quantity <= entry.availableCount;
   });
+  // Per EXB-11 (2026-08-04, per decision #186): the total
+  // extra-bed count across the cart. Replaces the old single
+  // `extraBedCount` state — the user now toggles the count
+  // per type on the room-type card, and the cart is the
+  // source of truth. Used by the Step 2 / Step 3 aside for
+  // the price breakdown.
+  const totalExtraBeds = useMemo(
+    () => distributedRoomCart.reduce((sum, room) => sum + (room.extraBedCount || 0), 0),
+    [distributedRoomCart]
+  );
   const cartDistributionComplete =
     distributedRoomCart.length > 0
     && cartDistribution.unassignedAdults === 0
@@ -502,8 +513,24 @@ export function BookingPage() {
     maxCapacity: selectedMaxCapacity,
     maxChildren: selectedMaxChildren
   });
+  // Per EXB-11 (2026-08-04, per decision #186): the
+  // per-type extra-bed count for the currently-selected
+  // type, summed across the cart. Used by the aside +
+  // `missingExtraBeds` helper. The user-set per-type value
+  // lives on each cart room; we sum it for the selected
+  // type. (The `missingExtraBeds` value itself is a
+  // defensive read; no current call site depends on it —
+  // the EXB-11 spec surfaces the constraint through the
+  // soft-floor warning on the room-type card and the
+  // CHD-11 submit-gate, not through this variable.)
+  const selectedTypeExtraBeds = useMemo(() => {
+    if (!selectedTypeEntry) return 0;
+    return distributedRoomCart
+      .filter((room) => room.roomType === selectedTypeEntry.value)
+      .reduce((sum, room) => sum + (room.extraBedCount || 0), 0);
+  }, [distributedRoomCart, selectedTypeEntry]);
   const missingExtraBeds = Math.max(
-    selectedOccupancyOverflow.requiredExtraBeds - extraBedCount,
+    selectedOccupancyOverflow.requiredExtraBeds - selectedTypeExtraBeds,
     0
   );
   // The selected type may use its rollaway-bed allowance for adult
@@ -648,7 +675,6 @@ export function BookingPage() {
     checkOut,
     guests: String(guests),
     children: String(numChildren),
-    extraBeds: String(extraBedCount),
     roomType: selectedTypeEntry?.value ?? "",
     breakfast: hasBreakfast ? "yes" : "no"
   });
@@ -783,7 +809,6 @@ export function BookingPage() {
   }, [
     availableRoomTypes,
     bookingId,
-    extraBedCount,
     numAdults,
     numChildren,
     rateChoice,
@@ -828,17 +853,6 @@ export function BookingPage() {
     const next = new URLSearchParams(searchParams);
     next.set("children", String(safeChildren));
     next.set("guests", String(guests));
-    setSearchParams(next, { replace: true });
-  }
-
-  function updateExtraBeds(nextCount: number) {
-    const safeCount = Math.min(
-      Math.max(nextCount, 0),
-      selectedMaxExtraBeds
-    );
-    setExtraBedCount(safeCount);
-    const next = new URLSearchParams(searchParams);
-    next.set("extraBeds", String(safeCount));
     setSearchParams(next, { replace: true });
   }
 
@@ -920,6 +934,37 @@ export function BookingPage() {
       const nextParams = new URLSearchParams(searchParams);
       nextParams.set("rooms", serializeBookingRoomCart(next));
       nextParams.set("roomType", typeValue);
+      setSearchParams(nextParams, { replace: true });
+      return next;
+    });
+  }
+
+  // Per EXB-11 (2026-08-04, per decision #186): the per-type
+  // extra-bed counter. Mirrors the user's pick onto every
+  // room of that type in the cart. The cap is the type's
+  // `maxExtraBeds`; the soft floor is `max(0, requiredExtraBeds)`
+  // (the per-room overflow required to fit the group) — the
+  // caller is responsible for disabling the `[−]` button at
+  // the soft floor (the soft floor is exposed via
+  // `requiredExtraBedsFor` on the caller side). The function
+  // only enforces the type cap here, not the soft floor, so
+  // the caller can keep a "tried to go below the soft floor"
+  // affordance without this function silently ignoring the
+  // user's intent. URL state rides on the cart (via
+  // `serializeBookingRoomCart`), so the per-room count is
+  // already in `rooms=` — no separate `extraBeds=` URL param
+  // is needed.
+  function updateExtraBedCount(typeValue: string, nextCount: number, maxCount: number) {
+    const safeCount = Math.min(Math.max(Math.floor(nextCount), 0), Math.max(0, Math.floor(maxCount)));
+    setRoomCart((current) => {
+      if (!current.some((room) => room.roomType === typeValue)) return current;
+      const next = current.map((room) =>
+        room.roomType === typeValue
+          ? { ...room, extraBedCount: safeCount }
+          : room
+      );
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("rooms", serializeBookingRoomCart(next));
       setSearchParams(nextParams, { replace: true });
       return next;
     });
@@ -1442,9 +1487,13 @@ export function BookingPage() {
             numChildren={numChildren}
             breakfastIncludesChildren={breakfastIncludesChildren}
             setBreakfastIncludesChildren={setBreakfastIncludesChildren}
-            // Per EXB-01 (2026-07-31): extra-bed count + rate
-            // thread through to the aside.
-            extraBedCount={extraBedCount}
+            // Per EXB-11 (2026-08-04, per decision #186): the
+            // per-cart total extra-bed count (sum of each
+            // room's `extraBedCount`). Replaces the old single
+            // `extraBedCount` state — the user now toggles the
+            // count per type on the room-type card, and the
+            // cart is the source of truth.
+            extraBedCount={totalExtraBeds}
             extraBedRate={extraBedRate}
             typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
             roomSummary={distributedRoomCart.map((room, index) => ({
@@ -1932,9 +1981,13 @@ export function BookingPage() {
             numChildren={numChildren}
             breakfastIncludesChildren={breakfastIncludesChildren}
             setBreakfastIncludesChildren={setBreakfastIncludesChildren}
-            // Per EXB-01 (2026-07-31): extra-bed count + rate
-            // thread through to the aside.
-            extraBedCount={extraBedCount}
+            // Per EXB-11 (2026-08-04, per decision #186): the
+            // per-cart total extra-bed count (sum of each
+            // room's `extraBedCount`). Replaces the old single
+            // `extraBedCount` state — the user now toggles the
+            // count per type on the room-type card, and the
+            // cart is the source of truth.
+            extraBedCount={totalExtraBeds}
             extraBedRate={extraBedRate}
             typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
             roomSummary={distributedRoomCart.map((room, index) => ({
@@ -2394,6 +2447,144 @@ export function BookingPage() {
                                 <span className="text-xs font-medium text-amber-700" data-testid={`room-type-rooms-needed-${type.value}`}>
                                   You&apos;d need {fit.roomsNeeded} of {type.label} for your group.
                                 </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Per EXB-11 (2026-08-04, per decision
+                            #186): the per-type "Extras" sub-section.
+                            Surfaces the extra-bed count as a
+                            user-controlled 0..maxExtraBeds counter
+                            on each room-type card, with the
+                            per-bed-per-night rate + stay total
+                            inline, and a soft-floor warning when
+                            the type's `maxExtraBeds` cap is below
+                            the per-room overflow the group needs.
+                            The user is in control — the soft floor
+                            is enforced via the `[−]` button being
+                            disabled (not by auto-setting the
+                            count), and the submit gate (per CHD-11)
+                            catches the over-cap case at Step 1 →
+                            Step 2. Hidden entirely when
+                            `maxExtraBeds === 0` per the spec's
+                            "no extra bed" edge case. */}
+                        {(() => {
+                          const typeMaxExtraBeds = Number(type.maxExtraBeds) || 0;
+                          if (typeMaxExtraBeds === 0) return null;
+                          // All rooms of this type share the
+                          // same per-type count (the toggle
+                          // is per-type, not per-room — see the
+                          // spec's "per-type vs per-room" edge
+                          // case). `updateExtraBedCount` mirrors
+                          // the user's pick onto every room.
+                          const userExtraBeds = selectedTypeRooms[0]?.extraBedCount ?? 0;
+                          const typeExtraBedRate = Number(type.extraBedRate) || 0;
+                          // The per-room overflow for this type
+                          // against the current group. The
+                          // soft floor is `requiredExtraBeds`
+                          // (the per-room count the group needs
+                          // to fit without over-cap). When the
+                          // type's `maxExtraBeds` is below this,
+                          // the type cannot satisfy the group
+                          // and the warning fires.
+                          const perTypeOverflow = requiredExtraBedsFor({
+                            numAdults,
+                            numChildren,
+                            maxCapacity: Number(type.maxCapacity) || 0,
+                            maxChildren: Number(type.maxChildren) || 0
+                          });
+                          const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
+                          const overCap = softFloor > typeMaxExtraBeds;
+                          // The rate is only meaningful when the
+                          // user has at least one room of this
+                          // type in the cart (the counter has
+                          // nothing to multiply against when
+                          // `typeQuantity === 0`). The
+                          // disabled-when-zero-rows state on the
+                          // counter buttons keeps the UX honest.
+                          const stayTotal = userExtraBeds * typeExtraBedRate * nights;
+                          return (
+                            <div
+                              className="mt-4 grid gap-2"
+                              aria-label={`${type.label} extras`}
+                              data-testid={`extras-stepper-${type.value}`}
+                            >
+                              <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
+                                <span>
+                                  <span className="block text-sm font-semibold text-gray-950">Extra beds</span>
+                                  <span className="block text-xs text-gray-500">
+                                    {typeQuantity > 0
+                                      ? `${formatPrice(typeExtraBedRate)} / bed / night`
+                                      : "Add at least one room to set extra beds"}
+                                  </span>
+                                </span>
+                                <span className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove one extra bed from ${type.label}`}
+                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                    // Disabled at the soft floor
+                                    // (`userExtraBeds <= softFloor`)
+                                    // and when there are no rooms
+                                    // of this type to mirror the
+                                    // count onto.
+                                    disabled={typeQuantity === 0 || userExtraBeds <= softFloor}
+                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds - 1, typeMaxExtraBeds)}
+                                  >
+                                    <Minus size={16} />
+                                  </button>
+                                  <span
+                                    className="min-w-8 text-center text-lg font-semibold text-gray-950"
+                                    aria-live="polite"
+                                    data-testid={`extras-count-${type.value}`}
+                                  >
+                                    {userExtraBeds}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    aria-label={`Add one extra bed to ${type.label}`}
+                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                    disabled={typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds}
+                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds + 1, typeMaxExtraBeds)}
+                                  >
+                                    <Plus size={16} />
+                                  </button>
+                                </span>
+                              </div>
+                              {/* Stay total: hidden when the
+                                  count is 0 (no noise) per the
+                                  spec's "What the toggle shows"
+                                  section. */}
+                              {typeQuantity > 0 && userExtraBeds > 0 ? (
+                                <p
+                                  className="text-xs text-gray-600"
+                                  data-testid={`extras-stay-total-${type.value}`}
+                                >
+                                  {formatPrice(stayTotal)} for {nights} {nights === 1 ? "night" : "nights"}
+                                </p>
+                              ) : null}
+                              {/* Soft-floor warning: fires when
+                                  the type's `maxExtraBeds` cap
+                                  cannot cover the per-room
+                                  overflow. The submit gate
+                                  (per CHD-11) catches the
+                                  over-cap case at Step 1 → Step
+                                  2; this warning is the inline
+                                  nudge. Per the spec, the
+                                  message is "Room needs N extra
+                                  beds to fit your group. You can
+                                  add up to N here." (the second
+                                  N is the cap, the first is the
+                                  soft floor). */}
+                              {typeQuantity > 0 && overCap ? (
+                                <p
+                                  className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-700"
+                                  data-testid={`extras-soft-floor-warning-${type.value}`}
+                                  role="status"
+                                >
+                                  {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
+                                </p>
                               ) : null}
                             </div>
                           );
