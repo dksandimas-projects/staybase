@@ -43,6 +43,26 @@ type EmailAction =
   // call time — the cancel handler picks exactly one
   // per transaction.
   | "booking-cancelled-reservation"
+  // Per CRL-08 (2026-08-03, per decision #174): the
+  // refund-state email. Fires from `handleAddRefund`
+  // when a successful refund commit changes the
+  // liability state (the prior state and the new
+  // state are both computed via
+  // `computeCancellationLiabilityState` with the
+  // same `processedAmount` read; a state change is
+  // the trigger, so an idempotent replay or a
+  // sub-100-peso partial within the same state does
+  // NOT re-send). The body lists the new state, the
+  // new processed total, the new outstanding amount,
+  // the retention (if any), the payment method, and
+  // the transaction reference. Subject and body
+  // include the booking reference so the guest can
+  // match the email to their records. The
+  // reservation-scope + per-child + legacy null-
+  // `reservationId` paths all route through the
+  // same template (the `loadLiabilityProjectionForEmail`
+  // helper reads the appropriate subcollection).
+  | "booking-refund-processed"
   | "corporate-inquiry"
   | "discount-rejected"
   | "early-checkin-request"
@@ -275,6 +295,122 @@ function adminUrl(path = "") {
 // single-room booking without a `reservationId`), the
 // helper returns `null` and the caller falls through to
 // the legacy `bookingRows` rendering.
+//
+// Per CRL-08 (2026-08-03, per decision #174): when
+// the reservation or first child carries a
+// `cancellationLiability` snapshot, the email view
+// also carries the `liabilityProjection` field —
+// the live state + breakdown the cancellation +
+// refund-processed templates render. The view
+// builder itself stays pure (the heavy I/O +
+// state-helper call live in
+// `loadReservationEmailViewWithLiability`); the
+// projection is passed in by the caller when
+// available.
+
+// Per CRL-08 (2026-08-03, per decision #174): the
+// liability projection for an email view. Reads
+// the stored `cancellationLiability` from the
+// cancelled entity (reservation header for
+// reservation-scope cancels + new-path N=1,
+// booking doc for per-child + legacy null-
+// `reservationId` cancels) and the cumulative
+// `processedAmount` from the refunds subcollection,
+// then runs `computeCancellationLiabilityState` to
+// project the live state. The returned object is
+// the breakdown the cancellation + refund-processed
+// email templates consume.
+//
+// The helper is `null` when no `cancellationLiability`
+// exists (a pre-CRL-07 cancel, or a no-refund cancel
+// that omitted the field) OR when the refunds
+// subcollection read failed (the caller should treat
+// the absence as `processedAmount = 0` — the helper
+// `computeCancellationLiabilityState` defaults to a
+// safe value when `processedAmount` is missing).
+//
+// The dual-source read is the same shape the
+// `handleAddRefund` + `handleGetCancellationLiability`
+// (CRL-07) use. The cumulative is the absolute sum
+// of the refund entries (refunds are stored as
+// negative amounts on either subcollection per
+// CRL-01; the `|abs()|` makes the projection
+// consistent with the helper's sign convention).
+async function loadLiabilityProjectionForEmail(params: {
+  reservationId?: string | null;
+  bookingId: string;
+}): Promise<any | null> {
+  const reservationId = String(params.reservationId || "").trim();
+  const bookingId = String(params.bookingId || "").trim();
+  if (!bookingId) return null;
+  // The new path: read the reservation header's
+  // `cancellationLiability` (the source of truth
+  // for reservation-scope cancels + N=1 cancels)
+  // and the refunds subcollection. When the
+  // reservation has no liability, fall through to
+  // the per-booking read (covers per-child cancels
+  // inside a multi-room reservation + legacy null-
+  // `reservationId` bookings).
+  let liability: any = null;
+  let refundsRef: FirebaseFirestore.CollectionReference | null = null;
+  if (reservationId) {
+    const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
+    if (reservationDoc.exists) {
+      liability = (reservationDoc.data() as any)?.cancellationLiability || null;
+      if (liability) {
+        refundsRef = adminDb.collection("reservations").doc(reservationId).collection("refunds");
+      }
+    }
+  }
+  // The per-booking path: legacy null-`reservationId`
+  // bookings OR a per-child cancel inside a
+  // multi-room reservation (the cancelled child
+  // carries the snapshot; the reservation header
+  // does not).
+  if (!liability) {
+    const bookingDoc = await adminDb.collection("bookings").doc(bookingId).get();
+    if (bookingDoc.exists) {
+      liability = (bookingDoc.data() as any)?.cancellationLiability || null;
+    }
+    refundsRef = adminDb.collection("bookings").doc(bookingId).collection("payments");
+  }
+  if (!liability) return null;
+  // Read the refunds subcollection. For new
+  // reservations the canonical source is
+  // `reservations/{id}/refunds/` (the CRL-01
+  // dual-write path MRB-04 Phase 2.x shipped). For
+  // legacy bookings the refund entries are
+  // negative-amount entries on
+  // `bookings/{id}/payments/` (the historical
+  // CRL-01 convention). The cumulative is the
+  // absolute sum so the helper's sign convention
+  // matches (refunds are positive numbers in the
+  // state machine's `processedAmount`).
+  let processedAmount = 0;
+  if (refundsRef) {
+    try {
+      const snap = await refundsRef.get();
+      processedAmount = snap.docs.reduce((sum, d) => {
+        const amount = Number(d.data()?.amount || 0);
+        return sum + Math.abs(amount);
+      }, 0);
+    } catch (err) {
+      // Per CRL-08: the projection is best-effort.
+      // A failed refunds read defaults to 0 — the
+      // template renders the pending state so the
+      // guest still sees an accurate "we owe you"
+      // story.
+      console.warn("[email] Failed to read refunds subcollection for liability projection:", err);
+    }
+  }
+  // Defer the import to avoid a circular
+  // dependency at module load time. The
+  // `computeCancellationLiabilityState` helper is
+  // a pure function in the shared package.
+  const { computeCancellationLiabilityState } = await import("@spark-inn/shared");
+  return computeCancellationLiabilityState({ liability, processedAmount });
+}
+
 export function buildReservationEmailView(reservation: any, children: any[]): any | null {
   if (!reservation || !Array.isArray(children) || children.length === 0) return null;
   const first = children[0] || {};
@@ -875,6 +1011,60 @@ function checkinReminderEmail(booking: any, houseRules?: string | null) {
   });
 }
 
+// Per CRL-08 (2026-08-03, per decision #174): the
+// liability breakdown card. Renders the policy
+// refund, retained amount, current processed
+// total, outstanding amount, and the state badge
+// from the CRL-07 `liabilityProjection` field.
+// Hidden when the projection is absent (a
+// pre-CRL-07 cancel, a no-refund cancel that
+// omitted the field) — the surrounding "no refund
+// is issued automatically" callout then serves the
+// guest. The retained-amount row is hidden when
+// `retentionAmount === 0` (no exception was
+// applied) so the layout stays clean for the
+// default path.
+function liabilityBreakdownCard(projection: any) {
+  if (!projection || !projection.liability) return "";
+  const policyResult = projection.liability.policyResult || {};
+  const refundPct = Number(policyResult.refundPct || 0);
+  const policyRefund = Number(policyResult.policyRefund || 0);
+  const netCollected = Number(policyResult.netCollected || 0);
+  const retainedAtCancel = Number(policyResult.retainedAmount || 0);
+  const approved = Number(projection.liability.approvedAmount || 0);
+  const processed = Number(projection.processedAmount || 0);
+  const outstanding = Number(projection.outstandingAmount || 0);
+  const retention = Number(projection.retentionAmount || 0);
+  const stateLabel = String(projection.stateLabel || "Pending refund");
+  const policyText = String(policyResult.policyText || "Standard cancellation policy applies.");
+  // The "extra we kept beyond the policy" row is
+  // only shown when an exception was applied
+  // (retention > 0). Same for the state badge —
+  // always present, but the wording reflects the
+  // current lifecycle position.
+  const exceptionRow = retention > 0
+    ? row("Extra retained (exception)", formatMoney(retention))
+    : "";
+  const retainedAtCancelRow = retainedAtCancel > 0 && retention === 0
+    ? row("Retained under policy", formatMoney(retainedAtCancel))
+    : "";
+  return `
+    ${card("Refund summary", `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Net collected at cancel", formatMoney(netCollected))}
+        ${row(`Policy refund (${refundPct}%)`, formatMoney(policyRefund))}
+        ${retainedAtCancelRow}
+        ${row("Approved refund", formatMoney(approved))}
+        ${row("Processed so far", formatMoney(processed))}
+        ${row("Outstanding", formatMoney(outstanding))}
+        ${exceptionRow}
+        ${row("Current state", escapeHtml(stateLabel))}
+      </table>
+      <p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">${escapeHtml(policyText)}</p>
+    `)}
+  `;
+}
+
 function bookingCancelledEmail(booking: any) {
   // Per CRL-04 (2026-08-02): truthful communications. The previous
   // copy said "If this cancellation was unexpected, please contact
@@ -899,12 +1089,35 @@ function bookingCancelledEmail(booking: any) {
   // vs "our team" vs "the system") so the email reads naturally
   // regardless of who initiated the cancellation. The refund
   // sentence is identical because the rule is identical.
+  //
+  // Per CRL-08 (2026-08-03, per decision #174): when the
+  // `liabilityProjection` field is present, the email
+  // renders the financial breakdown card (policy
+  // refund, retained, processed, outstanding, state
+  // badge) AND tailors the "what happens next"
+  // callout to the actual numbers. The legacy
+  // "no refund is issued automatically" copy stays
+  // as a fallback for pre-CRL-07 cancels + the
+  // no-refund case.
   const source = String(booking.cancellationSource || "staff");
   const intro = source === "guest"
     ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled at your request.`
     : source === "system"
       ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled because the payment hold expired.`
       : `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled by our team.`;
+  // The breakdown-aware callout. When the
+  // projection is present, the callout references
+  // the actual policy refund + outstanding so the
+  // guest knows the precise money story. When
+  // absent, the legacy generic copy stays (a
+  // pre-CRL-07 cancel or a no-refund cancel).
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory
+    ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed — our team will reach out to arrange the refund. Processing times vary.`
+    : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> — if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.`;
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} has been cancelled.`,
     eyebrow: "Booking cancelled",
@@ -912,7 +1125,8 @@ function bookingCancelledEmail(booking: any) {
     intro,
     body: `
       ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
-      ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> — if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.")}
+      ${callout("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
       ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
@@ -982,6 +1196,22 @@ function bookingCancelledReservationEmail(booking: any) {
       </table>
     `
     : "";
+  // Per CRL-08 (2026-08-03, per decision #174):
+  // the reservation-scope path also renders the
+  // financial breakdown. Same projection shape
+  // the per-child template uses — the helper is
+  // shared. The "what happens next" callout
+  // references the actual numbers when the
+  // projection is present (a paid cancel that
+  // owes a refund); the legacy generic copy
+  // stays for the no-money case.
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory
+    ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed — our team will reach out to arrange the refund. Processing times vary.`
+    : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> — if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.`;
   return emailLayout({
     preheader: booking.reservationRef
       ? `Reservation ${booking.reservationRef} was updated.`
@@ -991,13 +1221,85 @@ function bookingCancelledReservationEmail(booking: any) {
     intro,
     body: `
       ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
-      ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> — if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.")}
+      ${callout("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
       ${roomsTable ? card("Rooms", roomsTable) : card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
     ctaUrl: `mailto:${config.supportEmail}`
   });
+}
+
+// Per CRL-08 (2026-08-03, per decision #174): the
+// refund-state email. Sent when a successful
+// `handleAddRefund` commit changes the liability
+// state (e.g. "pending-processing" →
+// "partially-processed" or "partially-processed" →
+// "processed"). The state-change gate lives in the
+// handler — this template just renders the new
+// state + the new processed / outstanding numbers
+// + the latest refund entry (method + reference).
+// Falls through to a "your refund is being
+// processed" callout when the projection is absent
+// (a defensive guard — the state-change gate
+// already ensures a liability exists, but a
+// mid-flight read failure should not blank the
+// email).
+function bookingRefundProcessedEmail(booking: any) {
+  const projection = booking.liabilityProjection;
+  const latestRefund = booking.latestRefund || null;
+  const stateLabel = String(projection?.stateLabel || "Refund update");
+  const processed = Number(projection?.processedAmount || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const approved = Number(projection?.liability?.approvedAmount || 0);
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const retention = Number(projection?.retentionAmount || 0);
+  // The headline is the state itself — "Your
+  // refund is being processed", "Your refund has
+  // been completed", etc. The state badge is the
+  // primary signal the guest reads.
+  const subject = booking.reservationRef
+    ? `[${config.brandName}] Refund update: ${booking.reservationRef}`
+    : `[${config.brandName}] Refund update: ${booking.bookingRef}`;
+  const intro = `Dear ${escapeHtml(booking.guestName)}, here's a quick update on the refund for your ${booking.reservationRef ? "reservation" : "booking"} <strong>${escapeHtml(booking.reservationRef || booking.bookingRef)}</strong>.`;
+  // The "what this means" callout uses the state
+  // to switch the actor — the guest knows what
+  // happens next without reading the table.
+  const whatHappensNext = projection?.state === "processed"
+    ? `Your refund is now complete. The total of <strong>${formatMoney(approved)}</strong> has been returned to you. No further action is needed.`
+    : projection?.state === "retained"
+      ? `An exception was applied — <strong>${formatMoney(approved)}</strong> is approved for refund and <strong>${formatMoney(retention)}</strong> is being retained beyond the standard policy. <strong>${formatMoney(outstanding)}</strong> is still being processed.`
+      : projection?.state === "partially-processed"
+        ? `Your refund is in progress. <strong>${formatMoney(processed)}</strong> of <strong>${formatMoney(approved)}</strong> has been returned so far. <strong>${formatMoney(outstanding)}</strong> is still being processed.`
+        : `Your refund is pending. <strong>${formatMoney(approved)}</strong> is approved for return; our team will process it shortly.`;
+  // The latest-refund row surfaces the per-entry
+  // detail (method + reference). Hidden when the
+  // caller didn't pass it (the state-change handler
+  // always passes it, but the defensive guard
+  // keeps the template useful for any future
+  // re-send path).
+  const latestRefundRow = latestRefund
+    ? row("Latest refund", `${formatMoney(Math.abs(Number(latestRefund.amount || 0)))} via ${escapeHtml(String(latestRefund.method || "—"))}${latestRefund.transactionReference ? ` · Ref ${escapeHtml(String(latestRefund.transactionReference))}` : ""}`)
+    : "";
+  return {
+    subject,
+    html: emailLayout({
+      preheader: `Refund update for ${booking.reservationRef || booking.bookingRef}: ${stateLabel}.`,
+      eyebrow: "Refund update",
+      title: stateLabel,
+      intro,
+      body: `
+        ${callout("warm", "What this means", whatHappensNext)}
+        ${liabilityBreakdownCard(projection)}
+        ${latestRefund ? card("Latest refund", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${latestRefundRow}</table>`) : ""}
+        ${policyRefund > 0 ? `<p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">The cancellation policy applied to your booking entitled you to a refund of <strong>${formatMoney(policyRefund)}</strong>. Processing times vary by payment method.</p>` : ""}
+        <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
+      `,
+      ctaLabel: "Contact support",
+      ctaUrl: `mailto:${config.supportEmail}`
+    })
+  };
 }
 
 function discountRejectedEmail(booking: any) {
@@ -1747,7 +2049,24 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     "payment-rejected": {
       subject: `[${config.brandName}] Action needed: payment proof rejected for ${booking.bookingRef}`,
       html: paymentRejectedEmail(booking)
-    }
+    },
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // the refund-state email. The template function
+    // returns `{ subject, html }` because the
+    // subject depends on the `liabilityProjection`
+    // field (`"Refund update: <ref>"` with no
+    // room-count parenthetical). The handler fires
+    // this action when a successful `add-refund`
+    // commit changes the liability state (the
+    // state-change gate is the trigger, not the
+    // refund entry itself — a sub-state partial
+    // does not re-send). The booking view passed
+    // by the handler carries `liabilityProjection`
+    // (the live `computeCancellationLiabilityState`
+    // result) + `latestRefund` (the just-committed
+    // refund entry, used for the "Latest refund"
+    // row).
+    "booking-refund-processed": bookingRefundProcessedEmail(booking)
   };
 
   const template = templates[action];

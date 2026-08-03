@@ -821,7 +821,25 @@ export type NotificationType =
   | "message"
   | "arrival"
   | "departure"
-  | "store-order";
+  | "store-order"
+  // Per CRL-08 (2026-08-03, per decision #174):
+  // the cancellation-refund surface. Fires from
+  // `handleCancelBooking` when a destructive cancel
+  // stamps a non-null `cancellationLiability` (the
+  // desk sees a new "money to process" alert) and
+  // from `handleAddRefund` when a successful commit
+  // changes the liability state (the desk sees the
+  // lifecycle progressed — pending → partial → done,
+  // or pending → retained). The bell panel picks it
+  // up via the existing `onSnapshot` listener; the
+  // persistent trail lives in the `notifications`
+  // collection (per decision #120). The
+  // `cancellationLiability` field on the cancelled
+  // entity is the canonical source — the
+  // notification is best-effort and can be
+  // reconstructed from the stored snapshot + the
+  // refunds subcollection.
+  | "cancellation-refund";
 
 export type NotificationEntityType = "booking" | "storeOrder" | "intercom";
 

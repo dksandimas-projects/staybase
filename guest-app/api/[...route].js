@@ -23570,6 +23570,24 @@ var require_app = __commonJS({
   }
 });
 
+// ../node_modules/firebase-admin/lib/esm/app/index.js
+var import_app, AppErrorCodes, FirebaseAppError, SDK_VERSION, applicationDefault, cert, deleteApp, getApp, getApps, initializeApp, refreshToken;
+var init_app = __esm({
+  "../node_modules/firebase-admin/lib/esm/app/index.js"() {
+    import_app = __toESM(require_app(), 1);
+    AppErrorCodes = import_app.default.AppErrorCodes;
+    FirebaseAppError = import_app.default.FirebaseAppError;
+    SDK_VERSION = import_app.default.SDK_VERSION;
+    applicationDefault = import_app.default.applicationDefault;
+    cert = import_app.default.cert;
+    deleteApp = import_app.default.deleteApp;
+    getApp = import_app.default.getApp;
+    getApps = import_app.default.getApps;
+    initializeApp = import_app.default.initializeApp;
+    refreshToken = import_app.default.refreshToken;
+  }
+});
+
 // ../node_modules/@google-cloud/firestore/build/src/v1/firestore_client_config.json
 var require_firestore_client_config = __commonJS({
   "../node_modules/@google-cloud/firestore/build/src/v1/firestore_client_config.json"(exports2, module2) {
@@ -102008,6 +102026,42 @@ var require_firestore = __commonJS({
   }
 });
 
+// ../node_modules/firebase-admin/lib/esm/firestore/index.js
+var import_firestore, AggregateField, AggregateQuery, AggregateQuerySnapshot, BulkWriter, BundleBuilder, CollectionGroup, CollectionReference, DocumentReference, DocumentSnapshot, FieldPath, FieldValue, Filter, FirebaseFirestoreError, Firestore, GeoPoint, GrpcStatus, Query, QueryDocumentSnapshot, QueryPartition, QuerySnapshot, Timestamp, Transaction, WriteBatch, WriteResult, getFirestore, initializeFirestore, setLogFunction, v13;
+var init_firestore = __esm({
+  "../node_modules/firebase-admin/lib/esm/firestore/index.js"() {
+    import_firestore = __toESM(require_firestore(), 1);
+    AggregateField = import_firestore.default.AggregateField;
+    AggregateQuery = import_firestore.default.AggregateQuery;
+    AggregateQuerySnapshot = import_firestore.default.AggregateQuerySnapshot;
+    BulkWriter = import_firestore.default.BulkWriter;
+    BundleBuilder = import_firestore.default.BundleBuilder;
+    CollectionGroup = import_firestore.default.CollectionGroup;
+    CollectionReference = import_firestore.default.CollectionReference;
+    DocumentReference = import_firestore.default.DocumentReference;
+    DocumentSnapshot = import_firestore.default.DocumentSnapshot;
+    FieldPath = import_firestore.default.FieldPath;
+    FieldValue = import_firestore.default.FieldValue;
+    Filter = import_firestore.default.Filter;
+    FirebaseFirestoreError = import_firestore.default.FirebaseFirestoreError;
+    Firestore = import_firestore.default.Firestore;
+    GeoPoint = import_firestore.default.GeoPoint;
+    GrpcStatus = import_firestore.default.GrpcStatus;
+    Query = import_firestore.default.Query;
+    QueryDocumentSnapshot = import_firestore.default.QueryDocumentSnapshot;
+    QueryPartition = import_firestore.default.QueryPartition;
+    QuerySnapshot = import_firestore.default.QuerySnapshot;
+    Timestamp = import_firestore.default.Timestamp;
+    Transaction = import_firestore.default.Transaction;
+    WriteBatch = import_firestore.default.WriteBatch;
+    WriteResult = import_firestore.default.WriteResult;
+    getFirestore = import_firestore.default.getFirestore;
+    initializeFirestore = import_firestore.default.initializeFirestore;
+    setLogFunction = import_firestore.default.setLogFunction;
+    v13 = import_firestore.default.v1;
+  }
+});
+
 // ../node_modules/@fastify/busboy/deps/streamsearch/sbmh.js
 var require_sbmh = __commonJS({
   "../node_modules/@fastify/busboy/deps/streamsearch/sbmh.js"(exports2, module2) {
@@ -120839,6 +120893,30 @@ var require_auth2 = __commonJS({
     Object.defineProperty(exports2, "AuthClientErrorCode", { enumerable: true, get: function() {
       return error_1.AuthClientErrorCode;
     } });
+  }
+});
+
+// ../node_modules/firebase-admin/lib/esm/auth/index.js
+var import_auth, Auth, AuthClientErrorCode, BaseAuth, FirebaseAuthError, MultiFactorInfo, MultiFactorSettings, PhoneMultiFactorInfo, ProjectConfig, ProjectConfigManager, Tenant, TenantAwareAuth, TenantManager, UserInfo, UserMetadata, UserRecord, getAuth;
+var init_auth = __esm({
+  "../node_modules/firebase-admin/lib/esm/auth/index.js"() {
+    import_auth = __toESM(require_auth2(), 1);
+    Auth = import_auth.default.Auth;
+    AuthClientErrorCode = import_auth.default.AuthClientErrorCode;
+    BaseAuth = import_auth.default.BaseAuth;
+    FirebaseAuthError = import_auth.default.FirebaseAuthError;
+    MultiFactorInfo = import_auth.default.MultiFactorInfo;
+    MultiFactorSettings = import_auth.default.MultiFactorSettings;
+    PhoneMultiFactorInfo = import_auth.default.PhoneMultiFactorInfo;
+    ProjectConfig = import_auth.default.ProjectConfig;
+    ProjectConfigManager = import_auth.default.ProjectConfigManager;
+    Tenant = import_auth.default.Tenant;
+    TenantAwareAuth = import_auth.default.TenantAwareAuth;
+    TenantManager = import_auth.default.TenantManager;
+    UserInfo = import_auth.default.UserInfo;
+    UserMetadata = import_auth.default.UserMetadata;
+    UserRecord = import_auth.default.UserRecord;
+    getAuth = import_auth.default.getAuth;
   }
 });
 
@@ -143953,6 +144031,61 @@ var require_storage3 = __commonJS({
       const [token2] = downloadTokens.split(",");
       return `${endpoint}/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${token2}`;
     }
+  }
+});
+
+// ../node_modules/firebase-admin/lib/esm/storage/index.js
+var import_storage, Storage, getDownloadURL, getStorage;
+var init_storage = __esm({
+  "../node_modules/firebase-admin/lib/esm/storage/index.js"() {
+    import_storage = __toESM(require_storage3(), 1);
+    Storage = import_storage.default.Storage;
+    getDownloadURL = import_storage.default.getDownloadURL;
+    getStorage = import_storage.default.getStorage;
+  }
+});
+
+// server/lib/firebase-admin.ts
+function normalizePrivateKey(privateKey) {
+  return privateKey.trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "").replace(/\\n/g, "\n");
+}
+function getFirebaseAdminApp() {
+  if (firebaseAdminApp) return firebaseAdminApp;
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error("Missing Firebase Admin Environment Variables");
+  }
+  firebaseAdminApp = getApps().length ? getApps()[0] : initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey: normalizePrivateKey(privateKey)
+    })
+  });
+  return firebaseAdminApp;
+}
+function lazyService(getService) {
+  return new Proxy({}, {
+    get(_target, prop) {
+      const service = getService();
+      const value = service[prop];
+      return typeof value === "function" ? value.bind(service) : value;
+    }
+  });
+}
+var firebaseAdminApp, adminDb, adminAuth, adminStorage;
+var init_firebase_admin = __esm({
+  "server/lib/firebase-admin.ts"() {
+    "use strict";
+    init_app();
+    init_firestore();
+    init_auth();
+    init_storage();
+    adminDb = lazyService(() => getFirestore(getFirebaseAdminApp()));
+    adminAuth = lazyService(() => getAuth(getFirebaseAdminApp()));
+    adminStorage = lazyService(() => getStorage(getFirebaseAdminApp()));
   }
 });
 
@@ -181372,6 +181505,87 @@ var require_jspdf_node_min = __commonJS({
         return "" + r4;
       }, e4;
     })(), exports2.AcroForm = yt2, exports2.AcroFormAppearance = vt2, exports2.AcroFormButton = ht3, exports2.AcroFormCheckBox = pt3, exports2.AcroFormChoiceField = ot2, exports2.AcroFormComboBox = ct3, exports2.AcroFormEditBox = ut3, exports2.AcroFormListBox = st3, exports2.AcroFormPasswordField = mt3, exports2.AcroFormPushButton = lt3, exports2.AcroFormRadioButton = ft3, exports2.AcroFormTextField = gt3, exports2.GState = _2, exports2.ShadingPattern = k3, exports2.TilingPattern = F4, exports2.default = I4, exports2.jsPDF = I4;
+  }
+});
+
+// ../hotel.config.ts
+var config, hotel_config_default;
+var init_hotel_config = __esm({
+  "../hotel.config.ts"() {
+    config = {
+      hotelId: "spark-inn",
+      brandName: "spark inn",
+      rewardsName: "Spark Rewards",
+      legalName: "Spark Inn Hotel Corp",
+      tagline: "Where comfort is felt, care is intentional, and every stay is consistent.",
+      brandPromise: "Peaceful, consistent stays shaped by genuine, intentional hospitality.",
+      bookingRefPrefix: "SI",
+      memberNumberPrefix: "SR",
+      storeName: "Spark Essentials",
+      termsLastUpdated: "June 16, 2026",
+      colors: {
+        primary: "#EA8A1A",
+        primaryDark: "#C4720E",
+        primaryLight: "#FEF3E2",
+        sectionBg: "#FDF8F3",
+        sidebar: "#111827"
+      },
+      fonts: {
+        heading: {
+          name: "Apollo",
+          files: {
+            regular: "APOLLO.otf",
+            italic: "APOLLOItalic.otf"
+          },
+          letterSpacing: "0.06em"
+        },
+        body: {
+          name: "Inter",
+          source: "google",
+          googleFamily: "Inter:wght@400;500;600;700",
+          localFile: ""
+        }
+      },
+      logos: {
+        standard: "FINAL LOGO.png",
+        white: "nav-bar-logo-white.png",
+        navbar: "nav-bar-logo.png",
+        icon: "ICON LOGO.png",
+        wordmark: "TEXT LOGO.png"
+      },
+      favicon: "favicon/favicon.ico",
+      currency: "PHP",
+      currencySymbol: "\u20B1",
+      locale: "en-PH",
+      timezone: "Asia/Manila",
+      dateFormat: "MMM DD, YYYY",
+      phoneCountryCode: "+63",
+      dpoEmail: "sparkinn.reservations@gmail.com",
+      privacyPolicyLastUpdated: "June 2, 2026",
+      applicableLaw: "Republic Act No. 10173 (Data Privacy Act of 2012)",
+      pageTitle: "spark inn",
+      metaDescription: "Book your stay at spark inn, a boutique hotel in Bohol, Philippines.",
+      ogImage: "og-image.png",
+      priceRange: "\u20B1\u20B1",
+      address: {
+        street: "J. Borja St",
+        city: "Tagbilaran City",
+        region: "Bohol",
+        postalCode: "6300"
+      },
+      analyticsId: "",
+      whatsappNumber: "",
+      frontDeskPhone: "+63-38-000-0000",
+      domain: "sparkinnbohol.com",
+      adminDomain: "admin.sparkinnbohol.com",
+      supportEmail: "sparkinn.dev@gmail.com",
+      facebookUrl: "https://www.facebook.com/sparkinnbohol",
+      instagramUrl: "https://www.instagram.com/sparkinnbohol",
+      twitterHandle: "",
+      checkInTime: "14:00",
+      checkOutTime: "12:00"
+    };
+    hotel_config_default = config;
   }
 });
 
@@ -220362,11 +220576,649 @@ var init_node2 = __esm({
   }
 });
 
+// ../node_modules/resend/dist/index.mjs
+function parseAttachments(attachments) {
+  return attachments == null ? void 0 : attachments.map((attachment) => ({
+    content: attachment.content,
+    filename: attachment.filename,
+    path: attachment.path,
+    content_type: attachment.contentType,
+    inline_content_id: attachment.inlineContentId
+  }));
+}
+function parseEmailToApiOptions(email) {
+  return {
+    attachments: parseAttachments(email.attachments),
+    bcc: email.bcc,
+    cc: email.cc,
+    from: email.from,
+    headers: email.headers,
+    html: email.html,
+    reply_to: email.replyTo,
+    scheduled_at: email.scheduledAt,
+    subject: email.subject,
+    tags: email.tags,
+    text: email.text,
+    to: email.to
+  };
+}
+function parseDomainToApiOptions(domain) {
+  return {
+    name: domain.name,
+    region: domain.region,
+    custom_return_path: domain.customReturnPath
+  };
+}
+var __defProp3, __defProps2, __getOwnPropDescs2, __getOwnPropSymbols2, __hasOwnProp3, __propIsEnum2, __defNormalProp2, __spreadValues2, __spreadProps2, __async2, version5, ApiKeys, Audiences, Batch, Broadcasts, Contacts, Domains, Emails, defaultBaseUrl, defaultUserAgent, baseUrl, userAgent, Resend;
+var init_dist2 = __esm({
+  "../node_modules/resend/dist/index.mjs"() {
+    __defProp3 = Object.defineProperty;
+    __defProps2 = Object.defineProperties;
+    __getOwnPropDescs2 = Object.getOwnPropertyDescriptors;
+    __getOwnPropSymbols2 = Object.getOwnPropertySymbols;
+    __hasOwnProp3 = Object.prototype.hasOwnProperty;
+    __propIsEnum2 = Object.prototype.propertyIsEnumerable;
+    __defNormalProp2 = (obj, key, value) => key in obj ? __defProp3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+    __spreadValues2 = (a, b3) => {
+      for (var prop in b3 || (b3 = {}))
+        if (__hasOwnProp3.call(b3, prop))
+          __defNormalProp2(a, prop, b3[prop]);
+      if (__getOwnPropSymbols2)
+        for (var prop of __getOwnPropSymbols2(b3)) {
+          if (__propIsEnum2.call(b3, prop))
+            __defNormalProp2(a, prop, b3[prop]);
+        }
+      return a;
+    };
+    __spreadProps2 = (a, b3) => __defProps2(a, __getOwnPropDescs2(b3));
+    __async2 = (__this, __arguments, generator) => {
+      return new Promise((resolve, reject) => {
+        var fulfilled = (value) => {
+          try {
+            step(generator.next(value));
+          } catch (e3) {
+            reject(e3);
+          }
+        };
+        var rejected = (value) => {
+          try {
+            step(generator.throw(value));
+          } catch (e3) {
+            reject(e3);
+          }
+        };
+        var step = (x4) => x4.done ? resolve(x4.value) : Promise.resolve(x4.value).then(fulfilled, rejected);
+        step((generator = generator.apply(__this, __arguments)).next());
+      });
+    };
+    version5 = "4.8.0";
+    ApiKeys = class {
+      constructor(resend2) {
+        this.resend = resend2;
+      }
+      create(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          const data = yield this.resend.post(
+            "/api-keys",
+            payload,
+            options
+          );
+          return data;
+        });
+      }
+      list() {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get("/api-keys");
+          return data;
+        });
+      }
+      remove(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.delete(
+            `/api-keys/${id}`
+          );
+          return data;
+        });
+      }
+    };
+    Audiences = class {
+      constructor(resend2) {
+        this.resend = resend2;
+      }
+      create(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          const data = yield this.resend.post(
+            "/audiences",
+            payload,
+            options
+          );
+          return data;
+        });
+      }
+      list() {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get("/audiences");
+          return data;
+        });
+      }
+      get(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get(
+            `/audiences/${id}`
+          );
+          return data;
+        });
+      }
+      remove(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.delete(
+            `/audiences/${id}`
+          );
+          return data;
+        });
+      }
+    };
+    Batch = class {
+      constructor(resend2) {
+        this.resend = resend2;
+      }
+      send(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          return this.create(payload, options);
+        });
+      }
+      create(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          const emails = [];
+          for (const email of payload) {
+            if (email.react) {
+              if (!this.renderAsync) {
+                try {
+                  const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
+                  this.renderAsync = renderAsync2;
+                } catch (error) {
+                  throw new Error(
+                    "Failed to render React component. Make sure to install `@react-email/render`"
+                  );
+                }
+              }
+              email.html = yield this.renderAsync(email.react);
+              email.react = void 0;
+            }
+            emails.push(parseEmailToApiOptions(email));
+          }
+          const data = yield this.resend.post(
+            "/emails/batch",
+            emails,
+            options
+          );
+          return data;
+        });
+      }
+    };
+    Broadcasts = class {
+      constructor(resend2) {
+        this.resend = resend2;
+      }
+      create(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          if (payload.react) {
+            if (!this.renderAsync) {
+              try {
+                const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
+                this.renderAsync = renderAsync2;
+              } catch (error) {
+                throw new Error(
+                  "Failed to render React component. Make sure to install `@react-email/render`"
+                );
+              }
+            }
+            payload.html = yield this.renderAsync(
+              payload.react
+            );
+          }
+          const data = yield this.resend.post(
+            "/broadcasts",
+            {
+              name: payload.name,
+              audience_id: payload.audienceId,
+              preview_text: payload.previewText,
+              from: payload.from,
+              html: payload.html,
+              reply_to: payload.replyTo,
+              subject: payload.subject,
+              text: payload.text
+            },
+            options
+          );
+          return data;
+        });
+      }
+      send(id, payload) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.post(
+            `/broadcasts/${id}/send`,
+            { scheduled_at: payload == null ? void 0 : payload.scheduledAt }
+          );
+          return data;
+        });
+      }
+      list() {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get("/broadcasts");
+          return data;
+        });
+      }
+      get(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get(
+            `/broadcasts/${id}`
+          );
+          return data;
+        });
+      }
+      remove(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.delete(
+            `/broadcasts/${id}`
+          );
+          return data;
+        });
+      }
+      update(id, payload) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.patch(
+            `/broadcasts/${id}`,
+            {
+              name: payload.name,
+              audience_id: payload.audienceId,
+              from: payload.from,
+              html: payload.html,
+              text: payload.text,
+              subject: payload.subject,
+              reply_to: payload.replyTo,
+              preview_text: payload.previewText
+            }
+          );
+          return data;
+        });
+      }
+    };
+    Contacts = class {
+      constructor(resend2) {
+        this.resend = resend2;
+      }
+      create(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          const data = yield this.resend.post(
+            `/audiences/${payload.audienceId}/contacts`,
+            {
+              unsubscribed: payload.unsubscribed,
+              email: payload.email,
+              first_name: payload.firstName,
+              last_name: payload.lastName
+            },
+            options
+          );
+          return data;
+        });
+      }
+      list(options) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get(
+            `/audiences/${options.audienceId}/contacts`
+          );
+          return data;
+        });
+      }
+      get(options) {
+        return __async2(this, null, function* () {
+          if (!options.id && !options.email) {
+            return {
+              data: null,
+              error: {
+                message: "Missing `id` or `email` field.",
+                name: "missing_required_field"
+              }
+            };
+          }
+          const data = yield this.resend.get(
+            `/audiences/${options.audienceId}/contacts/${(options == null ? void 0 : options.email) ? options == null ? void 0 : options.email : options == null ? void 0 : options.id}`
+          );
+          return data;
+        });
+      }
+      update(payload) {
+        return __async2(this, null, function* () {
+          if (!payload.id && !payload.email) {
+            return {
+              data: null,
+              error: {
+                message: "Missing `id` or `email` field.",
+                name: "missing_required_field"
+              }
+            };
+          }
+          const data = yield this.resend.patch(
+            `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`,
+            {
+              unsubscribed: payload.unsubscribed,
+              first_name: payload.firstName,
+              last_name: payload.lastName
+            }
+          );
+          return data;
+        });
+      }
+      remove(payload) {
+        return __async2(this, null, function* () {
+          if (!payload.id && !payload.email) {
+            return {
+              data: null,
+              error: {
+                message: "Missing `id` or `email` field.",
+                name: "missing_required_field"
+              }
+            };
+          }
+          const data = yield this.resend.delete(
+            `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`
+          );
+          return data;
+        });
+      }
+    };
+    Domains = class {
+      constructor(resend2) {
+        this.resend = resend2;
+      }
+      create(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          const data = yield this.resend.post(
+            "/domains",
+            parseDomainToApiOptions(payload),
+            options
+          );
+          return data;
+        });
+      }
+      list() {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get("/domains");
+          return data;
+        });
+      }
+      get(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get(
+            `/domains/${id}`
+          );
+          return data;
+        });
+      }
+      update(payload) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.patch(
+            `/domains/${payload.id}`,
+            {
+              click_tracking: payload.clickTracking,
+              open_tracking: payload.openTracking,
+              tls: payload.tls
+            }
+          );
+          return data;
+        });
+      }
+      remove(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.delete(
+            `/domains/${id}`
+          );
+          return data;
+        });
+      }
+      verify(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.post(
+            `/domains/${id}/verify`
+          );
+          return data;
+        });
+      }
+    };
+    Emails = class {
+      constructor(resend2) {
+        this.resend = resend2;
+      }
+      send(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          return this.create(payload, options);
+        });
+      }
+      create(_0) {
+        return __async2(this, arguments, function* (payload, options = {}) {
+          if (payload.react) {
+            if (!this.renderAsync) {
+              try {
+                const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
+                this.renderAsync = renderAsync2;
+              } catch (error) {
+                throw new Error(
+                  "Failed to render React component. Make sure to install `@react-email/render`"
+                );
+              }
+            }
+            payload.html = yield this.renderAsync(
+              payload.react
+            );
+          }
+          const data = yield this.resend.post(
+            "/emails",
+            parseEmailToApiOptions(payload),
+            options
+          );
+          return data;
+        });
+      }
+      get(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.get(
+            `/emails/${id}`
+          );
+          return data;
+        });
+      }
+      update(payload) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.patch(
+            `/emails/${payload.id}`,
+            {
+              scheduled_at: payload.scheduledAt
+            }
+          );
+          return data;
+        });
+      }
+      cancel(id) {
+        return __async2(this, null, function* () {
+          const data = yield this.resend.post(
+            `/emails/${id}/cancel`
+          );
+          return data;
+        });
+      }
+    };
+    defaultBaseUrl = "https://api.resend.com";
+    defaultUserAgent = `resend-node:${version5}`;
+    baseUrl = typeof process !== "undefined" && process.env ? process.env.RESEND_BASE_URL || defaultBaseUrl : defaultBaseUrl;
+    userAgent = typeof process !== "undefined" && process.env ? process.env.RESEND_USER_AGENT || defaultUserAgent : defaultUserAgent;
+    Resend = class {
+      constructor(key) {
+        this.key = key;
+        this.apiKeys = new ApiKeys(this);
+        this.audiences = new Audiences(this);
+        this.batch = new Batch(this);
+        this.broadcasts = new Broadcasts(this);
+        this.contacts = new Contacts(this);
+        this.domains = new Domains(this);
+        this.emails = new Emails(this);
+        if (!key) {
+          if (typeof process !== "undefined" && process.env) {
+            this.key = process.env.RESEND_API_KEY;
+          }
+          if (!this.key) {
+            throw new Error(
+              'Missing API key. Pass it to the constructor `new Resend("re_123")`'
+            );
+          }
+        }
+        this.headers = new Headers({
+          Authorization: `Bearer ${this.key}`,
+          "User-Agent": userAgent,
+          "Content-Type": "application/json"
+        });
+      }
+      fetchRequest(_0) {
+        return __async2(this, arguments, function* (path, options = {}) {
+          try {
+            const response = yield fetch(`${baseUrl}${path}`, options);
+            if (!response.ok) {
+              try {
+                const rawError = yield response.text();
+                return { data: null, error: JSON.parse(rawError) };
+              } catch (err) {
+                if (err instanceof SyntaxError) {
+                  return {
+                    data: null,
+                    error: {
+                      name: "application_error",
+                      message: "Internal server error. We are unable to process your request right now, please try again later."
+                    }
+                  };
+                }
+                const error = {
+                  message: response.statusText,
+                  name: "application_error"
+                };
+                if (err instanceof Error) {
+                  return { data: null, error: __spreadProps2(__spreadValues2({}, error), { message: err.message }) };
+                }
+                return { data: null, error };
+              }
+            }
+            const data = yield response.json();
+            return { data, error: null };
+          } catch (error) {
+            return {
+              data: null,
+              error: {
+                name: "application_error",
+                message: "Unable to fetch data. The request could not be resolved."
+              }
+            };
+          }
+        });
+      }
+      post(_0, _1) {
+        return __async2(this, arguments, function* (path, entity, options = {}) {
+          const headers = new Headers(this.headers);
+          if (options.idempotencyKey) {
+            headers.set("Idempotency-Key", options.idempotencyKey);
+          }
+          const requestOptions = __spreadValues2({
+            method: "POST",
+            headers,
+            body: JSON.stringify(entity)
+          }, options);
+          return this.fetchRequest(path, requestOptions);
+        });
+      }
+      get(_0) {
+        return __async2(this, arguments, function* (path, options = {}) {
+          const requestOptions = __spreadValues2({
+            method: "GET",
+            headers: this.headers
+          }, options);
+          return this.fetchRequest(path, requestOptions);
+        });
+      }
+      put(_0, _1) {
+        return __async2(this, arguments, function* (path, entity, options = {}) {
+          const requestOptions = __spreadValues2({
+            method: "PUT",
+            headers: this.headers,
+            body: JSON.stringify(entity)
+          }, options);
+          return this.fetchRequest(path, requestOptions);
+        });
+      }
+      patch(_0, _1) {
+        return __async2(this, arguments, function* (path, entity, options = {}) {
+          const requestOptions = __spreadValues2({
+            method: "PATCH",
+            headers: this.headers,
+            body: JSON.stringify(entity)
+          }, options);
+          return this.fetchRequest(path, requestOptions);
+        });
+      }
+      delete(path, query) {
+        return __async2(this, null, function* () {
+          const requestOptions = {
+            method: "DELETE",
+            headers: this.headers,
+            body: JSON.stringify(query)
+          };
+          return this.fetchRequest(path, requestOptions);
+        });
+      }
+    };
+  }
+});
+
+// server/lib/resend.ts
+var resendApiKey, resend;
+var init_resend = __esm({
+  "server/lib/resend.ts"() {
+    "use strict";
+    init_dist2();
+    resendApiKey = process.env.RESEND_API_KEY;
+    if (!resendApiKey) {
+      console.warn("\u26A0\uFE0F Missing RESEND_API_KEY. Emails will fail to send.");
+    }
+    resend = new Resend(resendApiKey || "re_mock_key");
+  }
+});
+
+// server/lib/siteUrl.ts
+function getServerBaseUrl(env = process.env) {
+  const explicit = env.SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  if (env.VERCEL_ENV === "production") {
+    return `https://www.${hotel_config_default.domain}`;
+  }
+  return `https://stg.${hotel_config_default.domain}`;
+}
+function getServerAdminBaseUrl(env = process.env) {
+  const explicit = env.ADMIN_SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  if (env.VERCEL_ENV === "production") {
+    return `https://${hotel_config_default.adminDomain}`;
+  }
+  return `https://stg-admin.${hotel_config_default.domain}`;
+}
+var init_siteUrl = __esm({
+  "server/lib/siteUrl.ts"() {
+    "use strict";
+    init_hotel_config();
+  }
+});
+
 // ../shared/VERSION.ts
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.237.0";
+    VERSION2 = "0.238.0";
   }
 });
 
@@ -222862,821 +223714,26 @@ var init_shared = __esm({
   }
 });
 
-// server/apiRouter.ts
-var apiRouter_exports = {};
-__export(apiRouter_exports, {
-  default: () => handler
+// server/handlers/email.ts
+var email_exports = {};
+__export(email_exports, {
+  buildReservationEmailView: () => buildReservationEmailView,
+  handleEmailPreview: () => handleEmailPreview,
+  handleEmailTrigger: () => handleEmailTrigger,
+  sendBookingConfirmedWithBalanceTrigger: () => sendBookingConfirmedWithBalanceTrigger,
+  sendBookingTrigger: () => sendBookingTrigger,
+  sendContactConfirmationTrigger: () => sendContactConfirmationTrigger,
+  sendContactInquiryTrigger: () => sendContactInquiryTrigger,
+  sendCorporateInquiryConfirmationTrigger: () => sendCorporateInquiryConfirmationTrigger,
+  sendCorporateInquiryTrigger: () => sendCorporateInquiryTrigger,
+  sendEarlyCheckinRequestTrigger: () => sendEarlyCheckinRequestTrigger,
+  sendEarlyCheckinResolveTrigger: () => sendEarlyCheckinResolveTrigger,
+  sendStaffNewBookingTrigger: () => sendStaffNewBookingTrigger,
+  sendStaffNewPaymentTrigger: () => sendStaffNewPaymentTrigger,
+  sendStaffRefundReviewTrigger: () => sendStaffRefundReviewTrigger,
+  sendStoreOrderTrigger: () => sendStoreOrderTrigger,
+  sendVoucherIssuedTrigger: () => sendVoucherIssuedTrigger
 });
-module.exports = __toCommonJS(apiRouter_exports);
-
-// ../node_modules/firebase-admin/lib/esm/app/index.js
-var import_app = __toESM(require_app(), 1);
-var AppErrorCodes = import_app.default.AppErrorCodes;
-var FirebaseAppError = import_app.default.FirebaseAppError;
-var SDK_VERSION = import_app.default.SDK_VERSION;
-var applicationDefault = import_app.default.applicationDefault;
-var cert = import_app.default.cert;
-var deleteApp = import_app.default.deleteApp;
-var getApp = import_app.default.getApp;
-var getApps = import_app.default.getApps;
-var initializeApp = import_app.default.initializeApp;
-var refreshToken = import_app.default.refreshToken;
-
-// ../node_modules/firebase-admin/lib/esm/firestore/index.js
-var import_firestore = __toESM(require_firestore(), 1);
-var AggregateField = import_firestore.default.AggregateField;
-var AggregateQuery = import_firestore.default.AggregateQuery;
-var AggregateQuerySnapshot = import_firestore.default.AggregateQuerySnapshot;
-var BulkWriter = import_firestore.default.BulkWriter;
-var BundleBuilder = import_firestore.default.BundleBuilder;
-var CollectionGroup = import_firestore.default.CollectionGroup;
-var CollectionReference = import_firestore.default.CollectionReference;
-var DocumentReference = import_firestore.default.DocumentReference;
-var DocumentSnapshot = import_firestore.default.DocumentSnapshot;
-var FieldPath = import_firestore.default.FieldPath;
-var FieldValue = import_firestore.default.FieldValue;
-var Filter = import_firestore.default.Filter;
-var FirebaseFirestoreError = import_firestore.default.FirebaseFirestoreError;
-var Firestore = import_firestore.default.Firestore;
-var GeoPoint = import_firestore.default.GeoPoint;
-var GrpcStatus = import_firestore.default.GrpcStatus;
-var Query = import_firestore.default.Query;
-var QueryDocumentSnapshot = import_firestore.default.QueryDocumentSnapshot;
-var QueryPartition = import_firestore.default.QueryPartition;
-var QuerySnapshot = import_firestore.default.QuerySnapshot;
-var Timestamp = import_firestore.default.Timestamp;
-var Transaction = import_firestore.default.Transaction;
-var WriteBatch = import_firestore.default.WriteBatch;
-var WriteResult = import_firestore.default.WriteResult;
-var getFirestore = import_firestore.default.getFirestore;
-var initializeFirestore = import_firestore.default.initializeFirestore;
-var setLogFunction = import_firestore.default.setLogFunction;
-var v13 = import_firestore.default.v1;
-
-// ../node_modules/firebase-admin/lib/esm/auth/index.js
-var import_auth = __toESM(require_auth2(), 1);
-var Auth = import_auth.default.Auth;
-var AuthClientErrorCode = import_auth.default.AuthClientErrorCode;
-var BaseAuth = import_auth.default.BaseAuth;
-var FirebaseAuthError = import_auth.default.FirebaseAuthError;
-var MultiFactorInfo = import_auth.default.MultiFactorInfo;
-var MultiFactorSettings = import_auth.default.MultiFactorSettings;
-var PhoneMultiFactorInfo = import_auth.default.PhoneMultiFactorInfo;
-var ProjectConfig = import_auth.default.ProjectConfig;
-var ProjectConfigManager = import_auth.default.ProjectConfigManager;
-var Tenant = import_auth.default.Tenant;
-var TenantAwareAuth = import_auth.default.TenantAwareAuth;
-var TenantManager = import_auth.default.TenantManager;
-var UserInfo = import_auth.default.UserInfo;
-var UserMetadata = import_auth.default.UserMetadata;
-var UserRecord = import_auth.default.UserRecord;
-var getAuth = import_auth.default.getAuth;
-
-// ../node_modules/firebase-admin/lib/esm/storage/index.js
-var import_storage = __toESM(require_storage3(), 1);
-var Storage = import_storage.default.Storage;
-var getDownloadURL = import_storage.default.getDownloadURL;
-var getStorage = import_storage.default.getStorage;
-
-// server/lib/firebase-admin.ts
-var firebaseAdminApp;
-function normalizePrivateKey(privateKey) {
-  return privateKey.trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "").replace(/\\n/g, "\n");
-}
-function getFirebaseAdminApp() {
-  if (firebaseAdminApp) return firebaseAdminApp;
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error("Missing Firebase Admin Environment Variables");
-  }
-  firebaseAdminApp = getApps().length ? getApps()[0] : initializeApp({
-    credential: cert({
-      projectId,
-      clientEmail,
-      privateKey: normalizePrivateKey(privateKey)
-    })
-  });
-  return firebaseAdminApp;
-}
-function lazyService(getService) {
-  return new Proxy({}, {
-    get(_target, prop) {
-      const service = getService();
-      const value = service[prop];
-      return typeof value === "function" ? value.bind(service) : value;
-    }
-  });
-}
-var adminDb = lazyService(() => getFirestore(getFirebaseAdminApp()));
-var adminAuth = lazyService(() => getAuth(getFirebaseAdminApp()));
-var adminStorage = lazyService(() => getStorage(getFirebaseAdminApp()));
-
-// server/handlers/email.ts
-init_zod();
-var import_jspdf = __toESM(require_jspdf_node_min());
-
-// ../hotel.config.ts
-var config = {
-  hotelId: "spark-inn",
-  brandName: "spark inn",
-  rewardsName: "Spark Rewards",
-  legalName: "Spark Inn Hotel Corp",
-  tagline: "Where comfort is felt, care is intentional, and every stay is consistent.",
-  brandPromise: "Peaceful, consistent stays shaped by genuine, intentional hospitality.",
-  bookingRefPrefix: "SI",
-  memberNumberPrefix: "SR",
-  storeName: "Spark Essentials",
-  termsLastUpdated: "June 16, 2026",
-  colors: {
-    primary: "#EA8A1A",
-    primaryDark: "#C4720E",
-    primaryLight: "#FEF3E2",
-    sectionBg: "#FDF8F3",
-    sidebar: "#111827"
-  },
-  fonts: {
-    heading: {
-      name: "Apollo",
-      files: {
-        regular: "APOLLO.otf",
-        italic: "APOLLOItalic.otf"
-      },
-      letterSpacing: "0.06em"
-    },
-    body: {
-      name: "Inter",
-      source: "google",
-      googleFamily: "Inter:wght@400;500;600;700",
-      localFile: ""
-    }
-  },
-  logos: {
-    standard: "FINAL LOGO.png",
-    white: "nav-bar-logo-white.png",
-    navbar: "nav-bar-logo.png",
-    icon: "ICON LOGO.png",
-    wordmark: "TEXT LOGO.png"
-  },
-  favicon: "favicon/favicon.ico",
-  currency: "PHP",
-  currencySymbol: "\u20B1",
-  locale: "en-PH",
-  timezone: "Asia/Manila",
-  dateFormat: "MMM DD, YYYY",
-  phoneCountryCode: "+63",
-  dpoEmail: "sparkinn.reservations@gmail.com",
-  privacyPolicyLastUpdated: "June 2, 2026",
-  applicableLaw: "Republic Act No. 10173 (Data Privacy Act of 2012)",
-  pageTitle: "spark inn",
-  metaDescription: "Book your stay at spark inn, a boutique hotel in Bohol, Philippines.",
-  ogImage: "og-image.png",
-  priceRange: "\u20B1\u20B1",
-  address: {
-    street: "J. Borja St",
-    city: "Tagbilaran City",
-    region: "Bohol",
-    postalCode: "6300"
-  },
-  analyticsId: "",
-  whatsappNumber: "",
-  frontDeskPhone: "+63-38-000-0000",
-  domain: "sparkinnbohol.com",
-  adminDomain: "admin.sparkinnbohol.com",
-  supportEmail: "sparkinn.dev@gmail.com",
-  facebookUrl: "https://www.facebook.com/sparkinnbohol",
-  instagramUrl: "https://www.instagram.com/sparkinnbohol",
-  twitterHandle: "",
-  checkInTime: "14:00",
-  checkOutTime: "12:00"
-};
-var hotel_config_default = config;
-
-// ../node_modules/resend/dist/index.mjs
-var __defProp3 = Object.defineProperty;
-var __defProps2 = Object.defineProperties;
-var __getOwnPropDescs2 = Object.getOwnPropertyDescriptors;
-var __getOwnPropSymbols2 = Object.getOwnPropertySymbols;
-var __hasOwnProp3 = Object.prototype.hasOwnProperty;
-var __propIsEnum2 = Object.prototype.propertyIsEnumerable;
-var __defNormalProp2 = (obj, key, value) => key in obj ? __defProp3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __spreadValues2 = (a, b3) => {
-  for (var prop in b3 || (b3 = {}))
-    if (__hasOwnProp3.call(b3, prop))
-      __defNormalProp2(a, prop, b3[prop]);
-  if (__getOwnPropSymbols2)
-    for (var prop of __getOwnPropSymbols2(b3)) {
-      if (__propIsEnum2.call(b3, prop))
-        __defNormalProp2(a, prop, b3[prop]);
-    }
-  return a;
-};
-var __spreadProps2 = (a, b3) => __defProps2(a, __getOwnPropDescs2(b3));
-var __async2 = (__this, __arguments, generator) => {
-  return new Promise((resolve, reject) => {
-    var fulfilled = (value) => {
-      try {
-        step(generator.next(value));
-      } catch (e3) {
-        reject(e3);
-      }
-    };
-    var rejected = (value) => {
-      try {
-        step(generator.throw(value));
-      } catch (e3) {
-        reject(e3);
-      }
-    };
-    var step = (x4) => x4.done ? resolve(x4.value) : Promise.resolve(x4.value).then(fulfilled, rejected);
-    step((generator = generator.apply(__this, __arguments)).next());
-  });
-};
-var version5 = "4.8.0";
-var ApiKeys = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        "/api-keys",
-        payload,
-        options
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/api-keys");
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/api-keys/${id}`
-      );
-      return data;
-    });
-  }
-};
-var Audiences = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        "/audiences",
-        payload,
-        options
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/audiences");
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/audiences/${id}`
-      );
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/audiences/${id}`
-      );
-      return data;
-    });
-  }
-};
-function parseAttachments(attachments) {
-  return attachments == null ? void 0 : attachments.map((attachment) => ({
-    content: attachment.content,
-    filename: attachment.filename,
-    path: attachment.path,
-    content_type: attachment.contentType,
-    inline_content_id: attachment.inlineContentId
-  }));
-}
-function parseEmailToApiOptions(email) {
-  return {
-    attachments: parseAttachments(email.attachments),
-    bcc: email.bcc,
-    cc: email.cc,
-    from: email.from,
-    headers: email.headers,
-    html: email.html,
-    reply_to: email.replyTo,
-    scheduled_at: email.scheduledAt,
-    subject: email.subject,
-    tags: email.tags,
-    text: email.text,
-    to: email.to
-  };
-}
-var Batch = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  send(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      return this.create(payload, options);
-    });
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const emails = [];
-      for (const email of payload) {
-        if (email.react) {
-          if (!this.renderAsync) {
-            try {
-              const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
-              this.renderAsync = renderAsync2;
-            } catch (error) {
-              throw new Error(
-                "Failed to render React component. Make sure to install `@react-email/render`"
-              );
-            }
-          }
-          email.html = yield this.renderAsync(email.react);
-          email.react = void 0;
-        }
-        emails.push(parseEmailToApiOptions(email));
-      }
-      const data = yield this.resend.post(
-        "/emails/batch",
-        emails,
-        options
-      );
-      return data;
-    });
-  }
-};
-var Broadcasts = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      if (payload.react) {
-        if (!this.renderAsync) {
-          try {
-            const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
-            this.renderAsync = renderAsync2;
-          } catch (error) {
-            throw new Error(
-              "Failed to render React component. Make sure to install `@react-email/render`"
-            );
-          }
-        }
-        payload.html = yield this.renderAsync(
-          payload.react
-        );
-      }
-      const data = yield this.resend.post(
-        "/broadcasts",
-        {
-          name: payload.name,
-          audience_id: payload.audienceId,
-          preview_text: payload.previewText,
-          from: payload.from,
-          html: payload.html,
-          reply_to: payload.replyTo,
-          subject: payload.subject,
-          text: payload.text
-        },
-        options
-      );
-      return data;
-    });
-  }
-  send(id, payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.post(
-        `/broadcasts/${id}/send`,
-        { scheduled_at: payload == null ? void 0 : payload.scheduledAt }
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/broadcasts");
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/broadcasts/${id}`
-      );
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/broadcasts/${id}`
-      );
-      return data;
-    });
-  }
-  update(id, payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.patch(
-        `/broadcasts/${id}`,
-        {
-          name: payload.name,
-          audience_id: payload.audienceId,
-          from: payload.from,
-          html: payload.html,
-          text: payload.text,
-          subject: payload.subject,
-          reply_to: payload.replyTo,
-          preview_text: payload.previewText
-        }
-      );
-      return data;
-    });
-  }
-};
-var Contacts = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        `/audiences/${payload.audienceId}/contacts`,
-        {
-          unsubscribed: payload.unsubscribed,
-          email: payload.email,
-          first_name: payload.firstName,
-          last_name: payload.lastName
-        },
-        options
-      );
-      return data;
-    });
-  }
-  list(options) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/audiences/${options.audienceId}/contacts`
-      );
-      return data;
-    });
-  }
-  get(options) {
-    return __async2(this, null, function* () {
-      if (!options.id && !options.email) {
-        return {
-          data: null,
-          error: {
-            message: "Missing `id` or `email` field.",
-            name: "missing_required_field"
-          }
-        };
-      }
-      const data = yield this.resend.get(
-        `/audiences/${options.audienceId}/contacts/${(options == null ? void 0 : options.email) ? options == null ? void 0 : options.email : options == null ? void 0 : options.id}`
-      );
-      return data;
-    });
-  }
-  update(payload) {
-    return __async2(this, null, function* () {
-      if (!payload.id && !payload.email) {
-        return {
-          data: null,
-          error: {
-            message: "Missing `id` or `email` field.",
-            name: "missing_required_field"
-          }
-        };
-      }
-      const data = yield this.resend.patch(
-        `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`,
-        {
-          unsubscribed: payload.unsubscribed,
-          first_name: payload.firstName,
-          last_name: payload.lastName
-        }
-      );
-      return data;
-    });
-  }
-  remove(payload) {
-    return __async2(this, null, function* () {
-      if (!payload.id && !payload.email) {
-        return {
-          data: null,
-          error: {
-            message: "Missing `id` or `email` field.",
-            name: "missing_required_field"
-          }
-        };
-      }
-      const data = yield this.resend.delete(
-        `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`
-      );
-      return data;
-    });
-  }
-};
-function parseDomainToApiOptions(domain) {
-  return {
-    name: domain.name,
-    region: domain.region,
-    custom_return_path: domain.customReturnPath
-  };
-}
-var Domains = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        "/domains",
-        parseDomainToApiOptions(payload),
-        options
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/domains");
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/domains/${id}`
-      );
-      return data;
-    });
-  }
-  update(payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.patch(
-        `/domains/${payload.id}`,
-        {
-          click_tracking: payload.clickTracking,
-          open_tracking: payload.openTracking,
-          tls: payload.tls
-        }
-      );
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/domains/${id}`
-      );
-      return data;
-    });
-  }
-  verify(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.post(
-        `/domains/${id}/verify`
-      );
-      return data;
-    });
-  }
-};
-var Emails = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  send(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      return this.create(payload, options);
-    });
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      if (payload.react) {
-        if (!this.renderAsync) {
-          try {
-            const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
-            this.renderAsync = renderAsync2;
-          } catch (error) {
-            throw new Error(
-              "Failed to render React component. Make sure to install `@react-email/render`"
-            );
-          }
-        }
-        payload.html = yield this.renderAsync(
-          payload.react
-        );
-      }
-      const data = yield this.resend.post(
-        "/emails",
-        parseEmailToApiOptions(payload),
-        options
-      );
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/emails/${id}`
-      );
-      return data;
-    });
-  }
-  update(payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.patch(
-        `/emails/${payload.id}`,
-        {
-          scheduled_at: payload.scheduledAt
-        }
-      );
-      return data;
-    });
-  }
-  cancel(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.post(
-        `/emails/${id}/cancel`
-      );
-      return data;
-    });
-  }
-};
-var defaultBaseUrl = "https://api.resend.com";
-var defaultUserAgent = `resend-node:${version5}`;
-var baseUrl = typeof process !== "undefined" && process.env ? process.env.RESEND_BASE_URL || defaultBaseUrl : defaultBaseUrl;
-var userAgent = typeof process !== "undefined" && process.env ? process.env.RESEND_USER_AGENT || defaultUserAgent : defaultUserAgent;
-var Resend = class {
-  constructor(key) {
-    this.key = key;
-    this.apiKeys = new ApiKeys(this);
-    this.audiences = new Audiences(this);
-    this.batch = new Batch(this);
-    this.broadcasts = new Broadcasts(this);
-    this.contacts = new Contacts(this);
-    this.domains = new Domains(this);
-    this.emails = new Emails(this);
-    if (!key) {
-      if (typeof process !== "undefined" && process.env) {
-        this.key = process.env.RESEND_API_KEY;
-      }
-      if (!this.key) {
-        throw new Error(
-          'Missing API key. Pass it to the constructor `new Resend("re_123")`'
-        );
-      }
-    }
-    this.headers = new Headers({
-      Authorization: `Bearer ${this.key}`,
-      "User-Agent": userAgent,
-      "Content-Type": "application/json"
-    });
-  }
-  fetchRequest(_0) {
-    return __async2(this, arguments, function* (path, options = {}) {
-      try {
-        const response = yield fetch(`${baseUrl}${path}`, options);
-        if (!response.ok) {
-          try {
-            const rawError = yield response.text();
-            return { data: null, error: JSON.parse(rawError) };
-          } catch (err) {
-            if (err instanceof SyntaxError) {
-              return {
-                data: null,
-                error: {
-                  name: "application_error",
-                  message: "Internal server error. We are unable to process your request right now, please try again later."
-                }
-              };
-            }
-            const error = {
-              message: response.statusText,
-              name: "application_error"
-            };
-            if (err instanceof Error) {
-              return { data: null, error: __spreadProps2(__spreadValues2({}, error), { message: err.message }) };
-            }
-            return { data: null, error };
-          }
-        }
-        const data = yield response.json();
-        return { data, error: null };
-      } catch (error) {
-        return {
-          data: null,
-          error: {
-            name: "application_error",
-            message: "Unable to fetch data. The request could not be resolved."
-          }
-        };
-      }
-    });
-  }
-  post(_0, _1) {
-    return __async2(this, arguments, function* (path, entity, options = {}) {
-      const headers = new Headers(this.headers);
-      if (options.idempotencyKey) {
-        headers.set("Idempotency-Key", options.idempotencyKey);
-      }
-      const requestOptions = __spreadValues2({
-        method: "POST",
-        headers,
-        body: JSON.stringify(entity)
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  get(_0) {
-    return __async2(this, arguments, function* (path, options = {}) {
-      const requestOptions = __spreadValues2({
-        method: "GET",
-        headers: this.headers
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  put(_0, _1) {
-    return __async2(this, arguments, function* (path, entity, options = {}) {
-      const requestOptions = __spreadValues2({
-        method: "PUT",
-        headers: this.headers,
-        body: JSON.stringify(entity)
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  patch(_0, _1) {
-    return __async2(this, arguments, function* (path, entity, options = {}) {
-      const requestOptions = __spreadValues2({
-        method: "PATCH",
-        headers: this.headers,
-        body: JSON.stringify(entity)
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  delete(path, query) {
-    return __async2(this, null, function* () {
-      const requestOptions = {
-        method: "DELETE",
-        headers: this.headers,
-        body: JSON.stringify(query)
-      };
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-};
-
-// server/lib/resend.ts
-var resendApiKey = process.env.RESEND_API_KEY;
-if (!resendApiKey) {
-  console.warn("\u26A0\uFE0F Missing RESEND_API_KEY. Emails will fail to send.");
-}
-var resend = new Resend(resendApiKey || "re_mock_key");
-
-// server/lib/siteUrl.ts
-function getServerBaseUrl(env = process.env) {
-  const explicit = env.SITE_URL?.trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
-  if (env.VERCEL_ENV === "production") {
-    return `https://www.${hotel_config_default.domain}`;
-  }
-  return `https://stg.${hotel_config_default.domain}`;
-}
-function getServerAdminBaseUrl(env = process.env) {
-  const explicit = env.ADMIN_SITE_URL?.trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
-  if (env.VERCEL_ENV === "production") {
-    return `https://${hotel_config_default.adminDomain}`;
-  }
-  return `https://stg-admin.${hotel_config_default.domain}`;
-}
-
-// server/handlers/email.ts
-init_shared();
-var FROM_EMAIL = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
-var ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail;
 function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
@@ -224278,9 +224335,45 @@ function checkinReminderEmail(booking, houseRules) {
     ctaUrl: lookupUrl(booking)
   });
 }
+function liabilityBreakdownCard(projection) {
+  if (!projection || !projection.liability) return "";
+  const policyResult = projection.liability.policyResult || {};
+  const refundPct = Number(policyResult.refundPct || 0);
+  const policyRefund = Number(policyResult.policyRefund || 0);
+  const netCollected = Number(policyResult.netCollected || 0);
+  const retainedAtCancel = Number(policyResult.retainedAmount || 0);
+  const approved = Number(projection.liability.approvedAmount || 0);
+  const processed = Number(projection.processedAmount || 0);
+  const outstanding = Number(projection.outstandingAmount || 0);
+  const retention = Number(projection.retentionAmount || 0);
+  const stateLabel = String(projection.stateLabel || "Pending refund");
+  const policyText = String(policyResult.policyText || "Standard cancellation policy applies.");
+  const exceptionRow = retention > 0 ? row("Extra retained (exception)", formatMoney(retention)) : "";
+  const retainedAtCancelRow = retainedAtCancel > 0 && retention === 0 ? row("Retained under policy", formatMoney(retainedAtCancel)) : "";
+  return `
+    ${card("Refund summary", `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Net collected at cancel", formatMoney(netCollected))}
+        ${row(`Policy refund (${refundPct}%)`, formatMoney(policyRefund))}
+        ${retainedAtCancelRow}
+        ${row("Approved refund", formatMoney(approved))}
+        ${row("Processed so far", formatMoney(processed))}
+        ${row("Outstanding", formatMoney(outstanding))}
+        ${exceptionRow}
+        ${row("Current state", escapeHtml(stateLabel))}
+      </table>
+      <p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">${escapeHtml(policyText)}</p>
+    `)}
+  `;
+}
 function bookingCancelledEmail(booking) {
   const source = String(booking.cancellationSource || "staff");
   const intro = source === "guest" ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled at your request.` : source === "system" ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled because the payment hold expired.` : `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled by our team.`;
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed \u2014 our team will reach out to arrange the refund. Processing times vary.` : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.`;
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} has been cancelled.`,
     eyebrow: "Booking cancelled",
@@ -224288,7 +224381,8 @@ function bookingCancelledEmail(booking) {
     intro,
     body: `
       ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
-      ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.")}
+      ${callout("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
       ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
@@ -224319,6 +224413,11 @@ function bookingCancelledReservationEmail(booking) {
   }).join("")}
       </table>
     ` : "";
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed \u2014 our team will reach out to arrange the refund. Processing times vary.` : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.`;
   return emailLayout({
     preheader: booking.reservationRef ? `Reservation ${booking.reservationRef} was updated.` : `Booking ${booking.bookingRef} has been cancelled.`,
     eyebrow,
@@ -224326,13 +224425,46 @@ function bookingCancelledReservationEmail(booking) {
     intro,
     body: `
       ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
-      ${callout("warm", "What happens next", "Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.")}
+      ${callout("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
       ${roomsTable ? card("Rooms", roomsTable) : card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
     ctaUrl: `mailto:${hotel_config_default.supportEmail}`
   });
+}
+function bookingRefundProcessedEmail(booking) {
+  const projection = booking.liabilityProjection;
+  const latestRefund = booking.latestRefund || null;
+  const stateLabel = String(projection?.stateLabel || "Refund update");
+  const processed = Number(projection?.processedAmount || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const approved = Number(projection?.liability?.approvedAmount || 0);
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const retention = Number(projection?.retentionAmount || 0);
+  const subject = booking.reservationRef ? `[${hotel_config_default.brandName}] Refund update: ${booking.reservationRef}` : `[${hotel_config_default.brandName}] Refund update: ${booking.bookingRef}`;
+  const intro = `Dear ${escapeHtml(booking.guestName)}, here's a quick update on the refund for your ${booking.reservationRef ? "reservation" : "booking"} <strong>${escapeHtml(booking.reservationRef || booking.bookingRef)}</strong>.`;
+  const whatHappensNext = projection?.state === "processed" ? `Your refund is now complete. The total of <strong>${formatMoney(approved)}</strong> has been returned to you. No further action is needed.` : projection?.state === "retained" ? `An exception was applied \u2014 <strong>${formatMoney(approved)}</strong> is approved for refund and <strong>${formatMoney(retention)}</strong> is being retained beyond the standard policy. <strong>${formatMoney(outstanding)}</strong> is still being processed.` : projection?.state === "partially-processed" ? `Your refund is in progress. <strong>${formatMoney(processed)}</strong> of <strong>${formatMoney(approved)}</strong> has been returned so far. <strong>${formatMoney(outstanding)}</strong> is still being processed.` : `Your refund is pending. <strong>${formatMoney(approved)}</strong> is approved for return; our team will process it shortly.`;
+  const latestRefundRow = latestRefund ? row("Latest refund", `${formatMoney(Math.abs(Number(latestRefund.amount || 0)))} via ${escapeHtml(String(latestRefund.method || "\u2014"))}${latestRefund.transactionReference ? ` \xB7 Ref ${escapeHtml(String(latestRefund.transactionReference))}` : ""}`) : "";
+  return {
+    subject,
+    html: emailLayout({
+      preheader: `Refund update for ${booking.reservationRef || booking.bookingRef}: ${stateLabel}.`,
+      eyebrow: "Refund update",
+      title: stateLabel,
+      intro,
+      body: `
+        ${callout("warm", "What this means", whatHappensNext)}
+        ${liabilityBreakdownCard(projection)}
+        ${latestRefund ? card("Latest refund", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${latestRefundRow}</table>`) : ""}
+        ${policyRefund > 0 ? `<p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">The cancellation policy applied to your booking entitled you to a refund of <strong>${formatMoney(policyRefund)}</strong>. Processing times vary by payment method.</p>` : ""}
+        <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
+      `,
+      ctaLabel: "Contact support",
+      ctaUrl: `mailto:${hotel_config_default.supportEmail}`
+    })
+  };
 }
 function discountRejectedEmail(booking) {
   const discountTypeLabel = booking.discountType === "senior" ? "Senior Citizen" : "PWD";
@@ -224949,7 +225081,24 @@ async function sendBookingTrigger(action, booking) {
     "payment-rejected": {
       subject: `[${hotel_config_default.brandName}] Action needed: payment proof rejected for ${booking.bookingRef}`,
       html: paymentRejectedEmail(booking)
-    }
+    },
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // the refund-state email. The template function
+    // returns `{ subject, html }` because the
+    // subject depends on the `liabilityProjection`
+    // field (`"Refund update: <ref>"` with no
+    // room-count parenthetical). The handler fires
+    // this action when a successful `add-refund`
+    // commit changes the liability state (the
+    // state-change gate is the trigger, not the
+    // refund entry itself — a sub-state partial
+    // does not re-send). The booking view passed
+    // by the handler carries `liabilityProjection`
+    // (the live `computeCancellationLiabilityState`
+    // result) + `latestRefund` (the just-committed
+    // refund entry, used for the "Latest refund"
+    // row).
+    "booking-refund-processed": bookingRefundProcessedEmail(booking)
   };
   const template = templates[action];
   if (!template) {
@@ -225327,12 +225476,28 @@ async function handleEmailPreview(req, res) {
     return res.status(500).json({ success: false, error: message });
   }
 }
+var import_jspdf, FROM_EMAIL, ADMIN_EMAIL;
+var init_email = __esm({
+  "server/handlers/email.ts"() {
+    "use strict";
+    init_zod();
+    import_jspdf = __toESM(require_jspdf_node_min());
+    init_hotel_config();
+    init_firebase_admin();
+    init_resend();
+    init_siteUrl();
+    init_shared();
+    FROM_EMAIL = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
+    ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail;
+  }
+});
 
 // server/lib/notifications.ts
-var MAX_TITLE_LENGTH = 160;
-var MAX_ID_LENGTH = 64;
-var MAX_ROOM_LENGTH = 12;
-var MAX_REF_LENGTH = 40;
+var notifications_exports = {};
+__export(notifications_exports, {
+  pruneNotifications: () => pruneNotifications,
+  writeNotification: () => writeNotification
+});
 async function writeNotification(input) {
   try {
     const title = String(input.title || "").trim().slice(0, MAX_TITLE_LENGTH);
@@ -225390,10 +225555,36 @@ async function pruneNotifications(maxAgeMs, batchSize = 500) {
     cutoffIso: cutoff.toISOString()
   };
 }
+var MAX_TITLE_LENGTH, MAX_ID_LENGTH, MAX_ROOM_LENGTH, MAX_REF_LENGTH;
+var init_notifications = __esm({
+  "server/lib/notifications.ts"() {
+    "use strict";
+    init_firestore();
+    init_firebase_admin();
+    MAX_TITLE_LENGTH = 160;
+    MAX_ID_LENGTH = 64;
+    MAX_ROOM_LENGTH = 12;
+    MAX_REF_LENGTH = 40;
+  }
+});
+
+// server/apiRouter.ts
+var apiRouter_exports = {};
+__export(apiRouter_exports, {
+  default: () => handler
+});
+module.exports = __toCommonJS(apiRouter_exports);
+init_firebase_admin();
+init_email();
+init_notifications();
+
+// server/handlers/bookings.ts
+init_firebase_admin();
 
 // server/handlers/test-runs.ts
 init_zod();
 var import_node_crypto = __toESM(require("node:crypto"));
+init_firebase_admin();
 function getStaff(req) {
   return req.staff || {};
 }
@@ -226512,11 +226703,15 @@ async function handleStagingRefreshPreview(req, res) {
 }
 
 // server/handlers/bookings.ts
+init_firestore();
+init_email();
+init_notifications();
 init_shared();
 init_shared();
 init_shared();
 init_shared();
 init_zod();
+init_hotel_config();
 
 // server/lib/rate-breakdown.ts
 init_shared();
@@ -226804,7 +226999,14 @@ async function loadReservationEmailView(bookingId) {
   ]);
   if (!reservationSnap.exists) return null;
   const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-  return buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
+  const view = buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
+  if (!view) return null;
+  const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
+  view.liabilityProjection = await loadLiabilityProjectionForEmail({
+    reservationId,
+    bookingId
+  });
+  return view;
 }
 var ROOM_OCCUPYING_STATUSES = BOOKING_OCCUPYING_STATUSES;
 var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest has not checked out yet.";
@@ -230059,14 +230261,44 @@ async function handleCancelBooking(req, res) {
       });
     }
     try {
+      const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
       const reservationView = await loadReservationEmailView(bookingId);
+      const liabilityProjection = reservationView ? reservationView.liabilityProjection : await loadLiabilityProjectionForEmail({ bookingId });
       const cancellationSourceForEmail = cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff";
       await sendBookingTrigger(
         postTransactionAction,
-        reservationView ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancellationSourceForEmail } : { ...bookingData2, cancellationReason: validReason }
+        reservationView ? {
+          ...reservationView,
+          cancellationReason: validReason,
+          cancellationSource: cancellationSourceForEmail,
+          liabilityProjection
+        } : { ...bookingData2, cancellationReason: validReason, liabilityProjection }
       );
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
+    }
+    try {
+      const { writeNotification: writeNotification2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
+      const liabilityTargetRef = lookedUpReservationId ? adminDb.collection("reservations").doc(lookedUpReservationId) : adminDb.collection("bookings").doc(bookingDocumentRef.id);
+      const liabilityDoc = await liabilityTargetRef.get();
+      const liability = liabilityDoc.exists ? liabilityDoc.data()?.cancellationLiability : null;
+      if (liability && liability.policyResult) {
+        const policyRefund = Number(liability.policyResult?.policyRefund || 0);
+        const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
+        const projection = computeCancellationLiabilityState2({ liability, processedAmount: 0 });
+        const stateLabel = projection.stateLabel || "Pending refund";
+        const notifTitle = policyRefund > 0 ? `Cancellation refund pending \u2014 ${bookingData2.bookingRef || bookingId} (${stateLabel}, \u20B1${policyRefund.toLocaleString("en-PH")})` : `Cancellation recorded \u2014 ${bookingData2.bookingRef || bookingId} (no refund owed)`;
+        await writeNotification2({
+          type: "cancellation-refund",
+          title: notifTitle,
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: bookingData2.roomNumber || null,
+          bookingRef: bookingData2.bookingRef || null
+        });
+      }
+    } catch (notifErr) {
+      console.error("[cancel-booking] Staff notification failed; continuing:", notifErr);
     }
     return res.status(200).json({ success: true });
   } catch (error) {
@@ -230422,6 +230654,59 @@ async function handleAddPayment(req, res) {
     }
   });
 }
+async function fireRefundStateEmailAndNotification(params) {
+  const bookingDoc = await adminDb.collection("bookings").doc(params.targetBookingId).get();
+  const bookingData2 = bookingDoc.exists ? bookingDoc.data() || {} : {};
+  const guestEmail = String(bookingData2.guestEmail || "").trim();
+  let liabilityProjection = null;
+  try {
+    const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
+    liabilityProjection = await loadLiabilityProjectionForEmail({
+      reservationId: params.targetReservationId,
+      bookingId: params.targetBookingId
+    });
+  } catch (projErr) {
+    console.warn("[add-refund] Liability projection failed; email fires with the basic breakdown:", projErr);
+  }
+  const latestRefund = {
+    amount: -Math.abs(params.numericAmount),
+    method: params.safeMethod,
+    reason: params.safeReason,
+    transactionReference: params.safeTransactionReference,
+    recordedAt: params.refundRecord?.recordedAt || /* @__PURE__ */ new Date()
+  };
+  if (guestEmail) {
+    try {
+      const { sendBookingTrigger: sendBookingTrigger2 } = await Promise.resolve().then(() => (init_email(), email_exports));
+      const emailView = {
+        ...bookingData2,
+        id: params.targetBookingId,
+        reservationId: params.targetReservationId,
+        liabilityProjection,
+        latestRefund
+      };
+      await sendBookingTrigger2("booking-refund-processed", emailView);
+    } catch (emailErr) {
+      console.error("[add-refund] Refund-state email failed; continuing:", emailErr);
+    }
+  }
+  const stateLabel = liabilityProjection?.stateLabel || params.newState;
+  const bookingRefForTitle = String(bookingData2.bookingRef || params.targetBookingId).trim();
+  const notifTitle = `Refund ${stateLabel.toLowerCase()} \u2014 ${bookingRefForTitle} (${params.priorState} \u2192 ${params.newState})`;
+  try {
+    const { writeNotification: writeNotification2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
+    await writeNotification2({
+      type: "cancellation-refund",
+      title: notifTitle,
+      entityType: "booking",
+      entityId: params.targetBookingId,
+      roomNumber: bookingData2.roomNumber || null,
+      bookingRef: bookingData2.bookingRef || null
+    });
+  } catch (notifErr) {
+    console.error("[add-refund] Staff notification failed; continuing:", notifErr);
+  }
+}
 async function handleAddRefund(req, res) {
   if (req.staff?.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only an administrator can approve refunds." });
@@ -230447,6 +230732,9 @@ async function handleAddRefund(req, res) {
     let refundRecord = {};
     let netCollected = 0;
     let idempotentReplay = false;
+    let priorStateRef = null;
+    let newStateRef = null;
+    let priorLiabilityRef = null;
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef);
@@ -230469,6 +230757,27 @@ async function handleAddRefund(req, res) {
         0
       );
       netCollected = netPositivePayments + netRefunds;
+      const liabilityDoc = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2) : bookingRef;
+      const liabilityData = (await transaction.get(liabilityDoc)).data() || {};
+      const liability = liabilityData.cancellationLiability || null;
+      priorLiabilityRef = liability;
+      if (liability && liability.policyResult) {
+        const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
+        const priorProcessedAmount = refundsSnapshot.docs.reduce(
+          (sum, d) => sum + Math.abs(Number(d.data()?.amount || 0)),
+          0
+        );
+        const priorProjection = computeCancellationLiabilityState2({
+          liability,
+          processedAmount: priorProcessedAmount
+        });
+        priorStateRef = priorProjection.state;
+        const newProjection = computeCancellationLiabilityState2({
+          liability,
+          processedAmount: priorProcessedAmount + numericAmount
+        });
+        newStateRef = newProjection.state;
+      }
       const existingRefund = refundsSnapshot.docs.find((docSnap) => docSnap.id === refundId);
       if (existingRefund) {
         const existingData = existingRefund.data();
@@ -230502,12 +230811,35 @@ async function handleAddRefund(req, res) {
       refundRecord = newRecord;
       transaction.create(refundsRef.doc(refundId), newRecord);
     });
+    if (!idempotentReplay && priorStateRef && newStateRef && priorStateRef !== newStateRef && priorLiabilityRef) {
+      try {
+        await fireRefundStateEmailAndNotification({
+          targetBookingId: bookingId,
+          targetReservationId: bookingReservationId.length > 0 ? bookingReservationId : null,
+          priorState: priorStateRef,
+          newState: newStateRef,
+          refundRecord,
+          numericAmount,
+          safeMethod,
+          safeReason,
+          safeTransactionReference,
+          liability: priorLiabilityRef
+        });
+      } catch (sideEffectErr) {
+        console.error("[add-refund] Post-commit side effect failed:", sideEffectErr);
+      }
+    }
     return res.status(200).json({
       success: true,
       data: {
         ...refundRecord,
         netCollected: netCollected - numericAmount,
-        idempotentReplay
+        idempotentReplay,
+        // Echo the prior + new state so the
+        // client UI can update the panel without
+        // a re-fetch (the read-only projection
+        // endpoint stays the source of truth).
+        stateTransition: priorStateRef && newStateRef && priorStateRef !== newStateRef ? { from: priorStateRef, to: newStateRef } : null
       }
     });
   } catch (error) {
@@ -232153,6 +232485,7 @@ async function handleRescheduleBooking(req, res) {
 }
 
 // server/handlers/rooms.ts
+init_firebase_admin();
 init_shared();
 var ACTIVE_STATUSES = BOOKING_OCCUPYING_STATUSES;
 function toIsoDate(value) {
@@ -232237,7 +232570,9 @@ async function handleRoomAvailability(req, res) {
 }
 
 // server/handlers/room-blocks.ts
+init_firestore();
 init_zod();
+init_firebase_admin();
 init_shared();
 var ROOM_OCCUPYING_STATUSES2 = BOOKING_OCCUPYING_STATUSES;
 var blockSchema = external_exports.object({
@@ -232387,6 +232722,7 @@ async function handleCancelRoomBlock(req, res) {
 }
 
 // server/handlers/vouchers.ts
+init_firebase_admin();
 init_shared();
 async function handleValidateVoucher(req, res) {
   if (req.method !== "POST") {
@@ -232450,6 +232786,7 @@ async function handleValidateVoucher(req, res) {
 }
 
 // server/handlers/corporate-codes.ts
+init_firebase_admin();
 init_shared();
 function parseCorporateCodeExpiry(value) {
   if (!value) return null;
@@ -232549,7 +232886,10 @@ async function handleValidateCorporateCode(req, res) {
 
 // server/handlers/corporate-inquiries.ts
 init_zod();
+init_firebase_admin();
+init_email();
 init_shared();
+init_hotel_config();
 var InquiryPreferredDatesSchema = external_exports.object({
   from: external_exports.string().trim().min(1).max(40),
   to: external_exports.string().trim().min(1).max(40)
@@ -232929,6 +233269,8 @@ async function handleConvertInquiryToBooking(req, res) {
 }
 
 // server/handlers/contact.ts
+init_firebase_admin();
+init_email();
 function isNonEmptyString(value, maxLen) {
   return typeof value === "string" && value.trim().length > 0 && value.trim().length <= maxLen;
 }
@@ -233006,6 +233348,8 @@ async function handleCreateContactInquiry(req, res) {
 
 // server/handlers/reference.ts
 init_shared();
+init_hotel_config();
+init_firebase_admin();
 async function handleGenerateReference(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -233041,6 +233385,8 @@ async function handleGenerateReference(req, res) {
 // server/handlers/members.ts
 init_zod();
 init_shared();
+init_hotel_config();
+init_firebase_admin();
 var registerMemberSchema = external_exports.object({
   fullName: external_exports.string().trim().max(120).optional().default(""),
   phone: external_exports.string().trim().max(40).optional().default(""),
@@ -233821,6 +234167,7 @@ async function handleEraseMemberAccount(req, res) {
 
 // server/handlers/legal.ts
 init_zod();
+init_firebase_admin();
 init_shared();
 var updateTermsSchema = external_exports.object({
   termsBody: external_exports.string().trim().min(1).max(TERMS_BODY_MAX_LENGTH)
@@ -233894,6 +234241,7 @@ function bumpPatchVersionFromString(version6) {
 
 // server/handlers/admin.ts
 init_zod();
+init_firebase_admin();
 var staffRoleSchema = external_exports.enum(["front-desk", "admin"]);
 var createStaffSchema = external_exports.object({
   fullName: external_exports.string().trim().min(1).max(120),
@@ -234186,6 +234534,9 @@ async function handleUpdateStaff(req, res) {
 
 // server/handlers/store.ts
 init_shared();
+init_firebase_admin();
+init_notifications();
+init_email();
 var MAX_GUEST_NAME_LENGTH = 120;
 var MAX_ROOM_NUMBER_LENGTH = 12;
 var MAX_ORDER_REF_LENGTH = 40;
@@ -234642,6 +234993,7 @@ async function handleGetStoreOrderStatus(req, res) {
 
 // server/handlers/intercom.ts
 init_zod();
+init_firebase_admin();
 var MAX_ROOM_NUMBER_LENGTH2 = 12;
 var MAX_LAST_NAME_LENGTH = 80;
 var MAX_BOOKING_ID_LENGTH = 128;
@@ -234793,8 +235145,12 @@ async function handleVerifyIntercomGuest(req, res) {
   }
 }
 
+// server/apiRouter.ts
+init_email();
+
 // server/handlers/janitor.ts
 init_shared();
+init_firebase_admin();
 function getDefaultBucket() {
   return process.env.FIREBASE_STORAGE_BUCKET;
 }
@@ -235004,7 +235360,9 @@ async function handleH2BackfillStatus(req, res) {
 }
 
 // server/handlers/seo.ts
+init_firestore();
 init_shared();
+init_firebase_admin();
 async function handlePublishSeo(req, res) {
   const deployHookUrl = process.env.VERCEL_DEPLOY_HOOK_URL?.trim();
   if (!deployHookUrl) {
@@ -235049,6 +235407,7 @@ async function handlePublishSeo(req, res) {
 }
 
 // server/handlers/notifications-prune.ts
+init_notifications();
 function isAuthorizedCronRequest2(req) {
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
@@ -235088,6 +235447,9 @@ async function handleNotificationsPrune(req, res) {
 }
 
 // server/handlers/hold-expiry.ts
+init_firestore();
+init_email();
+init_firebase_admin();
 init_shared();
 var SYSTEM_CANCELLATION_SOURCE = "system";
 var EXPIRY_BATCH_SIZE = 200;
@@ -235198,6 +235560,7 @@ async function handleHoldExpiryCron(req, res) {
 
 // server/handlers/storage.ts
 init_zod();
+init_firebase_admin();
 var privateStoragePathSchema = external_exports.object({
   path: external_exports.string().trim().min(1).max(512)
 }).strict();
@@ -235242,6 +235605,7 @@ async function handleGetPrivateStorageUrl(req, res) {
 }
 
 // server/apiRouter.ts
+init_hotel_config();
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
   "booking-confirmed",

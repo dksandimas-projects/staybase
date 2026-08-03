@@ -103,6 +103,34 @@ Triggered by `sendBookingTrigger("booking-cancelled", ...)` from `handleCancelBo
 - [x] Triggered by the same `sendBookingTrigger("booking-cancelled", ...)` call for the main handler + the 3 PEX-03 retirements + the PEX-06 cron (CRL-02 keeps the template shared; the `cancellationSource` field switches the actor line).
 - [x] CRL-04's "no refund is automatic" callout is the parallel source-aware truth-statement. CRL-03's guest-status restriction guarantees that a guest never sees this email for a booking where money was collected, but the copy stays defensive in case the source list expands under CRL-06.
 - [x] Never uses the word "refunded" — only "refund" + "issued" + "review" + "reach out". The ledger (CRL-07) is the only place "refunded" can be surfaced, and only after a processed refund entry exists.
+- [x] **CRL-08 (2026-08-03, per decision #174):** the templates now read the CRL-07 `liabilityProjection` field and render a shared `liabilityBreakdownCard` (net collected at cancel, policy refund, retained under policy, approved, processed so far, outstanding, current state). The "What happens next" callout tailors itself to the actual numbers when the projection is present (e.g. "₱1,500 of your ₱5,000 paid will be refunded; ₱3,500 is retained per the policy"); the legacy generic copy stays for pre-CRL-07 cancels + the no-refund case. The reservation-scope + per-child paths render the same card so the two templates never drift.
+
+---
+
+### Refund-Processed Email (CRL-08)
+
+Triggered by `sendBookingTrigger("booking-refund-processed", ...)` from `handleAddRefund` when a successful refund commit changes the liability state (the state-change gate lives inside the same `runTransaction` as the refund write — see `fireRefundStateEmailAndNotification` in `guest-app/server/handlers/bookings.ts`).
+
+**Subject:** `[{brandName}] Refund update: {ref}` (reservation ref when the cancel was reservation-scope, booking ref otherwise — never a per-room ref).
+
+**Body:**
+- Eyebrow: "Refund update"
+- Headline: the state label ("Pending refund" / "Partially refunded" / "Refunded" / "Exception applied · refund in progress" / "Exception applied · fully refunded") — the primary signal the guest reads
+- Warm callout: "What this means" — the body tailors itself to the new state. Examples:
+  - `processed` → "Your refund is now complete. The total of ₱1,500 has been returned to you. No further action is needed."
+  - `partially-processed` → "Your refund is in progress. ₱800 of ₱1,500 has been returned so far. ₱700 is still being processed."
+  - `pending-processing` → "Your refund is pending. ₱1,500 is approved for return; our team will process it shortly."
+  - `retained` → "An exception was applied — ₱1,500 is approved for refund and ₱500 is being retained beyond the standard policy. ₱500 is still being processed."
+- Liability breakdown card (the same `liabilityBreakdownCard` the cancellation email uses — single source of truth across templates)
+- "Latest refund" card: amount + method + transaction reference for the just-committed entry
+- Policy footer: "The cancellation policy applied to your booking entitled you to a refund of ₱X. Processing times vary by payment method." (only when `policyRefund > 0`)
+- CTA: "Contact support" → `mailto:{supportEmail}`
+
+**Checklist:**
+- [x] State-change gate (a state change is the trigger; an idempotent replay or a sub-state partial does NOT re-send) — the gate lives in the same `runTransaction` as the refund write.
+- [x] The reservation-scope + per-child + legacy paths all route through the same template (the `loadLiabilityProjectionForEmail` helper reads the appropriate subcollection).
+- [x] Subject uses the reservation ref (never a per-room ref) when the cancel was reservation-scope.
+- [x] Best-effort: a failed email send never fails the refund it describes (the post-commit side effect is wrapped in a try/catch that logs + swallows — same pattern the `writeNotification` helper follows per decision #120).
 
 ---
 

@@ -445,7 +445,27 @@ async function loadReservationEmailView(bookingId: string): Promise<any | null> 
   ]);
   if (!reservationSnap.exists) return null;
   const children = childrenSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
-  return buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
+  const view = buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
+  if (!view) return null;
+  // Per CRL-08 (2026-08-03, per decision #174): the
+  // cancellation + refund-processed email templates
+  // render the live liability state. Read the
+  // stored snapshot + the cumulative
+  // `processedAmount` from the refunds subcollection
+  // and attach the projection. The view builder
+  // itself stays pure (the projection is best-effort
+  // and falls through to `null` when the snapshot
+  // is absent — a pre-CRL-07 cancel or a no-refund
+  // cancel). The dual-source read (reservation
+  // header → booking doc fallthrough) is the same
+  // shape `handleAddRefund` + the CRL-07
+  // `handleGetCancellationLiability` use.
+  const { loadLiabilityProjectionForEmail } = await import("./email");
+  view.liabilityProjection = await loadLiabilityProjectionForEmail({
+    reservationId,
+    bookingId
+  });
+  return view;
 }
 
 const ROOM_OCCUPYING_STATUSES = BOOKING_OCCUPYING_STATUSES;
@@ -5809,18 +5829,97 @@ export async function handleCancelBooking(req: any, res: any) {
       // (which MRB-09 already taught to render the
       // full reservation view when the booking has a
       // `reservationId`).
+      //
+      // Per CRL-08 (2026-08-03, per decision #174):
+      // the cancellation template renders the
+      // financial breakdown. The projection comes
+      // from `loadLiabilityProjectionForEmail`
+      // (the same shape `handleAddRefund` + the
+      // CRL-07 projection endpoint use). The
+      // reservation-scope path's projection is
+      // already attached by `loadReservationEmailView`
+      // (which calls the helper internally); the
+      // legacy null-`reservationId` path loads it
+      // here so the bare-booking view also carries
+      // the breakdown. The projection is `null`
+      // when no liability was stamped (a pre-CRL-07
+      // cancel or a no-refund cancel) — the template
+      // falls through to the legacy
+      // "no refund is issued automatically" copy.
+      const { loadLiabilityProjectionForEmail } = await import("./email");
       const reservationView = await loadReservationEmailView(bookingId);
+      const liabilityProjection = reservationView
+        ? reservationView.liabilityProjection
+        : await loadLiabilityProjectionForEmail({ bookingId });
       const cancellationSourceForEmail: "guest" | "staff" | "system" = cancelledBy === "guest"
         ? "guest"
         : (cancelledBy === "system" ? "system" : "staff");
       await sendBookingTrigger(
         postTransactionAction,
         reservationView
-          ? { ...reservationView, cancellationReason: validReason, cancellationSource: cancellationSourceForEmail }
-          : { ...bookingData, cancellationReason: validReason }
+          ? {
+              ...reservationView,
+              cancellationReason: validReason,
+              cancellationSource: cancellationSourceForEmail,
+              liabilityProjection
+            }
+          : { ...bookingData, cancellationReason: validReason, liabilityProjection }
       );
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
+    }
+
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // the staff notification. Fires when the
+    // destructive cancel stamps a non-null
+    // `cancellationLiability` (the desk sees a
+    // "money to process" alert in the bell
+    // panel). For a no-refund cancel the
+    // snapshot is `null` and the notification is
+    // skipped (the absence means "no liability
+    // work to do" per CRL-07). The title
+    // includes the policy refund + the new state
+    // so the desk knows the magnitude + the
+    // lifecycle position without opening the
+    // booking drawer. Best-effort (the
+    // best-effort pattern #120 establishes — a
+    // failed notification must never fail the
+    // cancel it describes).
+    try {
+      const { writeNotification } = await import("../lib/notifications");
+      // The snapshot the cancel just stamped
+      // lives on the reservation header (for
+      // reservation-scope cancels + new-path N=1)
+      // OR the booking doc (per-child + legacy
+      // null-`reservationId`). Read the
+      // post-cancel snapshot from the same
+      // location the cancel wrote to.
+      const liabilityTargetRef = lookedUpReservationId
+        ? adminDb.collection("reservations").doc(lookedUpReservationId)
+        : adminDb.collection("bookings").doc(bookingDocumentRef.id);
+      const liabilityDoc = await liabilityTargetRef.get();
+      const liability = liabilityDoc.exists
+        ? (liabilityDoc.data() as any)?.cancellationLiability
+        : null;
+      if (liability && liability.policyResult) {
+        const policyRefund = Number(liability.policyResult?.policyRefund || 0);
+        const { computeCancellationLiabilityState } = await import("@spark-inn/shared");
+        const projection = computeCancellationLiabilityState({ liability, processedAmount: 0 });
+        const stateLabel = projection.stateLabel || "Pending refund";
+        const notifTitle = policyRefund > 0
+          ? `Cancellation refund pending — ${bookingData.bookingRef || bookingId} (${stateLabel}, ₱${policyRefund.toLocaleString("en-PH")})`
+          : `Cancellation recorded — ${bookingData.bookingRef || bookingId} (no refund owed)`;
+        await writeNotification({
+          type: "cancellation-refund",
+          title: notifTitle,
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: bookingData.roomNumber || null,
+          bookingRef: bookingData.bookingRef || null
+        });
+      }
+    } catch (notifErr) {
+      console.error("[cancel-booking] Staff notification failed; continuing:", notifErr);
     }
 
     return res.status(200).json({ success: true });
@@ -6473,6 +6572,110 @@ export async function handleAddPayment(req: any, res: any) {
   });
 }
 
+// Per CRL-08 (2026-08-03, per decision #174): the
+// post-commit side effect for a successful refund
+// that changed the liability state. The helper
+// fires the refund-state email + writes a
+// persistent staff notification (the bell panel
+// trail). Best-effort: errors are logged +
+// swallowed — a failed side effect must never
+// fail the refund it describes. Mirrors the
+// best-effort pattern `writeNotification` + the
+// email-send helpers follow.
+async function fireRefundStateEmailAndNotification(params: {
+  targetBookingId: string;
+  targetReservationId: string | null;
+  priorState: string;
+  newState: string;
+  refundRecord: Record<string, any>;
+  numericAmount: number;
+  safeMethod: string;
+  safeReason: string;
+  safeTransactionReference: string | null;
+  liability: any;
+}) {
+  // Load the booking doc the email needs
+  // (`guestEmail` + `guestName` + `reservationRef`).
+  // Non-fatal if the read fails (the email handler
+  // throws on a missing email, the staff
+  // notification falls back to a generic title).
+  const bookingDoc = await adminDb.collection("bookings").doc(params.targetBookingId).get();
+  const bookingData = bookingDoc.exists ? (bookingDoc.data() || {}) : {};
+  const guestEmail = String(bookingData.guestEmail || "").trim();
+  // The liability projection for the email. The
+  // refund subcollection is now `prior
+  // processedAmount + numericAmount`; the state
+  // was just computed inside the transaction
+  // (closed over `newStateRef`). The projection
+  // is the full breakdown the template renders.
+  let liabilityProjection: any = null;
+  try {
+    const { loadLiabilityProjectionForEmail } = await import("./email");
+    liabilityProjection = await loadLiabilityProjectionForEmail({
+      reservationId: params.targetReservationId,
+      bookingId: params.targetBookingId
+    });
+  } catch (projErr) {
+    console.warn("[add-refund] Liability projection failed; email fires with the basic breakdown:", projErr);
+  }
+  // The "latest refund" view the email renders
+  // in the dedicated card. The just-committed
+  // entry's amount is negative on the wire
+  // (CRL-01 negative-amount convention); the
+  // template reads the absolute value.
+  const latestRefund = {
+    amount: -Math.abs(params.numericAmount),
+    method: params.safeMethod,
+    reason: params.safeReason,
+    transactionReference: params.safeTransactionReference,
+    recordedAt: params.refundRecord?.recordedAt || new Date()
+  };
+  // Fire the refund-state email. The subject
+  // and body are template-driven (per
+  // `bookingRefundProcessedEmail`); the handler
+  // is the source of truth for the gate. The
+  // email is only sent when the guest email
+  // exists (defensive guard — a missing email
+  // is not a refund-blocker).
+  if (guestEmail) {
+    try {
+      const { sendBookingTrigger } = await import("./email");
+      const emailView: any = {
+        ...bookingData,
+        id: params.targetBookingId,
+        reservationId: params.targetReservationId,
+        liabilityProjection,
+        latestRefund
+      };
+      await sendBookingTrigger("booking-refund-processed", emailView);
+    } catch (emailErr) {
+      console.error("[add-refund] Refund-state email failed; continuing:", emailErr);
+    }
+  }
+  // The persistent staff notification. Title
+  // tells the desk which booking + which state
+  // transition (e.g. "Refund processed —
+  // SI-…: pending → partial"). The bell panel
+  // picks it up via the existing `onSnapshot`
+  // listener (decision #120).
+  const stateLabel = liabilityProjection?.stateLabel || params.newState;
+  const bookingRefForTitle = String(bookingData.bookingRef || params.targetBookingId).trim();
+  const notifTitle = `Refund ${stateLabel.toLowerCase()} — ${bookingRefForTitle} (${params.priorState} → ${params.newState})`;
+  try {
+    const { writeNotification } = await import("../lib/notifications");
+    await writeNotification({
+      type: "cancellation-refund",
+      title: notifTitle,
+      entityType: "booking",
+      entityId: params.targetBookingId,
+      roomNumber: bookingData.roomNumber || null,
+      bookingRef: bookingData.bookingRef || null
+    });
+  } catch (notifErr) {
+    console.error("[add-refund] Staff notification failed; continuing:", notifErr);
+  }
+}
+
 export async function handleAddRefund(req: any, res: any) {
   if (req.staff?.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only an administrator can approve refunds." });
@@ -6513,6 +6716,16 @@ export async function handleAddRefund(req: any, res: any) {
     let refundRecord: Record<string, any> = {};
     let netCollected = 0;
     let idempotentReplay = false;
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // the state-change gate. The transaction
+    // closure sets these when a liability exists;
+    // the post-commit side-effect reads them.
+    // Closure-scoped locals (not a return value)
+    // keep the existing transaction shape
+    // unchanged.
+    let priorStateRef: string | null = null;
+    let newStateRef: string | null = null;
+    let priorLiabilityRef: any = null;
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef);
@@ -6570,6 +6783,64 @@ export async function handleAddRefund(req: any, res: any) {
       // positive payments + negative refunds. Either way,
       // the sum is the net collected — sign-aware.
       netCollected = netPositivePayments + netRefunds;
+
+      // Per CRL-08 (2026-08-03, per decision #174):
+      // the state-change gate for the refund-state
+      // email. The handler computes the prior state
+      // from the stored liability + the CURRENT
+      // `processedAmount` (BEFORE this refund), then
+      // re-computes the new state after the commit
+      // (with the new `processedAmount = prior +
+      // numericAmount`). A state change is the
+      // trigger — an idempotent replay or a
+      // sub-state partial does not re-send. The
+      // fields are read in the same transaction so
+      // the gate is atomic with the refund write.
+      //
+      // The `cancellationLiability` lives on the
+      // cancelled entity (reservation header for
+      // new reservations, booking doc for legacy
+      // null-`reservationId` bookings + per-child
+      // cancels in a multi-room reservation). The
+      // refund writer reads from the same location
+      // the snapshot was stamped on (the dual-source
+      // read MRB-04 Phase 2.x established).
+      const liabilityDoc = bookingReservationId.length > 0
+        ? adminDb.collection("reservations").doc(bookingReservationId)
+        : bookingRef;
+      const liabilityData = (await transaction.get(liabilityDoc)).data() || {};
+      const liability = (liabilityData as any).cancellationLiability || null;
+      priorLiabilityRef = liability;
+      if (liability && liability.policyResult) {
+        const { computeCancellationLiabilityState } = await import("@spark-inn/shared");
+        // The `processedAmount` for the prior
+        // state is the absolute sum of existing
+        // refund entries (refunds are negative on
+        // the wire, per CRL-01).
+        const priorProcessedAmount = refundsSnapshot.docs.reduce(
+          (sum, d) => sum + Math.abs(Number(d.data()?.amount || 0)),
+          0
+        );
+        const priorProjection = computeCancellationLiabilityState({
+          liability,
+          processedAmount: priorProcessedAmount
+        });
+        // Capture the prior state + the new state in
+        // closure-scoped locals (the post-commit
+        // side-effect reads them after the
+        // transaction returns).
+        priorStateRef = priorProjection.state;
+        // The new state uses the same liability
+        // (the writer does not mutate
+        // `cancellationLiability`; only the
+        // refunds subcollection grows) with the
+        // new `processedAmount`.
+        const newProjection = computeCancellationLiabilityState({
+          liability,
+          processedAmount: priorProcessedAmount + numericAmount
+        });
+        newStateRef = newProjection.state;
+      }
 
       // Idempotency check: a refund with this exact refundId
       // already exists. Same amount/method/reason/reference
@@ -6633,12 +6904,61 @@ export async function handleAddRefund(req: any, res: any) {
       // and `bookings/{id}/payments/{refundId}` for legacy.
       transaction.create(refundsRef.doc(refundId), newRecord);
     });
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // post-commit side effects. The refund-state
+    // email fires when the state actually
+    // changed; the staff notification fires for
+    // the same gate (the persistent bell trail).
+    // Both are best-effort (the same pattern the
+    // email + notification helpers follow — a
+    // failed side effect must never fail the
+    // refund). The idempotent-replay path skips
+    // both (no state change, no notification, no
+    // email). When `priorState` is `null` (no
+    // liability exists — a pre-CRL-07 cancel, or
+    // a refund on a non-cancelled booking), the
+    // gate is also off.
+    if (
+      !idempotentReplay
+      && priorStateRef
+      && newStateRef
+      && priorStateRef !== newStateRef
+      && priorLiabilityRef
+    ) {
+      try {
+        await fireRefundStateEmailAndNotification({
+          targetBookingId: bookingId,
+          targetReservationId: bookingReservationId.length > 0 ? bookingReservationId : null,
+          priorState: priorStateRef,
+          newState: newStateRef,
+          refundRecord,
+          numericAmount,
+          safeMethod,
+          safeReason,
+          safeTransactionReference,
+          liability: priorLiabilityRef
+        });
+      } catch (sideEffectErr) {
+        // Per the best-effort pattern (decision
+        // #120): log + swallow. A failed
+        // email/notification must never fail the
+        // refund it describes.
+        console.error("[add-refund] Post-commit side effect failed:", sideEffectErr);
+      }
+    }
     return res.status(200).json({
       success: true,
       data: {
         ...refundRecord,
         netCollected: netCollected - numericAmount,
-        idempotentReplay
+        idempotentReplay,
+        // Echo the prior + new state so the
+        // client UI can update the panel without
+        // a re-fetch (the read-only projection
+        // endpoint stays the source of truth).
+        stateTransition: priorStateRef && newStateRef && priorStateRef !== newStateRef
+          ? { from: priorStateRef, to: newStateRef }
+          : null
       }
     });
   } catch (error: any) {

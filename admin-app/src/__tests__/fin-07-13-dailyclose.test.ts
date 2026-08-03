@@ -13,7 +13,15 @@ describe("FIN-07 & FIN-13 daily close and cash drawer variance", () => {
   });
 
   it("supports daily-close tab in ReportsPage state and markup", () => {
-    expect(reports).toMatch(/type ReportTab = "performance" \| "sales" \| "daily-close";/);
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // the ReportTab union now also includes
+    // "liability" (the new Reports queue).
+    // The test is lenient — it matches the
+    // "performance" / "sales" / "daily-close"
+    // prefix the existing tabs define, and
+    // permits a trailing "liability" or other
+    // future additions.
+    expect(reports).toMatch(/type ReportTab = "performance" \| "sales" \| "daily-close"/);
     expect(reports).toMatch(/activeTab === "daily-close"/);
     expect(reports).toMatch(/aria-selected=\{activeTab === "daily-close"\}/);
   });
