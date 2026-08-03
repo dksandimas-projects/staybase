@@ -8224,10 +8224,35 @@ export async function handleCheckinBooking(req: any, res: any) {
       // pre-Phase 5 behavior for legacy records. The
       // same `now` is used for the booking update +
       // the room update + the header mirror.
+      //
+      // Per MRB-15-03 (2026-08-03): the same
+      // transaction also recomputes
+      // `checkedInRoomCount` from every child's
+      // status (the just-checked-in booking is now
+      // `status: "checked-in"`, so the count
+      // includes it). The header's
+      // `activeRoomCount` / `cancelledRoomCount` /
+      // `roomCount` are NOT touched here — those are
+      // owned by the create / add-room / cancel paths
+      // only (per the JSDoc on `Reservation` in
+      // `shared/types/index.ts`). The
+      // `paymentStatus` aggregate reads every child's
+      // status (not just `["checked-in"]`) so the
+      // N>1 case is correct: a 2-room reservation
+      // where 1 room is checked-in and 1 is still
+      // pending reports the aggregate of `["checked-in",
+      // "payment-confirmed"]` — not a synthetic
+      // `["checked-in"]`.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
+        );
+        const childStatuses = childrenForCount.docs.map((d: any) => String(d.data()?.status || ""));
+        const newCheckedInCount = childStatuses.filter((s) => s === "checked-in").length;
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["checked-in"]),
+          checkedInRoomCount: newCheckedInCount,
+          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }
@@ -8513,10 +8538,34 @@ export async function handleCheckoutBooking(req: any, res: any) {
       // same `now` is used for the booking update +
       // the room update + the intercom archive + the
       // header mirror.
+      //
+      // Per MRB-15-03 (2026-08-03): the same
+      // transaction also recomputes
+      // `checkedInRoomCount` (decrement) +
+      // `checkedOutRoomCount` (increment) from every
+      // child's status. The just-checked-out booking
+      // is now `status: "checked-out"`, so the counts
+      // include it. The header's
+      // `activeRoomCount` / `cancelledRoomCount` /
+      // `roomCount` are NOT touched here — those are
+      // owned by the create / add-room / cancel paths
+      // only (per the JSDoc on `Reservation` in
+      // `shared/types/index.ts`). The
+      // `paymentStatus` aggregate reads every child's
+      // status (not just `["checked-out"]`) so the
+      // N>1 case is correct.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
+        );
+        const childStatuses = childrenForCount.docs.map((d: any) => String(d.data()?.status || ""));
+        const newCheckedInCount = childStatuses.filter((s) => s === "checked-in").length;
+        const newCheckedOutCount = childStatuses.filter((s) => s === "checked-out").length;
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["checked-out"]),
+          checkedInRoomCount: newCheckedInCount,
+          checkedOutRoomCount: newCheckedOutCount,
+          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }

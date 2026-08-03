@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.247.0";
+    VERSION2 = "0.249.0";
   }
 });
 
@@ -231823,8 +231823,14 @@ async function handleCheckinBooking(req, res) {
       });
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+        );
+        const childStatuses = childrenForCount.docs.map((d) => String(d.data()?.status || ""));
+        const newCheckedInCount = childStatuses.filter((s4) => s4 === "checked-in").length;
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["checked-in"]),
+          checkedInRoomCount: newCheckedInCount,
+          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }
@@ -231992,8 +231998,16 @@ async function handleCheckoutBooking(req, res) {
       }
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+        );
+        const childStatuses = childrenForCount.docs.map((d) => String(d.data()?.status || ""));
+        const newCheckedInCount = childStatuses.filter((s4) => s4 === "checked-in").length;
+        const newCheckedOutCount = childStatuses.filter((s4) => s4 === "checked-out").length;
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["checked-out"]),
+          checkedInRoomCount: newCheckedInCount,
+          checkedOutRoomCount: newCheckedOutCount,
+          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }
