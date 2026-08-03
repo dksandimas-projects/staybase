@@ -193,6 +193,23 @@ Reservation {
 
   requestFingerprint: string              // server-only; includes every room's type, occupancy, extra beds, and breakfast choices
 
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // durable refund-liability snapshot stamped onto
+  // the reservation header by reservation-scope
+  // cancels (MRB-13) + by N=1 cancels (the entire
+  // active surface today). Per-child cancels inside
+  // a multi-room reservation stamp the snapshot
+  // onto the cancelled booking instead; surviving
+  // children carry no liability. Absence / `null` /
+  // `undefined` means "no liability work to do" —
+  // typically because `policyRefund === 0` or the
+  // reservation was cancelled before CRL-07 shipped.
+  // See `CancellationLiability` + the pure
+  // `computeCancellationLiabilityState` helper in
+  // `shared/utils/cancellation.ts` for the state
+  // machine + the breakdown.
+  cancellationLiability?: CancellationLiability | null
+
   createdAt: Date
   updatedAt: Date
   createdBy: string                       // staff UID or the literal "guest"
@@ -314,6 +331,36 @@ Booking {
   cancelledAt: string | null
   cancelledBy: string | null
   cancellationSource: "guest" | "staff" | "system" | null
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // durable refund-liability snapshot stamped onto
+  // the booking doc by per-child + legacy
+  // null-`reservationId` cancels (the per-child
+  // path lives in the `else` arm of the
+  // `if (isReservationScope)` dispatch in
+  // `handleCancelBooking`; the legacy path
+  // falls through to the same branch because
+  // legacy bookings have no `reservationId`).
+  // Reservation-scope cancels stamp the snapshot
+  // onto the reservation header instead (see
+  // `Reservation.cancellationLiability`) — the
+  // booking doc's field is `undefined` for that
+  // path. Absence / `null` / `undefined` means
+  // "no liability work to do" — typically because
+  // `policyRefund === 0` (the destructive cancel
+  // never auto-refunds per CRL-04, so a no-refund
+  // cancel doesn't need a snapshot) or because
+  // the booking was cancelled before CRL-07
+  // shipped. The field is hydration-safe — the
+  // admin client's snapshot mapper defaults it to
+  // `null` when the Firestore doc has no field.
+  // See `CancellationLiability` + the pure
+  // `computeCancellationLiabilityState` helper in
+  // `shared/utils/cancellation.ts` for the state
+  // machine + the breakdown (state, outstanding,
+  // retention are derived; the stored field is
+  // the policy result + approved amount + the
+  // latest exception audit).
+  cancellationLiability?: CancellationLiability | null
   // Per BF-37 (booking-flow audit 2026-06-26) and W4.4 /
   // decision #104: per-booking email idempotency markers.
   // Written by the server when a transactional email fires so
@@ -900,3 +947,78 @@ ApiResponse<T> = ApiSuccess<T> | ApiError
 ## Booking Form (Zod — Step by Step)
 
 Zod schemas for the 4-step booking form live in `shared/schemas/booking.ts`. TypeScript types are derived via `z.infer`. See `plan/features/BOOKING-FLOW.md` for field-level validation rules. EXB shared helper behavior is owned by decisions #145, #153, and #157 and covered by the shared room-type, booking-add-on, and extra-bed-inventory tests.
+
+---
+
+## Cancellation Liability (CRL-07 — 2026-08-03)
+
+Per decision #173: the durable refund-liability snapshot stamped onto the cancelled entity in the same `runTransaction` as the status flip. Lives on the reservation header (`reservations/{id}.cancellationLiability`) for reservation-scope cancels + new-path N=1, and on the booking doc (`bookings/{id}.cancellationLiability`) for per-child cancels + legacy null-`reservationId` bookings. The stored fields are the immutable `policyResult` + the admin-controlled `approvedAmount` + the latest `exception` audit row. The derived fields — `state`, `outstandingAmount`, `retentionAmount` — are NEVER stored; the pure `computeCancellationLiabilityState` helper in `shared/utils/cancellation.ts` reads the stored snapshot + the cumulative `processedAmount` (from the refunds subcollection) and returns the projection.
+
+```
+CancellationPolicyResult {           // snapshot at cancel time; immutable post-cancel
+  refundPct: number                    // MIN per-room refundPct (the worst-case floor)
+  policyRefund: number                 // aggregate policy refund, 2dp
+  netCollected: number                 // aggregate net collected at cancel time
+  retainedAmount: number               // netCollected - policyRefund (what the hotel keeps under the policy)
+  cutoffHours: number                  // snapshotted cutoff (NOT the live settings value)
+  source: "settings" | "corporate-override" | "legacy-fallback"
+  snapshottedAt: Date                  // the same `now` as the cancel's `cancelledAt` — no clock skew
+}
+
+CancellationExceptionAudit {          // latest exception; overwritten on each new exception
+  approvedAmount: number               // the new approvedAmount after this exception
+  reason: string                       // required, ≤500 chars (the audit trail)
+  approvedBy: string                   // admin UID (the exception is admin-only)
+  approvedAt: Date
+}
+
+CancellationLiability {               // the stored snapshot (the contract)
+  policyResult: CancellationPolicyResult
+  approvedAmount: number               // defaults to policyResult.policyRefund; reduced only via exception
+  exception: CancellationExceptionAudit | null
+}
+
+CancellationLiabilityState {          // derived; never stored
+  "not-required"                        // policyRefund === 0 — nothing to refund
+  "retained"                            // approvedAmount < policyRefund — admin applied an exception
+  "pending-processing"                  // approvedAmount === policyRefund AND processedAmount === 0
+  "partially-processed"                 // 0 < processedAmount < approvedAmount
+  "processed"                           // processedAmount >= approvedAmount
+}
+
+// computed by the pure helper (input → output):
+computeCancellationLiabilityState({ liability, processedAmount }) → {
+  state: CancellationLiabilityState,
+  liability: CancellationLiability | null,
+  processedAmount: number,
+  outstandingAmount: number,           // approvedAmount - processedAmount, clamped ≥ 0
+  retentionAmount: number,             // policyRefund - approvedAmount, clamped ≥ 0
+  stateLabel: string                   // human-readable badge label per state
+}
+
+// The five-state machine is pinned by behavioural
+// tests in `shared/__tests__/crl-07-liability-state.test.ts`
+// (23 tests) covering the null fall-through, each
+// state, partial exception, fully-processed
+// exception, defensive coercion (negative inputs,
+// NaN, approvedAmount > policyRefund writer bug),
+// and the breakdown invariants. The pure
+// `buildCancellationLiabilitySnapshot` helper
+// produces the stored snapshot from a cancel-time
+// preview — used by the destructive cancel handler
+// in both branches (per-child + reservation-scope).
+//
+// Server projection endpoint (admin UI + future
+// Reports consumer):
+//   POST /api/bookings/cancellation-liability
+//     body: { reservationId } | { bookingId }
+//     returns: { success, data: { state, liability, processedAmount, outstandingAmount, retentionAmount, stateLabel } }
+//
+// Admin exception endpoint (the "reduce approved
+// amount" mutation):
+//   POST /api/bookings/cancellation-exception
+//     body: { reservationId | bookingId, approvedAmount: 0..policyRefund, reason: ≤500 chars }
+//     admin-only (403 for any other role)
+//     idempotency: same (amount, reason) replays the original commit
+//     never increases approvedAmount above the stored policy result
+```

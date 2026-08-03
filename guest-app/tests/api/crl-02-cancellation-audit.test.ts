@@ -42,16 +42,40 @@ describe("CRL-02 cancellation audit metadata", () => {
     it("writes all three audit fields in the same transaction.update call as the status flip", () => {
       // The 4 fields must share one `transaction.update` block so a
       // partial failure cannot leave a half-stamped cancellation.
+      // CRL-07 (2026-08-03) refactored the inline object into a
+      // `bookingUpdate` variable (the per-child branch now also
+      // includes the `cancellationLiability` snapshot when the
+      // policy refunds money), so the test reads the audit fields
+      // from the variable assignment instead of the inline object.
       const body = isolateHandleCancelBooking();
-      const updateBlock = body.match(/transaction\.update\(bookingDocumentRef,\s*\{[\s\S]+?\}\);/);
-      expect(updateBlock).toBeTruthy();
-      const block = updateBlock![0];
+      const updateVarBlock = body.match(/const bookingUpdate:\s*Record<string,\s*any>\s*=\s*\{[\s\S]+?\};/);
+      expect(updateVarBlock, "expected the per-child `bookingUpdate` variable").toBeTruthy();
+      const block = updateVarBlock![0];
       expect(block).toMatch(/status:\s*"cancelled"/);
       expect(block).toMatch(/cancellationReason:\s*validReason/);
-      expect(block).toMatch(/cancelledAt:\s*(?:new Date\(\)|now)/);
+      expect(block).toMatch(/cancelledAt:\s*now/);
       expect(block).toMatch(/cancelledBy/);
       expect(block).toMatch(/cancellationSource/);
-      expect(block).toMatch(/updatedAt:\s*(?:new Date\(\)|now)/);
+      expect(block).toMatch(/updatedAt:\s*now/);
+      // The variable is then passed to a single
+      // `transaction.update(bookingDocumentRef, bookingUpdate)`
+      // call so a partial failure cannot leave a
+      // half-stamped cancellation.
+      expect(body).toMatch(/transaction\.update\(bookingDocumentRef,\s*bookingUpdate\)/);
+    });
+
+    it("the per-child `bookingUpdate` shape carries the CRL-07 liability snapshot when one was produced", () => {
+      // CRL-07 (2026-08-03) added the optional
+      // `cancellationLiability` field to the
+      // per-child `bookingUpdate` (the snapshot is
+      // stamped in the same transaction as the
+      // status flip). The test matches the
+      // conditional set: when `liabilitySnapshot` is
+      // non-null, the field is added to the
+      // update; when `null` (no-refund cancel), the
+      // field is omitted.
+      const body = isolateHandleCancelBooking();
+      expect(body).toMatch(/bookingUpdate\.cancellationLiability\s*=\s*liabilitySnapshot/);
     });
 
     it("preserves the bounded cancellationReason contract (reason is sliced to 500 chars)", () => {

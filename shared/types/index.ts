@@ -306,6 +306,17 @@ export interface Reservation {
   updatedAt: Date;
   /** Staff UID for staff-created reservations, or the literal `"guest"` for self-service. Same pattern as CRL-02's `cancelledBy`. */
   createdBy: string;
+  // CRL-07 (2026-08-03, per decision #173): the durable refund-
+  // liability snapshot stamped onto the reservation header by
+  // reservation-scope cancels (MRB-13) and by N=1 cancels (the
+  // entire active surface today). Per-child cancels inside a
+  // multi-room reservation stamp the snapshot onto the cancelled
+  // booking instead; surviving children carry no liability.
+  // Absence (or `null`) means "no liability work to do" —
+  // typically because `policyRefund === 0`. See
+  // `CancellationLiability` + `computeCancellationLiabilityState`
+  // for the state machine.
+  cancellationLiability?: CancellationLiability | null;
 }
 
 // Per MRB-04 (2026-08-02, per decision #159): the
@@ -404,6 +415,93 @@ export interface ReservationFolioSummary {
   /** Whether the source is the new reservation subcollections or the legacy `bookings/{id}/payments` + `bookings/{id}/charges`. The legacy adapter is for null-`reservationId` bookings (pre-MRB-01). */
   source: "reservation-subcollection" | "booking-subcollection-legacy";
 }
+
+// Per CRL-07 (2026-08-03, per decision #173): the durable
+// refund-liability snapshot stamped onto the cancelled entity
+// in the same transaction as the status flip. The destructive
+// cancel never auto-refunds (CRL-04); the snapshot is the
+// contract — `policyResult` is read-only post-cancel, the
+// server + UI + future Reports (CRL-08) read it for display
+// and never recompute it. `approvedAmount` is admin-controlled
+// (default = `policyResult.policyRefund`, reduced only via
+// the new admin-only `POST /api/bookings/cancellation-exception`
+// endpoint that requires a reason). The `exception` field is
+// the latest audit row (overwritten on each new exception);
+// the historical trail lives in the admin notifications
+// collection CRL-08 adds. `processedAmount` is NOT stored —
+// it's derived from the refunds subcollection (the spec
+// body: "derived from immutable ledger entries"), so Reports
+// + the admin UI recompute on every render and stale counters
+// never drift. The `state` is also derived — see the pure
+// `computeCancellationLiabilityState` helper in
+// `shared/utils/cancellation.ts`.
+//
+// Lives at:
+//   - `reservations/{id}.cancellationLiability` for new reservations
+//     when the cancel is reservation-scope (MRB-13) OR for
+//     N=1 cancels (the entire active surface today).
+//   - `bookings/{id}.cancellationLiability` for per-child cancels
+//     inside a multi-room reservation (the surviving children
+//     carry no liability — the cancelled child carries the
+//     snapshot) AND for legacy null-`reservationId` bookings
+//     (pre-MRB-01) where the booking IS the reservation.
+//
+// Absence means "no liability work to do" — typically because
+// `policyRefund === 0` (no money owed, retention-only cancel)
+// or because the cancel happened before CRL-07 shipped. The
+// UI falls through to the pre-CRL-07 no-refund-needed view.
+
+/** Snapshotted at cancel time. Immutable post-cancel. */
+export interface CancellationPolicyResult {
+  /** MIN per-room `refundPct` — the worst-case floor the staff can guarantee without an exception. A higher per-room refund (e.g. a corporate override) is visible in the per-room projection; the aggregate is the floor. */
+  refundPct: number;
+  /** Aggregate policy refund at the moment of cancel, in PHP. Computed as the per-room `netCollected × (refundPct / 100)` sum, rounded to 2dp. */
+  policyRefund: number;
+  /** Aggregate net collected at the moment of cancel, in PHP. The reservation folio's `paymentsTotal` (sign-aware, refunds are negative) for the cancelled scope. */
+  netCollected: number;
+  /** Aggregate retained amount at the moment of cancel, in PHP. `netCollected - policyRefund`. Money the policy does NOT refund and the hotel keeps. */
+  retainedAmount: number;
+  /** The cutoff window in hours at the time of cancel (the snapshotted value, NOT the live settings value). */
+  cutoffHours: number;
+  /** Which source the policy snapshot came from. "settings" = websiteContent has a `cancellationPolicy`; "corporate-override" = a corporate code overrode the standard policy; "legacy-fallback" = null snapshot fell back to 48h/100%/0% (per CRL-05). */
+  source: "settings" | "corporate-override" | "legacy-fallback";
+  /** When the policy was evaluated. Captured at the same `now` the cancel's `cancelledAt` uses (one Date per request, no skew). */
+  snapshottedAt: Date;
+}
+
+/** The latest discretionary exception audit. Overwritten on each new exception. */
+export interface CancellationExceptionAudit {
+  /** The new `approvedAmount` after this exception. The previous `approvedAmount` is `policyResult.policyRefund` for the first exception, or the prior `exception.approvedAmount` for subsequent ones. */
+  approvedAmount: number;
+  /** Required, capped at 500 chars. Why the admin is reducing the approved amount. */
+  reason: string;
+  /** Admin UID — required (the exception is admin-only). */
+  approvedBy: string;
+  /** When the exception was recorded. */
+  approvedAt: Date;
+}
+
+/** The durable liability snapshot stamped at cancel time. */
+export interface CancellationLiability {
+  policyResult: CancellationPolicyResult;
+  /** Admin-controlled refund cap. Defaults to `policyResult.policyRefund` at cancel time. Reduced only via `POST /api/bookings/cancellation-exception`. NEVER exceeds `policyResult.policyRefund` (an exception can only reduce, never increase). */
+  approvedAmount: number;
+  /** The latest exception audit. `null` when no exception has been applied. */
+  exception: CancellationExceptionAudit | null;
+}
+
+/** The five derived states. NEVER stored — computed by `computeCancellationLiabilityState` from the stored liability + the derived `processedAmount`. */
+export type CancellationLiabilityState =
+  /** `policyRefund === 0` — no money to refund. The hotel keeps everything the guest paid (or the guest paid nothing). No admin action required. */
+  | "not-required"
+  /** `approvedAmount < policyRefund` — admin applied an exception to reduce the refund. The retention `policyRefund - approvedAmount` is the "extra we kept beyond what the policy gave". Includes the fully-processed exception case (`processedAmount >= approvedAmount`). */
+  | "retained"
+  /** `approvedAmount === policyRefund` AND `processedAmount === 0` — full policy refund approved, nothing refunded yet. Admin needs to record the refund. */
+  | "pending-processing"
+  /** `0 < processedAmount < approvedAmount` — some refunds recorded, more to go. */
+  | "partially-processed"
+  /** `processedAmount >= approvedAmount` — fully refunded. Lifecycle complete. */
+  | "processed";
 
 export interface Booking {
   id: string;
@@ -608,6 +706,16 @@ export interface Booking {
   cancelledAt: string | null;
   cancelledBy: string | null;
   cancellationSource: CancellationSource | null;
+  // CRL-07 (2026-08-03, per decision #173): the durable refund-
+  // liability snapshot stamped onto per-child cancels (a single
+  // room in a multi-room reservation, or any legacy null-
+  // `reservationId` booking). Reservation-scope cancels (MRB-13)
+  // stamp the snapshot onto the reservation header instead, so
+  // the per-child row is `undefined` for that path. Absence
+  // (or `null`) means "no liability work to do" — typically
+  // because `policyRefund === 0`. See `CancellationLiability` +
+  // `computeCancellationLiabilityState` for the state machine.
+  cancellationLiability?: CancellationLiability | null;
   earlyCheckIn?: EarlyCheckInDetails | null;
   createdAt: Date;
   updatedAt: Date;

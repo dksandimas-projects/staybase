@@ -11,6 +11,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
 import { CancellationPreviewPanel } from "../components/CancellationPreviewPanel";
+import { CancellationLiabilityPanel, CancellationExceptionModal } from "../components/CancellationLiabilityPanel";
 import {
   BookingCheckInReadiness,
   BookingDrawerActionFooter,
@@ -817,6 +818,37 @@ export function BookingsPage() {
   const [showVerifyPaymentModal, setShowVerifyPaymentModal] = useState(false);
   const verifySubmissionIdRef = useRef<string | null>(null);
   const [showRefundModal, setShowRefundModal] = useState(false);
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // exception modal state. Mounted when the admin
+  // taps "Apply exception" on the liability panel.
+  // The form lives in `CancellationExceptionModal`;
+  // this state just controls the open/close + the
+  // refresh trigger after a successful submit.
+  const [showExceptionModal, setShowExceptionModal] = useState(false);
+  // The `liabilitySnapshotKey` is bumped on every
+  // mutation that changes the stored liability
+  // (a fresh exception submit, a fresh refund
+  // submit). The panel watches this key (via
+  // the `liability` prop's identity change) and
+  // re-projects. Same pattern as the existing
+  // `cancelPreviewRequestIdRef` — a counter that
+  // forces a refetch when a dependent query
+  // changes its inputs.
+  const [liabilitySnapshotKey, setLiabilitySnapshotKey] = useState(0);
+  // The `openLiabilityRefundModal` function
+  // opens the existing refund modal pre-filled
+  // with the suggested amount. The panel calls
+  // this when the admin taps "Record processed
+  // refund". Same shape as
+  // `openRecordPaymentForBalance` — the parent
+  // owns the refund modal state, the panel
+  // just hands the amount.
+  const openLiabilityRefundModal = (suggestedAmount: number) => {
+    setRefundAmount(String(Math.max(0, Number(suggestedAmount) || 0)));
+    setRefundMethod("cash");
+    setRefundReason("");
+    setShowRefundModal(true);
+  };
   const [verifyAmount, setVerifyAmount] = useState("");
   const [verifyMethod, setVerifyMethod] = useState("gcash");
   const [verifyReference, setVerifyReference] = useState("");
@@ -4346,6 +4378,50 @@ export function BookingsPage() {
               </div>
             )}
 
+            {/* Per CRL-07 (2026-08-03, per decision #173):
+                the cancellation-liability panel. Mounted
+                inside the drawer when the selected
+                booking is cancelled (`status ===
+                "cancelled"`) AND has a liability
+                snapshot. For reservation-scope cancels
+                the snapshot lives on the reservation
+                header (the source of truth for the
+                aggregate); for per-child + legacy
+                cancels the snapshot lives on the
+                booking doc. The reservation header
+                carries the snapshot only when the
+                cancel was reservation-scope; the
+                cancelled child booking's
+                `cancellationLiability` is populated
+                when the cancel was per-child.
+
+                The panel reads from the booking doc by
+                default; when the selected booking is
+                part of a multi-room reservation AND
+                the reservation header carries a
+                liability (the reservation-scope case),
+                the panel reads from the header. For
+                N=1 (today's entire active surface) the
+                booking path is sufficient — the
+                cancel is per-child, the snapshot is
+                on the booking doc. The reservation-
+                header read is the CRL-08/15 follow-up
+                surface for N>1 reservation-scope
+                cancels; for now the panel falls
+                through to the booking's snapshot
+                when the header has none. */}
+            {selectedBooking.status === "cancelled" && (
+              <CancellationLiabilityPanel
+                liability={selectedBooking.cancellationLiability || null}
+                bookingId={selectedBooking.id}
+                reservationId={selectedBooking.reservationId || null}
+                isAdmin={currentUser?.role === "admin"}
+                onOpenRefundModal={openLiabilityRefundModal}
+                onOpenExceptionModal={() => setShowExceptionModal(true)}
+                refreshKey={liabilitySnapshotKey}
+              />
+            )}
+
             <div>
             <BookingDrawerWorkspaceHeader
               booking={selectedBooking}
@@ -6824,6 +6900,13 @@ export function BookingsPage() {
                 setRefundReason("");
                 setShowRefundModal(false);
                 toast.success("Refund recorded", `${formatPrice(amount)} returned via ${getOnsitePaymentMethodLabel(refundMethod)}.`);
+                // Per CRL-07: the refund updated the
+                // refunds subcollection. Bump the
+                // panel's `refreshKey` so it re-projects
+                // the live `processedAmount` without
+                // waiting for the Firestore onSnapshot
+                // to land the new value.
+                setLiabilitySnapshotKey((prev) => prev + 1);
               } catch (error: any) {
                 setRefundError(error.message || "Please try again.");
               } finally {
@@ -6840,6 +6923,41 @@ export function BookingsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Per CRL-07 (2026-08-03, per decision #173):
+          the admin-only exception modal. The form
+          lives in the
+          `CancellationExceptionModal` component (it
+          owns the input state, the validation, the
+          API call, and the error display). The
+          parent only owns the open/close + the
+          post-success refresh trigger. The modal is
+          admin-gated by the parent: the panel
+          only renders the "Apply exception" button
+          when `currentUser?.role === "admin"`, and
+          the modal itself is mounted only when
+          `showExceptionModal` is true (the parent
+          controls who can open it via the panel
+          button). A non-admin could not even
+          trigger the open handler. */}
+      <CancellationExceptionModal
+        open={showExceptionModal}
+        onClose={() => setShowExceptionModal(false)}
+        liability={selectedBooking?.cancellationLiability || null}
+        bookingId={selectedBooking?.id || ""}
+        reservationId={selectedBooking?.reservationId || null}
+        onSuccess={() => {
+          // The exception updated the stored
+          // `cancellationLiability`. Bump the
+          // panel's `refreshKey` so it re-projects
+          // the new state. The Firestore onSnapshot
+          // will also push the new value to
+          // `selectedBooking.cancellationLiability`,
+          // but the bump makes the refresh feel
+          // instant.
+          setLiabilitySnapshotKey((prev) => prev + 1);
+        }}
+      />
 
       {/* BDUX-05: Add charge modal */}
       <Modal

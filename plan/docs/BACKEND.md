@@ -76,6 +76,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `roomCount` / `activeRoomCount` / `cancelledRoomCount` / `checkedInRoomCount` / `checkedOutRoomCount` | number | Aggregate counters. Per MRB-07, a staff-created reservation stamps these from its actual room count (N), so the admin reservation row reads room count, status and balance without fanning out to the children |
 | `holdExpiresAt` | timestamp \| null | Unified payment hold deadline (PEX-01) |
 | `requestFingerprint` | string | Canonical SHA-256 create request fingerprint for idempotency |
+| `cancellationLiability` | object \| null | **CRL-07 (2026-08-03, per decision #173):** durable refund-liability snapshot stamped by reservation-scope cancels (MRB-13) + new-path N=1. Same shape as the booking-doc field — `{ policyResult: { refundPct, policyRefund, netCollected, retainedAmount, cutoffHours, source, snapshottedAt }, approvedAmount, exception: { approvedAmount, reason, approvedBy, approvedAt } \| null }`. `policyResult` is the aggregate of the reservation-scope preview (MIN per-room `refundPct` + pro-rated `netCollected`); the per-room detail is recoverable from the cancelled children's own snapshots when N>1. Surviving children in a partial reservation-scope cancel carry NO liability field (their status is unchanged). The header is the source of truth for the aggregate — Reports (CRL-08) read this field for the pending liability queue. |
 | `createdAt` / `updatedAt` / `createdBy` | timestamp / string | Audit |
 
 **Subcollections:**
@@ -116,6 +117,7 @@ MRB-06 public creates may contain an explicit room selection for each requested 
 | `breakfastSelections` | map | `bookings/{bookingId}.breakfastSelections` map: `yyyy-mm-dd-guest-n` → selected silog item name |
 | `breakfastServed` / `hasBreakfast` / `breakfastRate` | map / bool / number | Breakfast add-on & daily silog selection maps |
 | `cancellationReason` / `cancelledAt` / `cancelledBy` / `cancellationSource` | string / timestamp \| null | Permanent cancellation record |
+| `cancellationLiability` | object \| null | **CRL-07 (2026-08-03, per decision #173):** durable refund-liability snapshot stamped by per-child + legacy null-`reservationId` cancels. `{ policyResult: { refundPct, policyRefund, netCollected, retainedAmount, cutoffHours, source, snapshottedAt }, approvedAmount, exception: { approvedAmount, reason, approvedBy, approvedAt } \| null }`. `policyResult` is immutable post-cancel. `approvedAmount` defaults to `policyResult.policyRefund` and is reduced only via `POST /api/bookings/cancellation-exception`. Absent on no-refund cancels (the absence is the "no liability work to do" signal) and on bookings cancelled before CRL-07 shipped. See the `computeCancellationLiabilityState` helper for the derived state. |
 | `createdAt` / `updatedAt` | timestamp | Audit timestamps |
 
 ---
