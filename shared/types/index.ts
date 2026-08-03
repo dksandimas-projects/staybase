@@ -296,6 +296,31 @@ export interface Reservation {
   checkedInRoomCount: number;
   checkedOutRoomCount: number;
 
+  // Per MRB-14 (2026-08-03, per decision #180 — proposed):
+  // the per-child date spread. The header's `checkIn` /
+  // `checkOut` / `numNights` are the ORIGINAL shared-dates
+  // snapshot from create time (now immutable — MRB-14
+  // froze them so a reschedule of one room no longer
+  // mutates the "shared" range every other surface reads).
+  // `actualDateRange` is the denormalized
+  // MIN(children.checkIn) / MAX(children.checkOut) +
+  // an `isDivergent` flag. `null` when the field has
+  // never been computed (pre-MRB-14 reservations,
+  // backfilled lazily on the next reschedule or
+  // add-room). The header + per-child dates are
+  // independent: a single-room reservation's
+  // `actualDateRange` always equals the header's
+  // `checkIn` / `checkOut` and `isDivergent` is `false`.
+  // N=1 + legacy null-`reservationId` paths keep the
+  // existing byte-equivalent behaviour (the header's
+  // `checkIn` / `checkOut` are the only range the UI /
+  // email surface reads).
+  actualDateRange?: {
+    earliestCheckIn: Date;
+    latestCheckOut: Date;
+    isDivergent: boolean;
+  } | null;
+
   /** Per PEX-01 (decision #147): the unified hold window for the whole reservation. No separate large-group timer per MRB-08. `null` after the hold transitions to `payment-uploaded` or beyond. */
   holdExpiresAt: Date | null;
 

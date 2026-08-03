@@ -191,7 +191,7 @@ describe("MRB-02.x reschedule — reservation header update", () => {
       expect(bookingUpdateIdx).toBeLessThan(runTxnCloseIdx);
     });
 
-    it("updates the new dates + numNights + totals + fingerprint (NOT the source / corporate / member context)", () => {
+    it("updates the totals + fingerprint + actualDateRange (NOT the dates or the source / corporate / member context)", () => {
       // The reschedule re-uses the existing booking's
       // source / corporate / member context — only
       // the dates + room + rate change. The header's
@@ -202,16 +202,49 @@ describe("MRB-02.x reschedule — reservation header update", () => {
       // are preserved — the reschedule doesn't change
       // the lead booker's source, the corporate code,
       // or the voucher).
+      //
+      // Per MRB-14 (2026-08-03, per decision #180):
+      // the header's `checkIn` / `checkOut` /
+      // `numNights` are the ORIGINAL shared-dates
+      // snapshot from create time and are now
+      // IMMUTABLE. A reschedule of one child no longer
+      // mutates the header's "shared" range — every
+      // other surface (email subject, receipt PDF,
+      // dashboard date filter, checkin reminder
+      // cron) reads the header's original dates, not
+      // the rescheduled child's new dates. The
+      // child's new dates are its own
+      // `bookings/{id}.checkIn` / `checkOut` /
+      // `numNights`. The header's `actualDateRange`
+      // (denormalized) tracks the per-child spread +
+      // an `isDivergent` flag for the UI + email
+      // surface to switch between "one shared range"
+      // and "per-child dates" without re-fetching
+      // the children.
       const headerUpdateBlock = reschedule.match(
         /transaction\.update\(reservationDocRef, \{[\s\S]+?\}\);/
       );
       expect(headerUpdateBlock).toBeTruthy();
       const body = headerUpdateBlock![0];
-      expect(body).toMatch(/checkIn: Timestamp\.fromDate\(checkInDate\)/);
-      expect(body).toMatch(/checkOut: Timestamp\.fromDate\(checkOutDate\)/);
-      expect(body).toMatch(/numNights,/);
+      // The forbidden keys must NOT appear inside the
+      // update object. Pre-MRB-14 the reschedule did
+      // `checkIn: Timestamp.fromDate(checkInDate)`,
+      // `checkOut: Timestamp.fromDate(checkOutDate)`,
+      // `numNights` — the bug MRB-14 fixes.
+      expect(body).not.toMatch(/\bcheckIn: Timestamp\.fromDate/);
+      expect(body).not.toMatch(/\bcheckOut: Timestamp\.fromDate/);
+      expect(body).not.toMatch(/\bnumNights:/);
+      // The MRB-14 contract: the header's totals
+      // + the per-stream aggregate + the rescheduled
+      // fingerprint + the recomputed `actualDateRange`
+      // are the new update keys.
       expect(body).toMatch(/totalPrice: finalTotalPrice/);
+      expect(body).toMatch(/subtotal: originalTotalPrice/);
+      expect(body).toMatch(/originalSubtotal: originalTotalPrice/);
+      expect(body).toMatch(/aggregateRevenueAllocation: updatedBooking\.revenueAllocation/);
       expect(body).toMatch(/requestFingerprint: rescheduleFingerprint/);
+      expect(body).toMatch(/actualDateRange: rescheduleActualDateRange/);
+      expect(body).toMatch(/updatedAt: now/);
       // Negative: source / corporate / member context
       // are NOT updated (reschedule doesn't change them).
       expect(body).not.toMatch(/source:\s*"online"/);

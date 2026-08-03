@@ -910,3 +910,66 @@ export function computeBookingRevenueAllocation(
   );
 }
 
+
+// Per MRB-14 (2026-08-03, per decision #180 — proposed):
+// compute the `Reservation.actualDateRange` from a list of
+// children. Pure helper — no Firestore, no React state. The
+// header's `checkIn` / `checkOut` are the original shared
+// dates (now immutable per MRB-14); `actualDateRange` is the
+// denormalized MIN(children.checkIn) / MAX(children.checkOut)
+// + an `isDivergent` flag. The flag is `true` ⇔ any child's
+// `checkIn` or `checkOut` differs from the header's
+// `checkIn` / `checkOut`. Returns `null` for an empty
+// children list (caller decides what to do — the create
+// path always has at least 1 child, the reschedule path
+// never reduces to 0, the add-room path has N+1 by
+// construction). Used by the create path (initial write
+// with all children matching the header → `isDivergent:
+// false`), the reschedule path (post-reschedule re-scan),
+// and the add-room path (post-add re-scan). N=1 + legacy
+// null-`reservationId` callers don't compute the field
+// (their data is per-child only).
+export interface ReservationChildDateInput {
+  checkIn: Date | string;
+  checkOut: Date | string;
+}
+
+export interface ReservationActualDateRange {
+  earliestCheckIn: Date;
+  latestCheckOut: Date;
+  isDivergent: boolean;
+}
+
+/**
+ * Compute the `Reservation.actualDateRange` from a list of
+ * children. Pure function — no Firestore, no React state,
+ * no async. Dates are accepted as `Date` or ISO `string`
+ * (the caller's choice; the helper normalises via
+ * `new Date(...)`). Returns `null` for an empty list
+ * (the caller is responsible for the empty-list case —
+ * a reservation always has at least 1 child in MRB-04+).
+ */
+export function computeReservationActualDateRange(
+  headerCheckIn: Date | string,
+  headerCheckOut: Date | string,
+  children: ReadonlyArray<ReservationChildDateInput>
+): ReservationActualDateRange | null {
+  if (children.length === 0) return null;
+  const headerIn = new Date(headerCheckIn).getTime();
+  const headerOut = new Date(headerCheckOut).getTime();
+  if (!Number.isFinite(headerIn) || !Number.isFinite(headerOut)) return null;
+  let earliest = new Date(headerIn);
+  let latest = new Date(headerOut);
+  let isDivergent = false;
+  for (const child of children) {
+    const childIn = new Date(child.checkIn).getTime();
+    const childOut = new Date(child.checkOut).getTime();
+    if (!Number.isFinite(childIn) || !Number.isFinite(childOut)) continue;
+    if (childIn < earliest.getTime()) earliest = new Date(childIn);
+    if (childOut > latest.getTime()) latest = new Date(childOut);
+    if (childIn !== headerIn || childOut !== headerOut) {
+      isDivergent = true;
+    }
+  }
+  return { earliestCheckIn: earliest, latestCheckOut: latest, isDivergent };
+}

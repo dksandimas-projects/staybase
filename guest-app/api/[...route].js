@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.245.0";
+    VERSION2 = "0.246.0";
   }
 });
 
@@ -221266,7 +221266,7 @@ var init_animations = __esm({
 });
 
 // ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
 var init_constants = __esm({
   "../shared/constants/index.ts"() {
     BOOKING_STATUSES = [
@@ -221290,7 +221290,7 @@ var init_constants = __esm({
     PROTECTED_BOOKING_SOURCES = ["online", "walk-in", "corporate"];
     ROOM_STATUSES = ["available", "occupied", "blocked"];
     HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"];
-    DEFAULT_ROOM_TYPES = [
+    DEFAULT_ROOM_TYPES2 = [
       { value: "single", label: "Single", shortLabel: "Single", imageUrls: [], bedDefinition: "1 single bed", description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
       { value: "standard-double", label: "Standard Double", shortLabel: "Std Double", imageUrls: [], bedDefinition: "1 double bed", description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
       { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin", imageUrls: [], bedDefinition: "2 single beds", description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
@@ -221478,7 +221478,7 @@ var init_references = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, AddRoomBookingSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     init_zod();
@@ -221627,6 +221627,26 @@ var init_booking = __esm({
       // explicitly provided — a defensive path for a
       // future migration tool).
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+    }).strict();
+    AddRoomBookingSchema = external_exports.object({
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX),
+      roomId: external_exports.string().trim().min(1).max(64),
+      numAdults: external_exports.coerce.number().int().min(1).max(100),
+      numChildren: external_exports.coerce.number().int().min(0).max(100).optional().default(0),
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
+      discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
+      voucherCode: external_exports.string().trim().max(40).optional().default(""),
+      // The optional `totalPriceOverride` matches the walkin
+      // surface; absent → server-computed.
+      totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
+      // The optional `requestFingerprint` lets a future
+      // client preallocate the idempotency key for a
+      // retry-after-uncertain-response. The current staff
+      // modal doesn't preallocate — the server auto-mints
+      // `add-room-${reservationId}-${roomId}-${now}` and
+      // writes it onto the header (the same pattern the
+      // reschedule handler uses for `rescheduleFingerprint`).
+      requestFingerprint: external_exports.string().trim().min(1).max(256).optional()
     }).strict();
   }
 });
@@ -222183,6 +222203,26 @@ function computeBookingRevenueAllocation(input) {
     { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
     totalNet
   );
+}
+function computeReservationActualDateRange(headerCheckIn, headerCheckOut, children) {
+  if (children.length === 0) return null;
+  const headerIn = new Date(headerCheckIn).getTime();
+  const headerOut = new Date(headerCheckOut).getTime();
+  if (!Number.isFinite(headerIn) || !Number.isFinite(headerOut)) return null;
+  let earliest = new Date(headerIn);
+  let latest = new Date(headerOut);
+  let isDivergent = false;
+  for (const child of children) {
+    const childIn = new Date(child.checkIn).getTime();
+    const childOut = new Date(child.checkOut).getTime();
+    if (!Number.isFinite(childIn) || !Number.isFinite(childOut)) continue;
+    if (childIn < earliest.getTime()) earliest = new Date(childIn);
+    if (childOut > latest.getTime()) latest = new Date(childOut);
+    if (childIn !== headerIn || childOut !== headerOut) {
+      isDivergent = true;
+    }
+  }
+  return { earliestCheckIn: earliest, latestCheckOut: latest, isDivergent };
 }
 var init_bookingFolio = __esm({
   "../shared/utils/bookingFolio.ts"() {
@@ -223644,6 +223684,7 @@ var shared_exports = {};
 __export(shared_exports, {
   ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
   AboutContentSchema: () => AboutContentSchema,
+  AddRoomBookingSchema: () => AddRoomBookingSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
   BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
   BOOKING_SOURCES: () => BOOKING_SOURCES,
@@ -223661,7 +223702,7 @@ __export(shared_exports, {
   DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
-  DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES,
+  DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
@@ -223736,6 +223777,7 @@ __export(shared_exports, {
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeRequestFingerprint: () => computeRequestFingerprint,
+  computeReservationActualDateRange: () => computeReservationActualDateRange,
   computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
   computeServerFolioTotals: () => computeServerFolioTotals,
   countExtraBedsInUse: () => countExtraBedsInUse,
@@ -228621,6 +228663,19 @@ async function handleCreateBooking(req, res) {
         checkedOutRoomCount: 0,
         holdExpiresAt: newBooking.holdExpiresAt ? newBooking.holdExpiresAt : null,
         requestFingerprint: reservationRequestFingerprint,
+        // Per MRB-14 (2026-08-03, per decision #180 —
+        // proposed): the actual range snapshot. At create
+        // time every child shares the header's dates, so
+        // `isDivergent` is `false` by construction. The
+        // helper is overkill here; the reschedule +
+        // add-room paths use it. Pre-MRB-14 reservations
+        // keep `actualDateRange: null` and fall back to
+        // reading the children's per-child dates directly.
+        actualDateRange: {
+          earliestCheckIn: checkInDate,
+          latestCheckOut: checkOutDate,
+          isDivergent: false
+        },
         createdAt: now,
         updatedAt: now,
         createdBy: "guest"
@@ -229722,6 +229777,18 @@ async function handleCreateWalkin(req, res) {
         // idempotency check above used, so a replay of an N-room
         // walk-in compares like for like.
         requestFingerprint: buildWalkinFingerprint(guestName2),
+        // Per MRB-14 (2026-08-03, per decision #180 —
+        // proposed): the actual range snapshot. Walk-ins
+        // create all N children in the same transaction
+        // with the same dates, so `isDivergent` is
+        // `false` by construction. The reschedule +
+        // add-room paths use `computeReservationActualDateRange`
+        // to recompute on every child mutation.
+        actualDateRange: {
+          earliestCheckIn: checkInDate,
+          latestCheckOut: checkOutDate,
+          isDivergent: false
+        },
         createdAt: now,
         updatedAt: now,
         createdBy: "staff"
@@ -232647,6 +232714,26 @@ async function handleRescheduleBooking(req, res) {
       }
       transaction.update(bookingRef, updatedBooking);
       if (reservationDocRef && existingReservationData2) {
+        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
+        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
+        const rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
+          const childData = docSnap.data();
+          if (docSnap.id === String(bookingId)) {
+            return {
+              checkIn: checkInDate,
+              checkOut: checkOutDate
+            };
+          }
+          return {
+            checkIn: childData.checkIn,
+            checkOut: childData.checkOut
+          };
+        });
+        const rescheduleActualDateRange = computeReservationActualDateRange(
+          existingReservationData2.checkIn,
+          existingReservationData2.checkOut,
+          rescheduleChildrenDates
+        );
         const rescheduleFingerprint = computeRequestFingerprint({
           reservationId: bookingReservationId2,
           roomLines: [{
@@ -232672,9 +232759,31 @@ async function handleRescheduleBooking(req, res) {
           privacyVersion: String(existingReservationData2.privacyVersion || DEFAULT_TERMS_VERSION)
         });
         transaction.update(reservationDocRef, {
-          checkIn: Timestamp.fromDate(checkInDate),
-          checkOut: Timestamp.fromDate(checkOutDate),
-          numNights,
+          // Per MRB-14 (2026-08-03, per decision #180
+          // — proposed): the header's `checkIn` /
+          // `checkOut` / `numNights` are the ORIGINAL
+          // shared-dates snapshot from create time
+          // and are now IMMUTABLE. A reschedule of
+          // one child no longer mutates the header's
+          // "shared" range — every other surface
+          // (email subject, receipt PDF, dashboard
+          // date filter, checkin reminder cron)
+          // reads the header's original dates, not
+          // the rescheduled child's new dates. The
+          // child's new dates are its own
+          // `bookings/{id}.checkIn` / `checkOut` /
+          // `numNights`. The header's
+          // `actualDateRange` (denormalized) tracks
+          // the per-child spread + an `isDivergent`
+          // flag for the UI + email surface to switch
+          // between "one shared range" and "per-child
+          // dates" without re-fetching the children.
+          // (Removed lines: `checkIn`,
+          // `checkOut`, `numNights` — pre-MRB-14 the
+          // reschedule updated them to the new
+          // child's dates, which silently leaked the
+          // rescheduled child's range into every
+          // other surface's "shared" view.)
           // The reservation-level totals track the
           // child booking's `totalPrice` for the
           // single-room case (the reschedule
@@ -232708,6 +232817,20 @@ async function handleRescheduleBooking(req, res) {
           // different fingerprint is the natural
           // reschedule flow, not a conflict.
           requestFingerprint: rescheduleFingerprint,
+          // Per MRB-14 (2026-08-03, per decision #180
+          // — proposed): the recomputed
+          // `actualDateRange`. Built by the helper
+          // above from every child's post-write
+          // dates. `isDivergent: true` ⇔ the
+          // just-rescheduled child (or any other
+          // child) now has dates that differ from
+          // the header's original. The admin surface
+          // + email switch to per-child dates when
+          // this flag flips. Null when the helper
+          // returned null (no children, which is a
+          // never-true invariant — the transaction
+          // never lands with 0 children).
+          actualDateRange: rescheduleActualDateRange,
           updatedAt: now
         });
       }
@@ -232775,6 +232898,411 @@ async function handleRescheduleBooking(req, res) {
       });
     }
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
+  }
+}
+async function handleAddRoomToReservation(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsedAddRoom = AddRoomBookingSchema.safeParse(req.body || {});
+  if (!parsedAddRoom.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the add-room details \u2014 a required field is missing or invalid."
+    });
+  }
+  const {
+    reservationId,
+    roomId,
+    numAdults,
+    numChildren,
+    extraBedCount,
+    discountType: requestedDiscountType,
+    voucherCode: requestedVoucherCode,
+    totalPriceOverride
+  } = parsedAddRoom.data;
+  try {
+    let newBookingId = null;
+    let newBookingRef = null;
+    let updatedHeader = null;
+    let fullBookingForEmail = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const reservationRef = adminDb.collection("reservations").doc(reservationId);
+      const reservationSnap = await transaction.get(reservationRef);
+      if (!reservationSnap.exists) {
+        throw new Error("RESERVATION_NOT_FOUND");
+      }
+      const reservation = reservationSnap.data() || {};
+      const headerCheckIn = toDateOrNull(reservation.checkIn);
+      const headerCheckOut = toDateOrNull(reservation.checkOut);
+      if (!headerCheckIn || !headerCheckOut) {
+        throw new Error("Reservation header is missing dates.");
+      }
+      const headerNumNights = Number(reservation.numNights) || 0;
+      if (headerNumNights < 1) {
+        throw new Error("Reservation header has invalid numNights.");
+      }
+      const headerDateString = (() => {
+        const y2 = headerCheckIn.getUTCFullYear();
+        const m2 = String(headerCheckIn.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(headerCheckIn.getUTCDate()).padStart(2, "0");
+        return `${y2}-${m2}-${d}`;
+      })();
+      const headerCheckOutString = (() => {
+        const y2 = headerCheckOut.getUTCFullYear();
+        const m2 = String(headerCheckOut.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(headerCheckOut.getUTCDate()).padStart(2, "0");
+        return `${y2}-${m2}-${d}`;
+      })();
+      const targetRoomRef = adminDb.collection("rooms").doc(roomId);
+      const targetRoomSnap = await transaction.get(targetRoomRef);
+      if (!targetRoomSnap.exists) {
+        throw new Error("Target room not found.");
+      }
+      const targetRoom = targetRoomSnap.data() || {};
+      if (targetRoom.isActive === false) {
+        throw new Error("Target room is inactive.");
+      }
+      if (targetRoom.status === "blocked") {
+        const blockedFrom = toDateOrNull(targetRoom.blockedFrom);
+        const blockedTo = toDateOrNull(targetRoom.blockedTo);
+        const windowActive = blockedFrom && blockedTo ? rangesOverlap(blockedFrom, blockedTo, headerCheckIn, headerCheckOut) : true;
+        if (windowActive) {
+          throw new Error("Target room is blocked for those dates.");
+        }
+      }
+      const targetRoomType = String(targetRoom.type || "").trim();
+      if (!targetRoomType) {
+        throw new Error("Target room is missing a type.");
+      }
+      const requiredExtraBeds = requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: Number(targetRoom.maxCapacity) || 0,
+        maxChildren: Number(targetRoom.maxChildren) || 0
+      });
+      if (requiredExtraBeds.requiredExtraBeds > extraBedCount) {
+        throw new Error(
+          `Target room needs ${requiredExtraBeds.requiredExtraBeds} extra bed(s) for ${numAdults} adult(s) + ${numChildren} child(ren), but only ${extraBedCount} provided.`
+        );
+      }
+      if (Number(targetRoom.maxExtraBeds) >= 0 && extraBedCount > Number(targetRoom.maxExtraBeds)) {
+        throw new Error(`Target room allows at most ${targetRoom.maxExtraBeds} extra bed(s).`);
+      }
+      const existingChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", reservationId);
+      const existingChildrenSnap = await transaction.get(existingChildrenQuery);
+      const existingChildren = existingChildrenSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        data: docSnap.data() || {}
+      }));
+      const siblingClaimedRoom = existingChildren.find(
+        (child) => String(child.data.roomId || "") === String(roomId)
+      );
+      if (siblingClaimedRoom) {
+        throw new Error("Target room is already claimed by another stay in this reservation.");
+      }
+      const cancelledCount = existingChildren.filter(
+        (child) => String(child.data.status || "") === "cancelled"
+      ).length;
+      const checkedInCount = existingChildren.filter(
+        (child) => String(child.data.status || "") === "checked-in"
+      ).length;
+      if (cancelledCount > 0) {
+        throw new Error("Reservation has cancelled rooms \u2014 staff must clear those before adding a new room.");
+      }
+      if (checkedInCount > 0) {
+        throw new Error("Reservation has a checked-in room \u2014 the in-stay reschedule path applies to date changes for an existing room.");
+      }
+      const maxPosition = existingChildren.reduce(
+        (max, child) => Math.max(max, Number(child.data.reservationPosition) || 0),
+        0
+      );
+      const newPosition = maxPosition + 1;
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() || {} : {};
+      const roomTypesConfig = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : DEFAULT_ROOM_TYPES;
+      const targetTypeEntry = roomTypesConfig.find(
+        (entry) => String(entry.value) === targetRoomType
+      );
+      if (!targetTypeEntry) {
+        throw new Error("Target room type is not configured.");
+      }
+      const typeBaseRate = Number(targetTypeEntry.pricePerNight) || 0;
+      const typeWeekendRate = Number(targetTypeEntry.weekendRate) || typeBaseRate;
+      const isCorporateReservation = Boolean(reservation.isCorporate);
+      const corporateCode = String(reservation.corporateCode || "").trim().toUpperCase();
+      const perRoomTypeCorporateRate = (() => {
+        if (!isCorporateReservation) return 0;
+        const negotiatedRate = corporateCode && Array.isArray(targetTypeEntry.corporateRateByCode) ? Number(targetTypeEntry.corporateRateByCode[corporateCode]) || 0 : 0;
+        return negotiatedRate > 0 ? negotiatedRate : Number(targetTypeEntry.corporateRate) || 0;
+      })();
+      const activeBaseRate = perRoomTypeCorporateRate > 0 ? perRoomTypeCorporateRate : typeBaseRate;
+      const activeWeekendRate = perRoomTypeCorporateRate > 0 ? perRoomTypeCorporateRate : typeWeekendRate;
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides || []);
+      const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
+        checkIn: headerCheckIn,
+        checkOut: headerCheckOut,
+        roomType: targetRoomType,
+        baseRate: activeBaseRate,
+        weekendRate: activeWeekendRate,
+        seasonalRateOverrides
+      });
+      const roomTotal = roomBreakdown.roomSubtotal;
+      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() || {} : {};
+      const breakfastRate = Number(breakfastConfig.ratePerPersonPerNight) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
+      const hasBreakfast = Boolean(reservation.hasBreakfast ?? false);
+      const breakfastIncludesChildren = reservation.breakfastIncludesChildren ?? true;
+      const breakfastTotal = hasBreakfast ? calculateBreakfastAddOn({
+        hasBreakfast: true,
+        breakfastRate,
+        numGuests: numAdults + numChildren,
+        numNights: headerNumNights,
+        breakfastIncludesChildren
+      }) : 0;
+      const extraBedRate = Number(targetTypeEntry.extraBedRate) || 0;
+      const extraBedTotal = extraBedCount > 0 ? extraBedCount * extraBedRate * headerNumNights : 0;
+      const subtotal = roomTotal + breakfastTotal + extraBedTotal;
+      const discountType = requestedDiscountType || "";
+      const discountPct = discountType === "senior" || discountType === "pwd" ? 20 : 0;
+      const seniorPwdDiscount = Math.round(
+        calculatePercentDiscount(subtotal, discountPct)
+      );
+      const afterSeniorPwd = subtotal - seniorPwdDiscount;
+      const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
+      let voucherDiscount = 0;
+      let voucherUsageUpdate = null;
+      const formattedVoucherCode = String(requestedVoucherCode || "").trim().toUpperCase();
+      if (formattedVoucherCode) {
+        const voucherRef = adminDb.collection("vouchers").doc(formattedVoucherCode);
+        const voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          throw new Error("Voucher not found.");
+        }
+        const vData = voucherDoc.data() || {};
+        if (!vData.isActive) {
+          throw new Error("Voucher is inactive.");
+        }
+        if (vData.discountType === "percent") {
+          const applicable = (vData.applicableRoomTypes?.length ?? 0) === 0 || (vData.applicableRoomTypes || []).includes(targetRoomType);
+          if (!applicable) {
+            throw new Error("Voucher is not applicable to the target room type.");
+          }
+          voucherDiscount = Math.round(
+            calculateVoucherDiscount({
+              discountType: "percent",
+              discountValue: Number(vData.discountValue) || 0
+            }, voucherBase)
+          );
+        } else {
+          voucherDiscount = Math.min(
+            Math.round(calculateVoucherDiscount({
+              discountType: "flat",
+              discountValue: Number(vData.discountValue) || 0
+            }, voucherBase)),
+            afterSeniorPwd
+          );
+        }
+        const capOk = vData.usageCap == null || Number(vData.usageCount || 0) + 1 <= Number(vData.usageCap);
+        if (!capOk) {
+          throw new Error("Voucher is at its usage cap.");
+        }
+        voucherUsageUpdate = {
+          ref: voucherRef,
+          data: { usageCount: Number(vData.usageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
+        };
+      }
+      const hasManualOverride = totalPriceOverride !== void 0 && totalPriceOverride !== null;
+      const manualSubtotal = hasManualOverride ? Math.round(Number(totalPriceOverride)) : 0;
+      const finalSubtotal = hasManualOverride ? manualSubtotal : subtotal;
+      const finalVoucherDiscount = hasManualOverride ? 0 : voucherDiscount;
+      const finalSeniorDiscount = hasManualOverride ? 0 : seniorPwdDiscount;
+      const finalTotalPrice = Math.max(0, finalSubtotal - finalSeniorDiscount - finalVoucherDiscount);
+      const newChildRevenueAllocation = assertBookingRevenueAllocationInvariant(
+        {
+          roomNet: hasManualOverride ? finalSubtotal : roomTotal,
+          breakfastNet: hasManualOverride ? 0 : breakfastTotal,
+          addOnNet: hasManualOverride ? 0 : extraBedTotal,
+          deductionNet: hasManualOverride ? 0 : seniorPwdDiscount + voucherDiscount,
+          totalNet: finalTotalPrice
+        },
+        finalTotalPrice
+      );
+      const { todayStr: counterDay, todayCompact } = getManilaDateInfo();
+      const counterRef = adminDb.collection("counters").doc(`bookings-${counterDay}`);
+      const counterDoc = await transaction.get(counterRef);
+      const nextSequence2 = counterDoc.exists ? (counterDoc.data()?.count || 0) + 1 : 1;
+      transaction.set(counterRef, { count: nextSequence2, updatedAt: /* @__PURE__ */ new Date() }, { merge: true });
+      const bookingId = parsedAddRoom.data.requestFingerprint ? `add-room-${reservationId}-${roomId}-${String(parsedAddRoom.data.requestFingerprint).slice(0, 16)}` : `add-room-${reservationId}-${roomId}-${nextSequence2}-${Date.now()}`;
+      const newBookingRefValue = generateBookingRef("SI", headerCheckIn, nextSequence2);
+      const newBookingDoc = {
+        id: bookingId,
+        bookingRef: newBookingRefValue,
+        reservationId,
+        reservationRef: String(reservation.reservationRef || ""),
+        reservationPosition: newPosition,
+        reservationRoomCount: existingChildren.length + 1,
+        roomId: String(roomId),
+        roomNumber: String(targetRoom.roomNumber || ""),
+        roomType: targetRoomType,
+        guestName: String(reservation.leadGuestName || "").trim(),
+        guestEmail: String(reservation.leadGuestEmail || "").trim().toLowerCase(),
+        guestPhone: String(reservation.leadGuestPhone || "").trim(),
+        numGuests: numAdults + numChildren,
+        numAdults,
+        numChildren,
+        extraBedCount,
+        extraBedRate,
+        extraBedTotal,
+        checkIn: Timestamp.fromDate(headerCheckIn),
+        checkOut: Timestamp.fromDate(headerCheckOut),
+        numNights: headerNumNights,
+        ratePerNight: headerNumNights > 0 ? Math.round((hasManualOverride ? finalSubtotal : roomTotal) / headerNumNights) : hasManualOverride ? finalSubtotal : roomTotal,
+        totalPrice: finalTotalPrice,
+        originalTotalPrice: subtotal,
+        discountType,
+        discountPct,
+        discountIdPhotoUrl: null,
+        discountIdPhotoPath: null,
+        discountVerified: Boolean(discountType),
+        discountVerifiedBy: discountType ? req.staff?.uid || "staff" : null,
+        discountRejected: false,
+        discountRejectedBy: null,
+        discountRejectionReason: "",
+        voucherCode: formattedVoucherCode,
+        voucherDiscount: finalVoucherDiscount,
+        isCorporate: isCorporateReservation,
+        corporateCode,
+        companyName: String(reservation.companyName || "").trim(),
+        specialRequests: "",
+        status: "confirmed",
+        paymentMethod: String(reservation.paymentMethod || "pay-at-hotel").trim(),
+        paymentProofUrl: reservation.paymentProofUrl ?? null,
+        paymentProofPath: reservation.paymentProofPath ?? null,
+        lookupToken: generateLookupToken(),
+        source: String(reservation.source || "online").trim(),
+        notes: "Room added via staff add-room action.",
+        memberId: reservation.memberId ?? null,
+        pointsRedeemed: 0,
+        pointsRedeemedValue: 0,
+        pointsRedeemedBy: null,
+        pointsRedeemedAt: null,
+        hasBreakfast,
+        breakfastRate,
+        breakfastTotal,
+        reminderSentAt: null,
+        guestIdPhotoUrl: null,
+        handledBy: req.staff?.uid || "staff",
+        cancellationReason: "",
+        cancelledAt: null,
+        cancelledBy: null,
+        cancellationSource: null,
+        cancellationLiability: null,
+        createdAt: /* @__PURE__ */ new Date(),
+        breakfastSelections: {},
+        breakfastServed: {},
+        rateBreakdown: buildRateBreakdown({
+          roomLines: roomBreakdown.roomLines,
+          roomSubtotal: hasManualOverride ? finalSubtotal : roomTotal,
+          breakfastTotal: hasManualOverride ? 0 : breakfastTotal,
+          extraBedTotal: hasManualOverride ? 0 : extraBedTotal,
+          extraBedCount,
+          extraBedRate,
+          discountType,
+          discountPct,
+          voucherDiscount: finalVoucherDiscount,
+          memberDiscountPct: 0,
+          finalTotal: finalTotalPrice
+        }),
+        revenueAllocation: newChildRevenueAllocation,
+        holdExpiresAt: reservation.holdExpiresAt ?? null,
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      const newBookingRefDoc = adminDb.collection("bookings").doc(bookingId);
+      transaction.set(newBookingRefDoc, newBookingDoc);
+      newBookingId = bookingId;
+      newBookingRef = newBookingRefValue;
+      fullBookingForEmail = {
+        ...newBookingDoc,
+        id: bookingId,
+        bookingId
+      };
+      const newSubtotal = Number(reservation.subtotal || 0) + subtotal;
+      const newTotalPrice = Number(reservation.totalPrice || 0) + finalTotalPrice;
+      const newAggregateRevenueAllocation = (() => {
+        const existingAlloc = reservation.aggregateRevenueAllocation;
+        if (!existingAlloc) {
+          return newChildRevenueAllocation;
+        }
+        return assertBookingRevenueAllocationInvariant(
+          {
+            roomNet: Number(existingAlloc.roomNet || 0) + newChildRevenueAllocation.roomNet,
+            breakfastNet: Number(existingAlloc.breakfastNet || 0) + newChildRevenueAllocation.breakfastNet,
+            addOnNet: Number(existingAlloc.addOnNet || 0) + newChildRevenueAllocation.addOnNet,
+            deductionNet: Number(existingAlloc.deductionNet || 0) + newChildRevenueAllocation.deductionNet,
+            totalNet: Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+          },
+          Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+        );
+      })();
+      const newChildrenDates = [
+        ...existingChildren.map((child) => ({
+          checkIn: child.data.checkIn,
+          checkOut: child.data.checkOut
+        })),
+        { checkIn: headerCheckIn, checkOut: headerCheckOut }
+      ];
+      const newActualDateRange = computeReservationActualDateRange(
+        headerCheckIn,
+        headerCheckOut,
+        newChildrenDates
+      );
+      const corporateUsageUpdate = (() => {
+        if (!isCorporateReservation || !corporateCode) return null;
+        const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        return {
+          ref: corpRef,
+          data: { usageCount: Number(reservation.corporateUsageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
+        };
+      })();
+      updatedHeader = {
+        roomCount: existingChildren.length + 1,
+        activeRoomCount: existingChildren.length + 1,
+        subtotal: newSubtotal,
+        totalPrice: newTotalPrice,
+        aggregateRevenueAllocation: newAggregateRevenueAllocation,
+        actualDateRange: newActualDateRange,
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      transaction.update(reservationRef, updatedHeader);
+      if (voucherUsageUpdate) {
+        transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      }
+      if (corporateUsageUpdate) {
+        transaction.update(corporateUsageUpdate.ref, corporateUsageUpdate.data);
+      }
+    });
+    if (fullBookingForEmail) {
+      try {
+        await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
+      } catch (emailErr) {
+        console.error("Failed to send add-room email:", emailErr);
+      }
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        bookingId: newBookingId,
+        bookingRef: newBookingRef,
+        reservationId,
+        reservationRef: updatedHeader?.reservationRef || null
+      }
+    });
+  } catch (error) {
+    if (error?.message === "RESERVATION_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Reservation not found." });
+    }
+    return res.status(400).json({ success: false, error: error?.message || "Failed to add room." });
   }
 }
 
@@ -236379,6 +236907,17 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleRescheduleBooking(req, res);
+  }
+  if (domain === "bookings" && action === "add-room" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reschedule:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many reschedule requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleAddRoomToReservation(req, res);
   }
   if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`room-blocks-${action}:${ip}`, 60, 6e4)) {
