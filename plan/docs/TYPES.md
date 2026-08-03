@@ -794,6 +794,7 @@ store order placed). Live-derived from the `intercoms` listener
 ```
 NotificationType = "booking" | "payment" | "message"
                  | "arrival" | "departure" | "store-order"
+                 | "cancellation-refund"  // CRL-08 (2026-08-03, #174)
 
 NotificationEntityType = "booking" | "storeOrder" | "intercom"
 

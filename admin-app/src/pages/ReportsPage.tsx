@@ -35,8 +35,9 @@ import {
 } from "../utils/finance";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { LiabilityTab } from "../components/LiabilityTab";
 
-type ReportTab = "performance" | "sales" | "daily-close";
+type ReportTab = "performance" | "sales" | "daily-close" | "liability";
 type SalesSubTab = "bookings" | "breakfast" | "store" | "charges";
 
 interface ReportCharge {
@@ -1978,6 +1979,18 @@ export function ReportsPage() {
         >
           Daily Close
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "liability"}
+          onClick={() => setActiveTab("liability")}
+          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+            activeTab === "liability" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+          }`}
+          data-testid="report-tab-liability"
+        >
+          Liability
+        </button>
       </div>
 
       {activeTab === "performance" && (
@@ -2069,6 +2082,23 @@ export function ReportsPage() {
           toDate={toDate}
           isMobile={isMobile}
           staffNameMap={staffNameMap}
+        />
+      )}
+      {activeTab === "liability" && (
+        // Per CRL-08 (2026-08-03, per decision #174):
+        // the cancellation liability queue. The tab
+        // self-fetches its data (dual-source read
+        // of reservation header + per-booking
+        // `cancellationLiability` snapshots + the
+        // refunds subcollection for the live
+        // `processedAmount`). Exports + Daily Close
+        // continue to derive actual cash movement
+        // from the payment ledger, never from
+        // `approvedAmount` (per #173's "derived
+        // from immutable ledger entries" rule).
+        <LiabilityTab
+          rangeStart={periodStart}
+          rangeEnd={periodEnd}
         />
       )}
 
