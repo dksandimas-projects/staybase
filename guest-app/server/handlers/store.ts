@@ -1,7 +1,7 @@
 import { generateStoreOrderRef, getEffectiveStorePaymentMethods, getManilaDateInfo } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
 import { writeNotification } from "../lib/notifications";
-import { sendStoreOrderTrigger } from "./email";
+import { sendStaffRefundReviewTrigger, sendStoreOrderTrigger } from "./email";
 
 interface StoreOrderItemInput {
   itemId: string;
@@ -545,6 +545,41 @@ export async function handleCancelStoreOrder(req: any, res: any) {
             status: "cancelled",
             cancellationReason: cancellationReason || "Guest cancelled from intercom"
           });
+        }
+
+        // Per CRL-04 (2026-08-02): a paid GCash store order
+        // was cancelled — the guest has already sent money
+        // via GCash, and the cancellation alone does not
+        // issue a refund. The guest email mentions that
+        // the front desk will reach out, but the staff
+        // also need a dedicated, queue-able alert so the
+        // refund review has an owner. COD (`paymentMethod
+        // === "cod"`) and Add-to-Bill orders do not need
+        // a refund review: the money has either not been
+        // collected yet (COD) or rolls into the booking
+        // folio (Add-to-Bill, settled at checkout).
+        const freshDoc = await adminDb.collection("storeOrders").doc(orderId).get();
+        const fresh = freshDoc.exists ? freshDoc.data() : cancelledOrder;
+        if (fresh && fresh.paymentMethod === "gcash" && fresh.paymentProofUrl) {
+          try {
+            await sendStaffRefundReviewTrigger({
+              orderRef: fresh.orderRef,
+              orderId,
+              roomNumber,
+              guestName: fresh.guestName,
+              totalAmount: fresh.totalAmount,
+              paymentMethod: fresh.paymentMethod,
+              paymentProofUrl: fresh.paymentProofUrl,
+              cancellationReason: cancellationReason || "Guest cancelled from intercom",
+              bookingId: fresh.bookingId || null
+            });
+          } catch (staffEmailErr) {
+            // Best-effort: the staff alert is a queue item,
+            // not a payment. A failure here does not block
+            // the cancellation; the order's audit row is
+            // the canonical record.
+            console.error("Failed to send staff refund-review alert:", staffEmailErr);
+          }
         }
       } catch (emailErr) {
         console.error("Failed to send store-order-cancelled email:", emailErr);

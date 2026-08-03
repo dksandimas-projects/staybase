@@ -14,12 +14,15 @@ Covers three related concerns: Resend email flows via Vercel API routes, jsPDF r
 
 All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com` via Resend.
 
+**All links inside emails (CTAs, my-booking magic links, intercom deep links, store-order chat cards, brand assets) are env-aware** (2026-07-24 fix) — they route through `siteUrl()` / `adminUrl()` in `guest-app/server/handlers/email.ts`, which resolve via `getServerBaseUrl()` / `getServerAdminBaseUrl()` in `guest-app/server/lib/siteUrl.ts`. On `VERCEL_ENV=production` → `https://www.${config.domain}`; on `VERCEL_ENV=preview|development` (the Vercel Preview deploy of `dev`) or unset → `https://stg.${config.domain}`. `SITE_URL` / `ADMIN_SITE_URL` env vars override for white-label clients whose staging host doesn't follow the `stg.` convention. See `plan/docs/ENV-SETUP.md` for the env var reference. SEO canonical URLs and OG image URLs stay hardcoded to production — they must always be the real public URL.
+
 | Trigger | API Route | Recipient | When |
 |---|---|---|---|
 | Booking submitted | `/api/email/booking-submitted` | Guest | Immediately after booking creation |
 | Payment confirmed | `/api/email/payment-confirmed` | Guest | When staff confirms payment |
 | Payment rejected | *(inline booking trigger)* | Guest | When staff rejects an uploaded payment proof |
 | Booking confirmed | `/api/email/booking-confirmed` | Guest | When status set to `confirmed` |
+| Booking confirmed with balance *(CWB-02, decision #122)* | *(inline booking trigger)* | Guest | When staff confirms a `payment-uploaded` booking with a positive balance via `POST /api/bookings/confirm-with-balance`; balance + reason included in the body so the guest knows what to settle at check-in. Room type only (never room number — booking is not yet `checked-in`). |
 | Booking rescheduled | *(inline booking trigger)* | Guest | When staff changes the assigned room or stay dates |
 | Check-in reminder | `/api/email/checkin-reminder` | Guest | 1 day before `checkIn` date |
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |
@@ -45,6 +48,8 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 - [x] **Bugfix — wrong logo variant on the dark email header** (owner request 2026-07-09): `guest-app/server/handlers/email.ts`'s `brandLogoUrl()` (~line 76-78) returns `config.logos.white` when rendering in a dark sidebar background.
 - [x] Booking submitted: acts as an acknowledgment/receipt submission, warning the guest that their booking and payment are under review and a final confirmation email will follow after manual verification; includes booking ref, room, dates, payment instructions, link to `/my-booking`
 - [x] Payment confirmed: receipt of payment, full booking summary
+- [x] **Payment confirmed: optional House rules card** (ECE-01, 2026-07-24) — when `settings.websiteContent.houseRules` is non-blank, the payment-confirmed email appends a "House rules" card sourced from that setting so the guest arrives already knowing the property's expectations. Loaded non-transactionally by `sendBookingTrigger` (only for this template — other triggers skip the Firestore read); omitted entirely when the setting is blank or whitespace-only; HTML-escaped on render to prevent injection. Preview endpoint accepts `houseRules` in the request body so staff can sanity-check the card before saving the setting.
+- [x] **Booking confirmed + check-in reminder: same House rules card** (ECE-02, 2026-07-26, decision #139) — extends ECE-01 so the same `settings.websiteContent.houseRules` card also appends to `booking-confirmed` + `checkin-reminder` (the two "you're arriving soon" touchpoints). The card-build logic is now a shared `houseRulesCard(houseRules)` helper inside `email.ts` so the three templates (`paymentConfirmedEmail` / `bookingConfirmedEmail` / `checkinReminderEmail`) all read from the same single-sourced string. `sendBookingTrigger` loads the setting via a `HOUSE_RULES_ACTIONS` Set (the three actions) so the doc read is still scoped — every other template still skips the Firestore round-trip. Omit-on-blank + HTML-escape contracts are unchanged. Preview endpoint accepts `houseRules` for the two new templates (mirrors the payment-confirmed preview contract). Tests: 19 new tests in `guest-app/tests/api/email-house-rules-ece02.test.ts` (live send + preview for both new templates, omit-when-blank for all three, no-roundtrip for non-arrival triggers, source-text guards on the helper + the gated Set + the preview routing). 1 existing ECE-01 source-text guard updated to pin the new `houseRulesCard(houseRules)` call instead of the prior inlined `houseRulesBlock` pattern.
 - [x] Booking confirmed: final confirmation, check-in time, check-in instructions
 - [x] Check-in reminder: room details, check-in time, hotel address, contact
 - [x] Booking cancelled: cancellation confirmation, reason (if provided)
@@ -76,6 +81,77 @@ Triggered by `/api/email/discount-rejected` when staff rejects a Senior Citizen 
 - [x] `discountRejectionReason` included in email only if non-empty
 - [x] Discount type label: "Senior Citizen" if `discountType == "senior"`, "PWD" if `discountType == "pwd"`
 - [x] ID label: "OSCA Card" if senior, "PWD ID" if pwd
+
+---
+
+### Booking Cancelled Email (CRL-02 + CRL-04)
+
+Triggered by `sendBookingTrigger("booking-cancelled", ...)` from `handleCancelBooking` (the 3 PEX-03 in-transaction retirements + the PEX-06 daily cron also use this template).
+
+**Subject:** `[Spark Inn] Booking cancelled: {bookingRef}`
+
+**Email contents:**
+- Greeting: "Dear {guestName},"
+- **CRL-02**: the intro line uses `cancellationSource` to switch the actor — `"guest"` says "cancelled at your request", `"staff"` says "cancelled by our team", `"system"` says "cancelled because the payment hold expired" (the PEX auto-expiry case).
+- Red callout: "Cancellation recorded" with the staff/guest-supplied reason (or "No cancellation reason was provided" if empty).
+- **CRL-04**: a warm "What happens next" callout is added below the reason. The text is identical across the three sources because the rule is identical: "Cancellation is permanent and the booking record is kept in our audit log. **No refund is issued automatically** — if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary."
+- Card: cancelled reservation summary (booking ref, room, dates, guests, total).
+- Closing: "If this cancellation was unexpected, please contact our support team right away."
+- CTA: "Contact support" → `mailto:{supportEmail}`
+
+**Checklist:**
+- [x] Triggered by the same `sendBookingTrigger("booking-cancelled", ...)` call for the main handler + the 3 PEX-03 retirements + the PEX-06 cron (CRL-02 keeps the template shared; the `cancellationSource` field switches the actor line).
+- [x] CRL-04's "no refund is automatic" callout is the parallel source-aware truth-statement. CRL-03's guest-status restriction guarantees that a guest never sees this email for a booking where money was collected, but the copy stays defensive in case the source list expands under CRL-06.
+- [x] Never uses the word "refunded" — only "refund" + "issued" + "review" + "reach out". The ledger (CRL-07) is the only place "refunded" can be surfaced, and only after a processed refund entry exists.
+- [x] **CRL-08 (2026-08-03, per decision #174):** the templates now read the CRL-07 `liabilityProjection` field and render a shared `liabilityBreakdownCard` (net collected at cancel, policy refund, retained under policy, approved, processed so far, outstanding, current state). The "What happens next" callout tailors itself to the actual numbers when the projection is present (e.g. "₱1,500 of your ₱5,000 paid will be refunded; ₱3,500 is retained per the policy"); the legacy generic copy stays for pre-CRL-07 cancels + the no-refund case. The reservation-scope + per-child paths render the same card so the two templates never drift.
+
+---
+
+### Refund-Processed Email (CRL-08)
+
+Triggered by `sendBookingTrigger("booking-refund-processed", ...)` from `handleAddRefund` when a successful refund commit changes the liability state (the state-change gate lives inside the same `runTransaction` as the refund write — see `fireRefundStateEmailAndNotification` in `guest-app/server/handlers/bookings.ts`).
+
+**Subject:** `[{brandName}] Refund update: {ref}` (reservation ref when the cancel was reservation-scope, booking ref otherwise — never a per-room ref).
+
+**Body:**
+- Eyebrow: "Refund update"
+- Headline: the state label ("Pending refund" / "Partially refunded" / "Refunded" / "Exception applied · refund in progress" / "Exception applied · fully refunded") — the primary signal the guest reads
+- Warm callout: "What this means" — the body tailors itself to the new state. Examples:
+  - `processed` → "Your refund is now complete. The total of ₱1,500 has been returned to you. No further action is needed."
+  - `partially-processed` → "Your refund is in progress. ₱800 of ₱1,500 has been returned so far. ₱700 is still being processed."
+  - `pending-processing` → "Your refund is pending. ₱1,500 is approved for return; our team will process it shortly."
+  - `retained` → "An exception was applied — ₱1,500 is approved for refund and ₱500 is being retained beyond the standard policy. ₱500 is still being processed."
+- Liability breakdown card (the same `liabilityBreakdownCard` the cancellation email uses — single source of truth across templates)
+- "Latest refund" card: amount + method + transaction reference for the just-committed entry
+- Policy footer: "The cancellation policy applied to your booking entitled you to a refund of ₱X. Processing times vary by payment method." (only when `policyRefund > 0`)
+- CTA: "Contact support" → `mailto:{supportEmail}`
+
+**Checklist:**
+- [x] State-change gate (a state change is the trigger; an idempotent replay or a sub-state partial does NOT re-send) — the gate lives in the same `runTransaction` as the refund write.
+- [x] The reservation-scope + per-child + legacy paths all route through the same template (the `loadLiabilityProjectionForEmail` helper reads the appropriate subcollection).
+- [x] Subject uses the reservation ref (never a per-room ref) when the cancel was reservation-scope.
+- [x] Best-effort: a failed email send never fails the refund it describes (the post-commit side effect is wrapped in a try/catch that logs + swallows — same pattern the `writeNotification` helper follows per decision #120).
+
+---
+
+### Staff Refund Review Alert (CRL-04)
+
+Triggered by `sendStaffRefundReviewTrigger(order)` from `handleCancelStoreOrder` when a paid GCash store order is cancelled (the `if` guard is `paymentMethod === "gcash" && paymentProofUrl`).
+
+**Subject:** `[Spark Inn] Refund review: cancelled paid store order {orderRef}`
+
+**Email contents:**
+- Eyebrow: "Refund review needed"
+- Title: "A guest cancelled a paid store order"
+- Intro: "A guest cancelled a paid store order at Spark Inn. The guest was charged via the order's payment method; review the payment proof and record a refund through the order's booking if appropriate."
+- Warm callout: "Action required" — "No refund is issued automatically by the cancellation. Open the order's payment screenshot, confirm the amount, and record a refund via the linked booking's Folio → Refund action."
+- Card: order ref, room, guest, amount, method, reason, payment-proof link.
+- CTA: "Open booking" → `/bookings?ref={bookingId}` (or `/bookings` if no linked booking).
+
+**Checklist:**
+- [x] Fires only for `paymentMethod === "gcash" && paymentProofUrl` — COD and Add-to-Bill do not need a refund review (the money has either not been collected yet, or rolls into the booking folio settled at checkout).
+- [x] Best-effort: a failure is logged but does not block the cancellation. The order's audit row is the canonical record; the staff alert is a queue item.
+- [x] Same shape as the existing `staffNewPaymentEmail` (warm callout + details card + admin URL CTA). Mirrors the `sendStaffNewPaymentTrigger` export surface so a future Notification Center queue item (per CRL-08) can plug in without a refactor.
 
 ---
 
@@ -111,7 +187,7 @@ Used in: Bookings Management (print/download), email attachment option.
 - Hotel name + address + contact
 - Document title: "Booking Confirmation Receipt"
 - Booking reference + confirmation date/time
-- Guest name, room type + room number
+- Guest name, room type *(room number intentionally omitted — see `refactor/room-number-visibility` change; the front desk assigns the physical room at check-in, and any pre-check-in number in the receipt would create a stale expectation if the assignment shifts)*
 - Check-in / check-out dates + number of nights
 - Number of guests, rate per night, total amount
 - **Rate breakdown** — if `Booking.rateBreakdown` exists:
@@ -131,6 +207,8 @@ Used in: Bookings Management (print/download), email attachment option.
   - Outstanding Balance: ₱{totalPrice − totalCollected} — shown as ₱0 if fully settled, or outstanding amount in bold if not
 - If no payments recorded — show "Payment Method: {paymentMethod}" and "Amount Due: ₱{totalPrice}" as before
 - Footer: "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property."
+- **Reservation-aware receipt (MRB-04):** linked bookings produce one reservation receipt. The reservation reference is used in the header, footer, and filename. Child rooms are ordered by reservation position and each prints its stored pricing allocation, add-ons, deductions, room total, and special requests. VAT is aggregated from those stored room allocations. Reservation-wide store and incidental charges retain child-room labels where present; payments and refunds print once; the reservation total and balance are never multiplied by room count. Legacy bookings without a reservation link retain the single-booking layout above.
+- **Reservation-scope email fan-out (MRB-09, decision #168):** the guest-facing email templates (`booking-submitted`, `payment-confirmed`, `booking-confirmed`, `checkin-reminder`, `booking-confirmed-with-balance`, `booking-rescheduled`, plus the receipt PDF) all render a single block view that lists every room in the reservation. The view is built by `buildReservationEmailView(reservation, children)` (exported from `guest-app/server/handlers/email.ts`) which synthesises a `rooms[]` array of per-stay projections (position + ref + type + occupancy + breakfast + per-stay total) and an aggregate total. Subject lines use the reservation ref (`R-YYYYMMDD-NNNNN`) when the view is reservation-scope; the receipt PDF filename mirrors the subject. The checkin reminder cron groups confirmed bookings by `reservationId` and sends one email per reservation — the pre-MRB-09 cron sent N duplicate reminders for an N-room reservation. The new `booking-cancelled-reservation` action + template fires from MRB-13's reservation-scope cancel path and renders a per-room table with the cancelled room(s) marked and the surviving rooms (if any) marked Confirmed. N=1 is byte-equivalent to the pre-MRB-09 single-room shape; legacy pre-MRB-01 bookings (no `reservationId`) continue through the per-child path.
 
 **PDF checklist:**
 - [x] PDF font handling is stable in browsers: use jsPDF built-in fonts unless known-good base64 TTF assets are added and verified. Do not reference missing font files or embed OTF files that jsPDF cannot encode reliably.
@@ -214,3 +292,31 @@ Used for: room photos, payment proof screenshots, QR notification sounds, websit
 - Font embedding gotcha: `plan/docs/GOTCHAS.md §jsPDF`
 - Receipt trigger in admin: `plan/features/BOOKINGS-MANAGEMENT.md`
 - Payment proof upload in guest flow: `plan/features/BOOKING-FLOW.md §Step 3`
+
+---
+
+## Extra Bed (EXB-08)
+
+Receipts and booking emails render the stored adult/child split when present and retain the legacy total-only fallback. When `extraBedCount > 0`, both show the extra-bed quantity and the independently stored add-on amount; no extra-bed line appears for zero or absent counts. The authoritative add-on entry comes from the server-built `rateBreakdown.addOns[]`; display surfaces do not recompute pricing.
+
+---
+
+## Canonical Copy (MRB-15-05)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-05 sub-item, shipped v0.252.0). The audit pins the canonical copy across every email template, PDF receipt, and status badge so a future template addition cannot silently drift from the established contract.
+
+### Canonical copy contract
+
+- **British spelling "Cancelled"** (not American "Canceled"). Every email subject, body, and PDF receipt uses the British spelling. The pre-MRB-15 codebase was already consistent; the audit pins the contract.
+- **Title-case StatusBadge labels**: `Pending`, `Confirmed`, `Checked In`, `Checked Out`, `Cancelled`, `No Show`. Status badges do NOT use sentence-case or all-caps.
+- **Subject pattern**: `[${brandName}] <verb>: ${ref} (N room[s])`. The `${ref}` is the reservation reference (`R-YYYYMMDD-NNNNN` for new reservations, `B-YYYYMMDD-NNNNN` for legacy). The `N room[s]` uses the singular form when N=1, plural otherwise.
+- **Preheader pattern**: every email template's preheader ends with a period (`.`). The period is the visual marker that the preheader is complete; the reader knows the email body starts after.
+
+### Where the contract applies
+
+- **Email templates**: `guest-app/server/handlers/email.ts` (every `*Email` function) — subject + preheader + body.
+- **PDF receipts**: `guest-app/server/handlers/receipt.ts` (the receipt PDF builder) — Stay card labels + status line.
+- **Status badges**: `admin-app/src/components/StatusBadge.tsx` + the guest `/my-booking` page (the reservation status row).
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-05-canonical-copy.test.ts` (16 tests) — pins every rule above across the email templates, PDF receipt, and status badges.

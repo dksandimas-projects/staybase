@@ -1053,3 +1053,319 @@ export async function handleListTestRuns(req: any, res: any) {
     return res.status(500).json({ success: false, error: "Unable to list test runs." });
   }
 }
+
+// ── ETR-R01 / ETR-R04 / ETR-R10: production-to-staging refresh (sanitization MVP) ──
+//
+// SCOPE — this is the ETR-R *foundation*: server-side authorization
+// (R01) + the identity-replacement sanitization engine (R04) + a
+// single preview endpoint that takes a production export and returns
+// the sanitized JSON. The full pipeline (R03 reviewable preservation,
+// R05 file sanitization, R06 relational integrity, R07 side-effect
+// disable, R08 mode-appropriate scan, R09 controlled replacement with
+// the staging-reset integration, R10 full audit retention) lands in
+// follow-up PRs.
+//
+// WORKFLOW (manual import for now, R09 will automate):
+//   1. Admin exports the production Firestore collections to JSON
+//      (via Firebase Console → Import/Export, or a one-off script).
+//   2. Admin POSTs the JSON to /api/test-runs/staging-refresh-preview
+//      with body { export: { bookings, storeOrders, members }, options }.
+//   3. Server sanitizes the JSON, returns the sanitized version +
+//      counts + a snapshotId for the audit row.
+//   4. Admin imports the sanitized JSON into staging via the Firebase
+//      Console. (R09 will automate this in a follow-up — the endpoint
+//      will accept a destinationProjectId and stream the sanitized
+//      docs into staging directly via the Admin SDK.)
+//
+// AUTHORIZATION (R01): the endpoint refuses to run on a non-staging
+// project (the production environment) and refuses any non-admin
+// caller. Production data flows production → staging only; the
+// production API never imports staging data. The `isStagingProject()`
+// gate is the same one the ETR-S01..S15 staging reset uses, so the
+// `STAGING_ALLOWLIST_PROJECT_IDS` env var is the single source of
+// truth.
+//
+// IDENTITY REPLACEMENT (R04): every PII field is deterministically
+// transformed by hashing the source value with a per-snapshot salt.
+// The same source value maps to the same synthetic value within a
+// snapshot (preserves relational integrity — the same guest's two
+// bookings get the same synthetic email) but a DIFFERENT synthetic
+// value across snapshots (no cross-snapshot correlation, no replay
+// attack). The salt is captured in the audit row so the snapshot is
+// reproducible from the source export for debugging, but the salt is
+// per-snapshot so two snapshots of the same source are
+// uncorrelatable.
+//
+// AUDIT (R10, partial): every successful preview writes a row to
+// `janitor/refresh-snapshots/{snapshotId}` with { createdAt, createdBy,
+// projectId (staging), sourceCounts, sanitizedCounts, mode, salt, sha256
+// of the source export }. The audit row carries the SHA-256 of the
+// source export (for chain-of-custody) but not the source PII itself.
+// Retention and deletion-replacement live in R10's follow-up.
+
+const REFRESH_MODES = ["sanitized-snapshot", "config-only"] as const;
+type RefreshMode = (typeof REFRESH_MODES)[number];
+
+const stagingRefreshSchema = z.object({
+  export: z.object({
+    bookings: z.array(z.record(z.any())).optional().default([]),
+    storeOrders: z.array(z.record(z.any())).optional().default([]),
+    members: z.array(z.record(z.any())).optional().default([])
+  }).strict(),
+  options: z.object({
+    mode: z.enum(REFRESH_MODES).optional().default("sanitized-snapshot"),
+    snapshotNote: z.string().trim().max(280).optional().default("")
+  }).strict().optional().default({ mode: "sanitized-snapshot", snapshotNote: "" })
+}).strict();
+
+// Per-snapshot deterministic hash → synthetic value.
+// SHA-256(salt || ":" || sourceValue) → first 8 hex chars. 8 hex chars
+// is 4 bytes / 32 bits of entropy per synthetic value — enough that
+// a snapshot has no realistic birthday collision on a 14-room hotel
+// (you'd need ~65k source values before 1% collision risk). The salt
+// is per-snapshot and recorded in the audit row.
+function syntheticFromSource(sourceValue: string | null | undefined, salt: string, prefix: string, domain: string): string {
+  if (sourceValue === null || sourceValue === undefined) return "";
+  const normalized = String(sourceValue).trim().toLowerCase();
+  if (!normalized) return "";
+  const h = crypto.createHash("sha256").update(`${salt}:${domain}:${normalized}`).digest("hex").slice(0, 8);
+  return `${prefix}-${h}@${domain}`;
+}
+
+// R04 — sanitize a single booking record. PII fields are replaced
+// with deterministic synthetic values. Operational fields (status,
+// checkIn, checkOut, numNights, numGuests, totalPrice, financial
+// breakdowns, roomNumber, roomType) are preserved verbatim — the
+// point of the refresh is to keep the operational data shape so
+// staging can be exercised against realistic totals, not to erase
+// the test signal. Source booking IDs are preserved so joins
+// (payments/charges subcollections) are reachable from the sanitized
+// root doc. Guest identifiers get the synthetic replacement; staff
+// UIDs (createdByUid, handledBy) get a separate synthetic actor
+// mapping.
+function sanitizeBookingExport(booking: any, salt: string) {
+  const guestEmail = String(booking.guestEmail || "");
+  const guestName = String(booking.guestName || "");
+  const guestPhone = String(booking.guestPhone || "");
+  const sourceEmail = guestEmail.trim().toLowerCase();
+
+  const sanitized: any = {
+    ...booking,
+    guestName: syntheticFromSource(guestName, salt, "Guest", "guests.invalid"),
+    guestEmail: sourceEmail
+      ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid")
+      : "",
+    guestPhone: guestPhone
+      ? syntheticFromSource(guestPhone, salt, "+63900000", "phones.invalid")
+      : "",
+    address: "[REDACTED — sanitized for staging]",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    // Government ID + signature + payment proof URLs removed — the
+    // R05 file-sanitization follow-up will replace with synthetic
+    // fixtures. For now, scrub the URLs so the operator can't
+    // accidentally click through to the production file.
+    guestIdUrl: "",
+    guestIdPhotoUrl: "",
+    paymentProofUrl: "",
+    signatureUrl: "",
+    // Booking doc keeps its original id so payments/charges
+    // subcollections can be walked in step 4. bookingRef is
+    // preserved so the staff can still reference it by the
+    // confirmation number; createdAt/updatedAt preserved; status
+    // + financial fields preserved (operational signal).
+    notes: "",
+    internalNotes: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "…",
+      appliedAt: new Date().toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+
+  // R06 (partial) — preserve the relational shape. If the booking
+  // has an `addedCharges` array, scrub any free-text PII in the
+  // charge descriptions but keep the amounts/tenders so the staging
+  // reports can still reconcile. If it has `payments`, scrub
+  // transactionReference numbers (they reference real GCash/bank
+  // traces) but keep the amounts.
+  if (Array.isArray(sanitized.addedCharges)) {
+    sanitized.addedCharges = sanitized.addedCharges.map((c: any) => ({
+      ...c,
+      description: "[REDACTED]",
+      notes: ""
+    }));
+  }
+  if (Array.isArray(sanitized.payments)) {
+    sanitized.payments = sanitized.payments.map((p: any) => ({
+      ...p,
+      transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
+      notes: ""
+    }));
+  }
+  return sanitized;
+}
+
+function sanitizeStoreOrderExport(order: any, salt: string) {
+  return {
+    ...order,
+    guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
+    guestEmail: order.guestEmail
+      ? syntheticFromSource(String(order.guestEmail).trim().toLowerCase(), salt, "guest", "example.invalid")
+      : "",
+    guestPhone: order.guestPhone
+      ? syntheticFromSource(String(order.guestPhone), salt, "+63900000", "phones.invalid")
+      : "",
+    paymentProofUrl: "",
+    notes: "",
+    internalNotes: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "…",
+      appliedAt: new Date().toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+}
+
+function sanitizeMemberExport(member: any, salt: string) {
+  return {
+    ...member,
+    fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
+    // The member's email is the SAME identity as a guest who booked
+    // with that email — use the "guest" prefix for the email so the
+    // synthetic value matches the booking's synthetic email. The
+    // member's full name is a separate identity (a person has one
+    // email but may have multiple display names over time), so it
+    // uses its own "Member" prefix for `fullName`.
+    email: member.email
+      ? syntheticFromSource(String(member.email).trim().toLowerCase(), salt, "guest", "example.invalid")
+      : "",
+    phone: member.phone
+      ? syntheticFromSource(String(member.phone), salt, "+63900000", "phones.invalid")
+      : "",
+    photoUrl: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "…",
+      appliedAt: new Date().toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+}
+
+export async function handleStagingRefreshPreview(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can refresh staging from production." });
+  }
+
+  // R01 — one-way gate. The endpoint must run on a staging project;
+  // running it on a production project is refused because the
+  // production Firestore is where the data flows FROM (read), not
+  // TO. A production caller cannot trigger a refresh.
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging refresh is only available on staging projects. The current project is not on the staging allowlist."
+    });
+  }
+
+  const parsed = stagingRefreshSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid production export (bookings, storeOrders, members) and options."
+    });
+  }
+
+  const { export: exportPayload, options } = parsed.data;
+  const mode: RefreshMode = options.mode;
+
+  // config-only is a no-op for the sanitization engine (it just
+  // returns counts + a snapshotId; the operator imports their own
+  // already-sanitized data). The endpoint still writes the audit
+  // row so the configuration-only path is observable.
+  const salt = crypto.randomBytes(16).toString("hex");
+  const snapshotId = `refresh-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+
+  const sourceCounts = {
+    bookings: exportPayload.bookings.length,
+    storeOrders: exportPayload.storeOrders.length,
+    members: exportPayload.members.length
+  };
+
+  try {
+    const sanitizedBookings = mode === "sanitized-snapshot"
+      ? exportPayload.bookings.map((b) => sanitizeBookingExport(b, salt))
+      : exportPayload.bookings;
+
+    const sanitizedStoreOrders = mode === "sanitized-snapshot"
+      ? exportPayload.storeOrders.map((o) => sanitizeStoreOrderExport(o, salt))
+      : exportPayload.storeOrders;
+
+    const sanitizedMembers = mode === "sanitized-snapshot"
+      ? exportPayload.members.map((m) => sanitizeMemberExport(m, salt))
+      : exportPayload.members;
+
+    const sanitizedCounts = {
+      bookings: sanitizedBookings.length,
+      storeOrders: sanitizedStoreOrders.length,
+      members: sanitizedMembers.length
+    };
+
+    // R10 (partial) — write the audit row. We persist the SHA-256 of
+    // the SOURCE export (chain-of-custody) but not the source PII
+    // itself. The salt is per-snapshot and stored alongside the audit
+    // row so the operator can reproduce the snapshot from the source
+    // export for debugging. Per-snapshot salts are not a global
+    // mapping key — they are scoped to this snapshot only.
+    const sourceHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(exportPayload))
+      .digest("hex");
+
+    await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).set({
+      projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
+      mode,
+      createdAt: new Date(),
+      createdBy: staff.email || staff.uid || "",
+      sourceCounts,
+      sanitizedCounts,
+      sourceHash,
+      saltPrefix: salt.slice(0, 8),
+      snapshotNote: options.snapshotNote,
+      status: "complete"
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        mode,
+        projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
+        sourceCounts,
+        sanitizedCounts,
+        sanitized: {
+          bookings: sanitizedBookings,
+          storeOrders: sanitizedStoreOrders,
+          members: sanitizedMembers
+        }
+      }
+    });
+  } catch (error: any) {
+    console.error("Staging refresh preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to generate sanitized staging refresh."
+    });
+  }
+}

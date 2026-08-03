@@ -8,8 +8,11 @@ import {
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
+  PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
   UNSUPPORTED_PAYMENT_METHODS,
+  type BookingSourceConfig,
+  type DiscountScope,
   type PaymentMethodConfig,
   type ProtectedPaymentMethod,
   type RoomTypeEntry
@@ -21,7 +24,7 @@ import {
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
   Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw,
-  ChevronDown, ChevronUp, FlaskConical
+  ChevronDown, ChevronUp, FlaskConical, Tag, Percent
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -29,14 +32,15 @@ import { storage } from "../firebase/config";
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
+import { ConfirmForm } from "../components/ConfirmForm";
 import { useToast } from "../components/Toast";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment";
-type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal";
+type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts";
+type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface EmailTriggerCatalogItem {
@@ -93,6 +97,7 @@ const EMAIL_TRIGGER_GROUPS: Array<{ label: string; triggers: EmailTriggerCatalog
 const VALID_TAB_IDS: TabId[] = [
   "hotel",
   "payment",
+  "sources",
   "roomtypes",
   "branding",
   "website",
@@ -104,7 +109,8 @@ const VALID_TAB_IDS: TabId[] = [
   "intercom",
   "legal",
   "staff",
-  "environment"
+  "environment",
+  "discounts"
 ];
 
 const DEFAULT_OG_IMAGE_URL = config.ogImage.startsWith("http")
@@ -432,6 +438,432 @@ function BrandingAssetRow({
         </div>
         {error && <p className="text-[10px] text-red-600">{error}</p>}
       </div>
+    </div>
+  );
+}
+
+interface BookingSourcesTabBodyProps {
+  bookingSources: BookingSourceConfig[];
+  onAdd: (config: BookingSourceConfig) => Promise<void>;
+  onUpdate: (source: string, updates: Partial<Omit<BookingSourceConfig, "source">>) => Promise<void>;
+  onReorder: (next: BookingSourceConfig[]) => Promise<void>;
+  onDelete: (source: string) => Promise<void>;
+}
+
+type BookingSourceEditModalState =
+  | { open: false }
+  | { open: true; isNew: boolean; source: BookingSourceConfig };
+
+function emptyBookingSource(): BookingSourceConfig {
+  return {
+    source: "",
+    label: "",
+    isEnabled: true,
+    selectableAtFrontDesk: true
+  };
+}
+
+function BookingSourcesTabBody({
+  bookingSources,
+  onAdd,
+  onUpdate,
+  onReorder,
+  onDelete
+}: BookingSourcesTabBodyProps) {
+  const toast = useToast();
+  const [editModal, setEditModal] = useState<BookingSourceEditModalState>({ open: false });
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const timer = setTimeout(() => setPendingDelete(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDelete]);
+
+  const isProtected = (source: string) =>
+    (PROTECTED_BOOKING_SOURCES as readonly string[]).includes(source);
+
+  const runMutation = async (
+    action: () => Promise<void>,
+    successTitle: string,
+    successMessage: string
+  ) => {
+    try {
+      await action();
+      toast.success(successTitle, successMessage);
+      return true;
+    } catch (error) {
+      toast.error(
+        "Could not update booking sources",
+        error instanceof Error ? error.message : "Please try again."
+      );
+      return false;
+    }
+  };
+
+  const handleToggleEnabled = async (entry: BookingSourceConfig) => {
+    await runMutation(
+      () => onUpdate(entry.source, { isEnabled: !entry.isEnabled }),
+      entry.isEnabled ? "Booking source disabled" : "Booking source enabled",
+      `${entry.label} is ${entry.isEnabled ? "hidden from active source options; historical bookings stay intact" : "available again"}.`
+    );
+  };
+
+  const handleToggleFrontDesk = async (entry: BookingSourceConfig) => {
+    if (isProtected(entry.source)) return;
+    await runMutation(
+      () => onUpdate(entry.source, { selectableAtFrontDesk: !entry.selectableAtFrontDesk }),
+      "Front-desk visibility updated",
+      `${entry.label} is ${entry.selectableAtFrontDesk ? "no longer" : "now"} available in New Booking.`
+    );
+  };
+
+  const handleReorder = async (source: string, direction: "up" | "down") => {
+    const index = bookingSources.findIndex((entry) => entry.source === source);
+    if (index < 0) return;
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= bookingSources.length) return;
+    const next = [...bookingSources];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    await runMutation(
+      () => onReorder(next),
+      "Booking sources reordered",
+      "The new order is live in Settings and source filters."
+    );
+  };
+
+  const handleDelete = async (entry: BookingSourceConfig) => {
+    if (pendingDelete !== entry.source) {
+      setPendingDelete(entry.source);
+      toast.info("Confirm delete", "Click the delete button again within 3 seconds to confirm.");
+      return;
+    }
+    setPendingDelete(null);
+    await runMutation(
+      () => onDelete(entry.source),
+      "Booking source deleted",
+      `${entry.label} was removed from the configured source list.`
+    );
+  };
+
+  const openAddModal = () => {
+    setEditModal({ open: true, isNew: true, source: emptyBookingSource() });
+  };
+
+  const openEditModal = (entry: BookingSourceConfig) => {
+    setEditModal({ open: true, isNew: false, source: { ...entry } });
+  };
+
+  const closeModal = () => setEditModal({ open: false });
+
+  const handleModalField = (
+    field: keyof BookingSourceConfig,
+    value: string | boolean
+  ) => {
+    if (!editModal.open) return;
+    setEditModal({
+      open: true,
+      isNew: editModal.isNew,
+      source: { ...editModal.source, [field]: value }
+    });
+  };
+
+  const handleSaveModal = async () => {
+    if (!editModal.open) return;
+    const sourceKey = editModal.source.source.trim().toLowerCase();
+    const label = editModal.source.label.trim();
+    if (!sourceKey) {
+      toast.error("Source key is required", "Use a short identifier such as “booking-com” or “travel-agent”.");
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(sourceKey)) {
+      toast.error("Invalid source key", "Use lowercase letters, numbers, and hyphens only.");
+      return;
+    }
+    if (!label) {
+      toast.error("Label is required", "Enter the staff-facing name shown in booking filters and reports.");
+      return;
+    }
+    const protectedSource = isProtected(sourceKey);
+    const normalized: BookingSourceConfig = {
+      source: sourceKey,
+      label,
+      isEnabled: editModal.source.isEnabled,
+      selectableAtFrontDesk: protectedSource
+        ? false
+        : editModal.source.selectableAtFrontDesk
+    };
+    const saved = await runMutation(
+      () => editModal.isNew
+        ? onAdd(normalized)
+        : onUpdate(editModal.source.source, {
+            label: normalized.label,
+            isEnabled: normalized.isEnabled,
+            selectableAtFrontDesk: normalized.selectableAtFrontDesk
+          }),
+      editModal.isNew ? "Booking source added" : "Booking source updated",
+      `${label} is ready for source filters and reporting.`
+    );
+    if (saved) closeModal();
+  };
+
+  return (
+    <div className="space-y-6 text-xs">
+      <div>
+        <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Booking Sources</h3>
+        <p className="mt-0.5 text-[10px] leading-relaxed text-gray-500">
+          Control the channels used by New Booking, booking filters, and acquisition reports.
+          System-assigned sources stay protected; custom sources can be offered to the front desk.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-900">
+        <div className="flex items-start gap-3">
+          <ShieldAlert size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="text-xs font-bold">Keep reporting consistent</p>
+            <p className="mt-1 text-[11px] leading-relaxed">
+              Online, walk-in, and corporate are assigned by the system and cannot be deleted or offered
+              in the front-desk picker. Disable a source to hide it from active filters without rewriting
+              historical bookings.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {bookingSources.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-8 text-center">
+          <Tag size={28} className="mx-auto text-gray-300" aria-hidden="true" />
+          <p className="mt-3 text-sm font-semibold text-gray-700">No booking sources configured</p>
+          <p className="mt-1 text-[11px] text-gray-500">
+            Add a channel so staff can classify new bookings and reports can attribute them correctly.
+          </p>
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="mt-4 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add booking source
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {bookingSources.map((entry, index) => {
+            const protectedSource = isProtected(entry.source);
+            const armed = pendingDelete === entry.source;
+            return (
+              <article
+                key={entry.source}
+                className={`rounded-xl border border-gray-200 bg-white p-4 shadow-sm ${entry.isEnabled ? "" : "opacity-70"}`}
+              >
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-bold text-gray-900">{entry.label || entry.source}</p>
+                      <code className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-mono text-gray-600">
+                        {entry.source}
+                      </code>
+                      {protectedSource && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700">
+                          <Lock size={10} aria-hidden="true" />
+                          Required
+                        </span>
+                      )}
+                      {!entry.isEnabled && (
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                          Disabled
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {protectedSource
+                        ? "System assigned — never shown in the New Booking source picker."
+                        : entry.selectableAtFrontDesk
+                          ? "Available to staff in New Booking."
+                          : "Hidden from the New Booking source picker."}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleEnabled(entry)}
+                      aria-pressed={entry.isEnabled}
+                      className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition ${
+                        entry.isEnabled
+                          ? "border-primary/30 bg-primary-light text-primary-dark"
+                          : "border-gray-200 bg-gray-50 text-gray-600"
+                      }`}
+                    >
+                      {entry.isEnabled ? <CheckSquare size={14} aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}
+                      {entry.isEnabled ? "Enabled" : "Disabled"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleFrontDesk(entry)}
+                      disabled={protectedSource}
+                      aria-pressed={entry.selectableAtFrontDesk}
+                      title={protectedSource ? "System-assigned sources cannot be selected manually." : undefined}
+                      className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        entry.selectableAtFrontDesk
+                          ? "border-primary/30 bg-primary-light text-primary-dark"
+                          : "border-gray-200 bg-white text-gray-600"
+                      }`}
+                    >
+                      <Users size={14} aria-hidden="true" />
+                      Front desk
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleReorder(entry.source, "up")}
+                      disabled={index === 0}
+                      aria-label={`Move ${entry.label} up`}
+                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowUp size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleReorder(entry.source, "down")}
+                      disabled={index === bookingSources.length - 1}
+                      aria-label={`Move ${entry.label} down`}
+                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowDown size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(entry)}
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    >
+                      <Pencil size={13} aria-hidden="true" />
+                      Edit
+                    </button>
+                    {!protectedSource && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(entry)}
+                        aria-label={armed ? `Confirm delete ${entry.label}` : `Delete ${entry.label}`}
+                        className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition ${
+                          armed
+                            ? "border-red-300 bg-red-100 text-red-700"
+                            : "border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700"
+                        }`}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                        {armed ? "Tap again to confirm" : "Delete"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {bookingSources.length > 0 && (
+        <div className="flex justify-end pt-2">
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add booking source
+          </button>
+        </div>
+      )}
+
+      {editModal.open && (
+        <Modal
+          open
+          onClose={closeModal}
+          title={editModal.isNew ? "Add booking source" : `Edit “${editModal.source.label || editModal.source.source}”`}
+          footer={
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-gray-200 bg-white px-5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveModal()}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+              >
+                <Save size={14} aria-hidden="true" />
+                Save
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4 text-xs">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                Source key
+                <input
+                  type="text"
+                  maxLength={80}
+                  value={editModal.source.source}
+                  onChange={(event) => handleModalField("source", event.target.value.toLowerCase())}
+                  disabled={!editModal.isNew}
+                  placeholder="e.g. booking-com"
+                  className="min-h-[44px] rounded-lg border border-gray-250 bg-gray-50/50 px-3 font-mono text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <span className="text-[10px] font-normal text-gray-500">
+                  {editModal.isNew
+                    ? "Immutable identifier stored on each booking. Use lowercase letters, numbers, and hyphens."
+                    : "Cannot be renamed because historical bookings store this key."}
+                </span>
+              </label>
+              <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                Display label
+                <input
+                  type="text"
+                  maxLength={80}
+                  value={editModal.source.label}
+                  onChange={(event) => handleModalField("label", event.target.value)}
+                  placeholder="e.g. Booking.com"
+                  className="min-h-[44px] rounded-lg border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                />
+                <span className="text-[10px] font-normal text-gray-500">
+                  Shown to staff in New Booking, booking filters, and acquisition reports.
+                </span>
+              </label>
+            </div>
+
+            <label className="flex min-h-[44px] cursor-pointer items-center gap-3 font-semibold text-gray-700">
+              <button
+                type="button"
+                onClick={() => handleModalField("isEnabled", !editModal.source.isEnabled)}
+                aria-pressed={editModal.source.isEnabled}
+                className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition ${editModal.source.isEnabled ? "bg-primary" : "bg-gray-200"}`}
+              >
+                <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition ${editModal.source.isEnabled ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
+              Enabled in active source filters and reports
+            </label>
+
+            <label className={`flex min-h-[44px] items-center gap-3 font-semibold text-gray-700 ${isProtected(editModal.source.source) ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+              <button
+                type="button"
+                disabled={isProtected(editModal.source.source)}
+                onClick={() => handleModalField("selectableAtFrontDesk", !editModal.source.selectableAtFrontDesk)}
+                aria-pressed={editModal.source.selectableAtFrontDesk}
+                className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition disabled:cursor-not-allowed ${editModal.source.selectableAtFrontDesk ? "bg-primary" : "bg-gray-200"}`}
+              >
+                <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition ${editModal.source.selectableAtFrontDesk ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
+              Available to staff in the New Booking source picker
+            </label>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1169,6 +1601,11 @@ export function SettingsPage() {
     deletePaymentMethod,
     uploadPaymentMethodQr,
     resetPaymentMethodQr,
+    bookingSources,
+    addBookingSource,
+    updateBookingSource,
+    reorderBookingSources,
+    deleteBookingSource,
     testRuns,
     testRunsLoading,
     createTestRun,
@@ -1304,6 +1741,17 @@ export function SettingsPage() {
   const [instagramUrl, setInstagramUrl] = useState(hotelConfig.instagramUrl);
   const [twitterHandle, setTwitterHandle] = useState(hotelConfig.twitterHandle ?? config.twitterHandle);
 
+  // Per DSC-01..05 (2026-08-01, per CVQ-06): per-class
+  // discount scope. The Discounts tab renders a 3×3
+  // checkbox editor (senior row admin-only per DSC-03);
+  // this state mirrors the editor and persists via
+  // `handleSaveDiscounts`. The snapshot is written to
+  // `settings/hotelConfig.discountScope` and read by the
+  // server on every new booking. Legacy settings hydrate
+  // to the broad default via `normalizeDiscountScope` in
+  // `AdminContext`.
+  const [discountScope, setDiscountScope] = useState<DiscountScope>(hotelConfig.discountScope);
+
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
   // no longer owns any hero copy — see `handleSaveBranding` below.
@@ -1426,6 +1874,15 @@ export function SettingsPage() {
   // 4. Breakfast Config states
   const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled);
   const [breakfastRate, setBreakfastRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
+  // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
+  // "include children in the breakfast charge". The server snapshots
+  // this onto every new booking whose client did not send a
+  // per-booking override. The admin can flip it here as policy
+  // changes; existing bookings are unaffected (the snapshot is
+  // per-booking, not per-policy).
+  const [breakfastIncludesChildrenDefault, setBreakfastIncludesChildrenDefault] = useState(
+    breakfastConfig.breakfastIncludesChildrenDefault !== false
+  );
   const [silogItems, setSilogItems] = useState<{ id: string; name: string; isActive: boolean }[]>(breakfastConfig.silogItems);
 
   // 5. Store Config states
@@ -1433,7 +1890,13 @@ export function SettingsPage() {
   const [lowStockThreshold, setLowStockThreshold] = useState(String(storeConfig.lowStockThreshold));
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
   const [pendingDeleteStoreItemId, setPendingDeleteStoreItemId] = useState<string | null>(null);
-  const [pendingDeleteRoomType, setPendingDeleteRoomType] = useState<string | null>(null);
+  // Per RTS-05 (2026-08-01): the room-type delete now uses a proper
+  // Modal + ConfirmForm (matching the RoomsPage delete flow) instead
+  // of a 3-second auto-disarm "Click to confirm" button — the old
+  // pattern could be re-armed indefinitely by a hesitant click and
+  // therefore never delete anything.
+  const [pendingDeleteRoomType, setPendingDeleteRoomType] = useState<RoomTypeEntry | null>(null);
+  const [isDeletingRoomType, setIsDeletingRoomType] = useState(false);
 
   // Email preview states
   const [previewingTemplate, setPreviewingTemplate] = useState<string | null>(null);
@@ -1465,11 +1928,10 @@ export function SettingsPage() {
     const timer = setTimeout(() => setPendingDeleteStoreItemId(null), 3000);
     return () => clearTimeout(timer);
   }, [pendingDeleteStoreItemId]);
-  useEffect(() => {
-    if (!pendingDeleteRoomType) return;
-    const timer = setTimeout(() => setPendingDeleteRoomType(null), 3000);
-    return () => clearTimeout(timer);
-  }, [pendingDeleteRoomType]);
+  // Per RTS-05 (2026-08-01): no more 3-second auto-disarm timer on the
+  // room-type delete — the confirm now lives in a Modal + ConfirmForm
+  // (matching the RoomsPage delete flow). The Modal's `onClose` cancels
+  // the pending delete; the ConfirmForm's `onCancel` does the same.
 
   // Room type photos manager state (per `plan/features/SETTINGS.md §Room Types`).
   const [photoTarget, setPhotoTarget] = useState<RoomTypeEntry | null>(null);
@@ -1504,7 +1966,28 @@ export function SettingsPage() {
   // 7. Legal Content states
   const [privacyPolicyBody, setPrivacyPolicyBody] = useState(websiteContent.privacyPolicyBody || "");
   const [cancellationPolicy, setCancellationPolicy] = useState(websiteContent.cancellationPolicy || "");
+  const [cancellationCutoffHours, setCancellationCutoffHours] = useState<string>(
+    websiteContent.cancellationCutoffHours !== undefined ? String(websiteContent.cancellationCutoffHours) : "48"
+  );
+  const [cancellationRefundPctBefore, setCancellationRefundPctBefore] = useState<string>(
+    websiteContent.cancellationRefundPctBefore !== undefined ? String(websiteContent.cancellationRefundPctBefore) : "100"
+  );
+  const [cancellationRefundPctAfter, setCancellationRefundPctAfter] = useState<string>(
+    websiteContent.cancellationRefundPctAfter !== undefined ? String(websiteContent.cancellationRefundPctAfter) : "0"
+  );
   const [houseRules, setHouseRules] = useState(websiteContent.houseRules || "");
+  // Per LCE-01 (decision #137, 2026-07-25): the Terms of
+  // Service body + version + last-updated are now admin-
+  // editable. The version is server-bumped on every save
+  // (1.0.0 → 1.0.1) — the local `termsVersion` state is a
+  // display mirror of the persisted value, populated from
+  // the Firestore snapshot. The `termsLastUpdated` is set
+  // by the server (the audit trail of when this version
+  // went live).
+  const [termsBody, setTermsBody] = useState(websiteContent.termsBody || "");
+  const [termsVersion, setTermsVersion] = useState(websiteContent.termsVersion || "");
+  const [termsLastUpdated, setTermsLastUpdated] = useState(websiteContent.termsLastUpdated || config.termsLastUpdated || "");
+  const [termsSavedAt, setTermsSavedAt] = useState<{ version: string; lastUpdated: string } | null>(null);
   const [privacyPolicyLastUpdated, setPrivacyPolicyLastUpdated] = useState(
     websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || ""
   );
@@ -1538,7 +2021,22 @@ export function SettingsPage() {
     setNotificationSoundUrl(hotelConfig.notificationSoundUrl || "");
     setPrivacyPolicyBody(websiteContent.privacyPolicyBody || "");
     setCancellationPolicy(websiteContent.cancellationPolicy || "");
+    setCancellationCutoffHours(
+      websiteContent.cancellationCutoffHours !== undefined ? String(websiteContent.cancellationCutoffHours) : "48"
+    );
+    setCancellationRefundPctBefore(
+      websiteContent.cancellationRefundPctBefore !== undefined ? String(websiteContent.cancellationRefundPctBefore) : "100"
+    );
+    setCancellationRefundPctAfter(
+      websiteContent.cancellationRefundPctAfter !== undefined ? String(websiteContent.cancellationRefundPctAfter) : "0"
+    );
     setHouseRules(websiteContent.houseRules || "");
+    // Per LCE-01: hydrate the terms fields when the websiteContent
+    // snapshot arrives (the useEffect fires on every snapshot
+    // because the Firestore `onSnapshot` is the source of truth).
+    setTermsBody(websiteContent.termsBody || "");
+    setTermsVersion(websiteContent.termsVersion || "");
+    setTermsLastUpdated(websiteContent.termsLastUpdated || config.termsLastUpdated || "");
     setPrivacyPolicyLastUpdated(websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || "");
     setPointsEnabled(rewardsConfig.pointsEnabled !== false);
     setEarningMode(rewardsConfig.earningMode === "per-booking" ? "per-booking" : "per-spend");
@@ -1636,6 +2134,10 @@ export function SettingsPage() {
     setSeoPriceRange(seoSettings.draft?.priceRange || config.priceRange);
     setSeoOgImage(normalizeSeoImageOverride(seoSettings.draft?.ogImage));
     setTwitterHandle(hotelConfig.twitterHandle ?? config.twitterHandle);
+    // Per DSC-01..05 (2026-08-01, per CVQ-06): sync the
+    // discount scope from the latest snapshot (already
+    // normalized in AdminContext).
+    setDiscountScope(hotelConfig.discountScope);
 
     // Safely format address: if it's a seeded object, convert to single-line string.
     let addrStr = "";
@@ -2035,7 +2537,22 @@ export function SettingsPage() {
     await runSettingsSave("breakfast", "Dining settings saved", () => updateSettings("breakfastConfig", {
       isEnabled: breakfastEnabled,
       ratePerPersonPerNight: parseFloat(breakfastRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+      breakfastIncludesChildrenDefault,
       silogItems
+    }));
+  };
+
+  // Per DSC-01..05 (2026-08-01, per CVQ-06): save the per-class
+  // discount scope to `settings/hotelConfig.discountScope`. The
+  // server snapshots this onto every new booking; existing
+  // bookings are unaffected (the snapshot is per-booking).
+  // Front-desk users cannot reach the editor (admin-only), and
+  // the senior row's checkboxes are disabled for non-admins if
+  // the page is reached by a different path.
+  const handleSaveDiscounts = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runSettingsSave("discounts", "Discount scope saved", () => updateSettings("hotelConfig", {
+      discountScope
     }));
   };
 
@@ -2054,16 +2571,72 @@ export function SettingsPage() {
   };
 
   const handleSaveLegal = async () => {
+    const cutoff = parseInt(cancellationCutoffHours);
+    const before = parseFloat(cancellationRefundPctBefore);
+    const after = parseFloat(cancellationRefundPctAfter);
+
+    if (isNaN(cutoff) || cutoff < 0) {
+      toast.error("Please enter a valid cutoff window (minimum 0 hours).");
+      return;
+    }
+    if (isNaN(before) || before < 0 || before > 100) {
+      toast.error("Refund percentage before cutoff must be between 0 and 100.");
+      return;
+    }
+    if (isNaN(after) || after < 0 || after > 100) {
+      toast.error("Refund percentage after cutoff must be between 0 and 100.");
+      return;
+    }
+
     const saved = await runSettingsSave("legal", "Legal content saved", () => updateSettings("websiteContent", {
       ...websiteContent,
       privacyPolicyBody,
       cancellationPolicy,
+      cancellationCutoffHours: cutoff,
+      cancellationRefundPctBefore: before,
+      cancellationRefundPctAfter: after,
       houseRules,
       privacyPolicyLastUpdated: new Date().toISOString().slice(0, 10)
     }));
     if (saved) {
       setPrivacyPolicyLastUpdated(new Date().toISOString().slice(0, 10));
     }
+  };
+
+  // Per LCE-01 (decision #137, 2026-07-25): the Terms of
+  // Service is editable from a dedicated save path because
+  // the server auto-bumps the patch version (1.0.0 → 1.0.1)
+  // and stamps `termsLastUpdated` atomically with the new
+  // body. The generic `updateSettings("websiteContent", ...)`
+  // path would not bump the version — the dedicated endpoint
+  // is the only write path that produces a fresh consent
+  // version for the booking audit trail. Front-desk callers
+  // get a 403 from the server.
+  const handleSaveTerms = async () => {
+    const token = await auth.currentUser?.getIdToken(true);
+    const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/update-terms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": token ? `Bearer ${token}` : ""
+      },
+      body: JSON.stringify({ termsBody })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      toast.error("Could not save terms", data?.error || "Please try again.");
+      return;
+    }
+    // The server returns the new version + last-updated;
+    // mirror them in local state so the user sees the
+    // post-save values without a Firestore round-trip.
+    setTermsVersion(data.data.termsVersion);
+    setTermsLastUpdated(data.data.termsLastUpdated);
+    setTermsSavedAt({
+      version: data.data.termsVersion,
+      lastUpdated: data.data.termsLastUpdated
+    });
+    toast.success(`Terms saved (version ${data.data.termsVersion})`);
   };
 
   const handleCreateStaffSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -2296,12 +2869,14 @@ export function SettingsPage() {
       setPendingDeleteRoomType(null);
       return;
     }
+    setIsDeletingRoomType(true);
     try {
       await deleteRoomType(typeValue);
+      setPendingDeleteRoomType(null);
     } catch (error) {
       toast.error("Cannot delete room type", error instanceof Error ? error.message : "Unknown error");
     } finally {
-      setPendingDeleteRoomType(null);
+      setIsDeletingRoomType(false);
     }
   };
   const selectedStoreCategoryLabel = storeCategoryFilter === "all"
@@ -2389,6 +2964,7 @@ export function SettingsPage() {
   const tabs = [
     { id: "hotel" as const, label: "Hotel Settings", icon: Landmark },
     { id: "payment" as const, label: "Payment Methods", icon: CreditCard },
+    { id: "sources" as const, label: "Booking Sources", icon: Tag },
     { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
     { id: "branding" as const, label: "Branding", icon: Palette },
     { id: "website" as const, label: "Website Content", icon: Globe },
@@ -2400,7 +2976,8 @@ export function SettingsPage() {
     { id: "intercom" as const, label: "Intercom", icon: MessageSquare },
     { id: "legal" as const, label: "Legal Content", icon: Scale },
     { id: "environment" as const, label: "Environment Testing", icon: FlaskConical },
-    { id: "staff" as const, label: "Staff Accounts", icon: UserCog }
+    { id: "staff" as const, label: "Staff Accounts", icon: UserCog },
+    { id: "discounts" as const, label: "Discounts", icon: Percent }
   ];
 
   if (settingsLoading) {
@@ -2645,6 +3222,30 @@ export function SettingsPage() {
             onUploadQr={uploadPaymentMethodQr}
             onResetQr={resetPaymentMethodQr}
           />}
+
+          {/* NBS-04 — admin-managed booking channel list. The data
+              layer already owns normalization, backfill, bulk writes,
+              and protected/reference delete guards. This tab is the
+              single UI surface for those operations. */}
+          {activeTab === "sources" && (
+            isAdmin ? (
+              <BookingSourcesTabBody
+                bookingSources={bookingSources}
+                onAdd={addBookingSource}
+                onUpdate={updateBookingSource}
+                onReorder={reorderBookingSources}
+                onDelete={deleteBookingSource}
+              />
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+                <p className="font-semibold">Admin-only section</p>
+                <p className="mt-1 leading-relaxed">
+                  Booking source configuration affects acquisition reporting and the New Booking
+                  workflow. Ask a hotel owner to make these changes.
+                </p>
+              </div>
+            )
+          )}
 
           {/* TAB 2: BRANDING — hero photos, hero copy, and logo
               overrides. Per `plan/features/SETTINGS.md §Branding`.
@@ -3752,6 +4353,30 @@ export function SettingsPage() {
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
                   />
                 </label>
+
+                {/* Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide
+                    default for "include children in the breakfast
+                    charge". The server snapshots this onto every new
+                    booking whose client did not send a per-booking
+                    override. Existing bookings are unaffected (the
+                    snapshot is per-booking, not per-policy). */}
+                <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setBreakfastIncludesChildrenDefault(!breakfastIncludesChildrenDefault)}
+                    disabled={!breakfastEnabled}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                      breakfastIncludesChildrenDefault ? "bg-primary" : "bg-gray-300"
+                    }`}
+                    aria-pressed={breakfastIncludesChildrenDefault}
+                    aria-label="Include children in the breakfast charge by default"
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      breakfastIncludesChildrenDefault ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  Include children in the breakfast charge by default
+                </label>
               </div>
 
               {/* Menu items toggler checkboxes */}
@@ -4241,6 +4866,9 @@ export function SettingsPage() {
                             {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS} photos
                           </p>
                           <p className="text-[11px] text-gray-500">
+                            Up to {type.maxCapacity} adult{type.maxCapacity === 1 ? "" : "s"} · {type.maxChildren ?? 0} child{(type.maxChildren ?? 0) === 1 ? "" : "ren"}
+                          </p>
+                          <p className="text-[11px] text-gray-500">
                             {countRoomsUsingType(type.value)} room{countRoomsUsingType(type.value) === 1 ? "" : "s"} using this type
                           </p>
                         </div>
@@ -4263,20 +4891,10 @@ export function SettingsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              if (pendingDeleteRoomType === type.value) {
-                                void handleDeleteRoomType(type.value);
-                              } else {
-                                setPendingDeleteRoomType(type.value);
-                              }
-                            }}
-                            className={`shrink-0 font-bold hover:underline min-h-[44px] px-2 ${
-                              pendingDeleteRoomType === type.value
-                                ? "text-red-700"
-                                : "text-red-650 hover:text-red-700"
-                            }`}
+                            onClick={() => setPendingDeleteRoomType(type)}
+                            className="shrink-0 font-bold hover:underline min-h-[44px] px-2 text-red-650 hover:text-red-700"
                           >
-                            {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
+                            Delete
                           </button>
                         </div>
                       </li>
@@ -4289,6 +4907,7 @@ export function SettingsPage() {
                         <th className="px-4 py-2.5">Identifier Key</th>
                         <th className="px-4 py-2.5">Display Label</th>
                         <th className="px-4 py-2.5">Short Abbreviation</th>
+                        <th className="px-4 py-2.5">Occupancy Caps</th>
                         <th className="px-4 py-2.5">Photos</th>
                         <th className="px-4 py-2.5">In Use</th>
                         <th className="px-4 py-2.5 text-right">Actions</th>
@@ -4303,6 +4922,11 @@ export function SettingsPage() {
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-105 text-gray-700 border border-gray-200">
                               {type.shortLabel}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-[11px] text-gray-600">
+                            <span className="font-semibold text-gray-800">{type.maxCapacity}</span> adult{type.maxCapacity === 1 ? "" : "s"}
+                            <span className="mx-1 text-gray-300">·</span>
+                            <span className="font-semibold text-gray-800">{type.maxChildren ?? 0}</span> child{(type.maxChildren ?? 0) === 1 ? "" : "ren"}
                           </td>
                           <td className="px-4 py-3">
                             <button
@@ -4329,21 +4953,11 @@ export function SettingsPage() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (pendingDeleteRoomType === type.value) {
-                                    void handleDeleteRoomType(type.value);
-                                  } else {
-                                    setPendingDeleteRoomType(type.value);
-                                  }
-                                }}
-                                className={`font-bold hover:underline ${
-                                  pendingDeleteRoomType === type.value
-                                    ? "text-red-700"
-                                    : "text-red-650 hover:text-red-700"
-                              }`}
-                            >
-                              {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
-                            </button>
+                                onClick={() => setPendingDeleteRoomType(type)}
+                                className="font-bold hover:underline text-red-650 hover:text-red-700"
+                              >
+                                Delete
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -4374,9 +4988,22 @@ export function SettingsPage() {
                       ? amenitiesRaw.split(",").map((a) => a.trim()).filter(Boolean)
                       : [];
                     const maxCapacity = parseInt((form.elements.namedItem("cap") as HTMLInputElement).value, 10) || 1;
+                    // Per CHD-03 (2026-08-01): `maxCapacity` is the
+                    // adult cap; children have their own non-negative
+                    // per-type cap.
+                    const maxChildren = Math.max(
+                      0,
+                      parseInt((form.elements.namedItem("maxChildren") as HTMLInputElement).value, 10) || 0
+                    );
                     const pricePerNight = parseFloat((form.elements.namedItem("baseRate") as HTMLInputElement).value) || 0;
                     const weekendRate = parseFloat((form.elements.namedItem("weekendRate") as HTMLInputElement).value) || pricePerNight;
                     const corporateRate = parseFloat((form.elements.namedItem("corpRate") as HTMLInputElement).value) || pricePerNight;
+                    // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+                    // `maxExtraBeds` of 0 means the type does not allow
+                    // extra beds (no separate `allowsExtraBed` boolean
+                    // per the spec). Absent fields default to 0.
+                    const maxExtraBeds = parseInt((form.elements.namedItem("maxExtraBeds") as HTMLInputElement).value, 10) || 0;
+                    const extraBedRate = parseFloat((form.elements.namedItem("extraBedRate") as HTMLInputElement).value) || 0;
 
                     if (!value || !label || !shortLabel) return;
                     if (!bedDefinition) {
@@ -4396,14 +5023,18 @@ export function SettingsPage() {
                       description,
                       amenities,
                       maxCapacity,
+                      maxChildren,
                       pricePerNight,
                       weekendRate,
-                      corporateRate
+                      corporateRate,
+                      // Per EXB-01 (2026-07-31).
+                      maxExtraBeds,
+                      extraBedRate
                     });
                     form.reset();
                     toast.success(
                       "Room type added",
-                      `${label} (${shortLabel}) — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night.`
+                      `${label} (${shortLabel}) — up to ${maxCapacity} adult${maxCapacity === 1 ? "" : "s"} and ${maxChildren} child${maxChildren === 1 ? "" : "ren"}, base ${formatPrice(pricePerNight)}/night${maxExtraBeds > 0 ? `, +${maxExtraBeds} extra bed${maxExtraBeds === 1 ? "" : "s"} at ${formatPrice(extraBedRate)}/night` : ""}.`
                     );
                   }}
                   className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
@@ -4475,9 +5106,9 @@ export function SettingsPage() {
                     />
                   </label>
 
-                  <div className="grid gap-4 sm:grid-cols-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Max guests
+                      Maximum adults (12+)
                       <input
                         name="cap"
                         type="number"
@@ -4486,6 +5117,22 @@ export function SettingsPage() {
                         required
                         className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                       />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Maximum children (0–11)
+                      <input
+                        name="maxChildren"
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={0}
+                        required
+                        aria-describedby="add-room-type-child-cap-help"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                      <span id="add-room-type-child-cap-help" className="text-[10px] font-normal leading-relaxed text-gray-500">
+                        Children are free of the room rate. Set 0 when this room type does not accommodate children.
+                      </span>
                     </label>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                       Base rate / night ({config.currencySymbol})
@@ -4512,6 +5159,35 @@ export function SettingsPage() {
                       Corporate rate ({config.currencySymbol})
                       <input
                         name="corpRate"
+                        type="number"
+                        min={0}
+                        defaultValue={0}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                    {/* Per EXB-01 (2026-07-31): extra-bed allowance
+                        + rate. The selector appears on the guest
+                        /book page only when `maxExtraBeds > 0`; the
+                        "no separate `allowsExtraBed` boolean" rule
+                        (per the spec) means the count itself is the
+                        gate. Leave at 0 to keep the type's offering
+                        unchanged. */}
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Max extra beds (0 = not offered)
+                      <input
+                        name="maxExtraBeds"
+                        type="number"
+                        min={0}
+                        max={5}
+                        step={1}
+                        defaultValue={0}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Extra bed rate ({config.currencySymbol} / bed / night)
+                      <input
+                        name="extraBedRate"
                         type="number"
                         min={0}
                         defaultValue={0}
@@ -4590,9 +5266,16 @@ export function SettingsPage() {
                     .map((a) => a.trim())
                     .filter(Boolean);
                   const maxCapacity = parseInt(get("cap"), 10) || 1;
+                  // Per CHD-03 (2026-08-01): persist the child cap
+                  // alongside the adult cap in the same room-types
+                  // array write.
+                  const maxChildren = Math.max(0, parseInt(get("maxChildren"), 10) || 0);
                   const pricePerNight = parseFloat(get("baseRate")) || 0;
                   const weekendRate = parseFloat(get("weekendRate")) || pricePerNight;
                   const corporateRate = parseFloat(get("corpRate")) || pricePerNight;
+                  // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+                  const maxExtraBeds = parseInt(get("maxExtraBeds"), 10) || 0;
+                  const extraBedRate = parseFloat(get("extraBedRate")) || 0;
 
                   if (!label || !shortLabel || !bedDefinition) {
                     toast.error("Missing required fields", "Label, short label, and bed description are required.");
@@ -4608,13 +5291,17 @@ export function SettingsPage() {
                       description,
                       amenities,
                       maxCapacity,
+                      maxChildren,
                       pricePerNight,
                       weekendRate,
-                      corporateRate
+                      corporateRate,
+                      // Per EXB-01 (2026-07-31).
+                      maxExtraBeds,
+                      extraBedRate
                     });
                     toast.success(
                       "Room type updated",
-                      `${label} — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night.`
+                      `${label} — up to ${maxCapacity} adult${maxCapacity === 1 ? "" : "s"} and ${maxChildren} child${maxChildren === 1 ? "" : "ren"}, base ${formatPrice(pricePerNight)}/night.`
                     );
                     setEditType(null);
                   } catch (err) {
@@ -4688,9 +5375,9 @@ export function SettingsPage() {
                   />
                 </label>
 
-                <div className="grid gap-4 sm:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Max guests
+                    Maximum adults (12+)
                     <input
                       name="cap"
                       type="number"
@@ -4699,6 +5386,22 @@ export function SettingsPage() {
                       defaultValue={editType.maxCapacity}
                       className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                     />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Maximum children (0–11)
+                    <input
+                      name="maxChildren"
+                      type="number"
+                      min={0}
+                      step={1}
+                      required
+                      defaultValue={editType.maxChildren ?? 0}
+                      aria-describedby="edit-room-type-child-cap-help"
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                    <span id="edit-room-type-child-cap-help" className="text-[10px] font-normal leading-relaxed text-gray-500">
+                      Children are free of the room rate. Set 0 when this room type does not accommodate children.
+                    </span>
                   </label>
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                     Base rate / night ({config.currencySymbol})
@@ -4731,8 +5434,88 @@ export function SettingsPage() {
                       className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                     />
                   </label>
+                  {/* Per EXB-01 (2026-07-31): extra-bed allowance
+                      + rate. The selector appears on the guest
+                      /book page only when `maxExtraBeds > 0`. */}
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Max extra beds (0 = not offered)
+                    <input
+                      name="maxExtraBeds"
+                      type="number"
+                      min={0}
+                      max={5}
+                      step={1}
+                      defaultValue={editType.maxExtraBeds ?? 0}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Extra bed rate ({config.currencySymbol} / bed / night)
+                    <input
+                      name="extraBedRate"
+                      type="number"
+                      min={0}
+                      defaultValue={editType.extraBedRate ?? 0}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
                 </div>
               </form>
+            ) : null}
+          </Modal>
+
+          {/* ROOM TYPE DELETE CONFIRM (per RTS-05, 2026-08-01) */}
+          <Modal
+            title={pendingDeleteRoomType ? `Delete · ${pendingDeleteRoomType.label}` : "Delete room type"}
+            open={!!pendingDeleteRoomType}
+            onClose={() => {
+              if (isDeletingRoomType) return;
+              setPendingDeleteRoomType(null);
+            }}
+            footer={null}
+          >
+            {pendingDeleteRoomType ? (
+              <div className="space-y-4 text-sm">
+                <p className="text-xs leading-relaxed text-gray-600">
+                  You are about to permanently delete the <strong>{pendingDeleteRoomType.label}</strong> room type
+                  ({pendingDeleteRoomType.value}). Any new bookings will no longer be able to select this type. Historical
+                  bookings keep their denormalized type, but the type is gone for new reservations and any associated
+                  room-classification UI.
+                </p>
+                {countRoomsUsingType(pendingDeleteRoomType.value) > 0 ? (
+                  <ConfirmForm
+                    title="Cannot delete this room type yet"
+                    message={
+                      <>
+                        <strong>{countRoomsUsingType(pendingDeleteRoomType.value)}</strong> room{countRoomsUsingType(pendingDeleteRoomType.value) === 1 ? "" : "s"} still
+                        use this type. Reassign those rooms to a different type before deleting it.
+                      </>
+                    }
+                    confirmLabel="Got it"
+                    cancelLabel="Back"
+                    variant="primary"
+                    onConfirm={() => setPendingDeleteRoomType(null)}
+                    onCancel={() => setPendingDeleteRoomType(null)}
+                    testId="delete-room-type-blocked"
+                  />
+                ) : (
+                  <ConfirmForm
+                    title="Type a reason and confirm"
+                    message={`Provide a short note for the audit log (e.g. \u201CMigrated all Standard Doubles to Deluxe, decommissioning the type\u201D).`}
+                    reasonLabel="Reason (required)"
+                    reasonRequired
+                    reasonPlaceholder="Why is this room type being removed?"
+                    confirmLabel={isDeletingRoomType ? "Deleting…" : "Delete room type permanently"}
+                    variant="danger"
+                    onConfirm={() => void handleDeleteRoomType(pendingDeleteRoomType.value)}
+                    onCancel={() => {
+                      if (isDeletingRoomType) return;
+                      setPendingDeleteRoomType(null);
+                    }}
+                    testId="delete-room-type-confirm"
+                  />
+                )}
+              </div>
             ) : null}
           </Modal>
 
@@ -5071,6 +5854,55 @@ export function SettingsPage() {
               </div>
 
               <form onSubmit={(e) => { e.preventDefault(); void handleSaveLegal(); }} className="space-y-6">
+                {/* Per LCE-01 (decision #137, 2026-07-25): the
+                    Terms of Service body is admin-editable.
+                    Placed ABOVE Privacy Policy because it's the
+                    first document the guest encounters during
+                    booking consent (Step 2's "I agree to the
+                    Terms" link) — surface the highest-touch
+                    legal doc first. The version is auto-bumped
+                    on every save (1.0.0 → 1.0.1) by the
+                    dedicated POST /api/admin/update-terms
+                    endpoint, so each save produces a fresh
+                    consent version for the booking audit
+                    trail. */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Terms of Service</h4>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                      {termsVersion && <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono font-semibold text-primary">v{termsVersion}</span>}
+                      {termsLastUpdated && <span>Last updated: {termsLastUpdated}</span>}
+                    </div>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Terms of Service Body
+                    <textarea
+                      value={termsBody}
+                      onChange={(e) => setTermsBody(e.target.value)}
+                      rows={16}
+                      maxLength={50000}
+                      placeholder="Enter the full Terms of Service text. This is displayed on the guest-facing /terms page. If left blank, the page falls back to the deploy-configured content. Saving bumps the version (1.0.0 → 1.0.1) and is captured on every new booking's consentVersion field for the audit trail."
+                      className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
+                    />
+                  </label>
+                  <p className="text-[10px] text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>Displayed at <code>/terms</code>.</span>
+                    <span>Plain text only — preserves paragraph + list structure via <code>whitespace-pre-line</code> on the public page.</span>
+                    <span>{termsBody.length.toLocaleString()} / 50,000 characters.</span>
+                    <span>Versioning: each save auto-bumps the patch level (the major + minor are preserved).</span>
+                  </p>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveTerms()}
+                      disabled={!termsBody.trim() || termsBody.trim().length > 50000}
+                      className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save Terms (bumps version)
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Privacy Policy</h4>
@@ -5103,6 +5935,45 @@ export function SettingsPage() {
                       className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
                     />
                   </label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+                      Cutoff Window (hours)
+                      <input
+                        type="number"
+                        min="0"
+                        value={cancellationCutoffHours}
+                        onChange={(e) => setCancellationCutoffHours(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-gray-50/50 p-2.5 text-sm font-medium focus:bg-white focus:outline-none"
+                        placeholder="48"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+                      Refund % Before Cutoff
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={cancellationRefundPctBefore}
+                        onChange={(e) => setCancellationRefundPctBefore(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-gray-50/50 p-2.5 text-sm font-medium focus:bg-white focus:outline-none"
+                        placeholder="100"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+                      Refund % After Cutoff
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={cancellationRefundPctAfter}
+                        onChange={(e) => setCancellationRefundPctAfter(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-gray-50/50 p-2.5 text-sm font-medium focus:bg-white focus:outline-none"
+                        placeholder="0"
+                      />
+                    </label>
+                  </div>
                   <p className="text-[10px] text-gray-500">Shown at booking Step 3 and in confirmation emails. If left blank, a default policy is used.</p>
                 </div>
 
@@ -5626,6 +6497,167 @@ export function SettingsPage() {
                 </>
               )}
             </div>
+          )}
+
+          {/* TAB 12: DISCOUNTS — per-class discount scope editor
+              (DSC-01..05, 2026-08-01, per CVQ-06). Admin-only:
+              front-desk staff cannot reach this surface. The
+              senior row's checkboxes are additionally disabled
+              for non-admins (DSC-03 guardrail — RA 9994 / RA 10754
+              statutory scope). The 3×3 matrix controls which
+              charge components (room · breakfast · extra bed)
+              each discount class (senior · voucher · member)
+              applies to. The "broad" default (all cells true)
+              is byte-equivalent to the pre-DSC-01 behavior and
+              matches the historical "apply to the whole bill"
+              expectation. Narrowing is opt-in via unchecking
+              cells; broadening back is the safe direction. */}
+          {activeTab === "discounts" && (
+            isAdmin ? (
+              <form onSubmit={handleSaveDiscounts} className="space-y-6 text-xs">
+                <div>
+                  <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Discount Scope</h3>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Choose which charge components (room · breakfast · extra bed) each discount class
+                    (senior · voucher · member) applies to. The scope is snapshotted onto every new
+                    booking; existing bookings are unaffected. Uncheck a cell to exclude that component
+                    from the discount's base.
+                  </p>
+                </div>
+
+                {(() => {
+                  // The 3×3 matrix. Three classes (senior · voucher · member)
+                  // × three components (room · breakfast · extra bed). The
+                  // senior row is admin-only per DSC-03; non-admins see the
+                  // checkboxes disabled. `row.senior/voucher/member` is the
+                  // shape stored on `settings/hotelConfig.discountScope`.
+                  const componentLabels: Array<{ key: "room" | "breakfast" | "extraBed"; label: string }> = [
+                    { key: "room", label: "Room" },
+                    { key: "breakfast", label: "Breakfast" },
+                    { key: "extraBed", label: "Extra bed" }
+                  ];
+                  const classLabels: Array<{ key: "senior" | "voucher" | "member"; label: string; hint: string }> = [
+                    {
+                      key: "senior",
+                      label: "Senior / PWD discount",
+                      hint: "RA 9994 / RA 10754 — statutory. Admin-only."
+                    },
+                    {
+                      key: "voucher",
+                      label: "Voucher discount",
+                      hint: "Hotel-issued flat or percent voucher."
+                    },
+                    {
+                      key: "member",
+                      label: `${config.rewardsName} member discount`,
+                      hint: "Loyalty member base room discount."
+                    }
+                  ];
+                  const updateScope = (
+                    cls: "senior" | "voucher" | "member",
+                    component: "room" | "breakfast" | "extraBed",
+                    value: boolean
+                  ) => {
+                    setDiscountScope((prev) => ({
+                      ...prev,
+                      [cls]: { ...prev[cls], [component]: value }
+                    }));
+                  };
+                  const isBroad = (cls: "senior" | "voucher" | "member") =>
+                    componentLabels.every((c) => discountScope[cls][c.key]);
+                  const setClassAll = (cls: "senior" | "voucher" | "member", value: boolean) => {
+                    setDiscountScope((prev) => ({
+                      ...prev,
+                      [cls]: {
+                        room: value,
+                        breakfast: value,
+                        extraBed: value
+                      }
+                    }));
+                  };
+                  return (
+                    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200">
+                            <th className="text-left px-4 py-3 font-semibold text-gray-700 w-1/2">Discount class</th>
+                            {componentLabels.map((c) => (
+                              <th key={c.key} className="px-3 py-3 font-semibold text-gray-700 text-center">{c.label}</th>
+                            ))}
+                            <th className="px-3 py-3 font-semibold text-gray-500 text-center w-24">All</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {classLabels.map((cls) => {
+                            const isSeniorRow = cls.key === "senior";
+                            return (
+                              <tr key={cls.key} className="border-b border-gray-100 last:border-0">
+                                <td className="px-4 py-3 align-top">
+                                  <p className="font-bold text-gray-800">{cls.label}</p>
+                                  <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">{cls.hint}</p>
+                                </td>
+                                {componentLabels.map((c) => {
+                                  const checked = discountScope[cls.key][c.key];
+                                  return (
+                                    <td key={c.key} className="px-3 py-3 text-center align-middle">
+                                      <label className="inline-flex items-center justify-center cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={(e) => updateScope(cls.key, c.key, e.target.checked)}
+                                          className="h-4 w-4 cursor-pointer text-primary focus:ring-primary-light rounded border-gray-300"
+                                          aria-label={`${cls.label} applies to ${c.label}`}
+                                        />
+                                      </label>
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-3 text-center align-middle">
+                                  <button
+                                    type="button"
+                                    onClick={() => setClassAll(cls.key, !isBroad(cls.key))}
+                                    className="text-[10px] font-bold uppercase tracking-wider text-primary hover:underline"
+                                  >
+                                    {isBroad(cls.key) ? "Uncheck all" : "Check all"}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-amber-800 text-[11px] leading-relaxed">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <ShieldAlert size={14} className="shrink-0" />
+                    Senior / PWD scope (RA 9994 / RA 10754)
+                  </p>
+                  <p className="mt-1">
+                    Narrowing the senior row below the statutory default can configure the
+                    hotel into non-compliance. The chain always applies the senior
+                    percentage to whichever components the scope allows; vouchers and
+                    member discounts apply to the remaining components after the senior
+                    step. The saved scope is snapshotted onto every new booking — a later
+                    policy change here never rewrites an existing bill.
+                  </p>
+                </div>
+
+                <SaveActionFooter label="Save Discount Scope" status={getSaveStatus("discounts")} />
+              </form>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+                <p className="font-semibold">Admin-only section</p>
+                <p className="mt-1 leading-relaxed">
+                  The discount scope is restricted to admin accounts. Senior/PWD scoping is
+                  statutorily bounded under RA 9994 / RA 10754 — the senior row is gated
+                  to admins even when this surface is reached. Ask a hotel owner to make
+                  discount-scope changes.
+                </p>
+              </div>
+            )
           )}
         </div>
       </div>

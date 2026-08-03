@@ -6,6 +6,7 @@ import config from "@config";
 import { db } from "../firebase/config";
 import { AccountLayout } from "../components/AccountLayout";
 import { GhostButton } from "../components/GhostButton";
+import { EmailVerifyBanner } from "../components/EmailVerifyBanner";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { formatPrice } from "../utils/format";
 
@@ -245,9 +246,17 @@ export function RewardsPage() {
   const pointsBalance = memberProfile?.rewardsPoints || 0;
   const pointsEnabled = rewardsConfig.pointsEnabled !== false;
   const memberDiscountEnabled = rewardsConfig.memberDiscountEnabled !== false && rewardsConfig.memberDiscountPct > 0;
+  // Per Spark Rewards audit 2026-07-18 LOW-4: align the copy
+  // with the live checkout-time formula. The previous copy
+  // ("Earn N points per ₱100 spent") understated the actual
+  // crediting, which is proportional
+  // (`Math.floor((totalPrice/100) * pointsPerHundred)` per
+  // `calculateCheckoutPoints` in `bookings.ts`). E.g. at 10
+  // pts/₱100, a ₱150 stay earns 15 pts, not 10. The copy now
+  // shows the per-₱100 rate and notes proportional crediting.
   const earningCopy = rewardsConfig.earningMode === "per-booking"
     ? `Earn ${rewardsConfig.pointsPerBooking.toLocaleString()} points per completed stay.`
-    : `Earn ${rewardsConfig.pointsPerHundred.toLocaleString()} points per ${formatPrice(100)} spent.`;
+    : `Earn ${rewardsConfig.pointsPerHundred.toLocaleString()} points per ${formatPrice(100)} spent (proportional — partial ₱100 still earn fractional points).`;
 
   return (
     <AccountLayout activeTab="rewards" title="My Rewards" subtitle={`Track your ${config.rewardsName} points and member perks.`}>
@@ -283,9 +292,20 @@ export function RewardsPage() {
               <span className="text-xs font-bold text-gray-900">Early Check-In</span>
             </div>
             <p className="text-xs text-gray-500 mb-3">Request early check-in on your next stay — subject to availability.</p>
-            <GhostButton onClick={() => setShowEarlyCheckIn(true)} className="text-[10px]">
-              Request Early Check-In
-            </GhostButton>
+            {/*
+              Per Spark Rewards audit 2026-07-18 HIGH-1: an
+              unverified email/password user can't submit a
+              request (the server returns 403 EMAIL_NOT_VERIFIED).
+              Surface the banner instead of opening the modal so
+              the user gets a clear next step.
+            */}
+            {user?.emailVerified === false ? (
+              <EmailVerifyBanner reason="early-checkin" />
+            ) : (
+              <GhostButton onClick={() => setShowEarlyCheckIn(true)} className="text-[10px]">
+                Request Early Check-In
+              </GhostButton>
+            )}
           </div>
         </div>
 

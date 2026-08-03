@@ -87,7 +87,11 @@ describe("/api/email/checkin-reminder cron", () => {
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({ success: true, data: { sent: 1, skipped: 0 } });
+    // Per MRB-09 (2026-08-02, per decision #168): the
+    // cron response shape now surfaces the grouping
+    // (reservations vs legacySingles) so the next
+    // audit can verify the consolidation worked.
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: { sent: 1, skipped: 0, reservations: 0, legacySingles: 1 } });
     expect(resend.emails.send).toHaveBeenCalledTimes(1);
     expect(resend.emails.send).toHaveBeenCalledWith(expect.objectContaining({
       to: "maria@example.test"
@@ -105,7 +109,7 @@ describe("/api/email/checkin-reminder cron", () => {
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({ success: true, data: { sent: 0, skipped: 1 } });
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: { sent: 0, skipped: 1, reservations: 0, legacySingles: 0 } });
     expect(resend.emails.send).not.toHaveBeenCalled();
   });
 });

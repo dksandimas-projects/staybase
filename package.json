@@ -16,12 +16,14 @@
     "preview:guest": "npm run preview -w guest-app",
     "preview:admin": "npm run preview -w admin-app",
     "typecheck": "npm run typecheck -w guest-app && npm run typecheck -w admin-app",
-    "test": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app",
+    "test": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app && npm run test:infra && npm run test:rules",
     "test:shared": "npm run test -w shared",
     "test:guest:api": "npm run test:api -w guest-app",
+    "test:infra": "vitest run firebase/tests/storage-cors.test.ts",
     "check:api-bundle": "node scripts/check-api-bundle.mjs",
     "docs:audit": "node scripts/docs-audit.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project spark-inn-rules-test \"vitest run --config vitest.rules.config.ts\"",
+    "test:fast": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app && npm run test:infra",
     "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {

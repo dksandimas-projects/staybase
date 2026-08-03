@@ -31,7 +31,16 @@ export function Modal({ title, children, footer, open, onClose, className }: Mod
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={onClose}
-            className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm"
+            // Backdrop sits in the modal tier (z-[60]) — one step above
+            // the drawer/sidebar tier (z-50) so when this modal opens on
+            // top of the booking drawer, the modal backdrop still covers
+            // the drawer's panel. The panel below is also at z-[60];
+            // DOM order (backdrop first, panel after) keeps the panel on
+            // top of its own backdrop. See ROADMAP §MBZ and
+            // plan/admin-app/CLAUDE.md §Z-Index Scale.
+            // /60 (not /50) matches QRManagementPage's pattern and is
+            // obviously a "modal is open" signal at a glance.
+            className="fixed inset-0 z-[60] bg-gray-950/60 backdrop-blur-sm"
             aria-hidden="true"
           />
           {isMobile ? (
@@ -90,7 +99,7 @@ function MobileModalPanel({
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-x-0 bottom-0 z-50 flex max-h-[95vh] flex-col rounded-t-card-lg bg-white shadow-xl"
+      className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[95vh] flex-col rounded-t-card-lg bg-white shadow-xl"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-5 py-4">
@@ -149,7 +158,7 @@ function DesktopModalPanel({
     // conflict entirely.
     <div
       className={cn(
-        "pointer-events-auto fixed left-1/2 top-1/2 z-50 flex w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card-lg bg-white shadow-xl max-h-[90vh]",
+        "pointer-events-auto fixed left-1/2 top-1/2 z-[60] flex w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card-lg bg-white shadow-xl max-h-[90vh]",
         className
       )}
     >

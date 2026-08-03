@@ -7,6 +7,15 @@ interface ConfirmFormProps {
   reasonLabel?: string;
   reasonPlaceholder?: string;
   reasonRequired?: boolean;
+  // Per MRB-13 (2026-08-02, per decision #166):
+  // optional extra fields rendered between the
+  // reason textarea and the action row. The
+  // BookingsPage cancel modal uses this slot to
+  // surface the `This room` / `All N rooms` scope
+  // selector for reservation-scope cancels. Other
+  // callers (order cancel, discount reject) keep
+  // the legacy reason-only shape.
+  additionalFields?: ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
   variant?: "primary" | "danger";
@@ -21,6 +30,7 @@ export function ConfirmForm({
   reasonLabel,
   reasonPlaceholder,
   reasonRequired = false,
+  additionalFields,
   confirmLabel,
   cancelLabel = "Back",
   variant = "primary",
@@ -52,6 +62,7 @@ export function ConfirmForm({
           className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-xs text-gray-800 outline-none focus:border-primary focus:ring-1 focus:ring-primary"
         />
       </label>
+      {additionalFields && <div className="mt-3">{additionalFields}</div>}
       <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <button
           type="button"

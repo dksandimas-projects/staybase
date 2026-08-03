@@ -93,6 +93,31 @@ The mobile responsive layout is built on the following hooks + components. **Do 
 
 ---
 
+## Z-Index Scale (overlays)
+
+Per `plan/project/ROADMAP.md §Modal Backdrop Z-Index (MBZ)` and `admin-app/src/__tests__/modal-backdrop-z-index.test.ts` — the layering of any new overlay (modal, drawer, sidebar, toast, popover, sticky bar) must respect this scale so modal-on-drawer / modal-on-modal always shows a visible backdrop across the entire viewport.
+
+**Two-tier model.** Within a tier, the backdrop and the panel share the SAME z-index. DOM order (backdrop rendered first, panel rendered after) keeps the panel on top of its own backdrop. A higher tier sits above every panel of every lower tier, so an overlay in a higher tier covers overlays in lower tiers across the full viewport.
+
+| Layer | z-index | Used by | Why |
+|---|---|---|---|
+| Page content | (none / 0) | Bookings, Dashboard, Settings body | Default stacking |
+| Sticky header / bottom tab bar | `z-20` / `z-40` | `AdminLayout` header, `BottomTabBar` | Sticky chrome, above page content |
+| **Tier 1 — Drawer / mobile Sidebar** (backdrop + panel) | **`z-50`** | `Drawer.tsx` (backdrop + mobile + desktop panel), `Sidebar.tsx` (mobile backdrop + mobile panel) | The drawer/sidebar overlay tier. Backdrop and panel share `z-50`; DOM order keeps the panel on top of its own backdrop. |
+| **Tier 2 — Modal** (backdrop + panel) | **`z-[60]`** | `Modal.tsx` (backdrop + mobile + desktop panel) | One step above Tier 1, so when a modal opens on top of the booking drawer the modal backdrop still covers the drawer's `z-50` panel. Backdrop and panel share `z-[60]`; DOM order keeps the modal panel on top of its own backdrop. |
+| Toast | `z-[100]` | `Toast.tsx` | Top of the stack — toasts must remain visible above every overlay |
+
+**Rule of thumb — which tier for a new overlay:**
+- It's a drawer, a slide-in side panel, or a mobile sidebar → tier 1 (`z-50`).
+- It's a centered modal that can be opened on top of a drawer or another modal → tier 2 (`z-[60]`).
+- If a new tier is needed (e.g. a third nested overlay class), pick the next free z-index in the 10s (current convention is 50 / 60 / 100) and update the table + the regression test in lockstep.
+
+**Anti-pattern.** Do NOT give the backdrop a higher z-index than its own panel. In a single stacking context, higher z-index wins regardless of DOM order, so the backdrop would cover its own panel and the overlay would disappear behind its own fade. This regression was introduced by the first MBZ attempt (commit `6731aea`) which set every backdrop to `z-[60]` while leaving every panel at `z-50`; it is fixed by the two-tier model above. The regression test in `admin-app/src/__tests__/modal-backdrop-z-index.test.ts` will fail loudly if anyone reintroduces the inversion.
+
+Fade strength is also standardized: `bg-gray-950/60 backdrop-blur-sm` for Modal, Drawer, and mobile Sidebar. Matches `QRManagementPage.tsx`. Do not reintroduce `/50` without a reason — `/60` is the agreed "modal is open" signal.
+
+---
+
 ## Firebase Usage (admin-app)
 
 | Collection | Operation | Notes |

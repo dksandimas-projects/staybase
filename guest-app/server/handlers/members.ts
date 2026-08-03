@@ -31,6 +31,28 @@ const eraseAccountSchema = z.object({
   confirmation: z.literal("erase-my-account")
 }).strict();
 
+// Per Spark Rewards audit 2026-07-18 MED-1: manual points
+// adjustment must be server-side (Admin SDK) so the
+// `rewardsPoints` + `pointsHistory` write happens inside one
+// transaction the client cannot bypass. With the audit fix, the
+// Firestore `members/{uid}` rule no longer permits staff clients
+// to write `rewardsPoints` directly — the only path is this
+// endpoint, which couples the balance and the history entry in
+// the same `runTransaction` commit.
+//
+// The `type` field is fixed to "manual" on the server — clients
+// cannot inject "earn" / "redeem" history rows through this path.
+// Caller is admin-only (audit privilege). The reason is required
+// (matches the existing UI guard at MembersPage.tsx).
+const manualAdjustPointsSchema = z.object({
+  memberId: z.string().trim().min(1).max(160),
+  amount: z.coerce.number().int(),
+  reason: z.string().trim().min(1).max(500)
+}).strict().refine((data) => data.amount !== 0, {
+  message: "Amount must be a non-zero integer.",
+  path: ["amount"]
+});
+
 const STAY_STATUSES = [
   "pending",
   "payment-uploaded",
@@ -145,6 +167,23 @@ export async function handleListMemberStays(req: any, res: any) {
     return res.status(401).json({ success: false, error: "Sign in to view your stays." });
   }
 
+  // Per Spark Rewards audit 2026-07-18 HIGH-1: `/api/members/stays`
+  // returns `bookingRef` + `lookupToken` for every match — together
+  // those are the public lookup/cancel credential. If we keyed off
+  // an unverified email, an attacker who registered with a victim's
+  // email could enumerate and cancel the victim's anonymous
+  // bookings. The `uid` (memberId) match is always safe. The email
+  // match is gated on `email_verified` (Google sign-in tokens are
+  // always verified, so this is effectively a gate on the
+  // email/password path).
+  if (authUser.email_verified !== true) {
+    return res.status(403).json({
+      success: false,
+      code: "EMAIL_NOT_VERIFIED",
+      error: "Please verify your email to see your past stays. Check your inbox for the verification link, or resend it from your profile."
+    });
+  }
+
   try {
     const uid = String(authUser.uid);
     const email = String(authUser.email).trim().toLowerCase();
@@ -252,15 +291,36 @@ export async function handleRegisterMember(req: any, res: any) {
       }, { merge: true });
     });
 
-    const linkedBookings = await linkBookingsByEmail(email, uid, parsed.data.bookingId || undefined);
+    // Per Spark Rewards audit 2026-07-18 HIGH-1: an unverified
+    // email/password signup can claim any address. Linking past
+    // bookings by `guestEmail == member.email` would let the
+    // attacker take over a victim's anonymous bookings. Skip the
+    // link when the email isn't verified — the member record is
+    // still created, and the client surfaces a "verify your email"
+    // prompt. Once verified, re-calling `/api/members/register`
+    // re-runs the link (the registration path is idempotent —
+    // `memberNumber` is preserved).
+    const emailIsVerified = authUser.email_verified === true;
+    const linkedBookings = emailIsVerified
+      ? await linkBookingsByEmail(email, uid, parsed.data.bookingId || undefined)
+      : 0;
 
     return res.status(200).json({
       success: true,
       data: {
         memberId: uid,
         memberNumber,
-        linkedBookings
-      }
+        linkedBookings,
+        // Surfaced to the client so the "verify your email" prompt
+        // appears on the post-signup confirmation. Cleared once the
+        // guest verifies (next register call returns emailVerified: true).
+        emailVerified: emailIsVerified
+      },
+      ...(emailIsVerified ? {} : {
+        // Non-blocking warning: registration succeeded, but past
+        // bookings won't link until the guest verifies their email.
+        warning: "Verify your email to link your past bookings."
+      })
     });
   } catch (error) {
     console.error("Member registration failed:", error);
@@ -569,6 +629,275 @@ export async function handleSetMemberActive(req: any, res: any) {
       success: false,
       error: "Unable to update member account status. Please try again."
     });
+  }
+}
+
+// Per Spark Rewards audit 2026-07-18 MED-1: manual points
+// adjustment is the only points-mutation path still on the
+// client SDK. Moving it server-side makes the
+// "rewardsPoints == sum(pointsHistory)" invariant provable at
+// the rules boundary — once the Firestore `members/{uid}` rule
+// drops `rewardsPoints` from the staff update allowlist, this
+// endpoint is the only way a staff caller can change a
+// member's balance, and the transaction couples the balance
+// write with the history write in one commit.
+//
+// Caller is admin-only (mirrors the existing client-side
+// `MembersPage.tsx` UI guard which already restricts manual
+// adjustment to admins). Front-desk callers get a 403; the
+// audit recommends admin-only so the privilege to "create
+// money" stays with the hotel owner.
+//
+// The `type: "manual"` history row is fixed server-side so
+// clients cannot inject an "earn" / "redeem" history entry
+// through this path — the field's invariant is preserved.
+export async function handleManualAdjustPoints(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
+  }
+
+  const parsed = manualAdjustPointsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid member ID, a non-zero points amount, and a reason (max 500 characters)."
+    });
+  }
+
+  const { memberId, amount, reason } = parsed.data;
+  const trimmedReason = reason.trim();
+
+  try {
+    let responseData: any = {};
+
+    await adminDb.runTransaction(async (transaction: any) => {
+      const memberRef = adminDb.collection("members").doc(memberId);
+      const memberDoc = await transaction.get(memberRef);
+      if (!memberDoc.exists) {
+        throw new Error("Member account was not found.");
+      }
+
+      const currentBalance = Number(memberDoc.data()?.rewardsPoints || 0);
+      const nextBalance = currentBalance + amount;
+      if (nextBalance < 0) {
+        // Defense-in-depth: the schema doesn't allow amount >= 0 to
+        // result in a negative balance check, but the cap is
+        // enforced here in case a future schema change widens the
+        // input. Matches the existing client-side guard.
+        throw new Error("Points adjustment cannot reduce the member balance below zero.");
+      }
+
+      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+
+      transaction.update(memberRef, {
+        rewardsPoints: nextBalance,
+        updatedAt: new Date()
+      });
+      transaction.set(historyRef, {
+        type: "manual",
+        points: amount,
+        description: `Manual adjust: ${trimmedReason}`,
+        reason: trimmedReason,
+        bookingId: null,
+        by: staff.uid,
+        at: new Date()
+      });
+
+      responseData = {
+        memberId,
+        rewardsPoints: nextBalance,
+        pointsAdjusted: amount,
+        historyId: historyRef.id
+      };
+    });
+
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error: any) {
+    const message = error?.message || "We could not adjust points for this member.";
+    // Per audit: surface the "balance cannot go negative" guard as
+    // a 400 (client error), not a 500. The "not found" guard is
+    // also a 400 — the client is asking about a non-existent
+    // member, not a server failure.
+    const status = message.includes("not found") || message.includes("below zero")
+      ? 400
+      : 500;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
+// Per Spark Rewards audit 2026-07-18 MED-3: when a member's account
+// email (e.g. Google) differs from the email on their earlier
+// anonymous booking, `linkBookingsByEmail` (which matches only on
+// the token email) won't link it. The spec's "guest self-service
+// prompt" surface was explicitly deferred; this is the front-desk
+// "manual link from Member detail drawer" surface that the audit
+// kept as the smaller build path (decision #135).
+//
+// Invariants:
+//   - Admin-only (front-desk 403) — same posture as the other staff-
+//     mediated member mutations. The audit calls out the work-around
+//     is staff-mediated, and admin-only matches `set-active` /
+//     `manual-adjust`.
+//   - Transaction: re-read member + booking inside one commit so a
+//     concurrent register or a concurrent erase cannot race the link.
+//   - Reject when the booking is already linked to a DIFFERENT
+//     member (don't unlink someone else's stays) — 409 with a
+//     clear message so the staff knows the conflict.
+//   - Reject when the booking is cancelled or a test run — preserves
+//     the audit trail and the test-run isolation invariant (test
+//     bookings must never reach the production member surface).
+//   - No-op success when the booking is already linked to THIS
+//     member — re-linking is idempotent, the audit row is still
+//     written so the action is recorded.
+//   - Audit row written under `bookings/audit/records/{id}` with the
+//     staff UID, reason, source/target emails, and timestamp — mirrors
+//     the existing erasure audit shape (decision #49 / W1.4).
+//   - The booking doc's `memberId` write is the only payload change
+//     on the booking; the `memberId` field is already in the staff
+//     update allowlist (decision #4 / pre-MED-3).
+const linkBookingToMemberSchema = z.object({
+  memberUid: z.string().trim().min(1).max(160),
+  bookingId: z.string().trim().min(1).max(160),
+  reason: z.string().trim().min(1).max(500)
+}).strict();
+
+export async function handleLinkBookingToMember(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can link bookings to a member." });
+  }
+
+  const parsed = linkBookingToMemberSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a member UID, a booking ID, and a reason (max 500 characters)."
+    });
+  }
+
+  const { memberUid, bookingId, reason } = parsed.data;
+  const trimmedReason = reason.trim();
+
+  try {
+    let responseData: any = {};
+
+    await adminDb.runTransaction(async (transaction: any) => {
+      const memberRef = adminDb.collection("members").doc(memberUid);
+      const memberDoc = await transaction.get(memberRef);
+      if (!memberDoc.exists) {
+        throw new Error("Member account was not found.");
+      }
+
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking was not found.");
+      }
+
+      const bookingData = bookingDoc.data() || {};
+      const bookingStatus = String(bookingData.status || "");
+      const bookingTestRunId = bookingData.testRunId || null;
+      const existingMemberId = bookingData.memberId || null;
+
+      if (bookingStatus === "cancelled") {
+        // Cancelled bookings are historical; linking them would put
+        // the cancelled stay in the member's My Stays list, which
+        // would surface a confusing "you cancelled this" card next
+        // to a successful stay. The booking-lookup workaround +
+        // booking-drawer `memberId` edit still let the staff
+        // re-attach the PII if needed; the MED-3 link path is for
+        // the common "realized I had two emails" case only.
+        throw new Error("Cancelled bookings cannot be linked to a member.");
+      }
+
+      if (bookingTestRunId) {
+        // Test-run bookings must never reach the production member
+        // surface — the same invariant the rest of the audit closes
+        // (ETR-07, audit S2.3 reconciliation spot-checks).
+        throw new Error("Test-run bookings cannot be linked to a member.");
+      }
+
+      if (existingMemberId && existingMemberId !== memberUid) {
+        // Surface the conflict cleanly. The staff can either unlink
+        // the booking via the booking-drawer `memberId` edit (out of
+        // scope for this fix) or pick a different booking. The
+        // thrown error becomes a 409 in the catch.
+        throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
+      }
+
+      const alreadyLinked = existingMemberId === memberUid;
+      const now = new Date();
+
+      if (!alreadyLinked) {
+        transaction.update(bookingRef, {
+          memberId: memberUid,
+          linkedByStaff: staff.uid,
+          linkedAt: now,
+          linkedReason: trimmedReason,
+          updatedAt: now
+        });
+      }
+
+      // Audit row — same shape as the erasure audit, written
+      // before the booking update so a partial transaction can be
+      // retried without losing the audit trail.
+      const auditRef = adminDb
+        .collection("bookings").doc("audit").collection("records").doc(`${bookingId}-link-${now.getTime()}`);
+      transaction.set(auditRef, {
+        bookingId,
+        bookingRef: bookingData.bookingRef || "",
+        action: "manual-link-member",
+        fromMemberId: existingMemberId,
+        toMemberId: memberUid,
+        memberEmail: memberDoc.data()?.email || "",
+        bookingEmail: bookingData.guestEmail || "",
+        reason: trimmedReason,
+        staffUid: staff.uid,
+        staffRole: staff.role,
+        at: now
+      });
+
+      responseData = {
+        memberUid,
+        bookingId,
+        bookingRef: bookingData.bookingRef || "",
+        alreadyLinked,
+        auditId: auditRef.id
+      };
+    });
+
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error: any) {
+    const message = error?.message || "We could not link this booking to the member.";
+    // The conflict guard ("already linked to a different member")
+    // is a 409 — the request is well-formed but conflicts with
+    // existing data, not a server failure. Everything else that
+    // mentions a missing member/booking or a cancelled/test-run
+    // booking is a 400 (client error). Default to 500.
+    const status = message.includes("already linked to a different member")
+      ? 409
+      : message.includes("was not found")
+        || message.includes("cannot be linked")
+        || message.includes("Cancelled bookings")
+        || message.includes("Test-run bookings")
+        ? 400
+        : 500;
+    return res.status(status).json({ success: false, error: message });
   }
 }
 

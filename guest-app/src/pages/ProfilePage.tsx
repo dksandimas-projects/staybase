@@ -6,6 +6,7 @@ import { AccountLayout } from "../components/AccountLayout";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
+import { EmailVerifyBanner } from "../components/EmailVerifyBanner";
 import { brandAsset } from "../utils/brand";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { doc, updateDoc } from "firebase/firestore";
@@ -176,6 +177,17 @@ export function ProfilePage() {
   return (
     <AccountLayout activeTab="profile" title="My Profile" subtitle={`Manage your ${config.rewardsName} account details.`}>
       <div className="space-y-8">
+        {/*
+          Per Spark Rewards audit 2026-07-18 HIGH-1: an
+          unverified email/password user lands here right
+          after signup. Surface the verification prompt first
+          so they see it before the rewards card or the
+          delete-account form. The banner also shows up on
+          every subsequent visit until the email is verified.
+        */}
+        {user?.emailVerified === false && (
+          <EmailVerifyBanner reason="registration" />
+        )}
         {/* Spark Rewards Card */}
         {user && !memberProfile && (
           <div className="rounded-card bg-primary-light p-5 ring-1 ring-primary/20">

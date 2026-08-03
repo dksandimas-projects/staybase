@@ -42,13 +42,23 @@ service cloud.firestore {
     match /bookings/{bookingId} {
       allow read: if isStaff();
       allow create: if false;
+      // Per MRB-01 (2026-08-02, per decision #159): the four
+      // `reservation*` fields on a booking are server-assigned
+      // projections of the parent `reservations/{id}` document.
+      // The `affectedKeys().hasOnly([...])` allowlist below does
+      // NOT list them, so any client write that touches
+      // `reservationId` / `reservationRef` / `reservationPosition`
+      // / `reservationRoomCount` is implicitly denied by omission.
+      // (The pin test in
+      // `firebase/tests/reservation-rules.emulator.test.ts` asserts
+      // the implicit-deny contract — a future refactor that
+      // accidentally widens the allowlist breaks the test.)
       allow update: if isStaff()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "guestIdPhotoUrl",
           "guestRegistration",
           "breakfastSelections",
           "breakfastServed",
-          "paymentReferenceNumber",
           "discountVerified",
           "discountVerifiedBy",
           "discountRejected",
@@ -108,6 +118,84 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Per MRB-01 (2026-08-02, per decision #159): the reservation
+    // header. Server-authoritative create / update / delete — the
+    // public ref, lead booker, source / corporate context, payment
+    // state, voucher / member discount, consent, and group totals
+    // are all written through Admin SDK transactions. Staff can
+    // read for the admin booking drawer; guests never have direct
+    // access (the public lookup resolves the reservation via the
+    // pre-allocated `reservationId` + the verified email / token
+    // credential, gated by /api/bookings/lookup).
+    //
+    // Subcollections mirror the booking's money-shape so MRB-04's
+    // folio migration (payments + charges + refunds on the
+    // reservation) and MRB-07's refund-state machine can land
+    // without a second rules change. The `payments` and `refunds`
+    // subcollections are server-only (no client create — same shape
+    // as the existing booking payments rule); the `charges`
+    // subcollection allows staff direct write (same shape as the
+    // existing booking charges rule, with the per-creator + bounds
+    // + void semantics).
+    match /reservations/{reservationId} {
+      allow read: if isStaff();
+      allow write: if false;  // Server-authoritative; Admin SDK only.
+
+      match /payments/{paymentId} {
+        allow read: if isStaff();
+        allow create: if false;  // Server-authoritative payment/refund APIs only.
+        allow update, delete: if false;
+      }
+
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision #159): the
+      // canonical refund source for new reservations. The
+      // `handleAddRefund` writer only writes to `refunds/`; the
+      // helper `getReservationFolioSummary` reads BOTH `payments/`
+      // (for any negative-amount entries — belt-and-suspenders) AND
+      // `refunds/` (canonical). Server-only: refunds are admin-only
+      // and require a `client-preallocated refundId` for CRL-01
+      // idempotency. Same shape as the `payments/` subcollection —
+      // no client create/update/delete; staff read.
+      match /refunds/{refundId} {
+        allow read: if isStaff();
+        allow create: if false;  // Server-authoritative refund APIs only.
+        allow update, delete: if false;
+      }
+
+      match /charges/{chargeId} {
+        allow read: if isStaff();
+        allow create: if isStaff()
+          && request.resource.data.keys().hasOnly(["label", "amount", "category", "note", "addedBy", "addedAt", "voidOf", "bookingId"])
+          && request.resource.data.label is string
+          && request.resource.data.label.size() > 0
+          && request.resource.data.label.size() <= 120
+          && request.resource.data.amount is number
+          && request.resource.data.amount != 0
+          && request.resource.data.amount <= 1000000
+          && request.resource.data.amount >= -1000000
+          && request.resource.data.category in ["late-checkout", "early-checkin", "extra-person", "damage", "laundry", "other"]
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 300
+          && request.resource.data.addedBy == request.auth.uid
+          && request.resource.data.addedAt == request.time
+          && request.resource.data.bookingId is string
+          && request.resource.data.bookingId.size() > 0
+          && request.resource.data.bookingId.size() <= 128
+          && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.reservationId == reservationId
+          && (
+            (request.resource.data.amount > 0 && request.resource.data.voidOf == null)
+            || (
+              request.resource.data.amount < 0
+              && request.resource.data.voidOf is string
+              && chargeId == "void-" + request.resource.data.voidOf
+              && get(/databases/$(database)/documents/reservations/$(reservationId)/charges/$(request.resource.data.voidOf)).data.amount == -request.resource.data.amount
+              && get(/databases/$(database)/documents/reservations/$(reservationId)/charges/$(request.resource.data.voidOf)).data.bookingId == request.resource.data.bookingId
+            )
+          );
+        allow update, delete: if false;
+      }
+    }
+
     // FD-02 (E2E audit 2026-07-17): signed-in users may update only
     // legitimate self-service profile fields. The `role`, `isActive`,
     // and staff-audit fields are reserved for admin/server writes.
@@ -138,7 +226,29 @@ service cloud.firestore {
     match /members/{userId} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
       allow create: if false;
+      // Per Spark Rewards audit 2026-07-18 MED-1: the staff-side
+      // update is restricted to a field allowlist that does NOT
+      // include `rewardsPoints` (or other financial fields). All
+      // balance mutations are server-side via the Admin SDK now:
+      //   - /api/members/redeem-points (staff)
+      //   - /api/members/undo-redemption (admin)
+      //   - /api/members/manual-adjust (admin, MED-1 fix)
+      //   - checkout-time earn via the existing API routes
+      // The `rewardsPoints` field is no longer writable from any
+      // client. The member self-update branch (fullName, phone,
+      // photoUrl) is unchanged.
       allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            "isActive",
+            "isMember",
+            "tier",
+            "memberSince",
+            "memberNumber",
+            "notes",
+            "handledBy",
+            "updatedAt"
+          ])
         || (
           signedIn()
           && request.auth.uid == userId
@@ -148,6 +258,15 @@ service cloud.firestore {
       allow delete: if isAdmin() || (signedIn() && request.auth.uid == userId);
 
       match /pointsHistory/{entryId} {
+        // Per MED-1: history writes happen inside the server
+        // transaction (Admin SDK bypasses rules), so the staff
+        // `allow create` is no longer needed. We still permit
+        // `isStaff()` here as a defense-in-depth fallback — if a
+        // future migration ever needs to backfill from the
+        // client, the path exists — but the only live writer in
+        // the codebase is the server. The integrity invariant
+        // (balance == sum(history)) is enforced at the
+        // server-transaction boundary, not here.
         allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
         allow create: if isStaff();
         allow update, delete: if false;

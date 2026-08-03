@@ -5,6 +5,15 @@ export interface CheckInRegistration {
   address?: string | null;
   dateOfBirth?: string | null;
   gender?: string | null;
+  // Per Decision #121 (2026-07-23): purpose of stay is required at
+  // physical check-in, defaults to "Leisure". The admin drawer opens
+  // with Leisure selected and the staff can choose another supported
+  // purpose before saving. Free-text `otherPurpose` is captured when
+  // the staff picks "Other" so the front desk has the actual reason
+  // (e.g. "wedding", "medical", "long-stay relocation") not just
+  // a generic bucket.
+  purposeOfStay?: string | null;
+  otherPurpose?: string | null;
   idType?: string | null;
   idNumber?: string | null;
   emergencyContact?: string | null;
@@ -27,6 +36,7 @@ const REQUIRED_REGISTRATION_FIELDS: Array<{ key: keyof CheckInRegistration; labe
   { key: "address", label: "Residential address" },
   { key: "dateOfBirth", label: "Date of birth" },
   { key: "gender", label: "Gender" },
+  { key: "purposeOfStay", label: "Purpose of stay" },
   { key: "idType", label: "ID type" },
   { key: "idNumber", label: "ID number" },
   { key: "emergencyContact", label: "Emergency contact" }
@@ -50,6 +60,16 @@ export function getCheckInReadiness(input: CheckInReadinessInput): CheckInReadin
     if (!hasValue(registration[field.key])) {
       missingItems.push(field.label);
     }
+  }
+  // Per Decision #121: when the staff picks "Other" for purpose of stay
+  // they must record the actual reason — "wedding", "medical", etc.
+  // Without the reason the bucket is useless to the front desk.
+  if (
+    typeof registration.purposeOfStay === "string" &&
+    registration.purposeOfStay.trim().toLowerCase() === "other" &&
+    !hasValue(registration.otherPurpose)
+  ) {
+    missingItems.push("Purpose of stay (Other — reason required)");
   }
   if (registration.signatureStatus !== "signed") {
     missingItems.push("Guest signature marked signed");

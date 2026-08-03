@@ -8,6 +8,7 @@ import config from "@config";
 import { useAdmin, Room } from "../context/AdminContext";
 import { useToast } from "../components/Toast";
 import { db } from "../firebase/config";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
 const qrSize = 136;
 
@@ -15,8 +16,15 @@ function getRoomQrValue(room: Room) {
   return room.qrToken || room.id;
 }
 
+// Per the env-aware URL fix (2026-07-24): the QR code must point to
+// the same environment the staff is working in so a scan during a
+// staging test round-trips back to the staging guest app (not the
+// live site). Reuses `getApiBaseUrl` so the same staging-detection
+// rules (stg-admin.<domain>, localhost, configured VITE_GUEST_APP_URL
+// pointing at stg.<domain>) apply — real printable QRs should be
+// generated from the production admin, not staging, which is by design.
 function getIntercomUrl(room: Room, destination: "chat" | "shop" = "chat") {
-  const base = `https://${config.domain}/intercom/${encodeURIComponent(getRoomQrValue(room))}`;
+  const base = `${getApiBaseUrl()}/intercom/${encodeURIComponent(getRoomQrValue(room))}`;
   return destination === "shop" ? `${base}?tab=shop` : base;
 }
 
@@ -333,7 +341,7 @@ export function QRManagementPage() {
         <div className="grid gap-3 text-xs text-gray-600 md:grid-cols-3">
           <div>
             <span className="font-bold text-gray-900">QR destination</span>
-            <p className="mt-1 font-mono text-[11px] text-gray-500">https://{config.domain}/intercom/[room]{qrDestination === "shop" ? "?tab=shop" : ""}</p>
+            <p className="mt-1 font-mono text-[11px] text-gray-500">{getApiBaseUrl()}/intercom/[room]{qrDestination === "shop" ? "?tab=shop" : ""}</p>
           </div>
           <div>
             <span className="font-bold text-gray-900">Rooms loaded</span>

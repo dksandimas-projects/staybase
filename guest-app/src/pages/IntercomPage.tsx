@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { 
-  Send, Phone, ShoppingBag, MessageSquare, Plus, Minus, Trash2, X, 
-  ChevronRight, PhoneOff, Mic, MicOff, AlertCircle, Sparkles, 
-  Upload, Info, Check, Loader2
+import {
+  Send, Phone, ShoppingBag, MessageSquare, Plus, Minus, Trash2, X,
+  ChevronRight, PhoneOff, Mic, MicOff, AlertCircle, Sparkles,
+  Upload, Info, Check, Loader2, Search
 } from "lucide-react";
 import {
   addDoc,
@@ -53,10 +53,50 @@ interface Message {
 interface StoreItem {
   id: string;
   name: string;
+  category: StoreCategory;
   description: string;
   price: number;
   stock: number | null; // null represents unlimited
   imageUrl: string;
+}
+
+// GSD-01: store item categories are owned by the admin catalog
+// (SettingsPage → Store). The guest client mirrors the same 5-value
+// union with a stable label map so chip text stays consistent with
+// what staff see when editing items. Legacy/missing values fall
+// back to "other" (see `normalizeStoreCategory` in
+// `admin-app/src/context/AdminContext.tsx` for the matching
+// server-side normalization).
+type StoreCategory = "drinks" | "snacks" | "toiletries" | "rentals" | "other";
+
+const STORE_CATEGORY_VALUES: readonly StoreCategory[] = [
+  "drinks",
+  "snacks",
+  "toiletries",
+  "rentals",
+  "other"
+] as const;
+
+const STORE_CATEGORY_LABELS: Record<StoreCategory, string> = {
+  drinks: "Drinks",
+  snacks: "Snacks",
+  toiletries: "Toiletries",
+  rentals: "Rentals",
+  other: "Other"
+};
+
+const STORE_CATEGORY_LABEL_ORDER: readonly StoreCategory[] = [
+  "drinks",
+  "snacks",
+  "toiletries",
+  "rentals",
+  "other"
+] as const;
+
+function normalizeStoreCategory(value: unknown): StoreCategory {
+  return STORE_CATEGORY_VALUES.includes(value as StoreCategory)
+    ? (value as StoreCategory)
+    : "other";
 }
 
 interface CartItem {
@@ -135,6 +175,65 @@ export function IntercomPage() {
     { method: "add-to-bill", label: "Room Bill", isEnabled: true, source: "payment" },
     { method: "gcash", label: "GCash Wallet", isEnabled: true, source: "payment" }
   ]);
+
+  // GSD-01 (Store Catalog Discovery) — search + category filter
+  // state. Lives at the IntercomPage scope (not inside the Shop
+  // sub-tree) so it survives Shop/Chat/cart/checkout view
+  // switches, and is independent from the `cart` state so adding
+  // or removing items never clears the active filter.
+  const [storeSearch, setStoreSearch] = useState<string>("");
+  const [storeCategoryFilter, setStoreCategoryFilter] = useState<StoreCategory | "all">("all");
+
+  // GSD-01: client-side filter + sort derived from the existing
+  // real-time item snapshot — typing and category changes issue no
+  // additional Firestore reads. Search matches name + description,
+  // trimmed and case-insensitive; combined with the category chip
+  // via AND. Sort groups in-stock items (alphabetical) before
+  // out-of-stock items (alphabetical).
+  const filteredStoreItems = useMemo(() => {
+    const normalizedQuery = storeSearch.trim().toLowerCase();
+    const filtered = storeItems.filter((item) => {
+      if (storeCategoryFilter !== "all" && item.category !== storeCategoryFilter) {
+        return false;
+      }
+      if (normalizedQuery.length > 0) {
+        const haystack = `${item.name} ${item.description}`.toLowerCase();
+        if (!haystack.includes(normalizedQuery)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const isInStock = (item: StoreItem) => item.stock === null || item.stock > 0;
+    return [...filtered].sort((a, b) => {
+      const aInStock = isInStock(a);
+      const bInStock = isInStock(b);
+      if (aInStock !== bInStock) {
+        return aInStock ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [storeItems, storeSearch, storeCategoryFilter]);
+
+  // GSD-01: only render category chips for categories that
+  // actually exist in the live store catalog. Order follows
+  // STORE_CATEGORY_LABEL_ORDER so the chip rail stays stable
+  // (All → Drinks → Snacks → Toiletries → Rentals → Other).
+  const representedStoreCategories = useMemo<StoreCategory[]>(() => {
+    const present = new Set<StoreCategory>();
+    for (const item of storeItems) {
+      present.add(item.category);
+    }
+    return STORE_CATEGORY_LABEL_ORDER.filter((category) => present.has(category));
+  }, [storeItems]);
+
+  const hasActiveStoreFilters = storeSearch.trim().length > 0 || storeCategoryFilter !== "all";
+
+  const clearStoreFilters = () => {
+    setStoreSearch("");
+    setStoreCategoryFilter("all");
+  };
   
   // Payment proof screenshot state — used for any non-`cod` /
   // non-`add-to-bill` method (GCash, Maya, PayPal, etc.). The state
@@ -473,6 +572,11 @@ export function IntercomPage() {
             return {
               id: docSnap.id,
               name: data.name || "Store item",
+              // GSD-01: keep `category` on the guest item; fall back
+              // to "other" for legacy items missing the field. The
+              // matching admin-side normalizer lives in
+              // `AdminContext.tsx → normalizeStoreCategory`.
+              category: normalizeStoreCategory(data.category),
               description: data.description || "",
               price: Number(data.price || 0),
               stock: data.stock ?? null,
@@ -1517,6 +1621,102 @@ export function IntercomPage() {
                 </p>
               </div>
 
+              {/* GSD-01: Catalog Discovery — search + category chips
+                  + result count + clear-all. Hidden while the live
+                  catalog is still empty so the unavailable/empty
+                  empty-state copy stays the single source of truth
+                  in that case. */}
+              {storeItems.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="relative">
+                    <Search
+                      size={14}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    />
+                    <input
+                      type="search"
+                      inputMode="search"
+                      value={storeSearch}
+                      onChange={(event) => setStoreSearch(event.target.value)}
+                      placeholder="Search the shop"
+                      aria-label="Search the shop"
+                      className="w-full min-h-[44px] rounded-lg border border-gray-200 bg-white pl-9 pr-9 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
+                    />
+                    {storeSearch.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setStoreSearch("")}
+                        aria-label="Clear search"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition"
+                      >
+                        <X size={14} aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+
+                  {representedStoreCategories.length > 0 && (
+                    <div
+                      role="tablist"
+                      aria-label="Filter shop by category"
+                      className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none"
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={storeCategoryFilter === "all"}
+                        aria-pressed={storeCategoryFilter === "all"}
+                        onClick={() => setStoreCategoryFilter("all")}
+                        className={`min-h-[44px] shrink-0 rounded-full px-4 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                          storeCategoryFilter === "all"
+                            ? "bg-primary text-white shadow-sm"
+                            : "bg-white text-gray-700 ring-1 ring-inset ring-gray-200 hover:bg-gray-50"
+                        }`}
+                      >
+                        All
+                      </button>
+                      {representedStoreCategories.map((category) => {
+                        const isActive = storeCategoryFilter === category;
+                        return (
+                          <button
+                            key={category}
+                            type="button"
+                            role="tab"
+                            aria-selected={isActive}
+                            aria-pressed={isActive}
+                            onClick={() => setStoreCategoryFilter(category)}
+                            className={`min-h-[44px] shrink-0 rounded-full px-4 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                              isActive
+                                ? "bg-primary text-white shadow-sm"
+                                : "bg-white text-gray-700 ring-1 ring-inset ring-gray-200 hover:bg-gray-50"
+                            }`}
+                          >
+                            {STORE_CATEGORY_LABELS[category]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-[11px] text-gray-500">
+                    <span aria-live="polite">
+                      {filteredStoreItems.length === storeItems.length
+                        ? `${storeItems.length} item${storeItems.length === 1 ? "" : "s"} available`
+                        : `${filteredStoreItems.length} of ${storeItems.length} item${storeItems.length === 1 ? "" : "s"} match your filters`}
+                    </span>
+                    {hasActiveStoreFilters && (
+                      <button
+                        type="button"
+                        onClick={clearStoreFilters}
+                        className="min-h-[28px] rounded-md px-2 text-[11px] font-semibold text-primary hover:bg-primary-light/40 transition"
+                      >
+                        Clear filters
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Items Grid */}
               <div className="grid gap-4 sm:grid-cols-2">
                 {storeError && (
@@ -1533,7 +1733,27 @@ export function IntercomPage() {
                   </div>
                 )}
 
-                {storeItems.map((item) => {
+                {/* GSD-01: distinct no-match state — only when the
+                    catalog has items but the active filter pair
+                    produces zero. Different copy + a focused
+                    "Clear filters" action so the user has an
+                    obvious next step back to the full catalog. */}
+                {storeItems.length > 0 && filteredStoreItems.length === 0 && !storeError && (
+                  <div className="sm:col-span-2 rounded-card bg-white p-6 text-center shadow-sm ring-1 ring-gray-200">
+                    <Search size={28} className="mx-auto text-gray-300" aria-hidden="true" />
+                    <p className="mt-3 text-sm font-bold text-gray-900">No items match your filters.</p>
+                    <p className="mt-1 text-xs text-gray-500">Try a different search or category.</p>
+                    <button
+                      type="button"
+                      onClick={clearStoreFilters}
+                      className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-[0.98]"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                )}
+
+                {filteredStoreItems.map((item) => {
                   const cartQty = cart.find(i => i.item.id === item.id)?.quantity || 0;
                   const isOutOfStock = item.stock === 0;
 

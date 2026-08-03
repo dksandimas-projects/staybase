@@ -48,22 +48,52 @@ describe("Phase 11.6 Batch 17 — cron idempotency + corporate no-promo", () => 
     });
 
     it("handler writes reminderSentAt to each booking it sends to", () => {
-      const cronMatch = emailHandlerSrc.match(
-        /if\s*\(\s*action\s*===\s*["']checkin-reminder["']\s*&&\s*!req\.body\?\.bookingId[\s\S]*?\}\s*\)\s*;\s*\n\s*\}/
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // cron now groups bookings by `reservationId` and
+      // stamps `reminderSentAt` on every child of every
+      // reminded reservation (and every legacy single).
+      // The new pattern is a `.collection("bookings").doc(child.id).update({ reminderSentAt: stamp })`
+      // inside two loops (one for reservation groups,
+      // one for legacy singles). The pre-MRB-09 single
+      // `.doc(id)` shorthand is replaced by the explicit
+      // `child.id` reference; the test regex is updated
+      // to match the new shape.
+      //
+      // The cron if-block ends with the
+      // `legacySingles: legacySingles.length` line in
+      // the response payload — the regex anchors on
+      // that unique string so it captures the entire
+      // block (the pre-MRB-09 regex's
+      // `}\s*\)\s*;\s*\n\s*}` non-greedy stop matched
+      // too early on the new shape).
+      const cronStart = emailHandlerSrc.indexOf('if (action === "checkin-reminder" && !req.body?.bookingId && !req.body?.bookingRef)');
+      const cronEnd = emailHandlerSrc.indexOf('legacySingles: legacySingles.length', cronStart) + 'legacySingles: legacySingles.length'.length + 40;
+      const body = emailHandlerSrc.slice(cronStart, cronEnd);
+      // Reservation-group path: every child of every
+      // reminded reservation gets the stamp.
+      expect(body).toMatch(
+        /for \(const \[, children\] of reservationGroups\.entries\(\)\)[\s\S]*?adminDb\.collection\(["']bookings["']\)\.doc\(child\.id\)\.update\(\{\s*reminderSentAt:\s*stamp\s*\}\)\.catch/
       );
-      expect(cronMatch).toBeTruthy();
-      const body = cronMatch![0];
-      expect(body).toMatch(/adminDb\.collection\(["']bookings["']\)\.doc\(id\)\.update\(\{\s*reminderSentAt:\s*stamp\s*\}\)/);
+      // Legacy-single path: every pre-MRB-01 booking
+      // without a `reservationId` gets the stamp.
+      expect(body).toMatch(
+        /for \(const single of legacySingles\)[\s\S]*?adminDb\.collection\(["']bookings["']\)\.doc\(single\.id\)\.update\(\{\s*reminderSentAt:\s*stamp\s*\}\)\.catch/
+      );
     });
 
     it("handler reports both sent + skipped counts in the response", () => {
-      const cronMatch = emailHandlerSrc.match(
-        /if\s*\(\s*action\s*===\s*["']checkin-reminder["']\s*&&\s*!req\.body\?\.bookingId[\s\S]*?\}\s*\)\s*;\s*\n\s*\}/
-      );
-      expect(cronMatch).toBeTruthy();
-      const body = cronMatch![0];
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // response now surfaces the grouping (reservations
+      // + legacySingles) so the next audit can verify
+      // the consolidation worked. The `sent` +
+      // `skipped` counts are unchanged.
+      const cronStart = emailHandlerSrc.indexOf('if (action === "checkin-reminder" && !req.body?.bookingId && !req.body?.bookingRef)');
+      const cronEnd = emailHandlerSrc.indexOf('legacySingles: legacySingles.length', cronStart) + 'legacySingles: legacySingles.length'.length + 40;
+      const body = emailHandlerSrc.slice(cronStart, cronEnd);
       expect(body).toMatch(/sent:\s*pending\.length/);
       expect(body).toMatch(/skipped:\s*bookings\.length\s*-\s*pending\.length/);
+      expect(body).toMatch(/reservations:\s*reservationAnchors\.length/);
+      expect(body).toMatch(/legacySingles:\s*legacySingles\.length/);
     });
 
     it("Booking type has reminderSentAt as string | null", () => {
@@ -105,7 +135,11 @@ describe("Phase 11.6 Batch 17 — cron idempotency + corporate no-promo", () => 
       // The previous code unconditionally entered the if(voucherCode)
       // block. Now the only entry path is the gated check.
       const createMatch = bookingsHandlerSrc.match(
-        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(bookingDocRef,\s*newBooking\);/
+        // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): the
+        // create path writes N booking docs in a loop rather than one
+        // `transaction.set(bookingDocRef, newBooking)`, so the body is
+        // anchored on the reservation header write instead.
+        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(reservationDocRef,\s*newReservation\);/
       );
       expect(createMatch).toBeTruthy();
       const body = createMatch![0];
@@ -120,7 +154,11 @@ describe("Phase 11.6 Batch 17 — cron idempotency + corporate no-promo", () => 
       // branch was skipped (corporate), the defaults from the doc
       // literal are what gets stored.
       const createMatch = bookingsHandlerSrc.match(
-        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(bookingDocRef,\s*newBooking\);/
+        // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): the
+        // create path writes N booking docs in a loop rather than one
+        // `transaction.set(bookingDocRef, newBooking)`, so the body is
+        // anchored on the reservation header write instead.
+        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(reservationDocRef,\s*newReservation\);/
       );
       expect(createMatch).toBeTruthy();
       const body = createMatch![0];

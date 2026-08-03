@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Calendar, Sparkles, ArrowRight, HelpCircle, Loader2, AlertCircle } from "lucide-react";
+import { Calendar, Sparkles, ArrowRight, HelpCircle, Loader2, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import config from "@config";
 import { AccountLayout } from "../components/AccountLayout";
 import { StatusBadge } from "../components/StatusBadge";
+import { EmailVerifyBanner } from "../components/EmailVerifyBanner";
 import { formatPrice } from "../utils/format";
 import { useGuestAuth } from "../context/GuestAuthContext";
 
@@ -23,6 +24,21 @@ interface StayRecord {
   totalPrice: number;
   status: string;
   hasBreakfast: boolean;
+  // Per Spark Rewards audit 2026-07-18 LOW-5: surface the
+  // early check-in status on My Stays too (the spec lists
+  // both My Stays and My Rewards as surfaces; only My
+  // Rewards rendered it). The shape mirrors the
+  // `Booking.earlyCheckIn` map from `shared/types/index.ts`.
+  earlyCheckIn?: {
+    status: "requested" | "approved" | "declined";
+    requestedTime?: string;
+    notes?: string;
+    requestedAt?: string;
+    resolvedAt?: string | null;
+    resolvedBy?: string | null;
+    staffNote?: string | null;
+    confirmedTime?: string;
+  } | null;
 }
 
 function toDateStr(value: any): string {
@@ -83,6 +99,18 @@ export function StaysPage() {
 
   return (
     <AccountLayout activeTab="stays" title="My Stays" subtitle={`Your booking history at ${config.brandName}.`}>
+      {/*
+        Per Spark Rewards audit 2026-07-18 HIGH-1: an
+        unverified email/password user can't see their
+        past-booking list (the server returns 403 on
+        /api/members/stays). The banner explains why and
+        offers a Resend action.
+      */}
+      {user?.emailVerified === false && (
+        <div className="mb-6">
+          <EmailVerifyBanner reason="past-stays" />
+        </div>
+      )}
       {isLoading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">
           <Loader2 size={24} className="animate-spin mr-2" />
@@ -157,6 +185,13 @@ export function StaysPage() {
 }
 
 function StayCard({ stay }: { stay: StayRecord }) {
+  // Per Spark Rewards audit 2026-07-18 LOW-5: render the
+  // early check-in status line on the StayCard. Mirrors the
+  // My Rewards surface so the spec's "My Stays + My Rewards
+  // show the request status on the relevant booking" rule is
+  // satisfied. The card layout is unchanged for stays without
+  // an early check-in request — the line is conditional.
+  const earlyCheckIn = stay.earlyCheckIn;
   return (
     <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col sm:flex-row sm:items-center gap-4">
       <div className="flex-1 min-w-0">
@@ -165,7 +200,15 @@ function StayCard({ stay }: { stay: StayRecord }) {
           <StatusBadge label={stay.status.replace(/-/g, " ")} status={stay.status} />
         </div>
         <p className="text-sm font-semibold text-gray-900">
-          Room {stay.roomNumber} — {stay.roomType}
+          {/* Per the refactor/room-number-visibility change: only
+              surface the assigned room number once the stay is
+              checked-in or checked-out. For pre-check-in stays the
+              front desk can still reshuffle rooms, so the number
+              is hidden until the assignment is firm. */}
+          {stay.roomNumber &&
+          (stay.status === "checked-in" || stay.status === "checked-out")
+            ? `Room ${stay.roomNumber} — ${stay.roomType}`
+            : stay.roomType}
         </p>
         <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
           <span className="flex items-center gap-1">
@@ -175,6 +218,7 @@ function StayCard({ stay }: { stay: StayRecord }) {
           <span>{stay.numNights} night{stay.numNights !== 1 ? "s" : ""}</span>
           {stay.hasBreakfast && <span className="text-amber-600 font-semibold">+ Breakfast</span>}
         </div>
+        {earlyCheckIn && <EarlyCheckInStatusLine earlyCheckIn={earlyCheckIn} />}
       </div>
       <div className="text-right">
         <p className="text-lg font-bold text-primary-dark">{formatPrice(stay.totalPrice)}</p>
@@ -193,5 +237,41 @@ function StayCard({ stay }: { stay: StayRecord }) {
         </Link>
       </div>
     </div>
+  );
+}
+
+// Per Spark Rewards audit 2026-07-18 LOW-5: My Stays is now
+// a full surface for the early check-in status, mirroring
+// `My Rewards` (per `plan/features/SPARK-REWARDS.md §Guest
+// visibility`). The three states use the same color tokens
+// as the My Rewards card (green = approved, red = declined,
+// blue = requested) so the visual language is consistent
+// across the two surfaces.
+function EarlyCheckInStatusLine({ earlyCheckIn }: { earlyCheckIn: NonNullable<StayRecord["earlyCheckIn"]> }) {
+  if (earlyCheckIn.status === "approved") {
+    const readyAt = earlyCheckIn.confirmedTime || earlyCheckIn.requestedTime;
+    return (
+      <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-green-50 px-2 py-1 text-[11px] font-semibold text-green-800">
+        <CheckCircle2 size={12} aria-hidden="true" />
+        Early check-in approved — ready from {readyAt || "TBA"}
+        {earlyCheckIn.staffNote && <span className="font-normal italic text-green-700"> · "{earlyCheckIn.staffNote}"</span>}
+      </p>
+    );
+  }
+  if (earlyCheckIn.status === "declined") {
+    return (
+      <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-800">
+        <AlertCircle size={12} aria-hidden="true" />
+        Early check-in unavailable
+        {earlyCheckIn.staffNote && <span className="font-normal italic text-red-700"> · "{earlyCheckIn.staffNote}"</span>}
+      </p>
+    );
+  }
+  // status === "requested"
+  return (
+    <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
+      <Clock size={12} aria-hidden="true" />
+      Early check-in requested — awaiting front desk
+    </p>
   );
 }

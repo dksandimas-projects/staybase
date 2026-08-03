@@ -17,7 +17,17 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".vercel", ".firebase"]);
+// `.worktrees` / `.claude` hold git worktrees checked out INSIDE the repo.
+// Each contains a full copy of `plan/`, so without these the audit walks
+// every branch's docs at once: measured from the main checkout on
+// 2026-08-02 that reported 250 files, ~1.2M tokens and 31 "broken
+// reference" errors that were really just cross-worktree paths. The audit
+// must describe THIS checkout only, or it reports garbage from whichever
+// directory it happens to be run in.
+const SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", ".vercel", ".firebase",
+  ".worktrees", ".claude"
+]);
 
 // Historical / generated / template sources — excluded from active totals and budgets.
 // Markers inside them are still verified.
@@ -47,7 +57,19 @@ const FILE_BUDGETS = [
 ];
 const ALWAYS_READ = ["CLAUDE.md", "plan/docs/GOTCHAS.md"];
 const ALWAYS_READ_CEILING = 10000;
-const ACTIVE_TOTAL_WARN = 120000;
+// Ratchet, set 2026-08-02. The previous 120,000 target was written on
+// 2026-07-17 in the same commit that introduced this script, when the
+// active corpus already measured ~212,000 — so it warned on every run
+// from day one and never signalled anything. The corpus today is
+// slightly SMALLER than it was then, which is the opposite of the
+// regression the warning implied.
+//
+// This is the same ratchet pattern CONTRIBUTING.md already applies to
+// oversized per-file docs: set the ceiling just above current size so
+// further GROWTH fails while the existing body of specification passes.
+// Lower it deliberately when a restructure actually reduces the corpus;
+// do not raise it to accommodate growth without a compaction review.
+const ACTIVE_TOTAL_WARN = 230000;
 
 const errors = [];
 const warnings = [];

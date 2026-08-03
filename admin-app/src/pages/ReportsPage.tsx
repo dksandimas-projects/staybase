@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
+import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -12,6 +13,7 @@ import {
 } from "recharts";
 import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
+import { getReportOccupancySplit } from "../utils/reportOccupancy";
 import {
   AlertTriangle, BarChart3, Download, DollarSign, Users, Home,
   TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet,
@@ -28,13 +30,13 @@ import {
   dateKeyInTimeZone,
   getTimeZoneDayRange,
   shiftDateKey,
-  splitBookingRevenue,
   summarizeFolioSnapshot
 } from "../utils/finance";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { LiabilityTab } from "../components/LiabilityTab";
 
-type ReportTab = "performance" | "sales" | "daily-close";
+type ReportTab = "performance" | "sales" | "daily-close" | "liability";
 type SalesSubTab = "bookings" | "breakfast" | "store" | "charges";
 
 interface ReportCharge {
@@ -195,6 +197,11 @@ export function ReportsPage() {
     members,
     staff,
     corporateInquiries,
+    // Per NBS-08 (2026-07-31): the acquisition chart reads the
+    // configured booking sources list, not a hardcoded array. An
+    // unconfigured source (a new "agoda" / "OTA" entry) would
+    // otherwise be silently dropped from the chart — the bug.
+    bookingSources: configuredBookingSources,
     currentUser
   } = useAdmin();
   const { isMobile } = useBreakpoint();
@@ -486,7 +493,7 @@ export function ReportsPage() {
     return rangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).room * fraction;
+      return sum + getBookingRevenueStreams(b).roomNet * fraction;
     }, 0);
   }, [rangeBookings, periodStart, periodEnd]);
 
@@ -499,7 +506,7 @@ export function ReportsPage() {
     return breakfastBookingsInRange.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).breakfast * fraction;
+      return sum + getBookingRevenueStreams(b).breakfastNet * fraction;
     }, 0);
   }, [breakfastBookingsInRange, periodStart, periodEnd]);
 
@@ -705,18 +712,30 @@ export function ReportsPage() {
 
     rangeBookings.forEach((b) => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-      const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+      // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
+      // numNights` now routes through the shared
+      // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+      // Per DSC (2026-07-31): the discount percentage steps and the
+      // clamped `afterSenior − voucher` subtraction now route through
+      // the shared `calculatePercentDiscount` + `calculateVoucherBase`
+      // helpers. Same product, same round, same clamp, same gates.
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: b.hasBreakfast,
+        breakfastRate: b.breakfastRate,
+        numGuests: b.numGuests,
+        numNights: b.numNights
+      });
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
-      const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+      const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
       const afterSenior = subtotal - seniorDiscount;
 
       const vchDiscount = b.voucherDiscount || 0;
-      const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+      const afterVoucher = calculateVoucherBase(afterSenior, vchDiscount);
 
       const memDiscountPct = b.memberDiscountPct || 0;
-      const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+      const memDiscount = memDiscountPct > 0 ? Math.round(calculatePercentDiscount(afterVoucher, memDiscountPct)) : 0;
 
       const ptsRedeemedVal = b.pointsRedeemedValue || 0;
 
@@ -735,6 +754,60 @@ export function ReportsPage() {
       memberDiscounts,
       pointsRedeemedValue,
       netBookings
+    };
+  }, [rangeBookings]);
+
+  // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT breakdown
+  // (12% VAT, VATable Sales, VAT-Exempt Sales, VAT Amount) for
+  // the selected date range. Each booking contributes:
+  //   - VATable Sales (VAT-exclusive) = totalPrice / 1.12
+  //   - VAT-Exempt Sales = seniorDiscount (RA 9994 exemption; 0
+  //     for non-senior bookings)
+  //   - VAT Amount = VATable Sales × 0.12
+  // The helper is scope-agnostic — it just takes the senior
+  // discount amount as input. The chain math above computes the
+  // senior discount from the booking's discount scope (DSC-01..05)
+  // + discountPct, so a narrow senior scope flows through
+  // correctly: the exempt portion is exactly the senior's scoped
+  // share, no more.
+  const vatSummary = useMemo(() => {
+    let vatExclusiveSales = 0;
+    let vatExemptSales = 0;
+    let vatAmount = 0;
+    let seniorBookingsCount = 0;
+
+    rangeBookings.forEach((b) => {
+      const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
+      // Same chain as `discountsSummary` above — keep the per-booking
+      // senior discount in lockstep with the Gross-to-Net bridge so
+      // the VAT-exempt figure matches the senior deduction line.
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: b.hasBreakfast,
+        breakfastRate: b.breakfastRate,
+        numGuests: b.numGuests,
+        numNights: b.numNights
+      });
+      const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
+
+      const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
+      const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
+
+      const { vatExclusiveSales: vxs, vatExemptSales: ves, vatAmount: va } = calculateVatBreakdown({
+        totalPrice: b.totalPrice,
+        seniorDiscountAmount: seniorDiscount
+      });
+      vatExclusiveSales += vxs;
+      vatExemptSales += ves;
+      vatAmount += va;
+      if (seniorDiscount > 0) seniorBookingsCount += 1;
+    });
+
+    return {
+      vatRate: 0.12,
+      vatExclusiveSales,
+      vatExemptSales,
+      vatAmount,
+      seniorBookingsCount
     };
   }, [rangeBookings]);
 
@@ -816,9 +889,9 @@ export function ReportsPage() {
       const checkIn = toDate(b.checkIn);
       if (!checkIn) return;
       const slot = ensureMonth(checkIn);
-      const bookingRevenue = splitBookingRevenue(b);
-      slot.room += bookingRevenue.room;
-      slot.breakfast += bookingRevenue.breakfast;
+      const bookingRevenue = getBookingRevenueStreams(b);
+      slot.room += bookingRevenue.roomNet;
+      slot.breakfast += bookingRevenue.breakfastNet;
     });
 
     deliveredStoreOrders.forEach(o => {
@@ -872,24 +945,44 @@ export function ReportsPage() {
   }, [rangePayments, uncollectedAddToBill]);
 
   // ── Acquisition / booking sources (Performance) ──
+  // Per NBS-08 (2026-07-31): the slice list and label map are
+  // derived from the configured `bookingSources` list. A booking
+  // with a source that is NOT in the configured list still gets a
+  // slice (it surfaces as "Unconfigured: <raw-key>") so the
+  // acquisition chart can never silently drop a booking — that
+  // was the bug. Phone + Facebook are now separate slices per
+  // CVQ-09 (the previous map collapsed them into "Social Media /
+  // Phone" which destroyed the breakdown).
   const bookingSources = useMemo(() => {
-    const labelMap: Record<string, string> = {
-      online: "Online Booking",
-      "walk-in": "Walk-in Desk",
-      corporate: "Corporate Codes",
-      phone: "Social Media / Phone",
-      facebook: "Social Media / Phone"
-    };
-    const sources = ["online", "walk-in", "corporate", "phone", "facebook"];
+    const configured = (configuredBookingSources || [])
+      .filter((s: any) => s.isEnabled)
+      .map((s: any) => ({ source: s.source, label: s.label }));
+    // Append an "Unconfigured" bucket for any source the database
+    // holds that isn't in the configured list. This makes the
+    // silent-drop class of bug loud — the admin sees the orphan
+    // slice and either adds the source to Settings or fixes the
+    // data.
+    const unconfigured = new Set<string>();
+    occupancyBookings.forEach((b: any) => {
+      if (b.source && !configured.some((c: any) => c.source === b.source)) {
+        unconfigured.add(b.source);
+      }
+    });
+    const sources = [
+      ...configured,
+      ...Array.from(unconfigured).map((s) => ({ source: s, label: `Unconfigured: ${s}` }))
+    ];
     const counts: Record<string, number> = {};
-    sources.forEach(s => { counts[s] = 0; });
-    occupancyBookings.forEach(b => {
-      if (counts[b.source] !== undefined) counts[b.source] += 1;
+    sources.forEach((s) => { counts[s.source] = 0; });
+    occupancyBookings.forEach((b: any) => {
+      if (typeof b.source === "string" && counts[b.source] !== undefined) {
+        counts[b.source] += 1;
+      }
     });
     return sources
-      .map((s, i) => ({ name: labelMap[s], count: counts[s], color: chartColors[i % chartColors.length] }))
-      .filter(s => s.count > 0);
-  }, [occupancyBookings, chartColors]);
+      .map((s, i) => ({ name: s.label, count: counts[s.source], color: chartColors[i % chartColors.length] }))
+      .filter((s) => s.count > 0);
+  }, [occupancyBookings, configuredBookingSources, chartColors]);
 
   // ── Occupancy by room type (Performance) ──
   const roomTypeOccupancy = useMemo(() => {
@@ -1059,11 +1152,12 @@ export function ReportsPage() {
       toast.error("Invalid range", "Start date cannot be after end date.");
       return;
     }
-    let csvContent = "Booking Reference,Guest Name,Room Number,Check In,Check Out,Nights,Total Price,Status,Source,Payment Method,Payment Reference Number\n";
+    let csvContent = "Booking Reference,Guest Name,Room Number,Check In,Check Out,Nights,Guests,Adults,Children,Total Price,Status,Source,Payment Method,Payment Reference (latest ledger entry)\n";
     filteredBookings.forEach(b => {
       const checkIn = toDate(b.checkIn);
       const checkOut = toDate(b.checkOut);
-      csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${b.paymentReferenceNumber || ""}"\n`;
+      const occupancy = getReportOccupancySplit(b);
+      csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${occupancy.guests},${occupancy.adults},${occupancy.children},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${getLatestPaymentReference(b) || ""}"\n`;
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `${config.hotelId}_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
@@ -1181,7 +1275,9 @@ export function ReportsPage() {
 
       const wb = XLSX.utils.book_new();
 
-      const bookingRows = bookings.map((b: any) => ({
+      const bookingRows = bookings.map((b: any) => {
+        const occupancy = getReportOccupancySplit(b);
+        return {
       "Booking Ref": b.bookingRef,
       "Guest Name": b.guestName,
       "Guest Email": b.guestEmail,
@@ -1191,7 +1287,9 @@ export function ReportsPage() {
       "Check-In": toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
       "Check-Out": toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
       Nights: b.numNights,
-      Guests: b.numGuests,
+      Guests: occupancy.guests,
+      Adults: occupancy.adults,
+      Children: occupancy.children,
       "Has Breakfast": b.hasBreakfast ? "Yes" : "No",
       "Rate/Night": b.ratePerNight,
       "Breakfast Rate": b.breakfastRate,
@@ -1215,7 +1313,7 @@ export function ReportsPage() {
         .filter((p) => p["Booking Ref"] === b.bookingRef)
         .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
       "Payment Method": b.paymentMethod,
-      "Payment Reference Number": b.paymentReferenceNumber || "",
+      "Payment Reference (latest ledger entry)": getLatestPaymentReference(b) || "",
       Source: b.source,
       Status: b.status,
       "Is Corporate": b.isCorporate ? "Yes" : "No",
@@ -1225,7 +1323,8 @@ export function ReportsPage() {
       Notes: b.notes,
       "Created At": toDate(b.createdAt)?.toISOString() || "",
       "Updated At": toDate((b as any).updatedAt)?.toISOString() || ""
-    }));
+        };
+      });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(bookingRows), "Bookings");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(paymentRows), "Payments");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chargeRows), "Charges");
@@ -1377,6 +1476,18 @@ export function ReportsPage() {
       ["Spark Rewards Points Redeemed", discountsSummary.pointsRedeemedValue],
       ["Net Bookings Revenue", discountsSummary.netBookings],
       [],
+      // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT
+      // breakdown block on the Summary sheet. The four lines
+      // mirror the on-screen VAT Breakdown section + the
+      // per-booking VAT columns on the Bookings sheet. The
+      // VAT-Exempt figure is the senior/PWD discount portion
+      // (RA 9994) summed across the range; the rest of the
+      // bill is VATable at 12%.
+      ["VAT Breakdown (12% Philippine standard)", `Value (${config.currencySymbol})`],
+      ["VATable Sales (VAT-exclusive)", vatSummary.vatExclusiveSales],
+      ["VAT-Exempt Sales (RA 9994 Senior/PWD)", vatSummary.vatExemptSales],
+      ["VAT Amount (12% × VATable)", vatSummary.vatAmount],
+      [],
       ["Loyalty Program Liability", "Metric / Value"],
       ["Total Outstanding Points", loyaltyLiability.totalPoints],
       ["Points Redemption Liability", loyaltyLiability.liability],
@@ -1388,27 +1499,67 @@ export function ReportsPage() {
     const currSymbol = config.currencySymbol;
     const bookingsHeaders = [
       "Booking Ref", "Guest Name", "Room Number", "Check-In", "Check-Out", "Nights",
-      "Guests", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
+      "Guests", "Adults", "Children", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
       "Discount Type", "Discount %", `Senior/PWD Discount (${currSymbol})`, "Voucher Code", `Voucher Discount (${currSymbol})`,
       `Member Discount (${currSymbol})`, `Points Redeemed Value (${currSymbol})`, `Gross Subtotal (${currSymbol})`, `Net Total Price (${currSymbol})`,
-      `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference Number", "Source", "Status"
+      // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): per-booking VAT
+      // breakdown columns. VATable Sales (VAT-exclusive) =
+      // totalPrice / 1.12, VAT-Exempt Sales = senior discount
+      // (RA 9994; 0 for non-senior), VAT Amount = VATable × 0.12.
+      // Same numbers as the on-screen VAT Breakdown section;
+      // the per-booking split is what the accountant needs to
+      // reconcile monthly figures back to individual receipts.
+      `VATable Sales (VAT-exclusive) (${currSymbol})`, `VAT-Exempt Sales (${currSymbol})`, `VAT Amount 12% (${currSymbol})`,
+      `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference (latest ledger entry)", "Source", "Status"
     ];
     const bookingsRows = filteredBookings.map(b => {
+      const occupancy = getReportOccupancySplit(b);
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-      const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+      // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
+      // numNights` now routes through the shared
+      // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+      // Per DSC (2026-07-31): the discount percentage steps and the
+      // clamped `afterSenior − voucher` subtraction now route through
+      // the shared `calculatePercentDiscount` + `calculateVoucherBase`
+      // helpers. Same product, same round, same clamp, same gates.
+      // Per DSC-06 (2026-08-01): the per-booking VAT breakdown
+      // (12% VAT, VATable Sales, VAT-Exempt Sales, VAT Amount) now
+      // routes through the shared `calculateVatBreakdown` helper.
+      // The senior discount computed above flows in as the
+      // VAT-exempt portion (RA 9994) — same value, different
+      // presentation column. The VAT computation itself is
+      // scope-agnostic; the scope choice only affects which
+      // components contribute to the senior discount, which the
+      // chain above already computed correctly per DSC-01..05.
+      const breakfastTotal = calculateBreakfastAddOn({
+        hasBreakfast: b.hasBreakfast,
+        breakfastRate: b.breakfastRate,
+        numGuests: b.numGuests,
+        numNights: b.numNights
+      });
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
-      const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+      const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
       const afterSenior = subtotal - seniorDiscount;
 
       const vchDiscount = b.voucherDiscount || 0;
-      const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+      const afterVoucher = calculateVoucherBase(afterSenior, vchDiscount);
 
       const memDiscountPct = b.memberDiscountPct || 0;
-      const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+      const memDiscount = memDiscountPct > 0 ? Math.round(calculatePercentDiscount(afterVoucher, memDiscountPct)) : 0;
 
       const ptsRedeemedVal = b.pointsRedeemedValue || 0;
+
+      // Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): per-booking VAT
+      // breakdown. The helper takes the senior discount (the
+      // VAT-exempt portion under RA 9994) and the bill
+      // (totalPrice, VAT-inclusive); returns the three VAT
+      // numbers the BIR form needs.
+      const { vatExclusiveSales, vatExemptSales, vatAmount } = calculateVatBreakdown({
+        totalPrice: b.totalPrice,
+        seniorDiscountAmount: seniorDiscount
+      });
 
       const collected = payments.filter(p => p.bookingId === b.id).reduce((sum, p) => sum + p.amount, 0);
       const bookingCharges = charges.filter((c) => c.bookingId === b.id).reduce((sum, c) => sum + c.amount, 0);
@@ -1422,27 +1573,37 @@ export function ReportsPage() {
         b.bookingRef, b.guestName, b.roomNumber,
         toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
         toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
-        b.numNights, b.numGuests, b.ratePerNight, roomSubtotal,
+        b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.ratePerNight, roomSubtotal,
         b.hasBreakfast ? "Yes" : "No", b.hasBreakfast ? b.breakfastRate : 0, breakfastTotal,
         b.discountType || "None", discountPct, seniorDiscount,
         b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
-        subtotal, b.totalPrice, collected, outstanding,
+        subtotal, b.totalPrice,
+        vatExclusiveSales, vatExemptSales, vatAmount,
+        collected, outstanding,
         PAYMENT_LABELS[b.paymentMethod] || b.paymentMethod,
-        b.paymentReferenceNumber || "",
+        getLatestPaymentReference(b) || "",
         b.source, b.status
       ];
     });
 
     const breakfastHeaders = [
-      "Booking Ref", "Guest Name", "Room Number", "Check-In", "Nights", "Guests",
+      "Booking Ref", "Guest Name", "Room Number", "Check-In", "Nights", "Guests", "Adults", "Children",
       "Breakfast Rate/person", "Total Breakfast Revenue"
     ];
-    const breakfastRows = filteredBreakfastBookings.map(b => [
-      b.bookingRef, b.guestName, b.roomNumber,
-      toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
-      b.numNights, b.numGuests, b.breakfastRate,
-      (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0)
-    ]);
+    const breakfastRows = filteredBreakfastBookings.map(b => {
+      const occupancy = getReportOccupancySplit(b);
+      return [
+        b.bookingRef, b.guestName, b.roomNumber,
+        toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
+        b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.breakfastRate,
+        calculateBreakfastAddOn({
+          hasBreakfast: b.hasBreakfast,
+          breakfastRate: b.breakfastRate,
+          numGuests: b.numGuests,
+          numNights: b.numNights
+        })
+      ];
+    });
 
     const storeHeaders = [
       "Order Ref", "Room Number", "Booking ID", "Guest Name", "Items",
@@ -1576,7 +1737,7 @@ export function ReportsPage() {
     return prevRangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).room * fraction;
+      return sum + getBookingRevenueStreams(b).roomNet * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
@@ -1584,7 +1745,7 @@ export function ReportsPage() {
     return prevRangeBookings.filter(b => b.hasBreakfast).reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + splitBookingRevenue(b).breakfast * fraction;
+      return sum + getBookingRevenueStreams(b).breakfastNet * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
@@ -1639,7 +1800,7 @@ export function ReportsPage() {
         .reduce((sum, b) => {
           const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
           const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-          return sum + splitBookingRevenue(b).room * fraction;
+          return sum + getBookingRevenueStreams(b).roomNet * fraction;
         }, 0);
       return { name: rt.label, revenue };
     });
@@ -1817,6 +1978,18 @@ export function ReportsPage() {
         >
           Daily Close
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "liability"}
+          onClick={() => setActiveTab("liability")}
+          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+            activeTab === "liability" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+          }`}
+          data-testid="report-tab-liability"
+        >
+          Liability
+        </button>
       </div>
 
       {activeTab === "performance" && (
@@ -1894,6 +2067,7 @@ export function ReportsPage() {
           chartColors={chartColors}
           isMobile={isMobile}
           discountsSummary={discountsSummary}
+          vatSummary={vatSummary}
           loyaltyLiability={loyaltyLiability}
           rewardsConfig={rewardsConfig}
         />
@@ -1907,6 +2081,23 @@ export function ReportsPage() {
           toDate={toDate}
           isMobile={isMobile}
           staffNameMap={staffNameMap}
+        />
+      )}
+      {activeTab === "liability" && (
+        // Per CRL-08 (2026-08-03, per decision #174):
+        // the cancellation liability queue. The tab
+        // self-fetches its data (dual-source read
+        // of reservation header + per-booking
+        // `cancellationLiability` snapshots + the
+        // refunds subcollection for the live
+        // `processedAmount`). Exports + Daily Close
+        // continue to derive actual cash movement
+        // from the payment ledger, never from
+        // `approvedAmount` (per #173's "derived
+        // from immutable ledger entries" rule).
+        <LiabilityTab
+          rangeStart={periodStart}
+          rangeEnd={periodEnd}
         />
       )}
 
@@ -2282,6 +2473,13 @@ function SalesTab(props: {
     pointsRedeemedValue: number;
     netBookings: number;
   };
+  vatSummary: {
+    vatRate: number;
+    vatExclusiveSales: number;
+    vatExemptSales: number;
+    vatAmount: number;
+    seniorBookingsCount: number;
+  };
   loyaltyLiability: {
     totalPoints: number;
     liability: number;
@@ -2301,7 +2499,7 @@ function SalesTab(props: {
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
     toDate, chartColors, isMobile,
-    discountsSummary, loyaltyLiability,
+    discountsSummary, vatSummary, loyaltyLiability,
     rewardsConfig
   } = props;
 
@@ -2650,7 +2848,7 @@ function SalesTab(props: {
 
           <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Loyalty Program Liability</h3>
-            
+
             <div className="rounded-lg border border-gray-150 p-4 bg-gray-50 space-y-4 h-[calc(100%-1.75rem)]">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Outstanding Points</p>
@@ -2666,6 +2864,51 @@ function SalesTab(props: {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT breakdown for the selected date range. */}
+      <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
+        <div>
+          <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">VAT Breakdown</h2>
+          <p className="mt-1 text-[10px] text-gray-500">
+            Philippine 12% VAT reconciliation for the selected range. VAT-Exempt Sales is the
+            Senior/PWD discount portion under RA 9994; the rest of the bill is VATable at 12%.
+            Rounded to whole pesos on the cards; the XLSX export carries the same figures without
+            rounding.
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-gray-150 p-4 bg-gray-50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">VAT Rate</p>
+            <p className="mt-1 text-2xl font-heading text-gray-950">{(vatSummary.vatRate * 100).toFixed(0)}%</p>
+            <p className="text-[10px] text-gray-500 mt-1">Philippine standard hotel VAT.</p>
+          </div>
+          <div className="rounded-lg border border-gray-150 p-4 bg-gray-50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">VATable Sales (VAT-exclusive)</p>
+            <p className="mt-1 text-2xl font-heading text-gray-950">{formatPrice(vatSummary.vatExclusiveSales)}</p>
+            <p className="text-[10px] text-gray-500 mt-1">Bill totals ÷ 1.12 across the range.</p>
+          </div>
+          <div className="rounded-lg border border-gray-150 p-4 bg-gray-50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">VAT-Exempt Sales (RA 9994)</p>
+            <p className="mt-1 text-2xl font-heading text-gray-950">{formatPrice(vatSummary.vatExemptSales)}</p>
+            <p className="text-[10px] text-gray-500 mt-1">
+              Senior/PWD discounts across {vatSummary.seniorBookingsCount} booking{vatSummary.seniorBookingsCount === 1 ? "" : "s"}.
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-150 p-4 bg-primary/5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-primary-dark">VAT Amount (12%)</p>
+            <p className="mt-1 text-2xl font-heading text-primary-dark">{formatPrice(vatSummary.vatAmount)}</p>
+            <p className="text-[10px] text-gray-500 mt-1">Output VAT due for the range.</p>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-gray-50 border border-gray-150 p-3 text-[10px] text-gray-500 leading-relaxed">
+          <strong className="text-gray-700">Reconciliation:</strong> VATable Sales (VAT-exclusive) + VAT Amount
+          = Net Bookings Revenue ({formatPrice(discountsSummary.netBookings)}). The VAT-Exempt
+          portion ({formatPrice(vatSummary.vatExemptSales)}) is reported separately and is not
+          included in the VATable base.
         </div>
       </section>
 
@@ -3049,18 +3292,31 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
         <tbody className="divide-y divide-gray-100">
           {bookings.slice(0, 50).map(b => {
             const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-            const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+            // Per EXB-02 (2026-07-31): inline `breakfastRate ×
+            // numGuests × numNights` now routes through the shared
+            // `calculateBreakfastAddOn` helper. Byte-equivalent output.
+            // Per DSC (2026-07-31): the discount percentage steps and
+            // the clamped `afterSenior − voucher` subtraction now route
+            // through the shared `calculatePercentDiscount` +
+            // `calculateVoucherBase` helpers. Same product, same round,
+            // same clamp, same gates.
+            const breakfastTotal = calculateBreakfastAddOn({
+              hasBreakfast: b.hasBreakfast,
+              breakfastRate: b.breakfastRate,
+              numGuests: b.numGuests,
+              numNights: b.numNights
+            });
             const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
             const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
-            const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+            const seniorDiscount = discountPct > 0 ? Math.round(calculatePercentDiscount(subtotal, discountPct)) : 0;
             const afterSenior = subtotal - seniorDiscount;
 
             const vchDiscount = b.voucherDiscount || 0;
-            const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+            const afterVoucher = calculateVoucherBase(afterSenior, vchDiscount);
 
             const memDiscountPct = b.memberDiscountPct || 0;
-            const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+            const memDiscount = memDiscountPct > 0 ? Math.round(calculatePercentDiscount(afterVoucher, memDiscountPct)) : 0;
 
             const ptsRedeemedVal = b.pointsRedeemedValue || 0;
             const deductionsVal = seniorDiscount + vchDiscount + memDiscount + ptsRedeemedVal;
@@ -3151,7 +3407,12 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
     return (
       <div className="space-y-3">
         {bookings.slice(0, 50).map(b => {
-          const total = (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0);
+          const total = calculateBreakfastAddOn({
+            hasBreakfast: b.hasBreakfast,
+            breakfastRate: b.breakfastRate,
+            numGuests: b.numGuests,
+            numNights: b.numNights
+          });
           return (
             <div key={b.id} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
               <div className="flex items-center justify-between gap-2">
@@ -3161,7 +3422,27 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
               <p className="mt-1 text-sm font-semibold text-gray-900">{b.bookingRef}</p>
               <p className="mt-0.5 text-sm text-gray-700">{b.guestName} · Room {b.roomNumber}</p>
               <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
-                <span>{b.numNights} nt × {b.numGuests} guests</span>
+                {/* Per EXB-08 (2026-08-01, per decision #156):
+                    the Reports line now shows the adult/child
+                    split when both fields are present, with
+                    the extra bed count appended when > 0.
+                    Legacy pre-CHD bookings read as a single
+                    `numGuests` total. Matches the drawer
+                    header + receipt PDF + the email helper
+                    so the staff surfaces stay in lockstep. */}
+                <span>{b.numNights} nt × {(() => {
+                  const numAdults = Number((b as any).numAdults);
+                  const numChildren = Number((b as any).numChildren);
+                  const extraBedCount = Number((b as any).extraBedCount);
+                  if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+                    const splitLabel = `${numAdults}A + ${numChildren}C`;
+                    const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+                      ? ` + ${extraBedCount} bed${extraBedCount === 1 ? "" : "s"}`
+                      : "";
+                    return <span title={`${b.numGuests} guest${b.numGuests === 1 ? "" : "s"} total`}>{splitLabel}{extraLabel}</span>;
+                  }
+                  return <>{b.numGuests} guests</>;
+                })()}</span>
                 <span>Rate {formatPrice(b.breakfastRate)}</span>
               </div>
               <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(total)}</p>
@@ -3188,7 +3469,12 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
         </thead>
         <tbody className="divide-y divide-gray-100">
           {bookings.slice(0, 50).map(b => {
-            const total = (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0);
+            const total = calculateBreakfastAddOn({
+            hasBreakfast: b.hasBreakfast,
+            breakfastRate: b.breakfastRate,
+            numGuests: b.numGuests,
+            numNights: b.numNights
+          });
             return (
               <tr key={b.id} className="hover:bg-gray-50/50">
                 <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>

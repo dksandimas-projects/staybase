@@ -150,7 +150,14 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
               onClick={onClose}
-              className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm"
+              // Backdrop shares z-50 with the sidebar panel below it; DOM
+              // order (backdrop rendered first, panel rendered after)
+              // keeps the panel on top of its own backdrop. The Modal
+              // tier (z-[60]) sits above if a modal opens on top of this
+              // sidebar — see ROADMAP §MBZ and
+              // plan/admin-app/CLAUDE.md §Z-Index Scale. /60 matches the
+              // Modal + Drawer backdrop for visual consistency.
+              className="fixed inset-0 z-50 bg-gray-950/60 backdrop-blur-sm"
               aria-hidden="true"
             />
             <motion.aside

@@ -355,6 +355,9 @@ const completeGuestRegistration = {
   address: "Tagbilaran City",
   dateOfBirth: "1980-01-01",
   gender: "Female",
+  // Per Decision #121 (2026-07-23): purpose of stay defaults to
+  // "Leisure" and is required at physical check-in.
+  purposeOfStay: "leisure",
   idType: "Passport",
   idNumber: "P1234567",
   emergencyContact: "Juan Dela Cruz / 09171234567",
@@ -410,6 +413,9 @@ describe("/api/bookings/create", () => {
             description: "Simple comfort for couples or business travelers.",
             amenities: ["WiFi", "AC"],
             maxCapacity: 4,
+            maxChildren: 1,
+            maxExtraBeds: 0,
+            extraBedRate: 0,
             pricePerNight: 2000,
             weekendRate: 2500,
             corporateRate: 1800
@@ -424,6 +430,138 @@ describe("/api/bookings/create", () => {
     setCalls = [];
     updateCalls = [];
     vi.clearAllMocks();
+  });
+
+  const chdBookingBody = (bookingId: string, occupancy: {
+    guests: number;
+    numAdults?: number;
+    numChildren?: number;
+    hasBreakfast?: boolean;
+  }) => ({
+    bookingId,
+    roomType: "standard-double",
+    checkIn: FUTURE_CHECK_IN_1,
+    checkOut: FUTURE_CHECK_OUT_1,
+    guests: occupancy.guests,
+    numAdults: occupancy.numAdults,
+    numChildren: occupancy.numChildren,
+    hasBreakfast: occupancy.hasBreakfast ?? false,
+    guestDetails: {
+      firstName: "CHD",
+      lastName: "Regression",
+      email: "chd@example.com",
+      phone: "09171234567",
+      consent: true
+    },
+    discountType: "",
+    discountIdPhotoUrl: null,
+    paymentMethod: "pay-at-hotel",
+    turnstileToken: "mock_token"
+  });
+
+  test("rejects a client total that disagrees with adults + children", async () => {
+    const req = mockRequest(chdBookingBody("bookingChd9A", {
+      guests: 3,
+      numAdults: 2,
+      numChildren: 2
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Occupancy split mismatch: numAdults (2) + numChildren (2) must equal guests (3)."
+    });
+    expect(setCalls).toHaveLength(0);
+  });
+
+  test("rejects adult overflow independently of the child cap", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 2;
+    const req = mockRequest(chdBookingBody("bookingChd9B", {
+      guests: 3,
+      numAdults: 3,
+      numChildren: 0
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Not enough extra beds: 1 overflow adult(s) + 0 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+    });
+    expect(setCalls).toHaveLength(0);
+  });
+
+  test("rejects child overflow independently of the adult cap", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
+    const req = mockRequest(chdBookingBody("bookingChd9C", {
+      guests: 4,
+      numAdults: 2,
+      numChildren: 2
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Not enough extra beds: 0 overflow adult(s) + 1 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+    });
+    expect(setCalls).toHaveLength(0);
+  });
+
+  test("allows children alongside the full adult cap without treating total guests as adults", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
+    const req = mockRequest(chdBookingBody("bookingChd9D", {
+      guests: 3,
+      numAdults: 2,
+      numChildren: 1
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const bookingWrite = setCalls.find((call) => call.path === "bookings/bookingChd9D");
+    expect(bookingWrite?.data).toMatchObject({
+      numGuests: 3,
+      numAdults: 2,
+      numChildren: 1
+    });
+  });
+
+  test("breakfast still multiplies by total occupancy when children are included", async () => {
+    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
+    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
+    mockSettings.breakfastConfig = {
+      isEnabled: true,
+      ratePerPersonPerNight: 250,
+      breakfastIncludesChildrenDefault: true
+    };
+    const req = mockRequest(chdBookingBody("bookingChd9E", {
+      guests: 3,
+      numAdults: 2,
+      numChildren: 1,
+      hasBreakfast: true
+    }));
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const bookingWrite = setCalls.find((call) => call.path === "bookings/bookingChd9E");
+    expect(bookingWrite?.data.rateBreakdown.addOns).toContainEqual({
+      label: "Breakfast add-on",
+      amount: 2_250
+    });
   });
 
   test.each([
@@ -600,13 +738,13 @@ describe("/api/bookings/create", () => {
   });
 
   test("does not leave partial writes after timeout or abort", async () => {
-    // Room count exceeds capacity - should throw and fail transaction before writing
+    // Adult count exceeds capacity - should throw and fail transaction before writing
     const invalidCapacityBody = {
       bookingId: "bookingErr1",
       roomType: "standard-double",
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
-      guests: 10, // Exceeds type maxCapacity (4)
+      guests: 10, // Legacy all-adults shape exceeds type maxCapacity (4)
       hasBreakfast: false,
       guestDetails: {
         firstName: "Jane",
@@ -628,7 +766,7 @@ describe("/api/bookings/create", () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      error: "Guest count exceeds room capacity of 4."
+      error: "Not enough extra beds: 6 overflow adult(s) + 0 overflow child(ren) = 6 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
     });
     
     // Check that no partial writes were made (neither the booking nor the daily counter was incremented)
@@ -812,29 +950,35 @@ describe("/api/bookings/create", () => {
     });
 
     test("returns 'Room no longer available' when every room of the type is booked", async () => {
+      const { todayStr } = getManilaDateInfo();
+      const targetCheckIn = offsetDateKey(todayStr, 10);
+      const targetCheckOut = offsetDateKey(todayStr, 12);
+      const blockStart = offsetDateKey(todayStr, 8);
+      const blockEnd = offsetDateKey(todayStr, 14);
+
       // Block every room of standard-double with overlapping bookings.
       mockBookings.push({
         id: "occupy_101",
         bookingId: "occupy_101",
         roomId: "room_101",
         status: "confirmed",
-        checkIn: { toDate: () => new Date("2026-08-01T00:00:00Z") },
-        checkOut: { toDate: () => new Date("2026-08-05T00:00:00Z") }
+        checkIn: { toDate: () => new Date(`${blockStart}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${blockEnd}T00:00:00Z`) }
       });
       mockBookings.push({
         id: "occupy_102",
         bookingId: "occupy_102",
         roomId: "room_102",
         status: "confirmed",
-        checkIn: { toDate: () => new Date("2026-08-01T00:00:00Z") },
-        checkOut: { toDate: () => new Date("2026-08-05T00:00:00Z") }
+        checkIn: { toDate: () => new Date(`${blockStart}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${blockEnd}T00:00:00Z`) }
       });
 
       const body = {
         bookingId: "bookingNoRoom1",
         roomType: "standard-double",
-        checkIn: "2026-08-02",
-        checkOut: "2026-08-04",
+        checkIn: targetCheckIn,
+        checkOut: targetCheckOut,
         guests: 2,
         hasBreakfast: false,
         guestDetails: {
@@ -1171,7 +1315,12 @@ describe("/api/bookings/create", () => {
           consent: true
         },
         discountType: "senior",
-        discountIdPhotoUrl: "https://storage.example/discount-id.jpg",
+        // Per X-01 (E2E audit 2026-07-17): guest clients must
+        // never mint a download URL for private bucket uploads.
+        // The server validates the discount against the path
+        // only — the URL is derived server-side for staff via
+        // `/api/storage/signed-url`.
+        discountIdPhotoPath: "bookings/bookingVoucherSenior1/discount-id/test-senior.jpg",
         voucherCode: "save10",
         paymentMethod: "pay-at-hotel",
         turnstileToken: "mock_token"
@@ -1196,6 +1345,45 @@ describe("/api/bookings/create", () => {
           usageCount: 3
         })
       });
+    });
+
+    // Per X-01 (E2E audit 2026-07-17): the discount-ID business rule
+    // is validated against the private-bucket *path* (not a public
+    // URL), because anonymous guest uploads never mint a
+    // download URL. Regression guard: a senior/PWD discount with
+    // no path must still be rejected.
+    test("rejects government discount when no discountIdPhotoPath is provided", async () => {
+      const body = {
+        bookingId: "bookingNoDiscountId",
+        roomType: "standard-double",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Senior",
+          lastName: "NoId",
+          email: "seniornoid@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "senior",
+        // no discountIdPhotoPath — guest skipped the ID upload
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringContaining("Government-mandated discount")
+        })
+      );
     });
   });
 
@@ -1653,6 +1841,100 @@ describe("/api/bookings/create", () => {
       }));
       // Status is unchanged — the cancel was rejected.
       expect(mockBookings.find((b: any) => b.id === "booking_checked_in").status).toBe("checked-in");
+    });
+  });
+  describe("MRB-06 — multi-room reservation references", () => {
+    // Regression: every child booking in a multi-room reservation used
+    // to inherit one shared `bookingRef`, because the per-room write
+    // loop overrode room/occupancy/pricing but not the reference. That
+    // made "booking ref + email" lookup ambiguous — the contract in
+    // `plan/features/BOOKING-LOOKUP.md` assumes a ref identifies
+    // exactly one room stay.
+    const multiRoomBody = () => ({
+      bookingId: "bookingMrbRef1",
+      roomType: "standard-double",
+      roomSelections: [
+        {
+          roomType: "standard-double",
+          numAdults: 2,
+          numChildren: 0,
+          hasBreakfast: false
+        },
+        {
+          roomType: "standard-double",
+          numAdults: 2,
+          numChildren: 0,
+          hasBreakfast: false
+        }
+      ],
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
+      guests: 4,
+      hasBreakfast: false,
+      guestDetails: {
+        firstName: "Group",
+        lastName: "Booker",
+        email: "group@example.com",
+        phone: "09171234567",
+        consent: true
+      },
+      discountType: "",
+      discountIdPhotoUrl: null,
+      paymentMethod: "pay-at-hotel",
+      turnstileToken: "mock_token"
+    });
+
+    const createdBookings = () =>
+      setCalls.filter((c: any) => /^bookings\/[^/]+$/.test(c.path));
+
+    test("gives each room stay its own booking reference", async () => {
+      const req = mockRequest(multiRoomBody());
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const written = createdBookings();
+      expect(written).toHaveLength(2);
+
+      const refs = written.map((c: any) => c.data.bookingRef);
+      expect(new Set(refs).size).toBe(2);
+      expect(refs.every((ref: string) => /^SI-\d{8}-\d{5}$/.test(ref))).toBe(true);
+      // Consecutive sequence numbers off the shared daily counter.
+      const sequences = refs.map((ref: string) => Number(ref.split("-")[2]));
+      expect(sequences[1]).toBe(sequences[0] + 1);
+
+      // Each room also keeps its own lookup token, so one room's magic
+      // link cannot resolve another room.
+      expect(new Set(written.map((c: any) => c.data.lookupToken)).size).toBe(2);
+    });
+
+    test("advances the daily counter past every reference the reservation used", async () => {
+      const req = mockRequest(multiRoomBody());
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      // Without this the next booking of the day would reuse a
+      // reference already issued to one of these rooms.
+      const counterWrite = setCalls.filter((c: any) => c.path.startsWith("counters/")).pop();
+      expect(counterWrite!.data.count).toBe(2);
+    });
+
+    test("the reservation reference takes the first sequence number", async () => {
+      const req = mockRequest(multiRoomBody());
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const written = createdBookings();
+      const reservationWrite = setCalls.find((c: any) => c.path.startsWith("reservations/"));
+      expect(reservationWrite).toBeTruthy();
+      const leadSequence = written
+        .map((c: any) => Number(c.data.bookingRef.split("-")[2]))
+        .sort((a: number, b: number) => a - b)[0];
+      expect(reservationWrite!.data.reservationRef).toBe(
+        `R-${written[0].data.bookingRef.split("-")[1]}-${String(leadSequence).padStart(5, "0")}`
+      );
     });
   });
 });

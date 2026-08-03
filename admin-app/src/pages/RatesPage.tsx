@@ -79,7 +79,7 @@ export function RatesPage() {
     hotelConfig,
     breakfastConfig,
     updateSettings,
-    updateRoomType,
+    saveRoomTypes,
     roomTypes,
     currentUser,
     ratesLoading
@@ -136,8 +136,8 @@ export function RatesPage() {
   // Local pricing state per room type — the source of truth now lives on
   // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
   // §W3.6`), so the local state is just the in-flight form buffer that
-  // is flushed via `updateRoomType` on save.
-  const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>({});
+  // is flushed via a single batched `saveRoomTypes` write on save.
+  const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number; extraBed: number }>>({});
   const [dirtyRateFields, setDirtyRateFields] = useState<Set<string>>(() => new Set());
   const [roomRates, setRoomRates] = useState<Record<string, string>>({});
   const [dirtyCorporateRateTypes, setDirtyCorporateRateTypes] = useState<Set<string>>(() => new Set());
@@ -167,24 +167,45 @@ export function RatesPage() {
   // Keep form buffers synced with Firestore-backed room types until the
   // admin edits a field. This prevents deploy-time defaults from clobbering
   // live rates when the settings snapshot arrives after first paint.
+  //
+  // Per EXB-05 (2026-08-01, per decision #154): the matrix gains a 4th
+  // column — `extraBed` (per-night-per-extra-bed rate). Same shape as
+  // the existing 3 rate fields: the form buffer holds the per-type
+  // editable rate, the dirty-set guard prevents a late snapshot from
+  // clobbering an in-flight edit, and the save handler routes through
+  // the bulk `saveRoomTypes` write (RTS-02) so a multi-row save doesn't
+  // fan out into the last-write-wins bug. The extra-bed rate
+  // (`t.extraBedRate`) is independent from the per-room rate
+  // (`t.pricePerNight` / `t.weekendRate` / `t.corporateRate`) — it
+  // covers the rollaway bed's per-night add-on, which the booking
+  // snapshot (per EXB-01) freezes at create time.
   useEffect(() => {
-    const initialPrices: Record<string, { base: number; weekend: number; corporate: number }> = {};
+    const initialPrices: Record<string, { base: number; weekend: number; corporate: number; extraBed: number }> = {};
     roomTypes.forEach(t => {
       initialPrices[t.value] = {
         base: t.pricePerNight,
         weekend: t.weekendRate,
-        corporate: t.corporateRate
+        corporate: t.corporateRate,
+        // Per EXB-05: `extraBedRate` is optional on the
+        // RoomTypeEntry (legacy settings without the field
+        // read as 0 via the same `Number(x) || 0` permissive
+        // pattern the #111 surface flags + EXB-01 +
+        // `applyRoomTypeDefaults` use). Defensive coercion
+        // keeps the matrix initial state consistent across
+        // legacy and post-EXB-01 settings.
+        extraBed: Number(t.extraBedRate) || 0
       };
     });
 
     setPrices(prev => {
       const updated = { ...prev };
       roomTypes.forEach(t => {
-        const current = updated[t.value] || { base: 0, weekend: 0, corporate: 0 };
+        const current = updated[t.value] || { base: 0, weekend: 0, corporate: 0, extraBed: 0 };
         updated[t.value] = {
           base: dirtyRateFields.has(`${t.value}.base`) ? current.base : initialPrices[t.value].base,
           weekend: dirtyRateFields.has(`${t.value}.weekend`) ? current.weekend : initialPrices[t.value].weekend,
-          corporate: dirtyRateFields.has(`${t.value}.corporate`) ? current.corporate : initialPrices[t.value].corporate
+          corporate: dirtyRateFields.has(`${t.value}.corporate`) ? current.corporate : initialPrices[t.value].corporate,
+          extraBed: dirtyRateFields.has(`${t.value}.extraBed`) ? current.extraBed : initialPrices[t.value].extraBed
         };
       });
       return updated;
@@ -210,7 +231,7 @@ export function RatesPage() {
     }
   }, [breakfastConfig.ratePerPersonPerNight, bfRateDirty]);
 
-  const updateRateField = (typeValue: string, field: "base" | "weekend" | "corporate", value: number) => {
+  const updateRateField = (typeValue: string, field: "base" | "weekend" | "corporate" | "extraBed", value: number) => {
     setDirtyRateFields(prev => new Set(prev).add(`${typeValue}.${field}`));
     setPrices(prev => ({
       ...prev,
@@ -218,6 +239,7 @@ export function RatesPage() {
         base: prev[typeValue]?.base ?? 0,
         weekend: prev[typeValue]?.weekend ?? 0,
         corporate: prev[typeValue]?.corporate ?? 0,
+        extraBed: prev[typeValue]?.extraBed ?? 0,
         [field]: value
       }
     }));
@@ -701,23 +723,37 @@ export function RatesPage() {
   };
 
   // Save room prices changes — per W3.6 the rate matrix lives on the
-  // room type, so we flush one `updateRoomType` per type rather than
-  // batching across rooms of that type.
+  // room type, so we compute the full next array ONCE and write it
+  // ONCE. The previous implementation fired N concurrent
+  // `updateRoomType` calls; each one read the same render-time
+  // `roomTypes` snapshot, wrote the whole array back via
+  // `setDoc(..., { merge: true })`, and lost all but the last write
+  // (merge of an array field replaces it wholesale). That is RTS-01.
+  //
+  // Per EXB-05 (2026-08-01, per decision #154): the matrix now also
+  // persists `extraBedRate` per room type (the rollaway bed's per-night
+  // add-on rate, snapshotted onto the booking at create time per EXB-01).
+  // The save handler maps the form buffer's `extraBed` field onto
+  // `t.extraBedRate` in the next array — same single-bulk-write shape as
+  // the 3 room-rate fields. The 4th column is purely additive; the
+  // RTS-02 single-write invariant is preserved.
   const [isSavingRates, setIsSavingRates] = useState(false);
   const handleSaveRates = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingRates(true);
     try {
-      const updates = roomTypes.map(t => {
+      const nextRoomTypes = roomTypes.map(t => {
         const next = prices[t.value];
-        if (!next) return Promise.resolve();
-        return updateRoomType(t.value, {
+        if (!next) return t;
+        return {
+          ...t,
           pricePerNight: next.base,
           weekendRate: next.weekend,
-          corporateRate: next.corporate
-        });
+          corporateRate: next.corporate,
+          extraBedRate: next.extraBed
+        };
       });
-      await Promise.all(updates);
+      await saveRoomTypes(nextRoomTypes);
       setDirtyRateFields(new Set());
       toast.success("Rates saved", "Rate matrix updated for all room types.");
     } catch (err) {
@@ -982,7 +1018,7 @@ export function RatesPage() {
     <div className="space-y-8 font-body">
       <header>
         <h1 className="font-heading text-3xl text-gray-950 lowercase">rates & promo configuration</h1>
-        <p className="text-xs text-gray-500 mt-1">Configure base room pricing, weekend surcharges, public corporate rates, and payment gateways.</p>
+        <p className="text-xs text-gray-500 mt-1">Configure base room pricing, weekend surcharges, public corporate rates, extra-bed rates, and payment gateways.</p>
       </header>
 
       {/* Grid: Core Pricing Systems */}
@@ -1075,6 +1111,19 @@ export function RatesPage() {
                         />
                       </div>
                     </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Extra Bed Rate (per bed / night)</label>
+                      <div className="relative mt-1 flex items-center">
+                        <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={prices[type.value]?.extraBed || 0}
+                          onChange={(e) => updateRateField(type.value, "extraBed", parseFloat(e.target.value) || 0)}
+                          className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
+                        />
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1087,6 +1136,7 @@ export function RatesPage() {
                       <th className="py-2.5">Standard Rate (Base)</th>
                       <th className="py-2.5">Weekend Rate (Sat/Sun)</th>
                       <th className="py-2.5">Corporate Rate (Flat)</th>
+                      <th className="py-2.5">Extra Bed Rate (per bed / night)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1128,6 +1178,18 @@ export function RatesPage() {
                               min={0}
                               value={prices[type.value]?.corporate || 0}
                               onChange={(e) => updateRateField(type.value, "corporate", parseFloat(e.target.value) || 0)}
+                              className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-2">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={prices[type.value]?.extraBed || 0}
+                              onChange={(e) => updateRateField(type.value, "extraBed", parseFloat(e.target.value) || 0)}
                               className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                             />
                           </div>

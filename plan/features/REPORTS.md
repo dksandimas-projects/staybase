@@ -10,8 +10,9 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 
 ### Export CSV Button (page header, both tabs)
 
-- [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
-- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and `b.paymentReferenceNumber` (see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`).
+- [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Guests, Adults, Children, Total Price, Status, Source, Payment Method, and latest Payment Reference.
+- [x] **Adult/child occupancy split (CHD-08)** — every booking-oriented CSV/XLSX row keeps the historical `Guests` total and adds separate `Adults` + `Children` columns. This covers the page CSV, Sales XLSX Bookings and Breakfast sheets, and Full Backup Bookings sheet. Legacy or inconsistent rows fall back to `Adults = numGuests`, `Children = 0`; no migration is required. Occupancy, ADR, and RevPAR remain room-night based and are unchanged.
+- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and the **latest `transactionReference`** on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields` — the previous top-level `b.paymentReferenceNumber` is retired; see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`).
 
 ### Custom Date Range (owner request 2026-07-09)
 
@@ -89,6 +90,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [x] **FL-13 reconciliation basis** — Billed and Collected are comparable to-date snapshots for booking folios touching the selected hotel-date range plus direct-paid store orders delivered in range. Billed includes full booking totals, all net incidentals, and delivered billed-to-room orders; Collected includes every matching payment/refund even when recorded before the selected range. Gross Collections and Refunds remain period cash-flow totals.
 - [x] **FL-14 retained no-show money** — the retained-payments table includes both cancelled bookings and past `confirmed` no-shows, with an explicit status plus gross paid, refunded, and still-retained totals.
 - [x] **FL-15 hotel-day windows** — preset/custom report membership, booking overlap/proration, no-show cutoffs, and export date labels use `config.timezone` calendar days rather than browser-local midnight or UTC slicing.
+- [x] **CRL-08 cancellation liability queue + refund-state email** — shipped 2026-08-03 (decision #174). A new "Liability" tab in `ReportsPage.tsx` mounts the `LiabilityTab` component which self-fetches every `cancellationLiability` snapshot via the dual-source read (collectionGroup on `reservations` for new reservations + per-booking read for legacy) and sums the refunds subcollection per liability to project the live state. Headline metrics: pending count (sum of `pending-processing` + `partially-processed`), pending amount (sum of `outstandingAmount`), partials (count of `partially-processed`), processed total in range, retained cancellation revenue in range (when `retentionAmount > 0`). Age distribution bucketed into under-7d / 7-30d / over-30d for the pending items. The pending list is sorted oldest-first. Exports + Daily Close continue to derive actual cash movement from the payment ledger, never from `approvedAmount` (per #173's "derived from immutable ledger entries" rule). The refund-state email fires from `handleAddRefund` when a successful commit changes the liability state — both the cancellation + the refund-processed emails render the financial breakdown via the `liabilityProjection` field on the email view. Spec: `plan/docs/DECISIONS-FEATURES.md #174`. Behavioural tests + staging rehearsal follow in CRL-09.
 
 ### Receivables & Aging *(FIN-04 shipped 2026-07-11)*
 
@@ -106,11 +108,14 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 
 #### Summary Cards (top of tab)
 - [x] **Total Revenue** — combined across all streams for the selected period
-- [x] **Room Revenue** — net room share of booking `totalPrice`; booking-level deductions are allocated proportionally across the locked gross room and breakfast amounts
-- [x] **Breakfast Revenue** — net breakfast share of booking `totalPrice`; derived from the locked breakfast amount and reduced by the same proportional deduction allocation
+- [x] **Room Revenue** — per MRB-11 (2026-08-03, per decision #177): the stored `Booking.revenueAllocation.roomNet` (gross) for post-MRB-11 docs, or the legacy `splitBookingRevenue` proportional split for pre-MRB-11 docs (tagged `"allocation: legacy-heuristic"` in the export). The deduction is shown as a single `Discounts given` line — the per-stream value is the gross amount, not the post-deduction share.
+- [x] **Breakfast Revenue** — per MRB-11: `Booking.revenueAllocation.breakfastNet` (gross) for post-MRB-11 docs; legacy split for pre-MRB-11 docs.
+- [x] **Add-on Revenue** — per MRB-11: `Booking.revenueAllocation.addOnNet` (extra-bed + future add-ons) for post-MRB-11 docs. Pre-MRB-11 docs bundle add-ons into the room share (the export tag is `"legacy-heuristic"`).
+- [x] **Discounts given** — per MRB-11: `Booking.revenueAllocation.deductionNet` (sum of senior + voucher + member + corporate adjustments) for post-MRB-11 docs. Pre-MRB-11 docs show 0 here because the legacy math already netted the deductions into the per-stream values.
 - [x] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
 - [x] **Incidental Revenue** — net sum of append-only `bookings/{id}/charges` entries, including negative void reversals
 - [x] **Total Transactions** — count of bookings + delivered store orders combined
+- [x] **Allocation column** — per MRB-11: every export row carries a `"allocation"` field (`"stored"` for post-MRB-11 docs, `"legacy-heuristic"` for pre-MRB-11 docs). The XLSX + PDF + CSV exports add a top-of-file disclaimer when ANY row is `"legacy-heuristic"`: `Note: <N> bookings in this range pre-date MRB-11 and use the legacy proportional split — the aggregate may differ by up to 0.5%`.
 
 #### Charts
 - [x] **Revenue by stream (stacked bar chart)** — one bar per month, stacked by Room / Breakfast / Store / Incidentals
@@ -122,8 +127,8 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 #### Sales Detail Table
 - [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**
 - [x] **Incidentals sub-table** — Booking Ref, Room, Category, Label, Amount, Added By, Date
-- [x] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
-- [x] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
+- [x] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, adult/child occupancy, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
+- [x] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, adult/child occupancy, Breakfast Rate/person, Total Breakfast Revenue
 - [x] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
 - [x] All sub-tables are paginated (20 rows default), searchable by ref or name
 - [x] All sub-tables filterable by payment method and status
@@ -135,7 +140,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 ### Data & Logic Checklist
 - [x] Bookings query: `status` in `["payment-confirmed", "confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
 - [x] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
-- [x] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
+- [x] Breakfast gross basis uses the booking's snapshotted chargeable occupancy: `breakfastRate × (numAdults + included children) × numNights`; the historical `numGuests` fallback applies when no split exists. Legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation.
 - [x] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
 - [x] Incidental revenue: real-time `collectionGroup("charges")`, filtered by `addedAt`; positive charges and negative reversals net together
 - [x] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)
@@ -185,8 +190,8 @@ One XLSX file with 5 sheets covering all revenue data.
 | Sheet | Contents |
 |---|---|
 | **Summary** | Revenue totals by stream + payment method breakdown for the period |
-| **Bookings** | All booking records (same columns as §Data Backup) |
-| **Breakfast** | Per-booking breakfast breakdown (ref, room, nights, guests, rate, total) |
+| **Bookings** | All booking records (same columns as §Data Backup, including Guests, Adults, and Children) |
+| **Breakfast** | Per-booking breakfast breakdown (ref, room, nights, guests, adults, children, rate, total) |
 | **Store Orders** | All delivered store order records (ref, room, items, qty, price, total, payment, date) |
 | **Charges** | Incidental ledger entries joined to booking ref, including reversals |
 
@@ -250,9 +255,10 @@ See `plan/features/STORE-MANAGEMENT.md §Store Reports` for the full store manag
 
 ## Manual QA — Sales Report
 
-- [x] Total Revenue card matches the sum of all four disjoint stream totals
-- [x] Room Revenue plus Breakfast Revenue matches net booking `totalPrice` for the period without counting breakfast twice
-- [x] Breakfast Revenue matches the proportionally allocated net breakfast share for each breakfast booking
+- [x] Total Revenue card matches the sum of all disjoint stream totals
+- [x] Per MRB-11 (2026-08-03, per decision #177): Room + Breakfast + Add-on + (Deduction line) equals booking `totalPrice` for post-MRB-11 docs (the stored allocation). Pre-MRB-11 docs use the legacy proportional split — Room + Breakfast = `totalPrice` exactly (no separate add-on / deduction line because the old math bundled them into the room share).
+- [x] Room Revenue matches the stored `revenueAllocation.roomNet` (gross) for post-MRB-11 docs
+- [x] Breakfast Revenue matches the stored `revenueAllocation.breakfastNet` (gross) for post-MRB-11 docs
 - [x] Store Revenue matches sum of `totalAmount` across delivered store orders for the period
 - [x] Stacked bar chart shows correct monthly breakdown per stream
 - [x] Bookings sub-table rows match booking count in Bookings Management for same period
@@ -304,6 +310,8 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 | Check-Out | `checkOut` (YYYY-MM-DD) |
 | Nights | computed |
 | Guests | `numGuests` |
+| Adults | `numAdults` when the stored split is valid; otherwise `numGuests` |
+| Children | `numChildren` when the stored split is valid; otherwise `0` |
 | Has Breakfast | `hasBreakfast` |
 | Rate/Night | `ratePerNight` |
 | Breakfast Rate | `breakfastRate` |
@@ -318,7 +326,7 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 | Total Collected Onsite | sum of `payments[]` subcollection |
 | Outstanding Balance | `totalPrice − totalCollected` |
 | Payment Method | `paymentMethod` |
-| Reference Number | `paymentReferenceNumber` (owner request 2026-07-09; see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`) |
+| Reference Number | Latest `transactionReference` on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields`; see `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`) |
 | Source | `source` |
 | Status | `status` |
 | Is Corporate | `isCorporate` |
@@ -477,3 +485,29 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 - jsPDF usage: `plan/features/EMAIL-PDF-STORAGE.md`
 - Recharts: already in stack — `plan/docs/DECISIONS-ARCH.md`
 - Status values for revenue queries: `plan/docs/TYPES.md §BookingStatus`
+
+---
+
+## Aggregate `paymentStatus` Derivation (MRB-15-03, MRB-15-08)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03 + MRB-15-08 sub-items, shipped v0.250.0 + v0.255.0). The `paymentStatus` field on `reservations/{id}` is now derived from the actual child statuses (not a hardcoded literal). Reports queries that aggregate by `paymentStatus` now use the correct aggregate for N>1 mixed states.
+
+### Pre-MRB-15-03 bug (the driving fix)
+
+`handleCheckinBooking` + `handleCheckoutBooking` updated the booking's own `status` but never recomputed the header's `paymentStatus` — the field was a hardcoded `["checked-in"]` / `["checked-out"]` array literal. For N=1, the literal happened to match the single child's status. For N>1, the literal was wrong: a 2-room reservation that fully checked in showed `paymentStatus: "checked-in"` on the header even though only one child had checked in (the other was still `confirmed`).
+
+### Post-MRB-15-03 contract
+
+The header's `paymentStatus` is now `computeReservationAggregatePaymentStatus(postStatuses)` where `postStatuses` is the array of child statuses read in the same `runTransaction` as the status flip. The aggregate now correctly reflects N>1 mixed states:
+
+| Child statuses | Aggregate `paymentStatus` |
+|---|---|
+| All `confirmed` | `pending` |
+| All `payment-confirmed` | `partial` |
+| Some `checked-in`, some `confirmed` | `partial` |
+| All `checked-in` | `checked-in` |
+| All `checked-out` | `checked-out` |
+| Any `cancelled` (full cancel) | `cancelled` |
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-03-transactional-counters.test.ts` (13 tests) — pins the aggregate `paymentStatus` derivation for N>1 mixed states.

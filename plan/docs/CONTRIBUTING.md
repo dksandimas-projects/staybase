@@ -47,6 +47,7 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | New feature file added | `plan/docs/FILE-STRUCTURE.md` + `CLAUDE.md` TOC |
 | New MD file created | `CLAUDE.md` TOC + this file's ownership table |
 | Major feature/phase completed | `plan/project/context/spark-inn-MASTER-CONTEXT.md` |
+| **A `feat:` / `fix:` / `refactor:` commit lands on `dev`** (roadmap item shipped, OR an off-roadmap fix/feature ships) | `plan/project/ROADMAP.md` — mark the item ✅ with a one-line shipped note + commit hash, or add a "Recently shipped (off-roadmap)" entry. **The roadmap is the source of truth for "what's open" — drift between the code and the roadmap makes the next person pick wrong work. Required on every merge to `dev`.** |
 
 ---
 
@@ -92,6 +93,38 @@ Husky's `commit-msg` hook auto-bumps `shared/VERSION.ts` based on the prefix.
 - If a branch was force-pushed, rebased, or otherwise lost, recreate it at the original tip commit: `git branch <name> <sha>`. The SHA is recoverable from `dev`'s log.
 - Do **not** run `git branch -d` / `git branch -D` / `git push origin --delete` on merged branches without explicit user instruction.
 - The only acceptable reasons to delete a branch are: (a) the user explicitly asks, or (b) the branch was created by mistake and never merged anywhere (e.g. typo'd name, abandoned spike).
+
+---
+
+## Testing
+
+Three test layers, each with a different purpose. **Pick the right one for the bug you're guarding against** — the wrong layer silently misses whole bug classes.
+
+| Layer | What it tests | Cost | Catches |
+|---|---|---|---|
+| Source-text (default `npm test`) | Asserts that source patterns exist (string matches, import paths, interface shapes). Cheap, deterministic, no setup. | <5s per workspace | Regressions of structure — "did someone rename this function?" "did someone remove this import?" "does the interface still declare this method?" |
+| Emulator-based rules (`firebase/tests/*.rules.test.ts`, runs under `npm run test:rules`) | Loads `firestore.rules` into the Firestore emulator and exercises real read/write attempts with the right auth contexts. | ~15s emulator startup + test time | Invalid-but-present rules (NC-02c shipped a `keys().union(...)` rule that passed every grep test but errored at evaluation time). Access-control regressions. |
+| Emulator-based behavioral (`firebase/tests/*.emulator.test.ts`, same `npm run test:rules`) | Replicates the write pattern against a real Firestore and asserts the contract. Does not import application code (which is React-context code, hard to load in Node). | ~15s emulator startup + test time | Wrong-answer-no-error-no-test-failure bugs. The exact class RTS-01 was — the success toast fired, the values snapped back on the next snapshot, and no source-text test could ever catch it. |
+
+**Rules that earned their place:**
+
+- **Default to source-text.** It is fast and catches the common case. Do not write emulator tests for things source-text already covers (string presence, import paths, function signatures).
+- **Promote to emulator when the bug class is "looks right, behaves wrong."** A behavioral test for a write race, a money math path, an availability transaction, a discount calculation, an idempotency key, a timestamp invariant — any contract that Firestore evaluates at runtime, not at parse time. The first such test is `firebase/tests/room-types-array-write.emulator.test.ts` (PMH-03, 2026-07-31) — pins the RTS-01 fix at the Firestore layer.
+- **Test pattern for `*.emulator.test.ts` files** — seed via the admin context, exercise the write pattern, assert the contract. Do not import `AdminContext` or other React-context code; replicate the write semantics directly. The harness loads `firestore.rules` automatically, so any rule change that breaks a write will surface here too.
+- **The Java requirement is real.** `npm run test:rules` boots the Firestore emulator, which needs Java. `npm run test:fast` skips it. CI uses `npm test` (full chain) so emulator tests must pass before merge.
+
+**Scripts:**
+
+- `npm test` — full chain: shared + api + admin + infra + rules. Includes the emulator. Requires Java.
+- `npm run test:fast` — source-text only: shared + api + admin + infra. Sub-30s. No Java required.
+- `npm run test:rules` — emulator only (`firebase emulators:exec --only firestore` + `vitest run --config vitest.rules.config.ts`). Includes both `*.rules.test.ts` and `*.emulator.test.ts`.
+- `npm run test:shared` / `test:guest:api` / `test:infra` — individual layers.
+
+**Naming convention:**
+
+- `*.rules.test.ts` — security-rule evaluation (existing).
+- `*.emulator.test.ts` — behavioral write-path test (new in PMH-03).
+- `*.test.ts` (anywhere else) — source-text test, picked up by the app's own vitest config.
 
 ---
 
@@ -150,6 +183,58 @@ Rule of thumb: **if it changes the data model, adds a screen, or takes more than
 
 ---
 
+## Feature Intake & Spec Workflow
+
+How a request becomes a roadmap block. Established 2026-07-31; every block from `WPM` onward follows it. Use it for anything that qualifies as a change request above — do not start coding from a chat message.
+
+### The loop
+
+1. **Investigate before answering.** Read the actual code paths the request touches. Count the call sites. Name the files and line numbers.
+2. **Verify every claim against code, never against an MD.** The docs drift. On 2026-07-31 `DECISIONS-FEATURES.md #115` stated the system exports a 12% VAT / VATable / VAT-Exempt breakdown; a repo-wide search returned **zero** occurrences. `FIN-06` had been closed as "decision logged", which was true — the calculation never followed. If an MD claims a behaviour exists, grep for it before repeating the claim.
+3. **Surface what the investigation found**, separately from what was asked. Requests and findings are different things and should be labelled as such (see "Findings" below).
+4. **Ask only the decisions that change the work.** Each question needs a stated recommendation and a working default. Anything answerable from the codebase or from convention is not a question — decide it and say so.
+5. **Spec it as a block** (anatomy below), with dependencies and sequencing made explicit.
+6. **Commit and merge** per the git flow below. No code in the same commit.
+
+### Block anatomy
+
+Every block is a `### ` section in `ROADMAP.md §Phase 12` with a three-letter code:
+
+- **Heading** — `### Name (CODE) — proposed|reported YYYY-MM-DD` plus a size or priority marker where useful (`· P1`, `· large, phased`, `· small`).
+- **Preamble blockquote** — the request in one line; what exists today with file/line evidence; the owner's decisions, dated; dependencies and what this gates; anything already half-built that the work can reuse. Flag cost-changing consequences with **⚠**.
+- **Numbered items** — `- ⬜ **CODE-01 — Short imperative title** — detail.` Each item is independently reviewable. The last item is always **Tests + MD sync**, naming every MD that must change.
+
+### Rules that earned their place
+
+- **Reserve a decision number** in the preamble (`#141`, `#142`, …); write the entry in `DECISIONS-FEATURES.md` only when the implementation lands. Reserving avoids collisions across parallel blocks; deferring the write avoids documenting decisions that get revised.
+- **Label findings distinctly from requests.** Work discovered during investigation — `RTS-01`, `NBS-08`, `DSC-06`, `EXB-10`, `WRV-01` — is marked in the item text (**CONFIRMED**, **ADJACENT FINDING**, **the real trap**). These are the items most likely to be dropped, because nobody asked for them.
+- **State the failure mode, not just the fix.** "Reports silently drops unknown sources — no error, no warning" is actionable. "Make Reports dynamic" is not.
+- **Record rejected alternatives and why.** `MRB` records why one document holding `rooms[]` was rejected over `groupId`; `NBS-02` records why the API route is not renamed. Without this, the next reader re-opens a settled question.
+- **Make dependencies explicit both ways.** If A gates B, say so in A *and* in B. Keep the running order in the `Last updated` line so it survives without reading every block.
+- **Supersede, don't delete.** When a decision reverses (`CVQ-01` flipped the child-breakfast rule and moved `CHD` behind the extraction), strike the old text and record the reversal with its consequence. The history is why the sequencing looks the way it does.
+
+### Client Validation Queue (CVQ)
+
+Decisions taken quickly need validating against how the hotel actually operates. Log them as a compact table — question, working default, affected items, why it matters — so **nothing hard-blocks** on a client meeting. Mark which single question changes engineering *cost* rather than a config value, and ask that one first. Fold each row into its decision entry when answered; delete the section when empty.
+
+### Git flow
+
+- Branch `docs/<topic>` off `dev` — never work on `dev` directly, even for docs.
+- Commit `docs: update ROADMAP.md — <summary>`. The body carries the reasoning: what was found, what was decided, what it costs. `docs:` does not bump `VERSION`.
+- `npm run docs:audit` before committing.
+- Merge with `--no-ff` and a `chore: merge <branch>` message, matching the existing history.
+- One block per branch. Cross-block edits (dependency updates, supersessions) ride along with the block that caused them.
+
+### Lifecycle
+
+Block specced → items ship (`⬜` → `✅`) → when every item is done, move the detail to `plan/project/archive/` and leave a one-line ✅ pointer, per §Documentation Budgets & Lifecycle. Open follow-ups stay in the roadmap; they do not go to the archive with their parent block.
+
+### Block code registry
+
+Keep codes unique. In use as of 2026-07-31 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
+
+---
+
 ## Adding a New MD
 
 If a new feature or concern warrants a new MD:
@@ -175,14 +260,17 @@ If a new feature or concern warrants a new MD:
 | Any single `plan/docs/*.md` (domain doc) | 10,000 |
 | **Ratchet exceptions** (oversized contract docs — ceiling set just above current size so further growth fails; compact toward the standard ceiling next time the feature is materially touched): `ADMIN-MOBILE.md` 10,500 · `SETTINGS.md` 9,000 · `BACKEND.md` 12,500 (grew for the 2026-07-17 PRC/UCO/ETR schema sync). `BOOKINGS-MANAGEMENT.md` was compacted back under the standard ceiling on 2026-07-17 and no longer has an exception. | — |
 | Combined always-read (`CLAUDE.md` + `GOTCHAS.md`) | 10,000 |
-| Entire active MD system | warn above 120,000 |
+| Entire active MD system | warn above 230,000 — a **ratchet** set 2026-08-02, just above the then-current ~224,000. The previous 120,000 figure was written on 2026-07-17 in the same commit that added `docs:audit`, when the corpus already measured ~212,000; it warned on every run from day one and so never signalled anything. Treat this ceiling the same way as the per-file ratchet exceptions below: further **growth** fails, and the number is lowered deliberately when a restructure actually shrinks the corpus — never raised to accommodate growth without a compaction review. |
 
 **Excluded from active totals:** `plan/project/archive/`, `plan/project/AUDIT-*.md`, `plan/project/AI-MD-SYSTEM-PROMPT.md`, `plan/project/context/spark-inn-MD-PLAN.md`, `plan/stitch/`, `node_modules`/build output.
 
-**Compaction rules:**
-- One fact, one home — everything else links to it (see §MD Ownership Rules).
-- When a phase, audit batch, or feature fully ships, move its diary/detail to `plan/project/archive/` (with a `HISTORICAL ARCHIVE` marker) and keep a one-line ✅ status in the active doc. Take an archive snapshot **before** materially compacting any large active doc.
-- Keep active: current behavior, requirements, acceptance criteria, unresolved risks, security/data invariants, deferral decisions with their triggers. Move out: branch/commit diaries, passing test logs, completed walkthroughs, superseded proposals.
+**Compaction & Archive Verbatim Invariant Rules:**
+- **Verbatim Text & Technical Context Preservation:** When compacting active documentation, NEVER summarize, shorten, or delete open task specifications or drop technical context details. Retain exact verbatim task descriptions for all open items in active docs.
+- **Historical Archive Full Detail Rule:** For shipped phases, completed audit batches, and historical feature blocks moved to `plan/project/archive/` (with a `HISTORICAL ARCHIVE` marker), ALWAYS retain 100% of the exact verbatim text, detailed multi-paragraph implementation narratives, decision records, and code specs from pre-compaction sources without truncating or summarizing them. Because archive files are excluded from token budget limits, they preserve full historical fidelity.
+- **One fact, one home:** Everything else links to the primary owner MD (see §MD Ownership Rules).
+- **Timing:** Take an archive snapshot **before** materially compacting any large active doc.
+- **Keep active:** Current behavior, requirements, acceptance criteria, open task specifications with their verbatim technical context, unresolved risks, security/data invariants, and deferral decisions with their triggers.
+- **Move out:** Branch/commit diaries, passing test logs, completed walkthroughs, and superseded proposals.
 - Archives and historical audits are never part of a normal implementation read bundle.
 
 **Review triggers** — run a documentation review (inventory, dedupe, compact/archive):

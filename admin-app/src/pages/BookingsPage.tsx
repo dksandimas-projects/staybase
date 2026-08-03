@@ -1,13 +1,17 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
+import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
+import { CancellationPreviewPanel } from "../components/CancellationPreviewPanel";
+import { CancellationLiabilityPanel, CancellationExceptionModal } from "../components/CancellationLiabilityPanel";
 import {
   BookingCheckInReadiness,
   BookingDrawerActionFooter,
@@ -20,12 +24,14 @@ import { BookingEmailActions } from "../components/BookingEmailActions";
 import { IncidentalChargeList } from "../components/IncidentalChargeList";
 import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
+import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import {
   Calendar,
   Mail,
   Plus,
+  Minus,
   Eye,
   ShoppingBag,
   Package,
@@ -44,12 +50,68 @@ import {
   Loader2,
   Move,
   Info,
+  ChevronDown,
   ChevronRight,
   Search,
   FlaskConical
 } from "lucide-react";
 
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+
+// Per MRB-07 (2026-08-02, per decision #159): one room inside the New
+// Booking modal's reservation. The desk picks a type and a specific
+// room per stay and distributes the party's guests across them; the
+// lead guest, dates, payment, discount and voucher stay
+// reservation-level. `key` is a stable React key so removing a middle
+// row doesn't reshuffle the inputs of the rows after it.
+type WalkinRoomStay = {
+  key: string;
+  roomType: string;
+  roomNumber: string;
+  numAdults: number;
+  numChildren: number;
+  extraBedCount: number;
+};
+
+// Per MRB-07 (2026-08-02, per decision #159): a row in the main
+// Bookings list. `booking` is an ungrouped room row (the historical
+// shape); `reservation` is the synthetic parent row for a reservation
+// covering several rooms; `roomStay` is one of that reservation's rooms
+// rendered nested beneath it. Grouping is derived from the
+// `reservation*` fields already denormalized onto each booking, so the
+// list needs no extra reads to render a group.
+type BookingListRow = Booking & {
+  listRowKind: "booking" | "reservation" | "roomStay";
+  listReservationId?: string;
+  listRoomCount?: number;
+  listChildBookings?: Booking[];
+  listReservationBalance?: number;
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the `Reservation` header is attached to the row so the
+  // Status column can render the aggregate `paymentStatus`
+  // + the cancellation-count chip (MRB-12-02) without a
+  // second lookup. Absent for N=1 / legacy null-
+  // `reservationId` rows (the existing byte-equivalent path).
+  listReservationHeader?: Reservation;
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the reservation-scope paid amount (sum of positive
+  // payment entries + negative refund entries on
+  // `reservations/{id}/payments/`). Used by the row's
+  // Total + Balance rendering and the drawer reservation
+  // strip's Paid + Balance pills (MRB-12-03). Absent
+  // for N=1 / legacy.
+  listReservationPaidAmount?: number;
+};
+
+let walkinRoomStayKeySeq = 0;
+const createWalkinRoomStay = (roomType: string): WalkinRoomStay => ({
+  key: `stay_${++walkinRoomStayKeySeq}`,
+  roomType,
+  roomNumber: "",
+  numAdults: 1,
+  numChildren: 0,
+  extraBedCount: 0
+});
 
 function toDate(value: any): Date | null {
   if (!value) return null;
@@ -59,6 +121,27 @@ function toDate(value: any): Date | null {
   if (value.seconds) return new Date(value.seconds * 1000);
   return null;
 }
+
+// Per MRB-14 (2026-08-03, per decision #180 — proposed):
+// the per-child dates UI uses a short date string
+// ("MMM D" → "Jan 1") for the actual-range display. The
+// admin `checkIn` / `checkOut` row already renders the
+// longer ISO string from the booking; the new
+// divergent-dates pill reads the `Reservation`
+// header's `actualDateRange` (Date objects) and the
+// children's per-child `checkIn` / `checkOut` (ISO
+// strings from the booking listener). The helper
+// normalises both shapes.
+function formatShortDate(value: any): string {
+  const date = toDate(value);
+  if (!date) return "—";
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+// Per 2026-07-24 (refactor/unify-payment-reference-fields):
+// `getLatestPaymentReference` is now imported from
+// `@spark-inn/shared` so the bookings table, dashboard, drawer
+// header, and reports exports all read the same helper.
 
 function estimateNewTotalPrice(
   booking: Booking,
@@ -117,14 +200,19 @@ function estimateNewTotalPrice(
   const subtotal = roomTotal + breakfastTotal;
 
   let discountPct = booking.discountPct || 0;
-  const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+  // Per DSC (2026-07-31): the inline `subtotal × (pct/100)` and
+  // `Math.max(subtotal − deduction, 0)` patterns now route through the
+  // shared `calculatePercentDiscount` + `calculateVoucherBase` helpers.
+  // Byte-equivalent output: the helper returns the same raw product, and
+  // the caller's `Math.round` wrap is preserved.
+  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
   const afterSeniorPwd = subtotal - seniorPwdDiscount;
 
   let voucherDiscount = 0;
   if (booking.voucherCode) {
     const voucherData = vouchers.find(v => v.code === booking.voucherCode);
     if (voucherData) {
-      const vBase = Math.max(subtotal - seniorPwdDiscount, 0);
+      const vBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
       voucherDiscount = Math.round(calculateVoucherDiscount({
         discountType: voucherData.discountType === "percent" ? "percent" : "flat",
         discountValue: Number(voucherData.discountValue) || 0
@@ -140,7 +228,7 @@ function estimateNewTotalPrice(
   if (booking.memberId && rewardsConfig?.memberDiscountEnabled !== false) {
     memberDiscountPct = Number(rewardsConfig?.memberDiscountPct) || 0;
   }
-  const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
   const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
   const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
 
@@ -148,8 +236,8 @@ function estimateNewTotalPrice(
 }
 import config from "@config";
 import { jsPDF } from "jspdf";
-import { addDoc, collection, doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { addDoc, collection, doc, getDoc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { getBlob, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { auth } from "../firebase/auth";
 
@@ -209,6 +297,56 @@ function getJsPdfImageFormat(dataUrl: string, blobType = "") {
   if (mimeType.includes("png")) return "PNG";
   if (mimeType.includes("webp")) return "WEBP";
   return "JPEG";
+}
+
+async function normalizePdfImageToJpeg(blob: Blob) {
+  const sourceDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read image."));
+    reader.readAsDataURL(blob);
+  });
+  // Browser image decoders don't reliably fire `onerror` for formats
+  // they don't recognize (HEIC, HEIF, AVIF on older builds, etc.) — in
+  // those cases the `<img>` element just sits there and the Promise
+  // never settles, which hangs the entire registration PDF generator
+  // (the "Preparing registration PDF..." tab is left open forever).
+  // A bounded decode keeps the error path reachable so the caller can
+  // surface a friendly toast and close the placeholder tab.
+  const DECODE_TIMEOUT_MS = 5000;
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Image decode timed out — the file may be an unsupported format. Please re-upload as JPEG, PNG, or WebP.")),
+      DECODE_TIMEOUT_MS
+    );
+    image.onload = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    image.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("Unable to decode image."));
+    };
+    image.src = sourceDataUrl;
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const context = canvas.getContext("2d");
+  if (!context || canvas.width === 0 || canvas.height === 0) {
+    throw new Error("Unable to prepare image for PDF.");
+  }
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0);
+
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.9),
+    width: canvas.width,
+    height: canvas.height
+  };
 }
 
 async function imageUrlToDataUrl(url: string) {
@@ -303,7 +441,8 @@ function drawPdfFooter(
   bookingRef: string,
   footerNote: string,
   brandRgb: [number, number, number],
-  footerY = 278
+  footerY = 278,
+  referenceLabel = "Booking Ref"
 ) {
   const pageW = 210;
   pdf.setDrawColor(...brandRgb);
@@ -320,7 +459,7 @@ function drawPdfFooter(
     footerY + 9,
     { align: "center", charSpace: 0 }
   );
-  pdf.text(`Booking Ref: ${bookingRef}`, pageW / 2, footerY + 13, { align: "center", charSpace: 0 });
+  pdf.text(`${referenceLabel}: ${bookingRef}`, pageW / 2, footerY + 13, { align: "center", charSpace: 0 });
 }
 
 function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | null) {
@@ -336,8 +475,21 @@ function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | nul
   return "downloaded";
 }
 
-function AdminPriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBreakdown | null; total: number }) {
+function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountType, discountPct, discountRejected }: { breakdown?: BookingRateBreakdown | null; total: number; originalTotalPrice?: number | null; discountType?: string | null; discountPct?: number | null; discountRejected?: boolean | null }) {
   if (!breakdown?.roomLines?.length) return null;
+  // Per DSC-07 (2026-08-01, per #115): the admin booking
+  // drawer now shows the 12% VAT reconciliation the same
+  // way the receipt PDF + XLSX export do. The helper
+  // composes the senior discount from the booking's stored
+  // `originalTotalPrice` (broad-scope approximation;
+  // documented narrow-scope edge case in the helper header).
+  const vat = getBookingVatBreakdown({
+    totalPrice: breakdown.finalTotal || total,
+    originalTotalPrice,
+    discountType,
+    discountPct,
+    discountRejected
+  });
   return (
     <div className="space-y-2">
       {breakdown.roomLines.map((line, index) => (
@@ -362,6 +514,25 @@ function AdminPriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBrea
         <span>Total Bill Amount:</span>
         <span className="text-primary-dark">{formatPrice(breakdown.finalTotal || total)}</span>
       </div>
+      {/* Per DSC-07 (2026-08-01, per #115): the 12% VAT
+          breakdown sub-block. Three muted lines for the
+          BIR-reconcilable figures; the senior discount
+          (RA 9994) is the VAT-exempt portion when the
+          booking carried one. */}
+      <div className="mt-2 space-y-1 border-t border-dashed border-gray-200 pt-2 text-[11px] text-gray-500">
+        <div className="flex justify-between">
+          <span>VATable Sales (VAT-exclusive)</span>
+          <span className="font-mono">{formatPrice(vat.vatExclusiveSales)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>VAT-Exempt Sales (RA 9994 Senior/PWD)</span>
+          <span className="font-mono">{formatPrice(vat.vatExemptSales)}</span>
+        </div>
+        <div className="flex justify-between font-semibold text-gray-700">
+          <span>VAT Amount (12% × VATable)</span>
+          <span className="font-mono">{formatPrice(vat.vatAmount)}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -370,6 +541,15 @@ export function BookingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { 
     bookings, 
+    // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+    // reservation headers + the reservation-scope paid-amount
+    // aggregate. The Bookings table row reads these so the
+    // row's `totalPrice` and `listReservationBalance` are
+    // independent of the active filter (the old code summed
+    // the filtered in-memory children and silently dropped
+    // any child hidden by the filter).
+    reservations,
+    reservationPaidAmount,
     rooms, 
     updateBookingStatus, 
     resolveEarlyCheckin,
@@ -389,6 +569,7 @@ export function BookingsPage() {
     vouchers,
     corporateCodes,
     paymentMethods,
+    bookingSources,
     currentUser,
     verifyAndRecordPayment,
     testRuns
@@ -417,6 +598,30 @@ export function BookingsPage() {
   const [refundError, setRefundError] = useState<string | null>(null);
   const [chargeError, setChargeError] = useState<string | null>(null);
   const [showBookingCancelForm, setShowBookingCancelForm] = useState(false);
+  // Per MRB-13 (2026-08-02, per decision #166): the
+  // cancel scope selector. The admin BookingsPage
+  // cancel modal exposes a `This room` / `All N
+  // rooms` selector when the selected booking is part
+  // of a multi-room reservation. The default `"room"`
+  // is the safer choice — staff must opt into the
+  // reservation-scope path explicitly. The state
+  // resets to `"room"` when the cancel form closes so
+  // a previous session's choice never bleeds into a
+  // new session.
+  const [bookingCancelScope, setBookingCancelScope] = useState<"room" | "reservation">("room");
+  // Per CRL-06 (2026-08-02): the cancellation preview
+  // state. The admin cancel modal calls the new
+  // `POST /api/bookings/cancel-preview` endpoint on
+  // open (and on scope flip) and renders the
+  // financial breakdown BEFORE the user taps confirm.
+  // The destructive cancel never auto-refunds (CRL-04);
+  // the panel makes the financial effect explicit.
+  // The state resets to `null` on close so a previous
+  // session's preview never bleeds into a new one.
+  const [cancelPreview, setCancelPreview] = useState<CancellationPreview | null>(null);
+  const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
+  const [cancelPreviewError, setCancelPreviewError] = useState<string | null>(null);
+  const cancelPreviewRequestIdRef = useRef(0);
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
   const [chargeToVoid, setChargeToVoid] = useState<IncidentalCharge | null>(null);
 
@@ -559,14 +764,73 @@ export function BookingsPage() {
 
   const processedDeepLinkRef = useRef<string | null>(null);
   useEffect(() => {
+    // Per MRB-07 (2026-08-02, per decision #159): deep links resolve
+    // both a child booking id (`?bookingId=`) and a reservation
+    // (`?reservationId=` or `?reservationRef=`). Emails, receipts and
+    // notifications reference whichever level they were written about,
+    // and every one of them must land somewhere useful. A reservation
+    // link expands that reservation in the list and opens its lead room
+    // — the room the desk almost always wants — rather than dead-ending
+    // because the id isn't a booking id.
     const bookingId = searchParams.get("bookingId");
-    if (!bookingId || bookingId === processedDeepLinkRef.current) return;
-    processedDeepLinkRef.current = bookingId;
-    const match = bookings.find((booking) => booking.id === bookingId);
-    if (!match) return;
-    setSelectedBooking(match);
+    const reservationId = searchParams.get("reservationId");
+    const reservationRef = searchParams.get("reservationRef");
+    const deepLinkKey = bookingId || reservationId || reservationRef;
+    if (!deepLinkKey || deepLinkKey === processedDeepLinkRef.current) return;
+
+    if (bookingId) {
+      const match = bookings.find((booking) => booking.id === bookingId);
+      if (!match) return;
+      processedDeepLinkRef.current = deepLinkKey;
+      setSelectedBooking(match);
+      setIsDrawerOpen(true);
+      return;
+    }
+
+    const reservationRooms = bookings
+      .filter((booking) =>
+        reservationId
+          ? booking.reservationId === reservationId
+          : booking.reservationRef === reservationRef
+      )
+      .sort((a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0));
+    if (reservationRooms.length === 0) return;
+    processedDeepLinkRef.current = deepLinkKey;
+    const resolvedReservationId = reservationRooms[0].reservationId;
+    if (resolvedReservationId) {
+      setExpandedReservationIds((current) => new Set(current).add(resolvedReservationId));
+    }
+    setSelectedBooking(reservationRooms[0]);
     setIsDrawerOpen(true);
   }, [searchParams, bookings]);
+
+  // Per fix/bookings-drawer-stale-state: the booking drawer
+  // holds a local copy of one row in `selectedBooking`. The
+  // `bookings` array is the live source of truth (admin context
+  // owns the onSnapshot listener and converts Firestore docs into
+  // `Booking` objects with the right field types), but the local
+  // copy is never re-synced. That means a status-changing action
+  // like Verify & Record Payment (which transitions the booking
+  // to `payment-confirmed` server-side and writes a payments
+  // ledger entry) would update `bookings` on the next onSnapshot
+  // tick — yet the drawer would still show the pre-action copy,
+  // so the "Verify & Record Payment" / "Review proof in Folio"
+  // buttons would keep rendering as if nothing happened.
+  //
+  // The dashboard doesn't hit this because its "pending payments"
+  // list renders directly from `bookings`. The BookingsPage
+  // drawer does not — it has a single `selectedBooking` state
+  // that needs to be re-synced. Whenever `bookings` updates, look
+  // up the matching row and adopt the live version. The early
+  // bail when the id is missing or no match is found keeps the
+  // effect safe (a deleted booking, a pre-load state, etc.).
+  useEffect(() => {
+    if (!selectedBooking?.id) return;
+    const fresh = bookings.find((b) => b.id === selectedBooking.id);
+    if (fresh && fresh !== selectedBooking) {
+      setSelectedBooking(fresh);
+    }
+  }, [bookings, selectedBooking?.id]);
 
   // Store Order Drawer States
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
@@ -575,6 +839,12 @@ export function BookingsPage() {
   // Payment Form States
   const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false);
   const paymentSubmissionIdRef = useRef<string | null>(null);
+  // Per CRL-01 (2026-08-01): preallocated refundId is the canonical
+  // idempotency key for /api/bookings/add-refund. A retry after an
+  // uncertain response (network blip, closed tab) replays the original
+  // commit instead of appending a second refund entry. Mirrors the
+  // paymentSubmissionIdRef pattern above.
+  const refundSubmissionIdRef = useRef<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
@@ -588,12 +858,66 @@ export function BookingsPage() {
   const [showVerifyPaymentModal, setShowVerifyPaymentModal] = useState(false);
   const verifySubmissionIdRef = useRef<string | null>(null);
   const [showRefundModal, setShowRefundModal] = useState(false);
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // exception modal state. Mounted when the admin
+  // taps "Apply exception" on the liability panel.
+  // The form lives in `CancellationExceptionModal`;
+  // this state just controls the open/close + the
+  // refresh trigger after a successful submit.
+  const [showExceptionModal, setShowExceptionModal] = useState(false);
+  // The `liabilitySnapshotKey` is bumped on every
+  // mutation that changes the stored liability
+  // (a fresh exception submit, a fresh refund
+  // submit). The panel watches this key (via
+  // the `liability` prop's identity change) and
+  // re-projects. Same pattern as the existing
+  // `cancelPreviewRequestIdRef` — a counter that
+  // forces a refetch when a dependent query
+  // changes its inputs.
+  const [liabilitySnapshotKey, setLiabilitySnapshotKey] = useState(0);
+  // The `openLiabilityRefundModal` function
+  // opens the existing refund modal pre-filled
+  // with the suggested amount. The panel calls
+  // this when the admin taps "Record processed
+  // refund". Same shape as
+  // `openRecordPaymentForBalance` — the parent
+  // owns the refund modal state, the panel
+  // just hands the amount.
+  const openLiabilityRefundModal = (suggestedAmount: number) => {
+    setRefundAmount(String(Math.max(0, Number(suggestedAmount) || 0)));
+    setRefundMethod("cash");
+    setRefundReason("");
+    setShowRefundModal(true);
+  };
   const [verifyAmount, setVerifyAmount] = useState("");
   const [verifyMethod, setVerifyMethod] = useState("gcash");
   const [verifyReference, setVerifyReference] = useState("");
   const [verifyNote, setVerifyNote] = useState("");
   const [verifyPending, setVerifyPending] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // Per feat/payment-success-modal: after a successful
+  // verify-and-record, surface a closing-the-loop modal that
+  // confirms the payment, notes the email that was sent, and
+  // nudges the front desk toward the natural next step
+  // (Confirm Booking). `null` while the modal is closed.
+  const [verifySuccess, setVerifySuccess] = useState<null | {
+    booking: Booking;
+    amount: number;
+    method: string;
+    methodLabel: string;
+    isFullPayment: boolean;
+    remainingBalance: number;
+  }>(null);
+  const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
+  // Per CWB-04 / decision #122 (2026-07-23): when the post-verify
+  // success modal renders the partial-payment variant, the
+  // "Confirm with Balance" CTA opens this form. The form is also
+  // reachable from the drawer's More actions menu for any
+  // `payment-uploaded` row. `null` while the form is closed.
+  const [confirmWithBalanceContext, setConfirmWithBalanceContext] = useState<null | {
+    booking: Booking;
+    currentBalance: number;
+  }>(null);
   const [isRefunding, setIsRefunding] = useState(false);
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
@@ -602,6 +926,18 @@ export function BookingsPage() {
 
   // Move Form States
   const [showMoveForm, setShowMoveForm] = useState(false);
+  // Per MRB-14 (2026-08-03, per decision #180 —
+  // proposed): the add-room modal state. The new
+  // child's dates are NEVER in the form (the server
+  // reads them from the header). The form captures
+  // just the target room + occupancy.
+  const [showAddRoomForm, setShowAddRoomForm] = useState(false);
+  const [addRoomRoomId, setAddRoomRoomId] = useState("");
+  const [addRoomNumAdults, setAddRoomNumAdults] = useState(1);
+  const [addRoomNumChildren, setAddRoomNumChildren] = useState(0);
+  const [addRoomExtraBedCount, setAddRoomExtraBedCount] = useState(0);
+  const [isAddingRoom, setIsAddingRoom] = useState(false);
+  const [addRoomError, setAddRoomError] = useState<string | null>(null);
   const [moveRoomId, setMoveRoomId] = useState("");
   const [moveCheckIn, setMoveCheckIn] = useState("");
   const [moveCheckOut, setMoveCheckOut] = useState("");
@@ -625,25 +961,94 @@ export function BookingsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Walk-in Form States
-  const [guestName, setGuestName] = useState("");
+  // Per fix/walkin-split-name (2026-07-25): the walk-in modal
+  // now mirrors the guest `/book` page — firstName + lastName
+  // are collected separately (two-column grid below) instead
+  // of being shoehorned into a single `guestName` field. The
+  // server combines them into `Booking.guestName` for storage.
+  const [walkinFirstName, setWalkinFirstName] = useState("");
+  const [walkinLastName, setWalkinLastName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [roomType, setRoomType] = useState<string>(() => roomTypes[0]?.value || "");
+  // Per MRB-07 (2026-08-02, per decision #159): the New Booking modal
+  // creates a reservation covering one OR MORE room stays — walk-in
+  // groups, phone bookings and OTA entry all book blocks of rooms. The
+  // room stay list is the single source of truth for the room, guest
+  // and extra-bed selections; the whole reservation shares one lead
+  // guest, one set of dates and one payment. A brand new modal starts
+  // with exactly one stay, so the common single-room case is unchanged
+  // for the desk.
+  const [walkinRoomStays, setWalkinRoomStays] = useState<WalkinRoomStay[]>(
+    () => [createWalkinRoomStay(roomTypes[0]?.value || "")]
+  );
 
-  // Sync default roomType when roomTypes load
+  // Sync the default room type onto the first stay when the room type
+  // catalog finishes loading.
   useEffect(() => {
-    if (!roomType && roomTypes.length > 0) {
-      setRoomType(roomTypes[0].value);
+    if (roomTypes.length > 0) {
+      setWalkinRoomStays((stays) =>
+        stays.some((stay) => stay.roomType)
+          ? stays
+          : stays.map((stay) => ({ ...stay, roomType: roomTypes[0].value }))
+      );
     }
   }, [roomTypes]);
-  const [roomNumber, setRoomNumber] = useState("");
+
+  // Compatibility aliases for the primary room stay. The submit
+  // handler, the price preview and the booking payload all describe the
+  // reservation as a whole; these two keep the "primary room" reads
+  // that predate multi-room support reading the first stay.
+  const roomType = walkinRoomStays[0]?.roomType || "";
+  const roomNumber = walkinRoomStays[0]?.roomNumber || "";
+
+  const updateWalkinRoomStay = (index: number, patch: Partial<WalkinRoomStay>) => {
+    setWalkinRoomStays((stays) =>
+      stays.map((stay, idx) => (idx === index ? { ...stay, ...patch } : stay))
+    );
+  };
   const [checkInDate, setCheckInDate] = useState(() => getManilaDateInfo(config.timezone).todayStr);
   const [checkOutDate, setCheckOutDate] = useState(() => {
     const tomorrow = getManilaDateInfo(config.timezone).manilaDate;
     tomorrow.setDate(tomorrow.getDate() + 1);
     return formatDateInput(tomorrow);
   });
-  const [numGuests, setNumGuests] = useState(1);
+  // Per EXB-07 (2026-08-01, per decision #155): the walk-in
+  // modal gains the same adult/child split + extra bed steppers
+  // the guest `/book` page already has. The split is
+  // staff-edited (the desk can decide a 3-guest booking is
+  // 2 adults + 1 child or 3 adults depending on what the
+  // guest said at the counter); the server derives
+  // `numGuests = numAdults + numChildren` (per CHD-04) so the
+  // booking doc stays consistent. The extra-bed stepper
+  // renders only when the selected room type has
+  // `maxExtraBeds > 0` (per EXB-01's "no separate
+  // `allowsExtraBed` boolean" rule). The legacy single
+  // `numGuests` input is replaced by the 3 steppers; the
+  // total is auto-derived from the adult + child sum.
+  //
+  // Per MRB-07 (2026-08-02, per decision #159): the steppers live on
+  // each room stay, so a reservation distributes its guests across its
+  // rooms instead of repeating one occupancy on every room. These
+  // aliases read the primary stay.
+  const walkinNumAdults = walkinRoomStays[0]?.numAdults ?? 1;
+  const walkinNumChildren = walkinRoomStays[0]?.numChildren ?? 0;
+  const walkinExtraBedCount = walkinRoomStays[0]?.extraBedCount ?? 0;
+  // Derived from the split (per CHD-04): the price preview
+  // and the booking doc's `numGuests` field both use this
+  // sum. The walkin form has no independent `numGuests`
+  // input — the steppers are the only source of truth. Per
+  // MRB-07 the total is summed across every room stay.
+  const numGuests = walkinRoomStays.reduce(
+    (sum, stay) => sum + stay.numAdults + stay.numChildren,
+    0
+  );
+  // Per NBS-07 (2026-07-31): the New Booking modal now records the
+  // source (walk-in / phone / facebook / agoda / etc.) and writes it
+  // to `Booking.source`. Default is still "walk-in" so the common
+  // case is one click. The selector maps the configured, front-desk-
+  // selectable, enabled entries — never the system-assigned ones
+  // (online / walk-in / corporate per NBS-06).
+  const [walkinSource, setWalkinSource] = useState("walk-in");
   const [walkinPayment, setWalkinPayment] = useState("pay-at-hotel");
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
@@ -654,6 +1059,29 @@ export function BookingsPage() {
   const [staffDiscountType, setStaffDiscountType] = useState<"" | "senior" | "pwd">("");
   const [staffVoucherCode, setStaffVoucherCode] = useState("");
   const [isApplyingStaffDiscount, setIsApplyingStaffDiscount] = useState(false);
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed): the
+  // discount-form scope selector (MRB-12-05). Mirrors the
+  // MRB-13 cancel-modal `bookingCancelScope` pattern. Default
+  // `"room"` is the safer choice — staff must opt into the
+  // whole-reservation path explicitly. Resets to `"room"` on
+  // close so a previous session's choice never bleeds into a
+  // new one. Absent (null) is the uninitialised state; the
+  // `useEffect` on `showDiscountForm` flips it to `"room"`
+  // when the modal opens.
+  const [staffDiscountScope, setStaffDiscountScope] = useState<"room" | "reservation" | null>(null);
+
+  // Per NBS-07 (2026-07-31): memo for the New Booking modal's source
+  // selector. Filters the configured list to entries that are
+  // (a) enabled, (b) selectable at the front desk, and (c) not the
+  // currently-selected source (so the user can re-pick the same one
+  // after toggling — the system-assigned sources never appear here
+  // regardless). Default selection in the state (`walkinSource`) is
+  // still "walk-in" for the common case.
+  const selectableBookingSources = useMemo<BookingSourceConfig[]>(() => {
+    return (bookingSources || []).filter(
+      (s) => s.isEnabled && s.selectableAtFrontDesk
+    );
+  }, [bookingSources]);
 
   const onsitePaymentMethodOptions = useMemo(() => {
     const configured = paymentMethods.filter((method) => {
@@ -685,6 +1113,7 @@ export function BookingsPage() {
 
   const [selectedBookingPayments, setSelectedBookingPayments] = useState<OnsitePayment[]>([]);
   const [selectedBookingCharges, setSelectedBookingCharges] = useState<IncidentalCharge[]>([]);
+  const [selectedReservationTotal, setSelectedReservationTotal] = useState<number | null>(null);
   const [chargeCategory, setChargeCategory] = useState<IncidentalChargeCategory>("other");
   const [chargeLabel, setChargeLabel] = useState("");
   const [chargeAmount, setChargeAmount] = useState("");
@@ -692,92 +1121,267 @@ export function BookingsPage() {
   const [isSavingCharge, setIsSavingCharge] = useState(false);
   const [showChargeModal, setShowChargeModal] = useState(false);
 
+  const selectedFolioBookingIds = useMemo(() => {
+    if (!selectedBooking?.id) return [];
+    if (!selectedBooking.reservationId) return [selectedBooking.id];
+    const childIds = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .map((booking) => booking.id);
+    return childIds.length > 0 ? childIds : [selectedBooking.id];
+  }, [bookings, selectedBooking?.id, selectedBooking?.reservationId]);
+
+  const selectedFolioBaseTotal = useMemo(() => {
+    if (!selectedBooking) return 0;
+    if (!selectedBooking.reservationId) return selectedBooking.totalPrice;
+    if (selectedReservationTotal !== null) return selectedReservationTotal;
+    const childTotal = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .reduce((sum, booking) => sum + (Number(booking.totalPrice) || 0), 0);
+    return childTotal || selectedBooking.totalPrice;
+  }, [bookings, selectedBooking, selectedReservationTotal]);
+
+  useEffect(() => {
+    if (!selectedBooking?.reservationId) {
+      setSelectedReservationTotal(null);
+      return;
+    }
+
+    setSelectedReservationTotal(null);
+    const unsubscribe = onSnapshot(
+      doc(db, "reservations", selectedBooking.reservationId),
+      (snapshot) => {
+        const total = Number(snapshot.data()?.totalPrice);
+        setSelectedReservationTotal(snapshot.exists() && Number.isFinite(total) ? total : null);
+      },
+      (error) => {
+        console.error("Error listening to reservation total:", error);
+        setSelectedReservationTotal(null);
+      }
+    );
+    return unsubscribe;
+  }, [selectedBooking?.reservationId]);
+
   useEffect(() => {
     if (!selectedBooking?.id) {
       setSelectedBookingPayments([]);
       return;
     }
 
-    const paymentsRef = collection(db, "bookings", selectedBooking.id, "payments");
-    const unsubscribe = onSnapshot(paymentsRef, (snapshot) => {
-      const paymentsData: OnsitePayment[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        paymentsData.push({
-          id: docSnap.id,
-          type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
-          amount: data.amount || 0,
-          method: data.method || "",
-          note: data.note || "",
-          reason: data.reason || null,
-          approvedBy: data.approvedBy || null,
-          recordedBy: data.recordedBy || "staff",
-          recordedAt: data.recordedAt instanceof Date
-            ? data.recordedAt.toISOString()
-            : data.recordedAt?.toDate
-              ? data.recordedAt.toDate().toISOString()
-              : data.recordedAt || ""
-        });
-      });
-      paymentsData.sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
-      setSelectedBookingPayments(paymentsData);
-    }, (error) => {
-      console.error("Error listening to payments subcollection:", error);
-    });
+    setSelectedBookingPayments([]);
+    const snapshots = new Map<string, OnsitePayment[]>();
+    const sources = selectedBooking.reservationId
+      ? [
+          { key: `reservation:${selectedBooking.reservationId}:payments`, ref: collection(db, "reservations", selectedBooking.reservationId, "payments") },
+          { key: `reservation:${selectedBooking.reservationId}:refunds`, ref: collection(db, "reservations", selectedBooking.reservationId, "refunds") },
+          ...selectedFolioBookingIds.map((bookingId) => ({
+            key: `booking:${bookingId}:payments`,
+            ref: collection(db, "bookings", bookingId, "payments")
+          }))
+        ]
+      : [{
+          key: `booking:${selectedBooking.id}:payments`,
+          ref: collection(db, "bookings", selectedBooking.id, "payments")
+        }];
 
-    return unsubscribe;
-  }, [selectedBooking?.id]);
+    const emitPayments = () => {
+      setSelectedBookingPayments(
+        Array.from(snapshots.values())
+          .flat()
+          .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt))
+      );
+    };
+
+    const unsubscribes = sources.map((source) => onSnapshot(
+      source.ref,
+      (snapshot) => {
+        snapshots.set(source.key, snapshot.docs.map((paymentDoc) => {
+          const data = paymentDoc.data();
+          return {
+            id: `${source.key}:${paymentDoc.id}`,
+            type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
+            amount: Number(data.amount || 0),
+            method: String(data.method || ""),
+            note: String(data.note || ""),
+            transactionReference: data.transactionReference ? String(data.transactionReference) : null,
+            reason: data.reason ? String(data.reason) : null,
+            approvedBy: data.approvedBy ? String(data.approvedBy) : null,
+            recordedBy: String(data.recordedBy || "staff"),
+            recordedAt: data.recordedAt instanceof Date
+              ? data.recordedAt.toISOString()
+              : data.recordedAt?.toDate
+                ? data.recordedAt.toDate().toISOString()
+                : String(data.recordedAt || "")
+          };
+        }));
+        emitPayments();
+      },
+      (error) => {
+        console.error("Error listening to folio payments:", error);
+      }
+    ));
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [selectedBooking?.id, selectedBooking?.reservationId, selectedFolioBookingIds]);
 
   useEffect(() => {
     if (!selectedBooking?.id) {
       setSelectedBookingCharges([]);
       return;
     }
-    const chargesRef = collection(db, "bookings", selectedBooking.id, "charges");
-    const unsubscribe = onSnapshot(chargesRef, (snapshot) => {
-      const charges = snapshot.docs.map((chargeDoc) => {
-        const data = chargeDoc.data();
-        const addedAt = data.addedAt?.toDate ? data.addedAt.toDate().toISOString() : String(data.addedAt || "");
-        return {
-          id: chargeDoc.id,
-          label: String(data.label || "Incidental charge"),
-          amount: Number(data.amount || 0),
-          category: (data.category || "other") as IncidentalChargeCategory,
-          note: String(data.note || ""),
-          addedBy: String(data.addedBy || "staff"),
-          addedAt,
-          voidOf: data.voidOf ? String(data.voidOf) : null
-        };
-      }).sort((a, b) => a.addedAt.localeCompare(b.addedAt));
-      setSelectedBookingCharges(charges);
-    }, (error) => {
-      console.error("Error listening to charges subcollection:", error);
-      toast.error("Could not load incidental charges", "Refresh the booking drawer and try again.");
-    });
-    return unsubscribe;
-  }, [selectedBooking?.id, toast]);
 
-  // Filter available rooms based on type selected
-  const availableRoomsOfType = rooms.filter(
-    r => r.type === roomType && r.status === "available"
-  );
+    setSelectedBookingCharges([]);
+    const snapshots = new Map<string, IncidentalCharge[]>();
+    const sources = selectedBooking.reservationId
+      ? [
+          {
+            key: `reservation:${selectedBooking.reservationId}`,
+            owner: "reservation" as const,
+            ownerId: selectedBooking.reservationId,
+            ref: collection(db, "reservations", selectedBooking.reservationId, "charges")
+          },
+          ...selectedFolioBookingIds.map((bookingId) => ({
+            key: `booking:${bookingId}`,
+            owner: "booking" as const,
+            ownerId: bookingId,
+            ref: collection(db, "bookings", bookingId, "charges")
+          }))
+        ]
+      : [{
+          key: `booking:${selectedBooking.id}`,
+          owner: "booking" as const,
+          ownerId: selectedBooking.id,
+          ref: collection(db, "bookings", selectedBooking.id, "charges")
+        }];
+
+    const emitCharges = () => {
+      setSelectedBookingCharges(
+        Array.from(snapshots.values())
+          .flat()
+          .sort((a, b) => a.addedAt.localeCompare(b.addedAt))
+      );
+    };
+
+    const unsubscribes = sources.map((source) => onSnapshot(
+      source.ref,
+      (snapshot) => {
+        snapshots.set(source.key, snapshot.docs.map((chargeDoc) => {
+          const data = chargeDoc.data();
+          return {
+            id: chargeDoc.id,
+            label: String(data.label || "Incidental charge"),
+            amount: Number(data.amount || 0),
+            category: (data.category || "other") as IncidentalChargeCategory,
+            note: String(data.note || ""),
+            addedBy: String(data.addedBy || "staff"),
+            addedAt: data.addedAt?.toDate ? data.addedAt.toDate().toISOString() : String(data.addedAt || ""),
+            voidOf: data.voidOf ? String(data.voidOf) : null,
+            bookingId: data.bookingId ? String(data.bookingId) : source.owner === "booking" ? source.ownerId : null,
+            ledgerOwner: source.owner,
+            ledgerOwnerId: source.ownerId
+          };
+        }));
+        emitCharges();
+      },
+      (error) => {
+        console.error("Error listening to folio charges:", error);
+        toast.error("Could not load incidental charges", "Refresh the booking drawer and try again.");
+      }
+    ));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [selectedBooking?.id, selectedBooking?.reservationId, selectedFolioBookingIds, toast]);
+
+  // Per EXB-07 (2026-08-01, per decision #155) + MRB-07 (2026-08-02,
+  // per decision #159): the per-type caps (`maxCapacity` +
+  // `maxChildren` + `maxExtraBeds` + `extraBedRate`) that drive the
+  // occupancy steppers and the contextual overflow message are read
+  // per room stay, inside the room list below, rather than once from a
+  // single selected type. Each stay looks up its own type entry from
+  // its selected room TYPE (not its room number) so the overflow
+  // message can render before the desk has picked a specific room —
+  // that's the case where the message is most actionable. The overflow
+  // itself uses the same `requiredExtraBedsFor` helper the server uses
+  // (per decision #153) so the preview matches the server's check.
 
   // Calculate rate per night for the selected room number — per W3.6
   // the rate lives on the room's type, not the room itself.
   const selectedRoomDetails = rooms.find(r => r.roomNumber === roomNumber);
   const selectedRoomType = roomTypes.find(t => t.value === selectedRoomDetails?.type);
   const ratePerNight = selectedRoomType?.pricePerNight || 0;
-  const roomChargeTotal = selectedRoomType
-    ? calculateSeasonalAwareRoomTotal({
-        checkIn: `${checkInDate}T00:00:00Z`,
-        checkOut: `${checkOutDate}T00:00:00Z`,
-        roomType: selectedRoomType.value,
-        baseRate: selectedRoomType.pricePerNight,
-        weekendRate: selectedRoomType.weekendRate,
-        seasonalRateOverrides
-      })
-    : 0;
-  
+
+  // Per MRB-07 (2026-08-02, per decision #159): the room charge is the
+  // sum across every room stay, each priced against its own type — the
+  // same shape the server computes, so the preview the desk sees before
+  // confirming matches what gets written.
+  const walkinRoomChargeTotals = walkinRoomStays.map((stay) => {
+    const stayRoom = rooms.find((r) => r.roomNumber === stay.roomNumber);
+    const stayType = roomTypes.find((t) => t.value === (stayRoom?.type || stay.roomType));
+    if (!stayType || !stay.roomNumber) return 0;
+    return calculateSeasonalAwareRoomTotal({
+      checkIn: `${checkInDate}T00:00:00Z`,
+      checkOut: `${checkOutDate}T00:00:00Z`,
+      roomType: stayType.value,
+      baseRate: stayType.pricePerNight,
+      weekendRate: stayType.weekendRate,
+      seasonalRateOverrides
+    });
+  });
+  const roomChargeTotal = walkinRoomChargeTotals.reduce((sum, amount) => sum + amount, 0);
+
+  // Rooms already claimed by another stay must not be offered again —
+  // the server rejects a duplicate room, so the picker never lets the
+  // desk build one.
+  const availableRoomsForStay = (stayIndex: number) => {
+    const claimed = new Set(
+      walkinRoomStays
+        .filter((_, idx) => idx !== stayIndex)
+        .map((stay) => stay.roomNumber)
+        .filter(Boolean)
+    );
+    return rooms.filter(
+      (r) =>
+        r.type === walkinRoomStays[stayIndex].roomType &&
+        r.status === "available" &&
+        !claimed.has(r.roomNumber)
+    );
+  };
+
+  const addWalkinRoomStay = () => {
+    setWalkinRoomStays((stays) => {
+      const nextType = stays[stays.length - 1]?.roomType || roomTypes[0]?.value || "";
+      const claimed = new Set(stays.map((stay) => stay.roomNumber).filter(Boolean));
+      const nextStay = createWalkinRoomStay(nextType);
+      const firstFree = rooms.find(
+        (r) => r.type === nextType && r.status === "available" && !claimed.has(r.roomNumber)
+      );
+      return [...stays, { ...nextStay, roomNumber: firstFree?.roomNumber || "" }];
+    });
+  };
+
+  const removeWalkinRoomStay = (index: number) => {
+    setWalkinRoomStays((stays) =>
+      stays.length <= 1 ? stays : stays.filter((_, idx) => idx !== index)
+    );
+  };
+
+  // Every stay must name a room, and no stay may exceed its type's caps
+  // without enough extra beds — both are server rejects, so the submit
+  // button stays disabled until the reservation is actually creatable.
+  const walkinRoomStayIssues = walkinRoomStays.map((stay) => {
+    if (!stay.roomNumber) return "room";
+    const stayType = roomTypes.find((t) => t.value === stay.roomType);
+    if (!stayType) return "type";
+    const overflow = requiredExtraBedsFor({
+      numAdults: stay.numAdults,
+      numChildren: stay.numChildren,
+      maxCapacity: Number(stayType.maxCapacity) || 0,
+      maxChildren: Number(stayType.maxChildren) || 0
+    });
+    if (overflow.requiredExtraBeds > stay.extraBedCount) return "capacity";
+    if (stay.numAdults + stay.numChildren < 1) return "empty";
+    return null;
+  });
+  const walkinReservationIsValid = walkinRoomStayIssues.every((issue) => issue === null);
+
   // Calculate nights
   const getNumNights = () => {
     if (!checkInDate || !checkOutDate) return 1;
@@ -791,13 +1395,30 @@ export function BookingsPage() {
   const totalPrice = roomChargeTotal + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
 
   // Table Columns Setup
-  const columns: Array<DataTableColumn<Booking>> = [
+  // Per MRB-07 (2026-08-02, per decision #159): the columns render three
+  // row kinds. A `reservation` row is the group header — it shows the
+  // public reservation reference, the room count, and the reservation's
+  // aggregate money, and it expands rather than opening a workspace. A
+  // `roomStay` row is one room inside an expanded reservation. A
+  // `booking` row is an ungrouped room, exactly as before.
+  const columns: Array<DataTableColumn<BookingListRow>> = [
     {
       key: "bookingRef",
       header: "Reference",
       render: (row) => (
         <span className="inline-flex items-center gap-1.5">
-          {row.bookingRef}
+          {row.listRowKind === "reservation" ? (
+            <>
+              {expandedReservationIds.has(row.listReservationId!) ? (
+                <ChevronDown size={13} className="text-gray-500" aria-hidden="true" />
+              ) : (
+                <ChevronRight size={13} className="text-gray-500" aria-hidden="true" />
+              )}
+              <strong className="font-bold">{row.reservationRef || row.bookingRef}</strong>
+            </>
+          ) : (
+            row.bookingRef
+          )}
           {row.isTestData && (
             <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
           )}
@@ -808,33 +1429,136 @@ export function BookingsPage() {
     {
       key: "roomNumber",
       header: "Room",
-      render: (row) => (
-        <span>
-          Room {row.roomNumber} ({row.roomType.replace("-", " ")})
-        </span>
-      )
+      render: (row) =>
+        row.listRowKind === "reservation" ? (
+          <span className="font-semibold text-gray-700">
+            {row.listRoomCount} rooms
+          </span>
+        ) : (
+          <span>
+            Room {row.roomNumber} ({row.roomType.replace("-", " ")})
+          </span>
+        )
     },
     {
       key: "checkIn",
       header: "Dates",
-      render: (row) => (
-        <span className="text-xs">
-          {row.checkIn} to {row.checkOut} ({row.numNights} nights)
-        </span>
-      )
+      render: (row) => {
+        // Per MRB-14 (2026-08-03, per decision #180 —
+        // proposed): for reservation rows where the
+        // children have diverged from the header's
+        // original shared dates, the Dates column
+        // shows the actual range (MIN(children.checkIn)
+        // / MAX(children.checkOut)) + a "varies by
+        // room" badge. N=1 + legacy null-`reservationId`
+        // rows keep the existing per-booking render
+        // (no children to diverge, no header to read).
+        // Pre-MRB-14 reservations have no
+        // `actualDateRange` (the field is `null`);
+        // they fall through to the per-child render.
+        if (row.listRowKind === "reservation" && row.listReservationHeader?.actualDateRange?.isDivergent) {
+          const range = row.listReservationHeader.actualDateRange;
+          const earliestStr = formatShortDate(range.earliestCheckIn);
+          const latestStr = formatShortDate(range.latestCheckOut);
+          return (
+            <span
+              className="inline-flex flex-col items-start gap-0.5 text-xs"
+              data-testid="reservation-dates-divergent"
+              title={
+                (row.listChildBookings || [])
+                  .map((child: any) => `Room ${child.roomNumber}: ${formatShortDate(child.checkIn)} – ${formatShortDate(child.checkOut)}`)
+                  .join("\n") || "Per-room dates available"
+              }
+            >
+              <span>{earliestStr} to {latestStr}</span>
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-inset ring-amber-200">
+                varies by room
+              </span>
+            </span>
+          );
+        }
+        return (
+          <span className="text-xs">
+            {row.checkIn} to {row.checkOut} ({row.numNights} nights)
+          </span>
+        );
+      }
     },
     {
       key: "totalPrice",
       header: "Total",
       align: "end",
-      render: (row) => <strong className="font-bold">{formatPrice(row.totalPrice)}</strong>
+      render: (row) => (
+        <span className="inline-flex flex-col items-end">
+          <strong className="font-bold">{formatPrice(row.totalPrice)}</strong>
+          {/* Per MRB-07: the reservation row states the group balance
+              so the desk can triage a group without expanding it. */}
+          {row.listRowKind === "reservation" && (row.listReservationBalance || 0) > 0 && (
+            <span className="text-[10px] font-semibold text-amber-700">
+              {formatPrice(row.listReservationBalance!)} due
+            </span>
+          )}
+        </span>
+      )
     },
     {
       key: "status",
       header: "Status",
       render: (row) => (
         <div className="flex items-center gap-1.5">
-          <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+              the reservation row's Status column reads the
+              `Reservation.paymentStatus` from the header
+              (populated by MRB-12-01's listener). The aggregate
+              pill is the desk's at-a-glance read of the group
+              state — it replaces the previous "Mixed" fallback
+              (which collapsed to a generic chip when the
+              children's per-booking statuses disagreed) with a
+              concrete payment state. The legacy "Mixed" wording
+              is kept as the cold-start fallback for the
+              first paint (when the listener hasn't hydrated yet);
+              the next snapshot replaces it with the aggregate
+              pill. N=1 + legacy null-`reservationId` rows keep
+              the per-booking `StatusBadge` byte-equivalent to
+              pre-MRB-12. */}
+          {row.listRowKind === "reservation" && row.listReservationHeader ? (
+            renderReservationPaymentStatusPill(
+              row.listReservationHeader.paymentStatus,
+              row.listReservationHeader.totalPrice,
+              row.listReservationPaidAmount || 0
+            )
+          ) : row.listRowKind === "reservation" && new Set((row.listChildBookings || []).map((child) => child.status)).size > 1 ? (
+            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 ring-1 ring-gray-200">
+              Mixed
+            </span>
+          ) : (
+            <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+          )}
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+              the cancellation-count chip. Renders only on
+              reservation rows (N>1) when the denormalized
+              `cancelledRoomCount` is > 0 — the desk never
+              has to expand a row to know a group has
+              cancellations in it. Legacy N=1 single-row
+              path keeps the existing per-booking
+              `StatusBadge` (the `cancelled` tone is
+              already on the badge). The chip's tooltip
+              lists the cancelled room numbers for
+              quick triage. */}
+          {row.listRowKind === "reservation" && row.listReservationHeader && row.listReservationHeader.cancelledRoomCount > 0 && (
+            <span
+              title={
+                "Cancelled rooms in this reservation: " +
+                (row.listChildBookings || [])
+                  .filter((child) => child.status === "cancelled")
+                  .map((child) => `Room ${child.roomNumber}`)
+                  .join(", ")
+              }
+              className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-200"
+            >
+              {row.listReservationHeader.cancelledRoomCount} cancelled
+            </span>
+          )}
           {row.earlyCheckIn?.status === "requested" && (
             <span
               title="Early check-in pending review"
@@ -863,19 +1587,33 @@ export function BookingsPage() {
       key: "action",
       header: "Actions",
       align: "end",
-      render: (row) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setSelectedBooking(row);
-            setIsDrawerOpen(true);
-          }}
-          className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition"
-        >
-          <Eye size={12} />
-          Details
-        </button>
-      )
+      render: (row) =>
+        // Per MRB-07: a reservation has no single booking workspace, so
+        // its action is to reveal the rooms. Each room then opens its
+        // own drawer as it always has.
+        row.listRowKind === "reservation" ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleReservationExpanded(row.listReservationId!);
+            }}
+            className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition"
+          >
+            {expandedReservationIds.has(row.listReservationId!) ? "Hide rooms" : "Show rooms"}
+          </button>
+        ) : (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedBooking(row);
+              setIsDrawerOpen(true);
+            }}
+            className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition"
+          >
+            <Eye size={12} />
+            Details
+          </button>
+        )
     }
   ];
 
@@ -948,39 +1686,29 @@ export function BookingsPage() {
   // Advanced payment-state filters calculate each booking's live folio during
   // render, so leaving these const declarations below that memo triggers the
   // temporal dead zone in production builds.
-  const getBookingPaymentsTotal = (booking: Booking) => {
-    if (selectedBooking && selectedBooking.id === booking.id) {
-      return selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
-    }
-    return (booking.onsitePayments || []).reduce((sum, payment) => sum + payment.amount, 0);
-  };
-
-  const getBookingStoreCharges = (booking: Booking) => {
-    return storeOrders.filter(
-      (order) =>
-        order.bookingId === booking.id &&
-        order.paymentMethod === "add-to-bill" &&
-        order.status === "delivered" &&
-        order.isBilled
-    );
-  };
-
+  // Per PMH-02 (2026-07-31): folio math is now sourced from the
+  // shared `computeBookingFolio` helper. The wrapper below is a
+  // thin adapter that feeds the React state (selectedBooking,
+  // selectedBookingPayments, selectedBookingCharges, storeOrders)
+  // into the shared function. Eight call sites in this file now
+  // go through this wrapper; the math lives in `shared/` so MRB-04
+  // and any future group-folio change can edit one place.
   const getBookingFolio = (booking: Booking) => {
-    const storeCharges = getBookingStoreCharges(booking);
-    const storeTotal = storeCharges.reduce((sum, order) => sum + order.totalAmount, 0);
-    const paymentsTotal = getBookingPaymentsTotal(booking);
-    const charges = selectedBooking?.id === booking.id ? selectedBookingCharges : [];
-    const chargesTotal = charges.reduce((sum, charge) => sum + charge.amount, 0);
-    const grandTotal = booking.totalPrice + storeTotal + chargesTotal;
-    return {
-      storeCharges,
-      storeTotal,
-      charges,
-      chargesTotal,
-      paymentsTotal,
-      grandTotal,
-      balance: grandTotal - paymentsTotal
-    };
+    const isSelected = selectedBooking?.id === booking.id;
+    const folioBookingIds = isSelected ? selectedFolioBookingIds : [booking.id];
+    return computeBookingFolio({
+      booking: isSelected
+        ? { ...booking, totalPrice: selectedFolioBaseTotal }
+        : booking,
+      // Prefer the live (selected) payments when this is the
+      // selected booking (optimistic-update path). Otherwise
+      // use the booking's persisted payments.
+      selectedBookingPayments: isSelected ? selectedBookingPayments : undefined,
+      persistedPayments: isSelected ? undefined : (booking.onsitePayments || []),
+      selectedBookingCharges: isSelected ? selectedBookingCharges : undefined,
+      folioBookingIds,
+      storeOrders: storeOrders as any
+    });
   };
 
   // FSO-08/09: Advanced filter predicates
@@ -1026,7 +1754,10 @@ export function BookingsPage() {
         booking.roomNumber.includes(s) ||
         booking.guestEmail.toLowerCase().includes(s) ||
         booking.guestPhone.includes(s) ||
-        (booking.paymentReferenceNumber || "").toLowerCase().includes(s) ||
+        // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+        // the canonical payment reference lives on each entry in
+        // the booking's onsitePayments[] ledger. The previous
+        // top-level `paymentReferenceNumber` is retired.
         (booking.onsitePayments || []).some((p) => (p.transactionReference || "").toLowerCase().includes(s))
       );
       const matchesStatus = bookingStatusFilter === "all" || booking.status === bookingStatusFilter;
@@ -1043,7 +1774,237 @@ export function BookingsPage() {
     return rows;
   }, [bookings, bookingSearch, bookingStatusFilter, bookingQuickView, bDateBasis, bDateFrom, bDateTo, bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount]);
 
-  const handleRowClick = (row: Booking) => {
+  // Per MRB-07 (2026-08-02, per decision #159): the main Bookings list
+  // shows one row per RESERVATION, with its room stays nested beneath
+  // it. Operational quick views stay room rows — when the desk is
+  // working arrivals, departures, in-house or needs-attention, the unit
+  // of work is a room, not a reservation, and collapsing rooms into a
+  // group would hide the very rows being worked.
+  const OPERATIONAL_QUICK_VIEWS = new Set([
+    "needs-attention",
+    "arrivals-today",
+    "departures-today",
+    "in-house"
+  ]);
+  const bookingListIsGrouped = !OPERATIONAL_QUICK_VIEWS.has(bookingQuickView);
+
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // a `Map<reservationId, Reservation>` lookup so the row builder
+  // can read the header in O(1). Rebuilt only when the
+  // `reservations` array reference changes (i.e. on snapshot
+  // updates, not on every render).
+  const reservationsMap = useMemo(
+    () => new Map(reservations.map((reservation) => [reservation.id, reservation])),
+    [reservations]
+  );
+
+  // Which reservations the desk has expanded. Collapsed by default so
+  // a group booking reads as one line until the desk asks for the
+  // rooms.
+  const [expandedReservationIds, setExpandedReservationIds] = useState<Set<string>>(new Set());
+  const toggleReservationExpanded = (reservationId: string) => {
+    setExpandedReservationIds((current) => {
+      const next = new Set(current);
+      if (next.has(reservationId)) next.delete(reservationId);
+      else next.add(reservationId);
+      return next;
+    });
+  };
+
+  // The flattened row list the table renders: a synthetic reservation
+  // row followed by its room stays when expanded. A reservation is only
+  // grouped when it actually holds more than one of the rows currently
+  // in view — a single-room reservation, a legacy booking with no
+  // reservation link, or a group whose other rooms were filtered out
+  // all render as plain room rows, so filters never lie about what is
+  // in the result set.
+  const groupedRows = useMemo<BookingListRow[]>(() => {
+    if (!bookingListIsGrouped) {
+      return filteredRows.map((booking) => ({ ...booking, listRowKind: "booking" as const }));
+    }
+
+    const byReservation = new Map<string, Booking[]>();
+    for (const booking of filteredRows) {
+      const reservationId = booking.reservationId;
+      if (!reservationId) continue;
+      const group = byReservation.get(reservationId);
+      if (group) group.push(booking);
+      else byReservation.set(reservationId, [booking]);
+    }
+
+    const emitted = new Set<string>();
+    const rows: BookingListRow[] = [];
+    for (const booking of filteredRows) {
+      if (emitted.has(booking.id)) continue;
+      const reservationId = booking.reservationId;
+      const group = reservationId ? byReservation.get(reservationId) : undefined;
+
+      if (!reservationId || !group || group.length < 2) {
+        rows.push({ ...booking, listRowKind: "booking" });
+        emitted.add(booking.id);
+        continue;
+      }
+
+      const sorted = [...group].sort(
+        (a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0)
+      );
+      // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+      // the row's `totalPrice` and `listReservationBalance` are
+      // read from the `Reservation` header + the reservation-scope
+      // paid-amount aggregate (`reservations` + `reservationPaidAmount`
+      // from the AdminContext listener). The header doesn't filter,
+      // so the previously-existing bug — where the row's
+      // `listReservationBalance` summed the FILTERED children and
+      // silently dropped any child hidden by an active filter —
+      // is fixed by construction. When the header is not yet in
+      // memory (cold-start race; the listener hydrates on the
+      // first snapshot), fall back to the child sum so the first
+      // paint byte-matches the pre-MRB-12 surface; the listener's
+      // next tick replaces the row with the header-sourced values.
+      const reservationHeader = reservationsMap.get(reservationId);
+      const paidAmount = reservationPaidAmount[reservationId] || 0;
+      const reservationTotal = reservationHeader
+        ? reservationHeader.totalPrice
+        : sorted.reduce((sum, child) => sum + (child.totalPrice || 0), 0);
+      const reservationBalance = reservationHeader
+        ? Math.max(0, reservationHeader.totalPrice - paidAmount)
+        : sorted.reduce((sum, child) => sum + getBookingFolio(child).balance, 0);
+      // The reservation row borrows the lead room's identity for the
+      // fields every column already knows how to read, and overrides
+      // the ones that are reservation-scoped (money, room label,
+      // occupancy). The columns special-case `listRowKind` where the
+      // reservation needs to read differently from a room.
+      rows.push({
+        ...sorted[0],
+        id: `reservation_${reservationId}`,
+        listRowKind: "reservation",
+        listReservationId: reservationId,
+        listRoomCount: sorted.length,
+        listChildBookings: sorted,
+        listReservationBalance: reservationBalance,
+        totalPrice: reservationTotal,
+        numGuests: sorted.reduce((sum, child) => sum + (child.numGuests || 0), 0),
+        // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+        // attach the header + paid-amount aggregate so the
+        // Status column (MRB-12-02) can render the aggregate
+        // `paymentStatus` + cancellation-count chip without a
+        // second lookup.
+        listReservationHeader: reservationHeader,
+        listReservationPaidAmount: paidAmount
+      });
+      emitted.add(booking.id);
+
+      if (expandedReservationIds.has(reservationId)) {
+        for (const child of sorted) {
+          rows.push({ ...child, listRowKind: "roomStay", listReservationId: reservationId });
+          emitted.add(child.id);
+        }
+      } else {
+        for (const child of sorted) emitted.add(child.id);
+      }
+    }
+    return rows;
+  }, [filteredRows, bookingListIsGrouped, expandedReservationIds, reservationsMap, reservationPaidAmount]);
+
+  // Per MRB-07 (2026-08-02, per decision #159): the reservation context
+  // for whatever booking the drawer currently has open. `null` for a
+  // legacy booking with no reservation link, and for a reservation that
+  // only ever held one room — in both cases there is no "other rooms"
+  // to disambiguate against, so the drawer stays exactly as it was.
+  const selectedReservationContext = useMemo(() => {
+    if (!selectedBooking?.reservationId) return null;
+    const siblings = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .sort((a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0));
+    if (siblings.length < 2) return null;
+    return {
+      reservationId: selectedBooking.reservationId,
+      reservationRef: selectedBooking.reservationRef || "",
+      rooms: siblings,
+      roomCount: siblings.length,
+      position: siblings.findIndex((booking) => booking.id === selectedBooking.id) + 1
+    };
+  }, [selectedBooking, bookings]);
+
+  // Every action inside a multi-room reservation states what it touches.
+  // Without this the desk cannot tell whether "Cancel Booking" drops one
+  // room or the whole group — the single most expensive ambiguity in a
+  // group booking. Rendered only when there IS more than one room, so
+  // ordinary single-room work is not cluttered with a label that would
+  // always read the same.
+  const renderActionScope = (scope: "room" | "reservation") => {
+    if (!selectedReservationContext) return null;
+    return (
+      <span
+        className={cn(
+          "ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+          scope === "room"
+            ? "bg-white/20 text-current"
+            : "bg-amber-100 text-amber-800"
+        )}
+      >
+        {scope === "room" ? "This room" : "All rooms"}
+      </span>
+    );
+  };
+
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed): the
+  // reservation-scope payment-state pill rendered in the
+  // Bookings table's Status column for reservation rows
+  // (MRB-12-02). The pill is the aggregate read: it states the
+  // group's payment state from the `Reservation.paymentStatus`
+  // header field (populated by MRB-12-01's listener) and
+  // surfaces the due amount when the group is not yet settled.
+  // The legacy "Mixed" wording is gone — the desk sees a
+  // concrete state instead of a generic chip when the children
+  // disagree. N=1 + legacy null-`reservationId` paths do not
+  // render this pill (the per-booking `StatusBadge` byte-
+  // equivalent is preserved).
+  const renderReservationPaymentStatusPill = (
+    status: string,
+    totalPrice: number,
+    paidAmount: number
+  ) => {
+    // Map the reservation's `paymentStatus` to the same tone
+    // set `StatusBadge` uses for booking statuses (the
+    // reservation enum mirrors the booking status flow but
+    // uses kebab-cased labels). The `Awaiting` variant
+    // surfaces the outstanding amount — the desk sees the
+    // group's due total in one glance without expanding the
+    // row.
+    const tone: Record<string, { label: string; className: string }> = {
+      "awaiting-payment": { label: "Awaiting", className: "bg-blue-50 text-blue-700 ring-blue-200" },
+      "payment-uploaded": { label: "Proof pending", className: "bg-violet-50 text-violet-700 ring-violet-200" },
+      "payment-confirmed": { label: "Verified", className: "bg-blue-50 text-blue-700 ring-blue-200" },
+      confirmed: { label: "Confirmed", className: "bg-green-50 text-green-700 ring-green-200" },
+      "in-house": { label: "In-house", className: "bg-primary-light text-primary-dark ring-primary" },
+      completed: { label: "Completed", className: "bg-gray-100 text-gray-600 ring-gray-200" },
+      cancelled: { label: "Cancelled", className: "bg-red-50 text-red-700 ring-red-200" }
+    };
+    const entry = tone[status] || tone["awaiting-payment"];
+    const balance = Math.max(0, totalPrice - paidAmount);
+    // Per MRB-12-02: surface the outstanding amount when
+    // the group is not yet settled. Settled groups show the
+    // state label only (no "₱0 due" noise).
+    const showDue = balance > 0 && status !== "cancelled";
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold ring-1 ring-inset",
+          entry.className
+        )}
+      >
+        <span>{entry.label}</span>
+        {showDue && <span className="text-[9px] font-semibold opacity-80">₱{Math.round(balance).toLocaleString()} due</span>}
+      </span>
+    );
+  };
+
+  const handleRowClick = (row: BookingListRow) => {
+    if (row.listRowKind === "reservation") {
+      toggleReservationExpanded(row.listReservationId!);
+      return;
+    }
     setSelectedBooking(row);
     setIsDrawerOpen(true);
   };
@@ -1114,7 +2075,64 @@ export function BookingsPage() {
     return paid >= row.totalPrice && row.totalPrice > 0;
   };
 
-  const renderBookingCard = (row: Booking) => (
+  const renderBookingCard = (row: BookingListRow) => {
+    // Per MRB-07 (2026-08-02, per decision #159): on a phone a
+    // reservation renders as a compact summary card that expands to its
+    // room cards, rather than repeating the full room detail of its
+    // lead room.
+    if (row.listRowKind === "reservation") {
+      const mixedStatus = new Set((row.listChildBookings || []).map((child) => child.status)).size > 1;
+      return (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5">
+              {expandedReservationIds.has(row.listReservationId!) ? (
+                <ChevronDown size={13} className="text-gray-500" aria-hidden="true" />
+              ) : (
+                <ChevronRight size={13} className="text-gray-500" aria-hidden="true" />
+              )}
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
+                REF: {row.reservationRef || row.bookingRef}
+              </span>
+              {row.isTestData && (
+                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+              )}
+            </span>
+            {mixedStatus ? (
+              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 ring-1 ring-gray-200">
+                Mixed
+              </span>
+            ) : (
+              <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+            )}
+          </div>
+          <p className="text-base font-bold text-gray-900">{row.guestName}</p>
+          <div className="flex items-center gap-3 text-xs text-gray-600">
+            <span className="flex items-center gap-1">
+              <Calendar size={12} className="text-gray-400" aria-hidden="true" />
+              {row.checkIn} – {row.checkOut}
+            </span>
+            <span className="flex items-center gap-1">
+              <BedDouble size={12} className="text-gray-400" aria-hidden="true" />
+              {row.listRoomCount} rooms
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <strong className="text-sm font-bold text-gray-900">{formatPrice(row.totalPrice)}</strong>
+            {(row.listReservationBalance || 0) > 0 && (
+              <span className="text-[11px] font-semibold text-amber-700">
+                {formatPrice(row.listReservationBalance!)} due
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] font-semibold text-gray-500">
+            Tap to {expandedReservationIds.has(row.listReservationId!) ? "hide" : "show"} rooms
+          </p>
+        </div>
+      );
+    }
+
+    return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5">
@@ -1139,7 +2157,28 @@ export function BookingsPage() {
         </span>
       </div>
       <p className="text-xs text-gray-500">
-        {row.numNights} {row.numNights === 1 ? "night" : "nights"} · {row.numGuests} {row.numGuests === 1 ? "guest" : "guests"}
+        {row.numNights} {row.numNights === 1 ? "night" : "nights"} · {(() => {
+          // Per EXB-08 (2026-08-01, per decision #156):
+          // the Bookings table row now shows the
+          // adult/child split when both fields are
+          // present, with the extra bed count appended
+          // when > 0. Legacy pre-CHD bookings read as
+          // a single `numGuests` total. Matches the
+          // drawer header + receipt PDF + the email
+          // helper so the staff surfaces stay in
+          // lockstep.
+          const numAdults = Number((row as any).numAdults);
+          const numChildren = Number((row as any).numChildren);
+          const extraBedCount = Number((row as any).extraBedCount);
+          if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+            const splitLabel = `${numAdults}A + ${numChildren}C`;
+            const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+              ? ` + ${extraBedCount} bed${extraBedCount === 1 ? "" : "s"}`
+              : "";
+            return <span title={`${row.numGuests} guest${row.numGuests === 1 ? "" : "s"} total`}>{splitLabel}{extraLabel}</span>;
+          }
+          return <>{row.numGuests} {row.numGuests === 1 ? "guest" : "guests"}</>;
+        })()}
       </p>
       <div className="flex items-center justify-between gap-2">
         <p className="text-lg font-bold text-primary-dark">{formatPrice(row.totalPrice)}</p>
@@ -1167,7 +2206,8 @@ export function BookingsPage() {
         </button>
       </div>
     </div>
-  );
+    );
+  };
 
   const renderOrderCard = (row: any) => (
     <div className="space-y-2">
@@ -1340,12 +2380,141 @@ export function BookingsPage() {
     }
   };
 
-  const handleCancelBooking = async (reason: string) => {
+  const handleCancelBooking = async (reason: string, scope: "room" | "reservation" = "room") => {
     if (!selectedBooking) return;
-    updateBookingStatus(selectedBooking.id, "cancelled", { cancellationReason: reason });
+    // Per MRB-13 (2026-08-02, per decision #166): the
+    // scope selector flows into `updateBookingStatus`
+    // as the 4th arg (`options.scope`). The default
+    // `"room"` is the legacy per-child path (byte-
+    // compatible with pre-MRB-13). The
+    // reservation-scope path cancels every cancellable
+    // child of the reservation in one transaction +
+    // decrements the shared voucher / corporate code
+    // `usageCount` exactly once per code. The
+    // `confirmLabel` already states the room count
+    // when `selectedReservationContext` is set, so the
+    // staff sees what they're about to cancel before
+    // they tap.
+    updateBookingStatus(selectedBooking.id, "cancelled", { cancellationReason: reason }, { scope });
     setSelectedBooking(prev => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
-    toast.success("Booking cancelled", reason ? `Reason: ${reason}` : "Guest will be notified by email.");
+    toast.success(
+      "Booking cancelled",
+      scope === "reservation"
+        ? `All rooms in this reservation have been cancelled. ${reason ? `Reason: ${reason}` : "Guest will be notified by email."}`
+        : reason ? `Reason: ${reason}` : "Guest will be notified by email."
+    );
     setShowBookingCancelForm(false);
+    // Per MRB-13: reset the scope on close so a
+    // previous session's choice never bleeds into a
+    // new session. The default `"room"` is the safer
+    // choice.
+    setBookingCancelScope("room");
+    cancelPreviewRequestIdRef.current += 1;
+    // Per CRL-06: drop the preview state on close
+    // so a previous session's breakdown never
+    // bleeds into a new session.
+    setCancelPreview(null);
+    setCancelPreviewError(null);
+  };
+
+  // Per CRL-06 (2026-08-02): the cancellation preview
+  // fetch. The cancel modal calls this on open
+  // (mounted by the `useEffect` below) and on scope
+  // flip. The endpoint is `/api/bookings/cancel-preview`
+  // (apiRouter's flat `[domain, action]` shape — same
+  // pattern as `add-payment` / `create-walkin`). The
+  // staff path uses the staff's ID token; the body
+  // carries `bookingId` + `scope` so the server can
+  // resolve the looked-up booking. The fetch never
+  // mutates anything — the user sees the financial
+  // breakdown before tapping confirm.
+  const fetchCancelPreview = async (bookingId: string, scope: "room" | "reservation") => {
+    const requestId = ++cancelPreviewRequestIdRef.current;
+    setCancelPreviewLoading(true);
+    setCancelPreviewError(null);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/cancel-preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, scope })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to load the cancellation preview.");
+      }
+      if (requestId !== cancelPreviewRequestIdRef.current) return;
+      setCancelPreview(data.preview);
+    } catch (err: any) {
+      // Per CRL-06: the preview is best-effort. The
+      // destructive cancel still proceeds (the user
+      // can confirm with the panel in the error
+      // state). The error surfaces in the panel so
+      // the staff knows the breakdown is unavailable.
+      if (requestId === cancelPreviewRequestIdRef.current) {
+        setCancelPreview(null);
+        setCancelPreviewError(err?.message || "Could not load the cancellation preview.");
+      }
+    } finally {
+      if (requestId === cancelPreviewRequestIdRef.current) {
+        setCancelPreviewLoading(false);
+      }
+    }
+  };
+
+  // Per CRL-06: trigger the preview fetch when the
+  // cancel modal opens or the scope flips. The
+  // `useEffect` is intentionally scoped to the
+  // `[showBookingCancelForm, selectedBooking?.id,
+  // bookingCancelScope]` triple — a re-fetch fires
+  // when any of those change. The destructive
+  // cancel never auto-fires this (the modal close
+  // path clears state in `handleCancelBooking`).
+  useEffect(() => {
+    if (showBookingCancelForm && selectedBooking?.id) {
+      void fetchCancelPreview(selectedBooking.id, bookingCancelScope);
+    }
+  }, [showBookingCancelForm, selectedBooking?.id, bookingCancelScope]);
+
+  // Per feat/payment-success-modal: the success modal's
+  // "Confirm Booking" CTA runs the `payment-confirmed` →
+  // `confirmed` transition. The onSnapshot listener will
+  // refresh `selectedBooking` on the next tick (see
+  // fix/bookings-drawer-stale-state), and the modal closes
+  // regardless of outcome so the staff never gets stuck
+  // behind it on a slow network.
+  const handleConfirmBookingFromSuccess = async () => {
+    if (!verifySuccess) return;
+    setConfirmingBookingFromSuccess(true);
+    try {
+      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+    } catch (err: any) {
+      toast.error("Failed to confirm booking", err?.message || "Please try again.");
+    } finally {
+      setConfirmingBookingFromSuccess(false);
+      setVerifySuccess(null);
+    }
+  };
+
+  // Per CWB-04 / decision #122 (2026-07-23): the post-verify
+  // partial-payment variant's "Confirm with Balance" CTA opens
+  // the confirm-with-balance form. We carry the just-computed
+  // `remainingBalance` from the success modal so the form can
+  // preview the right number even before the onSnapshot
+  // listener catches up. The form is the source of truth for
+  // the actual transition; it calls `confirmBookingWithBalance`
+  // and the snapshot listener refreshes the drawer.
+  const openConfirmWithBalanceFromSuccess = () => {
+    if (!verifySuccess) return;
+    setConfirmWithBalanceContext({
+      booking: verifySuccess.booking,
+      currentBalance: Math.max(0, verifySuccess.remainingBalance)
+    });
+    setVerifySuccess(null);
   };
 
   const handleCancelOrder = async (reason: string) => {
@@ -1371,11 +2540,28 @@ export function BookingsPage() {
     const pdfWindow = window.open("", "_blank");
     pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing registration PDF...</p>");
 
+    // Per the 2026-07-24 follow-up to the HEIC decode timeout: the
+    // generator has multiple awaits (brand-logo fetch, Firebase
+    // Storage `getBlob`, FileReader, `canvas.toDataURL`, etc.) and
+    // only the image-decode step is individually bounded. A single
+    // hung await anywhere in the chain leaves the placeholder tab
+    // open forever. This outer timeout guarantees the tab is closed
+    // and a clear error toast is shown no matter where the hang is.
+    const PDF_GENERATION_TIMEOUT_MS = 20_000;
+    let timeoutHandle: number | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = window.setTimeout(
+        () => reject(new Error("Registration PDF generation took too long. The guest ID photo may be too large or the network is slow — try again or re-upload a smaller ID.")),
+        PDF_GENERATION_TIMEOUT_MS
+      );
+    });
+
     try {
-      const pdf = new jsPDF({ unit: "mm", format: "a4" });
-      await registerBrandPdfFonts(pdf);
-      const logoDataUrl = await getPdfBrandLogoDataUrl();
-      setPdfFont(pdf, "Inter");
+      const buildAndOpen = async () => {
+        const pdf = new jsPDF({ unit: "mm", format: "a4" });
+        await registerBrandPdfFonts(pdf);
+        const logoDataUrl = await getPdfBrandLogoDataUrl();
+        setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -1443,7 +2629,30 @@ export function BookingsPage() {
     y += 4.4;
     pdf.text(`Check-in: ${b.checkIn}  |  Check-out: ${b.checkOut}`, marginL + 5, y);
     y += 4.4;
-    pdf.text(`Guests: ${b.numGuests}  |  Nights: ${b.numNights}`, marginL + 5, y);
+    // Per EXB-08 (2026-08-01, per decision #156): the
+    // receipt PDF's occupancy line now shows the
+    // adult/child split when both fields are present,
+    // with the extra bed count appended when > 0.
+    // Legacy pre-CHD bookings read as a single
+    // `numGuests` total. The "Guests:" prefix is
+    // preserved for the legacy case so the receipt
+    // stays scannable; the split case uses the
+    // compact "2A + 1C + 1 extra bed" form to fit
+    // the single-line PDF layout.
+    {
+      const numAdults = Number((b as any).numAdults);
+      const numChildren = Number((b as any).numChildren);
+      const extraBedCount = Number((b as any).extraBedCount);
+      if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+        const splitLabel = `${numAdults}A + ${numChildren}C (${b.numGuests})`;
+        const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+          ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+          : "";
+        pdf.text(`Guests: ${splitLabel}${extraLabel}  |  Nights: ${b.numNights}`, marginL + 5, y);
+      } else {
+        pdf.text(`Guests: ${b.numGuests}  |  Nights: ${b.numNights}`, marginL + 5, y);
+      }
+    }
     y += 10;
 
     const contentTop = y;
@@ -1465,6 +2674,13 @@ export function BookingsPage() {
       ["Nationality", reg?.nationality || "—"],
       ["Date of Birth", reg?.dateOfBirth || "—"],
       ["Gender", reg?.gender || "—"],
+      // Per Decision #121: render Purpose of stay inline; if the staff
+      // picked "Other" the free-text reason (reg.otherPurpose) is
+      // appended to the same line so it stays in the same row.
+      ["Purpose of stay", reg?.purposeOfStay
+        ? `${reg.purposeOfStay}${reg.purposeOfStay.toLowerCase() === "other" && reg?.otherPurpose ? ` — ${reg.otherPurpose}` : ""}`
+        : "—"
+      ],
       ["ID Type", reg?.idType || "—"],
       ["ID Number", reg?.idNumber || "—"],
       ["Address", reg?.address || "—"],
@@ -1504,24 +2720,13 @@ export function BookingsPage() {
 
     if (b.guestIdPhotoUrl) {
       try {
-        const response = await fetch(b.guestIdPhotoUrl);
-        const blob = await response.blob();
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-
-        const img = new Image();
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = reject;
-          img.src = base64;
-        });
+        const guestIdRef = storageRef(storage, b.guestIdPhotoUrl);
+        const blob = await getBlob(guestIdRef);
+        const pdfImage = await normalizePdfImageToJpeg(blob);
 
         const maxW = idBoxW - 2;
         const maxH = idBoxH - 2;
-        const imgRatio = img.width / img.height;
+        const imgRatio = pdfImage.width / pdfImage.height;
         let drawW = maxW;
         let drawH = drawW / imgRatio;
         if (drawH > maxH) {
@@ -1531,18 +2736,14 @@ export function BookingsPage() {
 
         pdf.setDrawColor(200, 200, 200);
         pdf.setLineWidth(0.3);
+        const drawX = idX + (idBoxW - drawW) / 2;
+        const drawY = idBoxY + (idBoxH - drawH) / 2;
         pdf.rect(idX, idBoxY, idBoxW, idBoxH);
-        pdf.addImage(base64, getJsPdfImageFormat(base64, blob.type), idX + 1, idBoxY + 1, drawW, drawH);
+        pdf.addImage(pdfImage.dataUrl, "JPEG", drawX, drawY, drawW, drawH);
       } catch {
-        // Failed to fetch image — show placeholder
-        pdf.setDrawColor(200, 200, 200);
-        pdf.setLineWidth(0.3);
-        pdf.setLineDashPattern([3, 3], 0);
-        pdf.rect(idX, idBoxY, idBoxW, idBoxH);
-        pdf.setLineDashPattern([], 0);
-        pdf.setFontSize(8);
-        pdf.setTextColor(150, 150, 150);
-        pdf.text("Attach ID here", idX + idBoxW / 2, idBoxY + idBoxH / 2 + 1, { align: "center" });
+        throw new Error(
+          "The uploaded guest ID could not be added to the registration PDF. Please re-upload the ID and try again."
+        );
       }
     } else {
       pdf.setDrawColor(200, 200, 200);
@@ -1644,20 +2845,53 @@ export function BookingsPage() {
       brandRgb
     );
 
-      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-registration.pdf`, pdfWindow);
-      toast.success(
-        "Registration PDF ready",
-        result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
-      );
+        const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-registration.pdf`, pdfWindow);
+        toast.success(
+          "Registration PDF ready",
+          result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
+        );
+        return result;
+      };
+      await Promise.race([buildAndOpen(), timeoutPromise]);
     } catch (error) {
       pdfWindow?.close();
       toast.error("Registration PDF failed", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      if (timeoutHandle !== undefined) {
+        window.clearTimeout(timeoutHandle);
+      }
     }
   };
 
   const printBookingReceiptPDF = async () => {
     if (!selectedBooking) return;
     const b = selectedBooking;
+    const isReservationReceipt = Boolean(b.reservationId);
+    const receiptBookings = isReservationReceipt
+      ? bookings
+          .filter((booking) => booking.reservationId === b.reservationId)
+          .sort((left, right) => {
+            const positionDifference = Number(left.reservationPosition || 0) - Number(right.reservationPosition || 0);
+            return positionDifference || left.bookingRef.localeCompare(right.bookingRef);
+          })
+      : [b];
+    if (receiptBookings.length === 0) receiptBookings.push(b);
+    const receiptReference = isReservationReceipt
+      ? (b.reservationRef || b.bookingRef)
+      : b.bookingRef;
+    const receiptReferenceLabel = isReservationReceipt ? "Reservation Reference" : "Booking Reference";
+    const receiptFileStem = receiptReference || b.bookingRef || "booking";
+    const getReceiptRoomLabel = (booking: Booking, index: number) =>
+      isReservationReceipt
+        ? `Room ${booking.reservationPosition || index + 1} of ${receiptBookings.length} — ${booking.roomType}`
+        : booking.roomType;
+    const getReceiptAttribution = (bookingId?: string | null) => {
+      if (!isReservationReceipt || !bookingId) return "";
+      const bookingIndex = receiptBookings.findIndex((booking) => booking.id === bookingId);
+      if (bookingIndex < 0) return "";
+      const booking = receiptBookings[bookingIndex];
+      return ` — Room ${booking.reservationPosition || bookingIndex + 1}`;
+    };
     const pdfWindow = window.open("", "_blank");
     pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing booking receipt PDF...</p>");
 
@@ -1684,7 +2918,7 @@ export function BookingsPage() {
           y = drawPdfBrandHeader(pdf, {
             logoDataUrl,
             title: "Booking Confirmation Receipt",
-            subtitle: `Booking Reference: ${b.bookingRef}`,
+            subtitle: `${receiptReferenceLabel}: ${receiptReference}`,
             meta: `Generated: ${generatedAt}`,
             brandRgb,
             printLight: true,
@@ -1762,7 +2996,7 @@ export function BookingsPage() {
       y = drawPdfBrandHeader(pdf, {
         logoDataUrl,
         title: "Booking Confirmation Receipt",
-        subtitle: `Booking Reference: ${b.bookingRef}`,
+        subtitle: `${receiptReferenceLabel}: ${receiptReference}`,
         meta: `Generated: ${generatedAt}`,
         brandRgb,
         printLight: true,
@@ -1785,7 +3019,7 @@ export function BookingsPage() {
       setPdfFont(pdf, "Inter");
       pdf.setFontSize(7.5);
       pdf.setTextColor(90, 90, 90);
-      pdf.text(`Booking ${b.bookingRef} • Generated ${generatedAt}`, marginL + 5, y + 6.2, { charSpace: 0 });
+      pdf.text(`${isReservationReceipt ? "Reservation" : "Booking"} ${receiptReference} • Generated ${generatedAt}`, marginL + 5, y + 6.2, { charSpace: 0 });
       y += 12; // Reduced gap
 
       // ── Guest & Stay Information ──
@@ -1796,11 +3030,57 @@ export function BookingsPage() {
         { label: "Email", value: b.guestEmail },
         { label: "Phone", value: b.guestPhone }
       ], marginL, y, cardW);
+      const receiptGuestCount = receiptBookings.reduce((sum, booking) => sum + (Number(booking.numGuests) || 0), 0);
       const stayRows = [
-        { label: "Room", value: `${b.roomNumber} (${b.roomType})` },
+        {
+          label: isReservationReceipt ? "Rooms" : "Room",
+          value: isReservationReceipt
+            ? `${receiptBookings.length} room${receiptBookings.length === 1 ? "" : "s"} — itemized below`
+            : `${b.roomNumber} (${b.roomType})`
+        },
         { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
-        { label: "Stay", value: `${b.numNights} night${b.numNights === 1 ? "" : "s"} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}` },
-        { label: "Rate", value: `${formatAmount(b.ratePerNight)} / night` }
+        // Per MRB-14 (2026-08-03, per decision #180): when
+        // the reservation's children have diverged from the
+        // header's original shared dates, the receipt adds
+        // an "Actual range" line so the printed copy matches
+        // what the guest sees in the email + the desk sees
+        // in the Bookings table. The per-room dates are
+        // still printed per-row in the pricing breakdown
+        // below. Pre-MRB-14 reservations carry no
+        // `actualDateRange` and the line is hidden.
+        ...((isReservationReceipt && b.reservationId && reservationsMap.get(b.reservationId)?.actualDateRange?.isDivergent)
+          ? [{
+              label: "Actual range",
+              value: `${formatShortDate(reservationsMap.get(b.reservationId)!.actualDateRange!.earliestCheckIn)} to ${formatShortDate(reservationsMap.get(b.reservationId)!.actualDateRange!.latestCheckOut)} (varies by room)`
+            }]
+          : []),
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the receipt's "Stay" line shows the adult/child
+        // split when both fields are present, with the
+        // extra bed count appended when > 0. Legacy pre-CHD
+        // bookings read as a single `numGuests` total.
+        { label: "Stay", value: (() => {
+          if (isReservationReceipt) {
+            const nightsLabel = `${b.numNights} night${b.numNights === 1 ? "" : "s"}`;
+            return `${nightsLabel} • ${receiptGuestCount} guest${receiptGuestCount === 1 ? "" : "s"} across ${receiptBookings.length} room${receiptBookings.length === 1 ? "" : "s"}`;
+          }
+          const numAdults = Number((b as any).numAdults);
+          const numChildren = Number((b as any).numChildren);
+          const extraBedCount = Number((b as any).extraBedCount);
+          const nightsLabel = `${b.numNights} night${b.numNights === 1 ? "" : "s"}`;
+          if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+            const splitLabel = `${numAdults}A + ${numChildren}C (${b.numGuests} total)`;
+            const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+              ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+              : "";
+            return `${nightsLabel} • ${splitLabel}${extraLabel}`;
+          }
+          return `${nightsLabel} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}`;
+        })() },
+        {
+          label: "Rate",
+          value: isReservationReceipt ? "See room allocations" : `${formatAmount(b.ratePerNight)} / night`
+        }
       ];
       if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
         stayRows.push({ label: "Breakfast", value: `${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night` });
@@ -1815,7 +3095,72 @@ export function BookingsPage() {
 
       pdf.setFontSize(10);
       pdf.setTextColor(50, 50, 50);
-      if (b.rateBreakdown?.roomLines?.length) {
+      if (isReservationReceipt) {
+        receiptBookings.forEach((receiptBooking, bookingIndex) => {
+          const roomLabel = getReceiptRoomLabel(receiptBooking, bookingIndex);
+          const breakdown = receiptBooking.rateBreakdown;
+          checkNewPage(12 + (
+            (breakdown?.roomLines?.length || 1)
+            + (breakdown?.addOns?.length || 0)
+            + (breakdown?.deductions?.length || 0)
+          ) * 5);
+
+          pdf.setFontSize(9.2);
+          pdf.setTextColor(...brandRgb);
+          pdf.setFont("helvetica", "bold");
+          pdf.text(roomLabel, labelColX, y, { charSpace: 0 });
+          pdf.text(receiptBooking.bookingRef, amountX, y, { align: "right", charSpace: 0 });
+          setPdfFont(pdf, "Inter");
+          y += 4.4;
+
+          // Per MRB-14 (2026-08-03, per decision #180):
+          // when the reservation's children have diverged,
+          // print the per-room dates inline under the
+          // room label so the printed receipt matches the
+          // "Actual range" line in the Stay card above and
+          // the per-room dates in the email. Otherwise the
+          // per-room dates match the reservation header
+          // dates and are omitted (no duplication).
+          const reservationActualRange = b.reservationId
+            ? reservationsMap.get(b.reservationId)?.actualDateRange
+            : null;
+          if (reservationActualRange?.isDivergent && receiptBooking.checkIn && receiptBooking.checkOut) {
+            pdf.setFontSize(8.0);
+            pdf.setTextColor(120, 120, 120);
+            const roomDatesLabel = `  ${receiptBooking.checkIn} → ${receiptBooking.checkOut}`;
+            pdf.text(roomDatesLabel, labelColX, y, { charSpace: 0 });
+            y += 4.0;
+          }
+
+          if (breakdown?.roomLines?.length) {
+            breakdown.roomLines.forEach((line) => {
+              drawAmountRow(
+                `  ${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`,
+                formatAmount(line.subtotal)
+              );
+            });
+            breakdown.addOns.forEach((line) => {
+              drawAmountRow(`  ${line.label}`, formatAmount(line.amount));
+            });
+            breakdown.deductions.forEach((line) => {
+              drawAmountRow(`  ${line.label}`, `-${formatAmount(line.amount)}`, { muted: true });
+            });
+          } else {
+            const roomSubtotal = receiptBooking.ratePerNight * receiptBooking.numNights;
+            drawAmountRow(
+              `  Room subtotal: ${receiptBooking.numNights} night${receiptBooking.numNights === 1 ? "" : "s"} x ${formatAmount(receiptBooking.ratePerNight)}`,
+              formatAmount(roomSubtotal)
+            );
+          }
+
+          drawAmountRow(
+            `  ${roomLabel} total`,
+            formatAmount(receiptBooking.totalPrice),
+            { bold: true }
+          );
+          y += 1.5;
+        });
+      } else if (b.rateBreakdown?.roomLines?.length) {
         b.rateBreakdown.roomLines.forEach((line) => {
           checkNewPage(6);
           drawAmountRow(`${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`, formatAmount(line.subtotal));
@@ -1842,7 +3187,10 @@ export function BookingsPage() {
               ? "PWD Discount"
               : "Discount";
           const storedDiscountBase = b.originalTotalPrice ?? subtotal;
-          const discountAmount = Math.max(0, Math.round(storedDiscountBase * (b.discountPct / 100)));
+          // Per DSC (2026-07-31): the percentage step routes through the shared
+          // `calculatePercentDiscount` helper. Byte-equivalent output: same
+          // product, same `Math.round` wrap, same `Math.max(0, …)` clamp.
+          const discountAmount = Math.max(0, Math.round(calculatePercentDiscount(storedDiscountBase, b.discountPct)));
           drawAmountRow(`${discountLabel} (${b.discountPct}%)`, `-${formatAmount(discountAmount)}`, { muted: true });
         }
 
@@ -1852,9 +3200,18 @@ export function BookingsPage() {
 
         if (b.memberDiscountPct && b.memberDiscountPct > 0) {
           const discountBase = b.originalTotalPrice ?? subtotal;
-          const seniorPwdAmount = b.discountPct ? Math.round(discountBase * (b.discountPct / 100)) : 0;
-          const memberBase = Math.max(discountBase - seniorPwdAmount - (b.voucherDiscount || 0), 0);
-          const memberDiscountAmount = Math.max(0, Math.round(memberBase * (b.memberDiscountPct / 100)));
+          // Per DSC (2026-07-31): both the senior step and the member-base
+          // subtraction now route through the shared helpers. The historical
+          // pattern was `Math.max(discountBase − seniorPwdAmount − voucher, 0)`
+          // — a single clamped subtraction of two deductions. The refactor
+          // composes two `calculateVoucherBase` calls (byte-equivalent: a
+          // clamped subtraction followed by another clamped subtraction on
+          // the clamped result is the same as one clamped subtraction of
+          // both deductions).
+          const seniorPwdAmount = b.discountPct ? Math.round(calculatePercentDiscount(discountBase, b.discountPct)) : 0;
+          const afterSenior = calculateVoucherBase(discountBase, seniorPwdAmount);
+          const memberBase = calculateVoucherBase(afterSenior, b.voucherDiscount || 0);
+          const memberDiscountAmount = Math.max(0, Math.round(calculatePercentDiscount(memberBase, b.memberDiscountPct)));
           drawAmountRow(`Member Discount (${b.memberDiscountPct}%)`, `-${formatAmount(memberDiscountAmount)}`, { muted: true });
         }
 
@@ -1863,7 +3220,8 @@ export function BookingsPage() {
         }
       }
 
-      // Booking Total Banner
+      // Reservation / booking base total banner. Folio-only
+      // charges render separately below so they are counted once.
       y += 0.5;
       pdf.setFillColor(255, 247, 237);
       pdf.roundedRect(marginL, y - 2, marginR - marginL, 7.5, 1.5, 1.5, "F");
@@ -1871,40 +3229,102 @@ export function BookingsPage() {
 
       pdf.setFontSize(10);
       pdf.setTextColor(...brandRgb);
-      pdf.text("Booking Total", labelColX, y, { charSpace: 0 });
+      pdf.text(isReservationReceipt ? "Reservation Total" : "Booking Total", labelColX, y, { charSpace: 0 });
       pdf.setFont("helvetica", "bold");
-      pdf.text(formatAmount(b.totalPrice), amountX, y, { align: "right", charSpace: 0 });
+      pdf.text(formatAmount(isReservationReceipt ? selectedFolioBaseTotal : b.totalPrice), amountX, y, { align: "right", charSpace: 0 });
       setPdfFont(pdf, "Inter");
       y += 6.5;
+
+      // ── VAT Breakdown ──
+      // Per DSC-07 (2026-08-01, per #115): the receipt PDF now
+      // shows the 12% VAT reconciliation the same way the
+      // monthly XLSX export does. The helper composes the
+      // senior discount from the booking's stored `originalTotalPrice`
+      // (broad-scope approximation; documented narrow-scope
+      // edge case in the helper header). The senior discount
+      // is the VAT-exempt portion under RA 9994 (Philippine
+      // BIR); the rest of the bill is VATable at 12%.
+      checkNewPage(20);
+      drawPdfSectionTitle(pdf, "VAT Breakdown (12% Philippine standard)", marginL, y, brandRgb);
+      y += 4.5;
+      const vatBreakdown = receiptBookings.reduce((totals, receiptBooking) => {
+        const roomVat = getBookingVatBreakdown({
+          totalPrice: receiptBooking.totalPrice,
+          originalTotalPrice: receiptBooking.originalTotalPrice,
+          discountType: receiptBooking.discountType,
+          discountPct: receiptBooking.discountPct,
+          discountRejected: receiptBooking.discountRejected
+        });
+        return {
+          vatExclusiveSales: totals.vatExclusiveSales + roomVat.vatExclusiveSales,
+          vatExemptSales: totals.vatExemptSales + roomVat.vatExemptSales,
+          vatAmount: totals.vatAmount + roomVat.vatAmount
+        };
+      }, { vatExclusiveSales: 0, vatExemptSales: 0, vatAmount: 0 });
+      drawAmountRow(
+        "VATable Sales (VAT-exclusive)",
+        formatAmount(vatBreakdown.vatExclusiveSales)
+      );
+      drawAmountRow(
+        "VAT-Exempt Sales (RA 9994 Senior/PWD)",
+        formatAmount(vatBreakdown.vatExemptSales)
+      );
+      drawAmountRow(
+        "VAT Amount (12% × VATable)",
+        formatAmount(vatBreakdown.vatAmount)
+      );
+      y += 1;
 
       if (receiptFolio.storeCharges.length > 0 || receiptFolio.charges.length > 0) {
         checkNewPage(12 + (receiptFolio.storeCharges.length + receiptFolio.charges.length) * 5);
         drawPdfSectionTitle(pdf, "Folio Charges", marginL, y, brandRgb);
         y += 4.5;
         receiptFolio.storeCharges.forEach((order) => {
-          drawAmountRow(`Store order ${order.orderRef}`, formatAmount(order.totalAmount));
+          drawAmountRow(
+            `Store order ${order.orderRef || order.bookingId || ""}${getReceiptAttribution(order.bookingId)}`,
+            formatAmount(order.totalAmount ?? 0)
+          );
         });
         receiptFolio.charges.forEach((charge) => {
-          drawAmountRow(charge.label, formatAmount(charge.amount), { muted: charge.amount < 0 });
+          const amount = charge.amount ?? 0;
+          drawAmountRow(
+            `${charge.label || "Charge"}${getReceiptAttribution((charge as IncidentalCharge).bookingId)}`,
+            formatAmount(amount),
+            { muted: amount < 0 }
+          );
         });
         drawAmountRow("Folio total", formatAmount(receiptFolio.grandTotal), { bold: true });
         y += 2;
       }
 
       // ── Special Requests / Notes ──
-      if (b.specialRequests && b.specialRequests.trim().length > 0) {
+      const requestBookings = receiptBookings.filter(
+        (receiptBooking) => receiptBooking.specialRequests?.trim().length > 0
+      );
+      if (requestBookings.length > 0) {
         checkNewPage(15);
         drawPdfSectionTitle(pdf, "Special Requests", marginL, y, brandRgb);
         y += 5;
 
         pdf.setFontSize(10);
         pdf.setTextColor(60, 60, 60);
-        const reqLines = pdf.splitTextToSize(b.specialRequests, pageW - 40);
-        for (const line of reqLines) {
-          checkNewPage(5);
-          pdf.text(line, labelColX, y, { charSpace: 0 });
-          y += 4.0;
-        }
+        requestBookings.forEach((receiptBooking, requestIndex) => {
+          const bookingIndex = receiptBookings.findIndex((booking) => booking.id === receiptBooking.id);
+          if (isReservationReceipt) {
+            checkNewPage(5);
+            pdf.setFont("helvetica", "bold");
+            pdf.text(getReceiptRoomLabel(receiptBooking, bookingIndex), labelColX, y, { charSpace: 0 });
+            setPdfFont(pdf, "Inter");
+            y += 4;
+          }
+          const reqLines = pdf.splitTextToSize(receiptBooking.specialRequests, pageW - 40);
+          for (const line of reqLines) {
+            checkNewPage(5);
+            pdf.text(line, labelColX, y, { charSpace: 0 });
+            y += 4.0;
+          }
+          if (requestIndex < requestBookings.length - 1) y += 1;
+        });
         y += 3;
       }
 
@@ -2000,7 +3420,7 @@ export function BookingsPage() {
         y = drawPdfBrandHeader(pdf, {
           logoDataUrl,
           title: "Booking Confirmation Receipt",
-          subtitle: `Booking Reference: ${b.bookingRef}`,
+          subtitle: `${receiptReferenceLabel}: ${receiptReference}`,
           meta: `Generated: ${generatedAt}`,
           brandRgb,
           printLight: true,
@@ -2009,13 +3429,14 @@ export function BookingsPage() {
       }
       drawPdfFooter(
         pdf,
-        b.bookingRef,
+        receiptReference,
         "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property.",
         brandRgb,
-        footerY > 275 ? y + 8 : footerY
+        footerY > 275 ? y + 8 : footerY,
+        isReservationReceipt ? "Reservation Ref" : "Booking Ref"
       );
 
-      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-receipt.pdf`, pdfWindow);
+      const result = openPdfOrDownload(pdf, `${receiptFileStem}-receipt.pdf`, pdfWindow);
       toast.success(
         "Receipt PDF ready",
         result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
@@ -2045,12 +3466,67 @@ export function BookingsPage() {
     syncSelectedBooking(updates);
   };
 
+  // The PDF generator only knows how to rasterize JPEG/PNG/WebP into a
+  // jsPDF page. Two paths land there:
+  //   1. JPEG/PNG/WebP - pass through `compressImageFile` directly.
+  //   2. HEIC/HEIF    - the registration PDF can't decode HEIC and the
+  //                     iPhone "High Efficiency" default hits the
+  //                     previous strict-reject path far too often to
+  //                     leave it. Convert client-side to JPEG via
+  //                     `heic-to` (LGPL-3.0, decision #125) before
+  //                     the compression step. The lib is loaded via
+  //                     dynamic `import()` only on HEIC detection so
+  //                     non-iPhone uploads never pay the ~720 KB
+  //                     gzipped chunk.
+  //
+  // Anything else (AVIF, TIFF, BMP, etc.) is still rejected — the
+  // allowlist is the final enforcement point, the picker `accept`
+  // attribute is just a hint.
+  const HEIC_INPUT_MIME_TYPES = new Set(["image/heic", "image/heif"]);
+  const ALLOWED_GUEST_ID_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+  ]);
+
   const handleGuestIdUpload = async (file: File | undefined) => {
     if (!file || !selectedBooking) return;
 
+    // HEIC path: dynamic-import the WASM decoder, convert to JPEG,
+    // then fall through to the standard compress+upload path with
+    // the resulting `File`. The library uses Web Workers internally
+    // (per its README) so the conversion does not block the UI thread.
+    let processedFile: File = file;
+    if (HEIC_INPUT_MIME_TYPES.has(file.type)) {
+      try {
+        setGuestIdUploadStatus("Converting HEIC to JPEG (first time only, ~720 KB download)...");
+        const { heicTo } = await import("heic-to");
+        const converted = await heicTo({ blob: file, type: "image/jpeg", quality: 0.92 });
+        // Drop the original .heic / .heif extension; the convert
+        // output is now a JPEG blob. Filename is intentionally
+        // simple so downstream `safeName` normalization doesn't have
+        // to deal with the new extension.
+        const originalName = file.name || "guest-id";
+        const baseName = originalName.replace(/\.(heic|heif)$/i, "");
+        processedFile = new File([converted], `${baseName || "guest-id"}.jpg`, { type: "image/jpeg" });
+      } catch (error) {
+        setGuestIdUploadStatus(
+          error instanceof Error
+            ? `Could not convert HEIC image (${error.message}). Please re-capture or convert to JPEG manually.`
+            : "Could not convert HEIC image. Please re-capture or convert to JPEG manually."
+        );
+        return;
+      }
+    } else if (!file.type || !ALLOWED_GUEST_ID_MIME_TYPES.has(file.type)) {
+      setGuestIdUploadStatus(
+        `Unsupported image format (${file.type || "unknown"}). Please re-capture or convert to JPEG, PNG, or WebP and try again.`
+      );
+      return;
+    }
+
     try {
       setGuestIdUploadStatus("Compressing guest ID image...");
-      const image = await compressImageFile(file, { maxWidth: 1400, maxHeight: 1400, quality: 0.84 });
+      const image = await compressImageFile(processedFile, { maxWidth: 1400, maxHeight: 1400, quality: 0.84 });
       setGuestIdUploadStatus("Uploading guest ID to secure storage...");
       const safeName = image.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileRef = storageRef(storage, `bookings/${selectedBooking.id}/guest-id/${Date.now()}-${safeName}`);
@@ -2066,12 +3542,27 @@ export function BookingsPage() {
   const handleRegistrationSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    // Per Decision #121 (2026-07-23): capture purpose of stay (defaults
+    // to Leisure) and the free-text "other" reason when applicable.
+    // Trimmed + normalized so the readiness gate's lowercase comparison
+    // on "other" works without surprises.
+    const purposeOfStay = String(formData.get("purposeOfStay") || "leisure").trim().toLowerCase();
+    const otherPurpose = String(formData.get("otherPurpose") || "").trim();
+    // Per GCR-01 follow-up (2026-07-24): Firestore's `updateDoc` rejects
+    // `undefined` as a field value, so the `otherPurpose` key must be
+    // OMITTED from the object (not set to `undefined`) when the staff
+    // didn't pick "Other". Spreading the conditional in keeps the
+    // document clean (no null/undefined fields) and matches how
+    // `corporate` is conditionally included in the public
+    // bookings-create payload.
     persistSelectedBooking({
       guestRegistration: {
         nationality: String(formData.get("nationality") || "").trim(),
         address: String(formData.get("address") || "").trim(),
         dateOfBirth: String(formData.get("dateOfBirth") || ""),
         gender: String(formData.get("gender") || ""),
+        purposeOfStay,
+        ...(purposeOfStay === "other" && otherPurpose ? { otherPurpose } : {}),
         idType: String(formData.get("idType") || ""),
         idNumber: String(formData.get("idNumber") || "").trim(),
         emergencyContact: String(formData.get("emergencyContact") || "").trim(),
@@ -2184,12 +3675,32 @@ export function BookingsPage() {
     }
   };
 
+  const createSelectedLedgerEntryId = (kind: "payment" | "refund") => {
+    if (!selectedBooking) return "";
+    if (selectedBooking.reservationId) {
+      return doc(collection(
+        db,
+        "reservations",
+        selectedBooking.reservationId,
+        kind === "refund" ? "refunds" : "payments"
+      )).id;
+    }
+    return doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+  };
+
+  const getSelectedChargeCollection = () => {
+    if (!selectedBooking) return null;
+    return selectedBooking.reservationId
+      ? collection(db, "reservations", selectedBooking.reservationId, "charges")
+      : collection(db, "bookings", selectedBooking.id, "charges");
+  };
+
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedBooking && paymentAmount) {
       const amount = parseFloat(paymentAmount);
       const paymentId = paymentSubmissionIdRef.current
-        || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+        || createSelectedLedgerEntryId("payment");
       paymentSubmissionIdRef.current = paymentId;
       setIsRecordingPayment(true);
       let paymentCompleted = false;
@@ -2224,22 +3735,46 @@ export function BookingsPage() {
       toast.warning("Check refund details", "Enter a positive amount and a required refund reason.");
       return;
     }
+    // Per CRL-01: client-preallocated refundId for idempotency. Keep the
+    // same ID across a retry-after-uncertain-response so the server
+    // transaction replays the original commit; mint a fresh one on the
+    // next intentional submit so a new refund does not collide with a
+    // previous one. The mint uses the Firestore-generated payments doc
+    // ID so the ID is server-acceptable under the existing rules shape
+    // (no client-side rules allowlist for /payments/{id}).
+    const refundId = refundSubmissionIdRef.current
+      || createSelectedLedgerEntryId("refund");
+    refundSubmissionIdRef.current = refundId;
     setIsRefunding(true);
+    let refundCompleted = false;
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-refund`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-        body: JSON.stringify({ bookingId: selectedBooking.id, amount, method: refundMethod, reason: refundReason.trim() })
+        body: JSON.stringify({ bookingId: selectedBooking.id, refundId, amount, method: refundMethod, reason: refundReason.trim() })
       });
       const payload = await response.json();
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to record refund.");
+      if (!response.ok || !payload.success) {
+        // 409 means the staff reused an ID for a different refund; clear
+        // the held ref so the next submit mints a fresh one, and surface
+        // the server's reason verbatim.
+        if (response.status === 409) {
+          refundSubmissionIdRef.current = null;
+        }
+        throw new Error(payload.error || "Unable to record refund.");
+      }
+      refundCompleted = true;
       setRefundAmount("");
       setRefundReason("");
       toast.success("Refund recorded", `${formatPrice(amount)} returned via ${getOnsitePaymentMethodLabel(refundMethod)}.`);
     } catch (error: any) {
       toast.error("Could not record refund", error.message || "Please try again.");
     } finally {
+      // Keep the same ID after an uncertain/network failure. A manual
+      // retry then replays the original server commit instead of creating
+      // a second ledger entry. Successful submissions mint a fresh ID.
+      if (refundCompleted) refundSubmissionIdRef.current = null;
       setIsRefunding(false);
     }
   };
@@ -2254,14 +3789,17 @@ export function BookingsPage() {
     }
     setIsSavingCharge(true);
     try {
-      await addDoc(collection(db, "bookings", selectedBooking.id, "charges"), {
+      const chargesRef = getSelectedChargeCollection();
+      if (!chargesRef) return;
+      await addDoc(chargesRef, {
         label: chargeLabel.trim(),
         amount,
         category: chargeCategory,
         note: chargeNote.trim(),
         addedBy: currentUser?.uid || "staff",
         addedAt: serverTimestamp(),
-        voidOf: null
+        voidOf: null,
+        ...(selectedBooking.reservationId ? { bookingId: selectedBooking.id } : {})
       });
       setChargeLabel("");
       setChargeAmount("");
@@ -2278,7 +3816,9 @@ export function BookingsPage() {
   const handleVoidCharge = async (reason: string) => {
     if (!selectedBooking || !chargeToVoid) return;
     try {
-      const reversalRef = doc(db, "bookings", selectedBooking.id, "charges", `void-${chargeToVoid.id}`);
+      const owner = chargeToVoid.ledgerOwner || (selectedBooking.reservationId ? "reservation" : "booking");
+      const ownerId = chargeToVoid.ledgerOwnerId || selectedBooking.reservationId || selectedBooking.id;
+      const reversalRef = doc(db, owner === "reservation" ? "reservations" : "bookings", ownerId, "charges", `void-${chargeToVoid.id}`);
       await setDoc(reversalRef, {
         label: `Reversal — ${chargeToVoid.label}`,
         amount: -Math.abs(chargeToVoid.amount),
@@ -2286,7 +3826,10 @@ export function BookingsPage() {
         note: reason.trim(),
         addedBy: currentUser?.uid || "staff",
         addedAt: serverTimestamp(),
-        voidOf: chargeToVoid.id
+        voidOf: chargeToVoid.id,
+        ...(owner === "reservation"
+          ? { bookingId: chargeToVoid.bookingId || selectedBooking.id }
+          : {})
       });
       toast.success("Charge voided", "A reversal entry was added; the original record remains unchanged.");
       setChargeToVoid(null);
@@ -2327,22 +3870,62 @@ export function BookingsPage() {
 
   const handleWalkinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!guestName || !roomNumber) {
-      toast.warning("Missing details", "Please fill in the guest name and select an available room.");
+    const trimmedFirst = walkinFirstName.trim();
+    const trimmedLast = walkinLastName.trim();
+    if (!trimmedFirst || !trimmedLast || !roomNumber) {
+      toast.warning(
+        "Missing details",
+        "Please fill in the guest's first and last name and select an available room."
+      );
+      return;
+    }
+    // Per MRB-07 (2026-08-02, per decision #159): every room in the
+    // reservation must name a vacant room before the reservation can be
+    // created — the server writes all N rooms or none of them.
+    if (walkinRoomStays.some((stay) => !stay.roomNumber)) {
+      toast.warning(
+        "Missing room",
+        "Every room in this reservation needs an available room number."
+      );
       return;
     }
 
+    const submittedRoomStays = walkinRoomStays;
     setIsWalkinSubmitting(true);
     try {
       const result = await addWalkinBooking({
         roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
         roomNumber,
         roomType,
-        guestName,
+        // Per MRB-07 (2026-08-02, per decision #159): the reservation's
+        // full room list. The server treats this as canonical, prices
+        // each room against its own type, and writes one booking doc
+        // per room under a single reservation header. The top-level
+        // room / occupancy fields above still describe the primary
+        // room, which the server cross-checks against `rooms[0]`.
+        rooms: submittedRoomStays.map((stay) => ({
+          roomId: rooms.find((r) => r.roomNumber === stay.roomNumber)?.id || "",
+          numAdults: stay.numAdults,
+          numChildren: stay.numChildren,
+          extraBedCount: stay.extraBedCount
+        })),
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
         reminderSentAt: null,
         guestEmail: guestEmail || `walkin-${Date.now()}@example.invalid`,
         guestPhone: guestPhone || "n/a",
         numGuests,
+        // Per EXB-07 (2026-08-01, per decision #155): the
+        // walk-in modal now carries the adult/child split
+        // + the extra bed count. The server (per CHD-04 +
+        // EXB-03) validates `numAdults + numChildren === numGuests`
+        // and applies the EXB-03 overflow rule
+        // (`requiredExtraBedsFor` helper). The extra-bed count
+        // is the desk's choice; absent fields on legacy data
+        // hydrate to all-adults (per CHD-04's fallback rule).
+        numAdults: walkinNumAdults,
+        numChildren: walkinNumChildren,
+        extraBedCount: walkinExtraBedCount,
         checkIn: checkInDate,
         checkOut: checkOutDate,
         numNights,
@@ -2375,8 +3958,13 @@ export function BookingsPage() {
         // empty string placeholder so the type is satisfied;
         // the server overwrites it with the real token.
         lookupToken: "",
-        source: "walk-in",
-        notes: "Created on-site at Front Desk.",
+        // Per NBS-02 / NBS-07 (2026-07-31): the source is now selected
+        // by the desk from the configured list (default "walk-in" for
+        // the common case). The note becomes source-derived server-
+        // side so a phone / Agoda / Facebook booking no longer ships
+        // with a note claiming it was created at the desk.
+        source: walkinSource,
+        notes: "",
         memberId: null,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
@@ -2391,17 +3979,27 @@ export function BookingsPage() {
       });
 
       if (result.success) {
-        setGuestName("");
+        setWalkinFirstName("");
+        setWalkinLastName("");
         setGuestEmail("");
         setGuestPhone("");
-        setRoomNumber("");
         setPriceOverride("");
         setHasBreakfast(false);
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
         setWalkinTestRunId("");
+        // Per EXB-07 + MRB-07: reset back to a single empty room stay
+        // at the 1-adult / 0-children / 0-extra-bed default, so the
+        // next booking starts from the common single-room state
+        // rather than inheriting the previous group's room list.
+        setWalkinRoomStays([createWalkinRoomStay(roomTypes[0]?.value || "")]);
         setIsModalOpen(false);
-        toast.success("Walk-in booking created", `Room ${roomNumber} for ${guestName}`);
+        toast.success(
+          submittedRoomStays.length > 1 ? "Reservation created" : "Walk-in booking created",
+          submittedRoomStays.length > 1
+            ? `${submittedRoomStays.length} rooms (${submittedRoomStays.map((stay) => stay.roomNumber).join(", ")}) for ${trimmedFirst} ${trimmedLast}`
+            : `Room ${roomNumber} for ${trimmedFirst} ${trimmedLast}`
+        );
       } else {
         toast.error("Failed to create walk-in booking", result.error);
       }
@@ -2434,6 +4032,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
         >
           Confirm pay-at-hotel booking
+          {renderActionScope("room")}
         </button>
       );
     }
@@ -2446,6 +4045,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
         >
           Review proof in Folio
+          {renderActionScope("reservation")}
         </button>
       );
     }
@@ -2458,6 +4058,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
         >
           Confirm booking
+          {renderActionScope("room")}
         </button>
       );
     }
@@ -2476,6 +4077,7 @@ export function BookingsPage() {
         >
           <CreditCard size={15} aria-hidden="true" />
           Collect {formatPrice(selectedBookingFolio.balance)}
+          {renderActionScope("reservation")}
         </button>
       );
     }
@@ -2489,6 +4091,7 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
         >
           {selectedBookingCheckInReadiness?.ready ? "Verify guest ID & check in" : "Complete check-in requirements"}
+          {renderActionScope("room")}
         </button>
       );
     }
@@ -2587,7 +4190,11 @@ export function BookingsPage() {
     if (bPaymentMethod) activeChips.push({ id: "bPaymentMethod", label: `Method: ${bPaymentMethod}`, onRemove: () => setBPaymentMethod("") });
     if (bRoom) activeChips.push({ id: "bRoom", label: `Room: ${bRoom}`, onRemove: () => setBRoom("") });
     if (bRoomType) activeChips.push({ id: "bRoomType", label: `Type: ${bRoomType}`, onRemove: () => setBRoomType("") });
-    if (bSource) activeChips.push({ id: "bSource", label: `Source: ${bSource}`, onRemove: () => setBSource("") });
+    if (bSource) {
+      // Render the configured label, not the raw key, per NBS-09.
+      const sourceLabel = (bookingSources || []).find((s) => s.source === bSource)?.label || bSource;
+      activeChips.push({ id: "bSource", label: `Source: ${sourceLabel}`, onRemove: () => setBSource("") });
+    }
     if (bCorp) activeChips.push({ id: "bCorp", label: bCorp === "yes" ? "Corporate" : "Non-corporate", onRemove: () => setBCorp("") });
     if (bDiscount) activeChips.push({ id: "bDiscount", label: bDiscount === "yes" ? "With discount" : "No discount", onRemove: () => setBDiscount("") });
     if (bDateFrom || bDateTo) activeChips.push({ id: "bDate", label: `Dates: ${bDateFrom || "any"} – ${bDateTo || "any"}`, onRemove: () => { setBDateFrom(""); setBDateTo(""); } });
@@ -2637,17 +4244,23 @@ export function BookingsPage() {
           <button
             onClick={() => {
               setPriceOverride("");
-              if (availableRoomsOfType.length > 0) {
-                setRoomNumber(availableRoomsOfType[0].roomNumber);
-              } else {
-                setRoomNumber("");
-              }
+              // Per MRB-07 (2026-08-02, per decision #159): open on a
+              // single room stay, preselected to the first vacant room
+              // of the default type — the common single-room case is
+              // still one click away.
+              const defaultType = roomTypes[0]?.value || "";
+              const firstFree = rooms.find(
+                (r) => r.type === defaultType && r.status === "available"
+              );
+              setWalkinRoomStays([
+                { ...createWalkinRoomStay(defaultType), roomNumber: firstFree?.roomNumber || "" }
+              ]);
               setIsModalOpen(true);
             }}
             className="min-h-[44px] px-5 inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark active:scale-[0.98] text-sm font-semibold text-white shadow-sm transition"
           >
             <Plus size={16} />
-            New Walk-in Booking
+            New Booking
           </button>
         )}
       </header>
@@ -2833,11 +4446,9 @@ export function BookingsPage() {
                 Source / channel
                 <select value={bSource} onChange={(e) => setBSource(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
                   <option value="">Any</option>
-                  <option value="online">Online</option>
-                  <option value="walk-in">Walk-in</option>
-                  <option value="phone">Phone</option>
-                  <option value="facebook">Facebook</option>
-                  <option value="corporate">Corporate</option>
+                  {(bookingSources || []).map((s) => (
+                    <option key={s.source} value={s.source}>{s.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
@@ -2933,9 +4544,18 @@ export function BookingsPage() {
         <>
           <DataTable
             columns={columns}
-            rows={filteredRows}
+            rows={groupedRows}
             onRowClick={handleRowClick}
             renderMobileCard={renderBookingCard}
+            // Per MRB-07 (2026-08-02, per decision #159): nest the
+            // room stays under their reservation row.
+            rowVariant={(row) =>
+              row.listRowKind === "reservation"
+                ? "parent"
+                : row.listRowKind === "roomStay"
+                  ? "child"
+                  : undefined
+            }
             emptyMessage="No bookings match the current filters."
           />
         </>
@@ -2972,6 +4592,196 @@ export function BookingsPage() {
             ? "flow-root space-y-6 text-sm"
             : "space-y-6 text-sm"
           }>
+            {/* Per MRB-07 (2026-08-02, per decision #159): the
+                reservation strip. A room inside a multi-room
+                reservation always shows which reservation it belongs
+                to, its position in the group, and one-tap navigation to
+                the sibling rooms — the desk works a group room by room,
+                and re-finding the next room through the list each time
+                is the friction that makes staff avoid group bookings.
+                Absent entirely for single-room and legacy bookings. */}
+            {selectedReservationContext && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-gray-700">
+                    Reservation {selectedReservationContext.reservationRef || "—"}
+                    <span className="ml-2 font-semibold text-gray-500">
+                      Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
+                    </span>
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                    Actions below apply to this room unless marked
+                  </span>
+                </div>
+                {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+                    the reservation-scope money pills. The Total /
+                    Paid / Balance come from the `Reservation` header
+                    + the reservation-scope paid-amount aggregate
+                    (MRB-12-01) — independent of which room the
+                    desk is currently looking at. The per-room
+                    `BookingDrawerWorkspaceHeader` below (line 4426+)
+                    keeps its own per-room money; the strip's pills
+                    are the GROUP-level read, not a replacement. The
+                    pills appear as soon as the header + the paid
+                    aggregate are in memory; otherwise the row falls
+                    back to the per-child sum so the first paint is
+                    never empty. Hidden when the reservation context
+                    is null (N=1 / legacy) — the strip already gates
+                    on that. */}
+                {(() => {
+                  const reservationId = selectedReservationContext.reservationId;
+                  const reservationHeader = reservationsMap.get(reservationId);
+                  const paidAmount = reservationPaidAmount[reservationId] || 0;
+                  const reservationTotal = reservationHeader
+                    ? reservationHeader.totalPrice
+                    : selectedReservationContext.rooms.reduce(
+                        (sum, child) => sum + (child.totalPrice || 0),
+                        0
+                      );
+                  // Per-room paid = totalPrice - balance (capped at 0;
+                  // a negative balance means overpayment, which the
+                  // strip renders as the overpayment). The fallback
+                  // keeps the first paint byte-equivalent to the
+                  // pre-MRB-12 surface; the listener's next tick
+                  // replaces it with the header-sourced values.
+                  const reservationPaid = reservationHeader
+                    ? paidAmount
+                    : selectedReservationContext.rooms.reduce(
+                        (sum, child) => {
+                          const folio = getBookingFolio(child);
+                          return sum + Math.max(0, (folio.grandTotal || 0) - folio.balance);
+                        },
+                        0
+                      );
+                  const reservationBalance = Math.max(0, reservationTotal - reservationPaid);
+                  return (
+                    <div
+                      data-testid="reservation-strip-money"
+                      className="mt-2 grid grid-cols-3 gap-1.5"
+                      aria-label="Reservation money"
+                    >
+                      <div className="rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-gray-200">
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Total</p>
+                        <p className="mt-0.5 text-xs font-bold text-gray-900">{formatPrice(reservationTotal)}</p>
+                      </div>
+                      <div className="rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-gray-200">
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Paid</p>
+                        <p className="mt-0.5 text-xs font-bold text-gray-900">{formatPrice(reservationPaid)}</p>
+                      </div>
+                      <div className="rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-gray-200">
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Balance</p>
+                        <p className={cn(
+                          "mt-0.5 text-xs font-bold",
+                          reservationBalance > 0 ? "text-amber-700" : "text-status-green-text"
+                        )}>
+                          {formatPrice(reservationBalance)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
+                {/* Per MRB-14 (2026-08-03, per decision #180): the
+                    "Actual range" pill row. Surfaces when the
+                    reservation's children have diverged from the
+                    header's original shared dates (a room has been
+                    rescheduled to a different check-in / check-out).
+                    The pill shows MIN(children.checkIn) →
+                    MAX(children.checkOut) and a "varies by room"
+                    badge. The per-room dates are still listed on the
+                    existing per-booking header below this strip.
+                    Hidden for N=1 / legacy reservations (no
+                    `actualDateRange` to read; no children to diverge). */}
+                {(() => {
+                  const reservationId = selectedReservationContext.reservationId;
+                  const reservationHeader = reservationsMap.get(reservationId);
+                  const actualRange = reservationHeader?.actualDateRange;
+                  if (!actualRange || !actualRange.isDivergent) return null;
+                  const earliestStr = formatShortDate(actualRange.earliestCheckIn);
+                  const latestStr = formatShortDate(actualRange.latestCheckOut);
+                  return (
+                    <div
+                      data-testid="reservation-strip-actual-range"
+                      className="mt-1.5 flex items-center gap-1.5 rounded-md bg-white px-2 py-1 ring-1 ring-inset ring-amber-200"
+                      aria-label="Reservation actual range"
+                      title={
+                        selectedReservationContext.rooms
+                          .map((sibling) => `Room ${sibling.roomNumber}: ${formatShortDate(sibling.checkIn)} – ${formatShortDate(sibling.checkOut)}`)
+                          .join("\n") || "Per-room dates available"
+                      }
+                    >
+                      <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400">Actual range</p>
+                      <p className="text-xs font-bold text-gray-900">{earliestStr} → {latestStr}</p>
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-inset ring-amber-200">
+                        varies by room
+                      </span>
+                    </div>
+                  );
+                })()}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {selectedReservationContext.rooms.map((sibling) => (
+                    <button
+                      key={sibling.id}
+                      type="button"
+                      onClick={() => setSelectedBooking(sibling)}
+                      aria-current={sibling.id === selectedBooking.id ? "true" : undefined}
+                      className={cn(
+                        "min-h-[32px] rounded-lg px-2.5 text-[11px] font-semibold transition",
+                        sibling.id === selectedBooking.id
+                          ? "bg-primary text-white"
+                          : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-100"
+                      )}
+                    >
+                      Room {sibling.roomNumber}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Per CRL-07 (2026-08-03, per decision #173):
+                the cancellation-liability panel. Mounted
+                inside the drawer when the selected
+                booking is cancelled (`status ===
+                "cancelled"`) AND has a liability
+                snapshot. For reservation-scope cancels
+                the snapshot lives on the reservation
+                header (the source of truth for the
+                aggregate); for per-child + legacy
+                cancels the snapshot lives on the
+                booking doc. The reservation header
+                carries the snapshot only when the
+                cancel was reservation-scope; the
+                cancelled child booking's
+                `cancellationLiability` is populated
+                when the cancel was per-child.
+
+                The panel reads from the booking doc by
+                default; when the selected booking is
+                part of a multi-room reservation AND
+                the reservation header carries a
+                liability (the reservation-scope case),
+                the panel reads from the header. For
+                N=1 (today's entire active surface) the
+                booking path is sufficient — the
+                cancel is per-child, the snapshot is
+                on the booking doc. The reservation-
+                header read is the CRL-08/15 follow-up
+                surface for N>1 reservation-scope
+                cancels; for now the panel falls
+                through to the booking's snapshot
+                when the header has none. */}
+            {selectedBooking.status === "cancelled" && (
+              <CancellationLiabilityPanel
+                liability={selectedBooking.cancellationLiability || null}
+                bookingId={selectedBooking.id}
+                reservationId={selectedBooking.reservationId || null}
+                isAdmin={currentUser?.role === "admin"}
+                onOpenRefundModal={openLiabilityRefundModal}
+                onOpenExceptionModal={() => setShowExceptionModal(true)}
+                refreshKey={liabilitySnapshotKey}
+              />
+            )}
+
             <div>
             <BookingDrawerWorkspaceHeader
               booking={selectedBooking}
@@ -2980,7 +4790,7 @@ export function BookingsPage() {
               totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
-              onPaymentReferenceChange={(value) => persistSelectedBooking({ paymentReferenceNumber: value || null })}
+              paymentMethodLabel={selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : ""}
             />
             </div>
 
@@ -2989,7 +4799,7 @@ export function BookingsPage() {
               <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-2.5">
                 <div className="flex items-center gap-2 text-xs">
                   <CreditCard size={14} className="text-gray-400" />
-                  <span className="text-gray-700">{selectedBooking.paymentMethod || "Online payment"}</span>
+                  <span className="text-gray-700">{selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "Online payment"}</span>
                   {selectedBooking.status === "payment-uploaded" && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
                   )}
@@ -3009,7 +4819,7 @@ export function BookingsPage() {
             ) : selectedBooking.paymentMethod !== "pay-at-hotel" && selectedBooking.paymentMethod ? (
               <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-2.5 text-xs text-gray-500">
                 <CreditCard size={14} className="text-gray-400" />
-                {selectedBooking.paymentMethod} — no proof uploaded
+                {getOnsitePaymentMethodLabel(selectedBooking.paymentMethod!)} — no proof uploaded
               </div>
             ) : null}
             </BookingDrawerSectionPanel>
@@ -3055,11 +4865,11 @@ export function BookingsPage() {
                     <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-gray-250 bg-gray-50 px-4 py-4 text-center transition hover:border-primary hover:bg-primary-light/30">
                       <span className="text-xs font-bold text-gray-800">Attach Guest ID Photo</span>
                       <span className="mt-1 text-[10px] leading-relaxed text-gray-500">
-                        JPG, PNG, or WebP. Image is compressed before upload.
+                        JPG, PNG, or WebP. HEIC from iPhone cameras is auto-converted to JPEG before upload.
                       </span>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
                         className="sr-only"
                         onChange={(event) => {
                           void handleGuestIdUpload(event.currentTarget.files?.[0]);
@@ -3095,7 +4905,29 @@ export function BookingsPage() {
                     <span>Check-Out: <strong>{selectedBooking.checkOut}</strong></span>
                   </p>
                   <p>Duration: {selectedBooking.numNights} nights</p>
-                  <p>Guests: {selectedBooking.numGuests}</p>
+                  {/* Per EXB-08 (2026-08-01, per decision #156):
+                      the drawer "Guests:" line now shows
+                      the adult/child split when both
+                      fields are present, with the extra
+                      bed count appended when > 0. Legacy
+                      pre-CHD bookings read as a single
+                      `numGuests` total. Matches the
+                      receipt PDF + the email helper +
+                      the table row so the staff
+                      surfaces stay in lockstep. */}
+                  <p>Guests: {(() => {
+                    const numAdults = Number((selectedBooking as any).numAdults);
+                    const numChildren = Number((selectedBooking as any).numChildren);
+                    const extraBedCount = Number((selectedBooking as any).extraBedCount);
+                    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+                      const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${selectedBooking.numGuests} total)`;
+                      const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+                        ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+                        : "";
+                      return <span>{splitLabel}{extraLabel}</span>;
+                    }
+                    return <span>{selectedBooking.numGuests}</span>;
+                  })()}</p>
                   <p>Breakfast: {selectedBooking.hasBreakfast ? "Included" : "Excluded"}</p>
                 </div>
                 {/* Move Booking trigger */}
@@ -3237,6 +5069,41 @@ export function BookingsPage() {
               className="lg:sticky lg:top-20 lg:float-right lg:w-[calc(33.333%-1rem)]"
             >
             <div className="space-y-4 rounded-card border border-gray-200 bg-white p-4 shadow-sm">
+              {/* Per CWB-04 / decision #122 (2026-07-23): a
+                  visible Balance-owed panel for any booking
+                  that was confirmed with money still owed.
+                  Renders while `confirmedWithBalance != null`
+                  AND a current balance remains. Auto-hides at
+                  ₱0. The "Settle on check-in" copy tells the
+                  staff (and the live drawer itself) that the
+                  guest will pay the rest at the front desk —
+                  not via the Record Payment flow. */}
+              {selectedBooking.confirmedWithBalance != null &&
+                (selectedBookingFolio?.balance ?? 0) > 0 && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-bold uppercase tracking-wider">Balance owed</p>
+                    <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[9px] font-bold text-amber-900">
+                      Settle on check-in
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-widest text-amber-700">Original</p>
+                      <p className="font-heading text-sm font-bold text-amber-950">{formatPrice(selectedBooking.confirmedWithBalance)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-widest text-amber-700">Now</p>
+                      <p className="font-heading text-sm font-bold text-amber-950">{formatPrice(selectedBookingFolio?.balance ?? 0)}</p>
+                    </div>
+                  </div>
+                  {selectedBooking.confirmedWithBalanceReason && (
+                    <p className="mt-2 border-t border-amber-200 pt-2 text-amber-800">
+                      <span className="font-semibold">Reason:</span> {selectedBooking.confirmedWithBalanceReason}
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <h2 className="text-sm font-bold text-gray-950">Folio summary</h2>
                 <p className="mt-1 text-[11px] text-gray-500">Current charges and collections for this stay.</p>
@@ -3284,7 +5151,7 @@ export function BookingsPage() {
                 <div className="mt-3 space-y-2 text-gray-600">
                   <div className="flex items-center justify-between gap-4">
                     <span>Room and booked add-ons</span>
-                    <span className="font-semibold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(selectedFolioBaseTotal)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span>Store charges billed to room</span>
@@ -3306,7 +5173,14 @@ export function BookingsPage() {
                       <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
                     </summary>
                     <div className="mt-3 rounded-lg bg-white p-3">
-                      <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
+                      <AdminPriceBreakdown
+                        breakdown={selectedBooking.rateBreakdown}
+                        total={selectedBooking.totalPrice}
+                        originalTotalPrice={selectedBooking.originalTotalPrice}
+                        discountType={selectedBooking.discountType}
+                        discountPct={selectedBooking.discountPct}
+                        discountRejected={selectedBooking.discountRejected}
+                      />
                     </div>
                   </details>
                 )}
@@ -3322,7 +5196,7 @@ export function BookingsPage() {
                     <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
                       <div className="space-y-0.5 text-xs">
                         <p className="font-semibold text-gray-800">
-                          {selectedBooking.paymentMethod} · {selectedBooking.paymentReferenceNumber || "No reference"}
+                          {selectedBooking.paymentMethod} · {getLatestPaymentReference(selectedBooking) || "No reference"}
                         </p>
                         <p className="text-[10px] text-gray-400">
                           {selectedBooking.status === "payment-confirmed" ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
@@ -3349,17 +5223,17 @@ export function BookingsPage() {
                         </button>
                         <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
                           <p className="font-semibold text-gray-900">
-                            Method: {selectedBooking.paymentMethod || "Not specified"}
+                            Method: {selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "Not specified"}
                           </p>
-                          {selectedBooking.paymentReferenceNumber && (
+                          {getLatestPaymentReference(selectedBooking) && (
                             <p className="font-semibold text-gray-900">
-                              Ref: {selectedBooking.paymentReferenceNumber}
+                              Ref: {getLatestPaymentReference(selectedBooking)}
                             </p>
                           )}
                           {selectedBooking.status === "payment-uploaded" && (
                             <button
                               type="button"
-                              onClick={() => { verifySubmissionIdRef.current = doc(collection(db, "bookings", selectedBooking.id, "payments")).id; setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
+                              onClick={() => { verifySubmissionIdRef.current = createSelectedLedgerEntryId("payment"); setShowVerifyPaymentModal(true); setVerifyAmount(String(Math.max(0, selectedBookingFolio?.balance ?? 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
                               className="inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 text-[10px] font-bold text-white transition hover:bg-green-700"
                             >
                               <ShieldCheck size={13} />
@@ -3494,6 +5368,16 @@ export function BookingsPage() {
                     >
                       <Plus size={14} />
                       Apply discount
+                      {/* Per MRB-12 (2026-08-03, per decision #179 —
+                          proposed): the discount action is per-room
+                          by default. The form gains a "This room" /
+                          "All N rooms" segmented control in
+                          MRB-12-05; the chip here is informational
+                          so the desk sees the scope before opening
+                          the modal. Hidden for N=1 / legacy (the
+                          `renderActionScope` helper gates on
+                          `selectedReservationContext`). */}
+                      {renderActionScope("room")}
                     </button>
                   )}
                 </div>
@@ -4057,6 +5941,30 @@ export function BookingsPage() {
 
             {/* Secondary and destructive booking actions */}
             <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} className="border-t border-gray-150 pt-4">
+              {/* Per CWB-04 / decision #122 (2026-07-23):
+                  secondary entry point for the confirm-with-
+                  balance flow. Visible whenever the booking is
+                  in `payment-uploaded` and a balance remains
+                  (the same case the verify success modal's
+                  partial variant covers). The form's threshold
+                  banner handles the role-gated submit. */}
+              {selectedBooking.status === "payment-uploaded" && (selectedBookingFolio?.balance ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmWithBalanceContext({
+                      booking: selectedBooking,
+                      currentBalance: Math.max(0, selectedBookingFolio?.balance ?? 0)
+                    });
+                  }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 text-xs font-bold text-primary transition hover:bg-primary/10"
+                >
+                  <ShieldCheck size={15} className="text-primary" aria-hidden="true" />
+                  Confirm with Balance
+                  {renderActionScope("reservation")}
+                </button>
+              )}
+
               {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showMoveForm && (
                 <button
                   type="button"
@@ -4065,21 +5973,170 @@ export function BookingsPage() {
                 >
                   <Move size={15} className="text-primary" aria-hidden="true" />
                   Move / upgrade room
+                  {renderActionScope("room")}
+                </button>
+              )}
+
+              {/*
+                Per MRB-14 (2026-08-03, per decision #180 —
+                proposed): the "Add room to this
+                reservation" action. Staff picks a
+                vacant room; the server reads the
+                header's current dates (the new child
+                inherits them — the dates are NEVER in
+                the modal). Pre-arrival only. Hidden
+                for legacy null-`reservationId`
+                bookings (the add-room flow is a
+                multi-room concept). Hidden for single-
+                room reservations where the existing
+                children disagree on status (a stale
+                or `cancelled` child triggers a
+                server-side 400 — the desk should
+                clear the stale child first).
+              */}
+              {selectedBooking.reservationId && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showAddRoomForm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddRoomRoomId("");
+                    setAddRoomNumAdults(1);
+                    setAddRoomNumChildren(0);
+                    setAddRoomExtraBedCount(0);
+                    setShowAddRoomForm(true);
+                  }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                  data-testid="add-room-button"
+                >
+                  <Plus size={15} className="text-primary" aria-hidden="true" />
+                  Add room to this reservation
+                  {renderActionScope("reservation")}
                 </button>
               )}
 
               {selectedBooking.status !== "checked-out" && selectedBooking.status !== "cancelled" && (
                 showBookingCancelForm ? (
                   <ConfirmForm
-                    title="Cancel this booking?"
-                    message="The guest will be notified by email. The booking record is kept in the audit log."
+                    // Per MRB-13 (2026-08-02, per decision
+                    // #166): the cancel form's title +
+                    // confirm label switch with the
+                    // selected scope. Default scope is
+                    // `"room"` (safer choice — staff must
+                    // opt into the whole-reservation
+                    // path). The `additionalFields` slot
+                    // hosts the `This room` / `All N
+                    // rooms` segmented control; it is only
+                    // rendered when the selected booking
+                    // is part of a multi-room reservation
+                    // (so single-room work is not
+                    // cluttered with a control that
+                    // would always pick the same value).
+                    title={
+                      selectedReservationContext && bookingCancelScope === "reservation"
+                        ? `Cancel all ${selectedReservationContext.roomCount} rooms?`
+                        : "Cancel this booking?"
+                    }
+                    message={
+                      selectedReservationContext && bookingCancelScope === "reservation"
+                        ? `This will cancel every room in reservation ${selectedReservationContext.reservationRef || "—"} (${selectedReservationContext.roomCount} rooms total). Cancellation is permanent and the guest will be notified by email. The booking records are kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action.`
+                        : "Cancellation is permanent and the guest will be notified by email. The booking record is kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action."
+                    }
                     reasonLabel="Cancellation reason (optional)"
                     reasonPlaceholder="e.g. guest requested, no-show, double-booked"
-                    confirmLabel="Cancel booking"
+                    confirmLabel={
+                      selectedReservationContext && bookingCancelScope === "reservation"
+                        ? `Cancel all ${selectedReservationContext.roomCount} rooms`
+                        : "Cancel booking"
+                    }
                     cancelLabel="Back"
                     variant="danger"
-                    onConfirm={(reason) => void handleCancelBooking(reason)}
-                    onCancel={() => setShowBookingCancelForm(false)}
+                    additionalFields={
+                      <div className="space-y-3">
+                        {selectedReservationContext ? (
+                          <div
+                            data-testid="booking-cancel-scope-selector"
+                            className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
+                          >
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+                              Cancellation scope
+                            </p>
+                            <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                              This booking is part of reservation {selectedReservationContext.reservationRef || "—"} ({selectedReservationContext.roomCount} rooms). Pick what to cancel.
+                            </p>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                data-testid="booking-cancel-scope-room"
+                                onClick={() => setBookingCancelScope("room")}
+                                className={cn(
+                                  "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                                  bookingCancelScope === "room"
+                                    ? "border-primary bg-primary text-white shadow-sm"
+                                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                                )}
+                              >
+                                <span className="block text-xs font-bold">This room</span>
+                                <span className={cn(
+                                  "mt-0.5 block text-[10px]",
+                                  bookingCancelScope === "room" ? "text-white/80" : "text-gray-500"
+                                )}>
+                                  Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="booking-cancel-scope-reservation"
+                                onClick={() => setBookingCancelScope("reservation")}
+                                className={cn(
+                                  "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                                  bookingCancelScope === "reservation"
+                                    ? "border-red-600 bg-red-600 text-white shadow-sm"
+                                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                                )}
+                              >
+                                <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
+                                <span className={cn(
+                                  "mt-0.5 block text-[10px]",
+                                  bookingCancelScope === "reservation" ? "text-white/80" : "text-gray-500"
+                                )}>
+                                  Cancel the whole reservation
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                        {/* Per CRL-06 (2026-08-02): the financial-effect
+                            preview. The panel is mounted below the scope
+                            selector so the staff sees the breakdown
+                            before tapping confirm. The panel is
+                            best-effort — the destructive cancel still
+                            proceeds if the preview errors (the error
+                            state surfaces a clear "breakdown unavailable"
+                            message). The panel re-fetches on scope
+                            flip via the `useEffect` above. */}
+                        <CancellationPreviewPanel
+                          preview={cancelPreview}
+                          isLoading={cancelPreviewLoading}
+                          error={cancelPreviewError}
+                        />
+                      </div>
+                    }
+                    onConfirm={(reason) => void handleCancelBooking(reason, bookingCancelScope)}
+                    onCancel={() => {
+                      setShowBookingCancelForm(false);
+                      // Per MRB-13: reset the scope on
+                      // close so a previous session's
+                      // choice never bleeds into a new
+                      // session. The default `"room"` is
+                      // the safer choice.
+                      setBookingCancelScope("room");
+                      cancelPreviewRequestIdRef.current += 1;
+                      // Per CRL-06: drop the preview
+                      // state on close so a previous
+                      // session's breakdown never
+                      // bleeds into a new session.
+                      setCancelPreview(null);
+                      setCancelPreviewError(null);
+                    }}
                   />
                 ) : (
                   <button
@@ -4087,6 +6144,7 @@ export function BookingsPage() {
                     className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-600 transition"
                   >
                     Cancel Booking
+                    {renderActionScope("room")}
                   </button>
                 )
               )}
@@ -4337,7 +6395,7 @@ export function BookingsPage() {
 
       {/* Walk-in Booking Modal (M-05) */}
       <Modal
-        title="Create Walk-in Booking"
+        title="Create New Booking"
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         footer={
@@ -4353,27 +6411,66 @@ export function BookingsPage() {
             <PrimaryButton
               type="submit"
               form="walkin-form"
-              disabled={!roomNumber || isWalkinSubmitting}
+              // Per MRB-07 (2026-08-02, per decision #159): every room
+              // stay must name a vacant room and fit its own type's
+              // caps — all of them are server rejects, so the desk is
+              // stopped before the round trip rather than after it.
+              disabled={!walkinReservationIsValid || isWalkinSubmitting}
               className="min-w-[150px]"
             >
-              {isWalkinSubmitting ? "Confirming..." : "Confirm Reservation"}
+              {isWalkinSubmitting
+                ? "Confirming..."
+                : walkinRoomStays.length > 1
+                  ? `Confirm ${walkinRoomStays.length} Rooms`
+                  : "Confirm Reservation"}
             </PrimaryButton>
           </div>
         }
       >
         <form onSubmit={handleWalkinSubmit} id="walkin-form" className="space-y-4 text-sm">
           <span className="sr-only">Confirm Reservation</span>
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Guest Full Name
-            <input
-              type="text"
-              required
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              placeholder="Maria Santos"
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
-            />
-          </label>
+          {/* Per fix/walkin-split-name (2026-07-25): walk-in
+              now mirrors the guest `/book` page and collects
+              first + last name separately. We use a flex
+              (not a grid) wrapper so the Phase 11.7 "single
+              column on mobile" rule stays intact — the two
+              fields stack on phones (where two short text
+              inputs side-by-side would be cramped) and sit
+              side-by-side on sm+ (640px+, where the front-
+              desk tablet/desktop lives). The autoComplete
+              hints let the browser's address-book fill drive
+              the input on each form independently. Both
+              fields are required — the server-side
+              WalkinGuestDetailsSchema already enforces this,
+              and the form-level guard in handleWalkinSubmit
+              surfaces a friendlier error before the round
+              trip. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+            <label className="flex flex-1 flex-col gap-2 text-xs font-semibold text-gray-700">
+              Guest First Name
+              <input
+                type="text"
+                required
+                value={walkinFirstName}
+                onChange={(e) => setWalkinFirstName(e.target.value)}
+                placeholder="Maria"
+                autoComplete="given-name"
+                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
+              />
+            </label>
+            <label className="flex flex-1 flex-col gap-2 text-xs font-semibold text-gray-700">
+              Guest Last Name
+              <input
+                type="text"
+                required
+                value={walkinLastName}
+                onChange={(e) => setWalkinLastName(e.target.value)}
+                placeholder="Santos"
+                autoComplete="family-name"
+                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
+              />
+            </label>
+          </div>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Phone
@@ -4398,47 +6495,6 @@ export function BookingsPage() {
           </label>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Room Type
-            <select
-              value={roomType}
-              onChange={(e) => {
-                setRoomType(e.target.value);
-                const matching = rooms.filter(r => r.type === e.target.value && r.status === "available");
-                if (matching.length > 0) {
-                  setRoomNumber(matching[0].roomNumber);
-                } else {
-                  setRoomNumber("");
-                }
-              }}
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
-            >
-              {roomTypes.map(t => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Select Available Room Number
-            <select
-              value={roomNumber}
-              onChange={(e) => setRoomNumber(e.target.value)}
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
-              required
-            >
-                {availableRoomsOfType.length > 0 ? (
-                  availableRoomsOfType.map(r => (
-                    <option key={r.id} value={r.roomNumber}>
-                      Room {r.roomNumber} ({roomTypes.find(t => t.value === r.type)?.shortLabel || r.type}, ₱{roomTypes.find(t => t.value === r.type)?.pricePerNight ?? 0}/night)
-                    </option>
-                  ))
-                ) : (
-                  <option value="" disabled>No vacant rooms available</option>
-                )}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Check-In Date
             <input
               type="date"
@@ -4460,17 +6516,235 @@ export function BookingsPage() {
             />
           </label>
 
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Number of Guests
-            <input
-              type="number"
-              min={1}
-              required
-              value={numGuests}
-              onChange={(e) => setNumGuests(parseInt(e.target.value) || 1)}
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs"
-            />
-          </label>
+          {/* Per EXB-07 (2026-08-01, per decision #155) + MRB-07
+              (2026-08-02, per decision #159): the reservation's room
+              stays. Each stay picks a room type and a specific vacant
+              room, then carries its own occupancy steppers: adults
+              (>= 1, required), children (>= 0), and extra beds (>= 0,
+              capped at `maxExtraBeds` for that stay's type, hidden
+              entirely when the type allows 0). Totals auto-update the
+              price preview below. The contextual overflow hint renders
+              per stay when its split exceeds that type's caps —
+              strongest UX: tell the desk exactly how many extra beds to
+              add instead of letting the server reject. Rooms already
+              taken by another stay are filtered out of the picker, so
+              the desk cannot build a reservation the server would
+              refuse for selling the same room twice. */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <span>
+                Rooms
+                {walkinRoomStays.length > 1 ? ` (${walkinRoomStays.length})` : ""}
+              </span>
+              <span className="text-gray-400 normal-case font-normal">
+                {numGuests} guest{numGuests === 1 ? "" : "s"} total
+              </span>
+            </div>
+
+            {walkinRoomStays.map((stay, stayIndex) => {
+              const stayRooms = availableRoomsForStay(stayIndex);
+              const stayTypeEntry = roomTypes.find((t) => t.value === stay.roomType);
+              const stayMaxCapacity = Number(stayTypeEntry?.maxCapacity) || 0;
+              const stayMaxChildren = Number(stayTypeEntry?.maxChildren) || 0;
+              const stayMaxExtraBeds = Number(stayTypeEntry?.maxExtraBeds) || 0;
+              const stayExtraBedRate = Number(stayTypeEntry?.extraBedRate) || 0;
+              const stayOverflow = stayTypeEntry
+                ? requiredExtraBedsFor({
+                    numAdults: stay.numAdults,
+                    numChildren: stay.numChildren,
+                    maxCapacity: stayMaxCapacity,
+                    maxChildren: stayMaxChildren
+                  })
+                : { overflowAdults: 0, overflowChildren: 0, requiredExtraBeds: 0 };
+              const stayShowOverflowHint =
+                Boolean(stayTypeEntry) && stayOverflow.requiredExtraBeds > stay.extraBedCount;
+              const stayGuests = stay.numAdults + stay.numChildren;
+
+              return (
+                <div
+                  key={stay.key}
+                  className="space-y-2 rounded-xl border border-gray-200 bg-gray-50/40 p-3"
+                >
+                  {walkinRoomStays.length > 1 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-gray-600">
+                        Room {stayIndex + 1} of {walkinRoomStays.length}
+                        {walkinRoomChargeTotals[stayIndex] > 0
+                          ? ` — ${formatPrice(walkinRoomChargeTotals[stayIndex])}`
+                          : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeWalkinRoomStay(stayIndex)}
+                        className="min-h-[32px] rounded-lg px-2 text-[11px] font-semibold text-red-600 hover:bg-red-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Room Type
+                    <select
+                      value={stay.roomType}
+                      onChange={(e) => {
+                        const nextType = e.target.value;
+                        const claimed = new Set(
+                          walkinRoomStays
+                            .filter((_, idx) => idx !== stayIndex)
+                            .map((other) => other.roomNumber)
+                            .filter(Boolean)
+                        );
+                        const firstFree = rooms.find(
+                          (r) =>
+                            r.type === nextType &&
+                            r.status === "available" &&
+                            !claimed.has(r.roomNumber)
+                        );
+                        updateWalkinRoomStay(stayIndex, {
+                          roomType: nextType,
+                          roomNumber: firstFree?.roomNumber || "",
+                          // A different type has different caps, so a
+                          // carried-over extra-bed count could exceed
+                          // the new allowance.
+                          extraBedCount: 0
+                        });
+                      }}
+                      className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+                    >
+                      {roomTypes.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Select Available Room Number
+                    <select
+                      value={stay.roomNumber}
+                      onChange={(e) => updateWalkinRoomStay(stayIndex, { roomNumber: e.target.value })}
+                      className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
+                      required
+                    >
+                      {stayRooms.length > 0 ? (
+                        stayRooms.map((r) => (
+                          <option key={r.id} value={r.roomNumber}>
+                            Room {r.roomNumber} ({roomTypes.find((t) => t.value === r.type)?.shortLabel || r.type}, ₱{roomTypes.find((t) => t.value === r.type)?.pricePerNight ?? 0}/night)
+                          </option>
+                        ))
+                      ) : (
+                        <option value="" disabled>No vacant rooms available</option>
+                      )}
+                    </select>
+                  </label>
+
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <span>Occupancy</span>
+                    <span className="text-gray-400 normal-case font-normal">
+                      {stayGuests} guest{stayGuests === 1 ? "" : "s"} in this room
+                    </span>
+                  </div>
+
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Adults</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Decrease adults in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numAdults: Math.max(1, stay.numAdults - 1) })}
+                        disabled={stay.numAdults <= 1}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{stay.numAdults}</span>
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Increase adults in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numAdults: stay.numAdults + 1 })}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Children (0–11, free of room rate)</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Decrease children in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numChildren: Math.max(0, stay.numChildren - 1) })}
+                        disabled={stay.numChildren <= 0}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{stay.numChildren}</span>
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        aria-label={`Increase children in room ${stayIndex + 1}`}
+                        onClick={() => updateWalkinRoomStay(stayIndex, { numChildren: stay.numChildren + 1 })}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+
+                  {stayMaxExtraBeds > 0 ? (
+                    <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                      <span>Extra beds ({formatPrice(stayExtraBedRate)} / bed / night)</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          aria-label={`Decrease extra beds in room ${stayIndex + 1}`}
+                          onClick={() => updateWalkinRoomStay(stayIndex, { extraBedCount: Math.max(0, stay.extraBedCount - 1) })}
+                          disabled={stay.extraBedCount <= 0}
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="w-6 text-center tabular-nums">{stay.extraBedCount}</span>
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          aria-label={`Increase extra beds in room ${stayIndex + 1}`}
+                          onClick={() => updateWalkinRoomStay(stayIndex, { extraBedCount: Math.min(stay.extraBedCount + 1, stayMaxExtraBeds) })}
+                          disabled={stay.extraBedCount >= stayMaxExtraBeds}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </label>
+                  ) : null}
+
+                  {stayShowOverflowHint && stayTypeEntry ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                      {stayMaxExtraBeds > 0 ? (
+                        <>
+                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} (or {stayMaxCapacity + stayMaxExtraBeds}/{stayMaxChildren + stayMaxExtraBeds} with {stayMaxExtraBeds} extra bed{stayMaxExtraBeds === 1 ? "" : "s"}). Add {stayOverflow.requiredExtraBeds} extra bed{stayOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit this room's guests, move someone to another room, or pick a different room type.
+                        </>
+                      ) : (
+                        <>
+                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} and does not allow extra beds. Move someone to another room or pick a different room type.
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={addWalkinRoomStay}
+              className="min-h-[44px] w-full rounded-lg border border-dashed border-gray-300 text-xs font-semibold text-gray-600 hover:border-primary hover:text-primary"
+            >
+              + Add another room
+            </button>
+          </div>
 
           <div className="space-y-2 pt-1">
             <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
@@ -4495,15 +6769,35 @@ export function BookingsPage() {
           </div>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Payment Term
+            Source
+            <select
+              value={walkinSource}
+              onChange={(e) => setWalkinSource(e.target.value)}
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+            >
+              {selectableBookingSources.map((s) => (
+                <option key={s.source} value={s.source}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Payment Method
             <select
               value={walkinPayment}
               onChange={(e) => setWalkinPayment(e.target.value)}
               className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
             >
-              <option value="pay-at-hotel">Pay at Hotel</option>
-              <option value="cash">Cash on Hand</option>
-              <option value="card">Onsite Card Reader</option>
+              {[
+                { method: "pay-at-hotel", label: "Pay at Hotel" },
+                ...onsitePaymentMethodOptions
+              ].map((m: any) => (
+                <option key={m.method} value={m.method}>
+                  {m.label || m.method}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -4550,8 +6844,19 @@ export function BookingsPage() {
               <span>Duration:</span>
               <span className="font-bold">{numNights} night(s)</span>
             </div>
+            {/* Per MRB-07 (2026-08-02, per decision #159): a
+                multi-room reservation states its room count so the
+                accommodation figure below is unambiguous. */}
+            {walkinRoomStays.length > 1 && (
+              <div className="flex justify-between">
+                <span>Rooms:</span>
+                <span className="font-bold">
+                  {walkinRoomStays.length} ({walkinRoomStays.map((stay) => stay.roomNumber || "—").join(", ")})
+                </span>
+              </div>
+            )}
             <div className="flex justify-between text-gray-600">
-              <span>Accommodation Cost:</span>
+              <span>Accommodation Cost{walkinRoomStays.length > 1 ? " (all rooms)" : ""}:</span>
               <span>{formatPrice(roomChargeTotal)}</span>
             </div>
             {hasBreakfast && (
@@ -4759,11 +7064,11 @@ export function BookingsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg bg-gray-50 px-3 py-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Booking total</p>
-                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBookingFolio?.grandTotal ?? selectedFolioBaseTotal)}</p>
               </div>
               <div className="rounded-lg bg-gray-50 px-3 py-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Outstanding</p>
-                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))}</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(Math.max(0, selectedBookingFolio?.balance ?? 0))}</p>
               </div>
             </div>
             <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
@@ -4797,13 +7102,36 @@ export function BookingsPage() {
                 if (!Number.isFinite(amount) || amount <= 0) { setVerifyError("Enter a valid positive amount."); return; }
                 setVerifyPending(true);
                 const paymentId = verifySubmissionIdRef.current
-                  || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+                  || createSelectedLedgerEntryId("payment");
                 verifySubmissionIdRef.current = paymentId;
                 const result = await verifyAndRecordPayment(selectedBooking.id, paymentId, amount, verifyMethod, verifyReference.trim() || undefined, verifyNote.trim() || undefined);
                 setVerifyPending(false);
                 if (!result.success) { setVerifyError(result.error || "Failed to verify payment."); return; }
                 verifySubmissionIdRef.current = null;
                 setShowVerifyPaymentModal(false);
+
+                // Per feat/payment-success-modal: close the loop
+                // with a confirmation modal. We compute "is full
+                // payment" client-side from the amount the staff
+                // just submitted plus the existing onsite
+                // payments — the server transitions to
+                // `payment-confirmed` iff the cumulative total
+                // reaches `totalPrice`. The existing
+                // onsitePayments snapshot is pre-action (the
+                // snapshot listener will catch up on the next
+                // tick), so the math here is correct.
+                const existingPaid = selectedBookingPayments.reduce((s, p) => s + p.amount, 0);
+                const cumulativeAfter = existingPaid + amount;
+                const folioTotal = selectedBookingFolio?.grandTotal ?? selectedFolioBaseTotal;
+                const isFullPayment = cumulativeAfter >= folioTotal && folioTotal > 0;
+                setVerifySuccess({
+                  booking: selectedBooking,
+                  amount,
+                  method: verifyMethod,
+                  methodLabel: onsitePaymentMethodLabels[verifyMethod] || verifyMethod,
+                  isFullPayment,
+                  remainingBalance: Math.max(0, folioTotal - cumulativeAfter)
+                });
               })()} disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
                 {verifyPending ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Verify & Record Payment"}
               </button>
@@ -4812,15 +7140,133 @@ export function BookingsPage() {
         )}
       </Modal>
 
+      {/* PRC-13 / feat/payment-success-modal: post-verify confirmation
+          modal. Closes the loop on the verify action and nudges the
+          front desk toward confirming the booking now that the
+          payment is recorded. See the component for the full variant
+          matrix (full vs partial, drawer vs dashboard CTAs). */}
+      <PaymentSuccessModal
+        open={verifySuccess !== null}
+        onClose={() => { if (!confirmingBookingFromSuccess) setVerifySuccess(null); }}
+        surface="drawer"
+        bookingRef={verifySuccess?.booking.bookingRef ?? ""}
+        guestName={verifySuccess?.booking.guestName ?? ""}
+        guestEmail={verifySuccess?.booking.guestEmail ?? ""}
+        roomType={verifySuccess?.booking.roomType ?? ""}
+        amount={verifySuccess?.amount ?? 0}
+        method={verifySuccess?.method ?? ""}
+        methodLabel={verifySuccess?.methodLabel}
+        isFullPayment={verifySuccess?.isFullPayment ?? false}
+        remainingBalance={verifySuccess?.remainingBalance}
+        onConfirmBooking={handleConfirmBookingFromSuccess}
+        confirmingBooking={confirmingBookingFromSuccess}
+        onConfirmWithBalance={openConfirmWithBalanceFromSuccess}
+      />
+
+      {/* Per CWB-04 / decision #122 (2026-07-23): opens from
+          the post-verify success modal (partial variant) OR
+          from the drawer's More actions menu. The form owns
+          the threshold banner + the role-gated submit
+          button; on success the snapshot listener refreshes
+          the drawer automatically. */}
+      {confirmWithBalanceContext && (
+        <ConfirmWithBalanceForm
+          open={confirmWithBalanceContext !== null}
+          onClose={() => setConfirmWithBalanceContext(null)}
+          booking={{
+            ...confirmWithBalanceContext.booking,
+            totalPrice: selectedBookingFolio?.grandTotal ?? confirmWithBalanceContext.booking.totalPrice,
+            onsitePayments: selectedBookingPayments
+          }}
+          currentBalance={confirmWithBalanceContext.currentBalance}
+          onConfirmed={() => setConfirmWithBalanceContext(null)}
+        />
+      )}
+
       {/* BDUX-05: Discount / Voucher modal */}
       <Modal
-        title={selectedBooking ? `Apply discount — ${selectedBooking.bookingRef}` : "Apply discount / voucher"}
+        title={
+          selectedBooking
+            ? staffDiscountScope === "reservation" && selectedReservationContext
+              ? `Apply discount — all ${selectedReservationContext.roomCount} rooms (${selectedReservationContext.reservationRef || "—"})`
+              : `Apply discount — ${selectedBooking.bookingRef}`
+            : "Apply discount / voucher"
+        }
         open={showDiscountForm}
-        onClose={() => setShowDiscountForm(false)}
+        onClose={() => {
+          setShowDiscountForm(false);
+          // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+          // reset the discount scope on close so a previous
+          // session's choice never bleeds into a new one (mirrors
+          // the MRB-13 cancel-modal `bookingCancelScope` reset).
+          setStaffDiscountScope(null);
+        }}
         className="max-w-lg"
       >
         <div className="space-y-4">
           <p className="text-xs text-gray-600">Apply after sighting a valid Senior/PWD ID, or enter a promo code. Pricing is recalculated and audited by the server.</p>
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+              the discount scope selector. Mirrors the MRB-13
+              cancel-modal `bookingCancelScope` segmented control.
+              Default `"room"` is the safer choice; staff must
+              opt into the whole-reservation path explicitly. The
+              scope selector is hidden when the selected booking
+              is single-room or legacy (no `selectedReservationContext`)
+              — the segmented control is meaningless for those
+              rows and would always read the same. */}
+          {selectedReservationContext && (
+            <div
+              data-testid="staff-discount-scope-selector"
+              className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+                Discount scope
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                This booking is part of reservation {selectedReservationContext.reservationRef || "—"} ({selectedReservationContext.roomCount} rooms). Pick what to discount.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  data-testid="staff-discount-scope-room"
+                  onClick={() => setStaffDiscountScope("room")}
+                  className={cn(
+                    "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                    (staffDiscountScope ?? "room") === "room"
+                      ? "border-primary bg-primary text-white shadow-sm"
+                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  <span className="block text-xs font-bold">This room</span>
+                  <span className={cn(
+                    "mt-0.5 block text-[10px]",
+                    (staffDiscountScope ?? "room") === "room" ? "text-white/80" : "text-gray-500"
+                  )}>
+                    Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="staff-discount-scope-reservation"
+                  onClick={() => setStaffDiscountScope("reservation")}
+                  className={cn(
+                    "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                    staffDiscountScope === "reservation"
+                      ? "border-primary bg-primary text-white shadow-sm"
+                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  )}
+                >
+                  <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
+                  <span className={cn(
+                    "mt-0.5 block text-[10px]",
+                    staffDiscountScope === "reservation" ? "text-white/80" : "text-gray-500"
+                  )}>
+                    Reservation total
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
           <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
             Government discount
             <select value={staffDiscountType} onChange={(e) => setStaffDiscountType(e.target.value as "" | "senior" | "pwd")} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs">
@@ -4835,32 +7281,240 @@ export function BookingsPage() {
           </label>
           {discountError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{discountError}</p>}
           <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={() => setShowDiscountForm(false)} disabled={isApplyingStaffDiscount} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => {
+              setShowDiscountForm(false);
+              setStaffDiscountScope(null);
+            }} disabled={isApplyingStaffDiscount} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
             <button type="button" onClick={() => void (async () => {
               if (!selectedBooking || (!staffDiscountType && !staffVoucherCode.trim())) return;
               setDiscountError(null);
               setIsApplyingStaffDiscount(true);
               try {
+                // Per MRB-12 (2026-08-03, per decision #179 —
+                // proposed): when the staff picks the reservation
+                // scope, loop over every room in
+                // `selectedReservationContext.rooms` and call the
+                // existing per-booking `apply-discount` endpoint
+                // for each. The server has no `applyReservationDiscount`
+                // endpoint today (MRB-14+ follow-up if atomicity
+                // ever matters); the loop is the same code path
+                // the desk would manually run for each room
+                // today. Errors on a single room abort the loop
+                // and surface the failure to the desk — already-
+                // repriced rooms keep their new totals; the
+                // operator retries the failed room.
+                const scope = staffDiscountScope ?? "room";
+                const targetIds = scope === "reservation" && selectedReservationContext
+                  ? selectedReservationContext.rooms.map((room) => room.id)
+                  : [selectedBooking.id];
                 const token = await auth.currentUser?.getIdToken(true);
-                const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-                  body: JSON.stringify({ bookingId: selectedBooking.id, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() })
-                });
-                const payload = await response.json();
-                if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to apply discount.");
-                syncSelectedBooking(payload.data);
+                const errors: string[] = [];
+                for (const targetId of targetIds) {
+                  const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+                    body: JSON.stringify({ bookingId: targetId, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() })
+                  });
+                  const payload = await response.json();
+                  if (!response.ok || !payload.success) {
+                    errors.push(payload.error || `Room ${targetId} failed.`);
+                    continue;
+                  }
+                  if (targetId === selectedBooking.id) {
+                    // The drawer's `selectedBooking` is the only
+                    // one the page hydrates locally via
+                    // `syncSelectedBooking`; the sibling rooms
+                    // refresh via the AdminContext listener.
+                    syncSelectedBooking(payload.data);
+                  }
+                }
+                if (errors.length > 0) {
+                  throw new Error(
+                    errors.length === targetIds.length
+                      ? errors[0]
+                      : `${errors.length} of ${targetIds.length} rooms failed: ${errors[0]}`
+                  );
+                }
                 setStaffDiscountType("");
                 setStaffVoucherCode("");
                 setShowDiscountForm(false);
-                toast.success("Booking repriced", `New total: ${formatPrice(payload.data.totalPrice)}`);
+                setStaffDiscountScope(null);
+                toast.success(
+                  scope === "reservation" && selectedReservationContext
+                    ? `Reservation repriced (${targetIds.length} rooms)`
+                    : "Booking repriced",
+                  scope === "reservation" && selectedReservationContext
+                    ? `Applied across ${targetIds.length} rooms in ${selectedReservationContext.reservationRef || "—"}`
+                    : `New total: ${formatPrice(selectedBooking.totalPrice || 0)}`
+                );
               } catch (error: any) {
                 setDiscountError(error.message || "Please check the details and try again.");
               } finally {
                 setIsApplyingStaffDiscount(false);
               }
             })()} disabled={isApplyingStaffDiscount || (!staffDiscountType && !staffVoucherCode.trim())} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
-              {isApplyingStaffDiscount ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Applying…</> : "Apply and reprice booking"}
+              {isApplyingStaffDiscount ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Applying…</> : (staffDiscountScope === "reservation" && selectedReservationContext ? `Apply to all ${selectedReservationContext.roomCount} rooms` : "Apply and reprice booking")}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Per MRB-14 (2026-08-03, per decision #180 —
+          proposed): the "Add room to this reservation"
+          modal. Staff picks a vacant room; the
+          server reads the header's current dates
+          (the new child inherits them — the dates
+          are NEVER in the form). Pre-arrival only.
+          Hidden for legacy null-`reservationId`
+          bookings (the drawer's button gates on
+          `selectedBooking.reservationId`). The
+          modal is intentionally minimal — just
+          target room + occupancy. The pricing +
+          allocation snapshot is the server's job
+          (per MRB-11 the server always computes
+          before the write; the input is accepted
+          for the rare pre-computed case). */}
+      <Modal
+        title={selectedBooking ? `Add room — ${selectedBooking.reservationRef || "—"}` : "Add room"}
+        open={showAddRoomForm}
+        onClose={() => {
+          setShowAddRoomForm(false);
+          setAddRoomError(null);
+        }}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-600">
+            The new room inherits the reservation's current dates. The room must be vacant and pass bed-inventory validation.
+          </p>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Target room
+            <select
+              value={addRoomRoomId}
+              onChange={(e) => setAddRoomRoomId(e.target.value)}
+              data-testid="add-room-room-select"
+              className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+            >
+              <option value="">Choose a vacant room</option>
+              {rooms
+                .filter((r) => r.isActive !== false && r.status !== "blocked")
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    Room {r.roomNumber} — {r.type.replace(/-/g, " ")}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Adults
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={addRoomNumAdults}
+                onChange={(e) => setAddRoomNumAdults(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+                data-testid="add-room-num-adults"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Children
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={addRoomNumChildren}
+                onChange={(e) => setAddRoomNumChildren(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                data-testid="add-room-num-children"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Extra beds
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={addRoomExtraBedCount}
+                onChange={(e) => setAddRoomExtraBedCount(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                data-testid="add-room-extra-bed-count"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs"
+              />
+            </label>
+          </div>
+          {addRoomError && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700" data-testid="add-room-error">
+              {addRoomError}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddRoomForm(false);
+                setAddRoomError(null);
+              }}
+              disabled={isAddingRoom}
+              className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!selectedBooking?.reservationId || !addRoomRoomId) {
+                  setAddRoomError("Choose a target room.");
+                  return;
+                }
+                setAddRoomError(null);
+                setIsAddingRoom(true);
+                try {
+                  const token = await auth.currentUser?.getIdToken(true);
+                  const response = await fetch(
+                    `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-room`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: token ? `Bearer ${token}` : ""
+                      },
+                      body: JSON.stringify({
+                        reservationId: selectedBooking.reservationId,
+                        roomId: addRoomRoomId,
+                        numAdults: addRoomNumAdults,
+                        numChildren: addRoomNumChildren,
+                        extraBedCount: addRoomExtraBedCount
+                      })
+                    }
+                  );
+                  const payload = await response.json();
+                  if (!response.ok || !payload.success) {
+                    throw new Error(payload.error || "Unable to add room.");
+                  }
+                  toast.success(
+                    "Room added",
+                    `New room ${payload.data?.bookingRef || ""} added to ${selectedBooking.reservationRef || "reservation"}`
+                  );
+                  setShowAddRoomForm(false);
+                } catch (error: any) {
+                  setAddRoomError(error?.message || "Failed to add room. Please try again.");
+                } finally {
+                  setIsAddingRoom(false);
+                }
+              }}
+              disabled={isAddingRoom || !addRoomRoomId}
+              data-testid="add-room-submit"
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50"
+            >
+              {isAddingRoom ? (
+                <>
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Adding…
+                </>
+              ) : (
+                "Add room"
+              )}
             </button>
           </div>
         </div>
@@ -4903,24 +7557,53 @@ export function BookingsPage() {
                 toast.warning("Check refund details", "Enter a positive amount and a required refund reason.");
                 return;
               }
+              // Per CRL-01: client-preallocated refundId for idempotency.
+              // See handleRefundSubmit for the full rationale; the inline
+              // Approve button mirrors the same preallocate-keep-replay-mint
+              // flow so a manual retry after a closed tab never appends a
+              // second refund entry.
+              const refundId = refundSubmissionIdRef.current
+                || createSelectedLedgerEntryId("refund");
+              refundSubmissionIdRef.current = refundId;
               setRefundError(null);
               setIsRefunding(true);
+              let refundCompleted = false;
               try {
                 const token = await auth.currentUser?.getIdToken(true);
                 const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-refund`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-                  body: JSON.stringify({ bookingId: selectedBooking.id, amount, method: refundMethod, reason: refundReason.trim() })
+                  body: JSON.stringify({ bookingId: selectedBooking.id, refundId, amount, method: refundMethod, reason: refundReason.trim() })
                 });
                 const payload = await response.json();
-                if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to record refund.");
+                if (!response.ok || !payload.success) {
+                  // 409 means the staff reused an ID for a different refund;
+                  // clear the held ref so the next submit mints a fresh one.
+                  if (response.status === 409) {
+                    refundSubmissionIdRef.current = null;
+                  }
+                  throw new Error(payload.error || "Unable to record refund.");
+                }
+                refundCompleted = true;
                 setRefundAmount("");
                 setRefundReason("");
                 setShowRefundModal(false);
                 toast.success("Refund recorded", `${formatPrice(amount)} returned via ${getOnsitePaymentMethodLabel(refundMethod)}.`);
+                // Per CRL-07: the refund updated the
+                // refunds subcollection. Bump the
+                // panel's `refreshKey` so it re-projects
+                // the live `processedAmount` without
+                // waiting for the Firestore onSnapshot
+                // to land the new value.
+                setLiabilitySnapshotKey((prev) => prev + 1);
               } catch (error: any) {
                 setRefundError(error.message || "Please try again.");
               } finally {
+                // Keep the same ID after an uncertain/network failure. A
+                // manual retry then replays the original server commit
+                // instead of creating a second ledger entry. Successful
+                // submissions mint a fresh ID.
+                if (refundCompleted) refundSubmissionIdRef.current = null;
                 setIsRefunding(false);
               }
             })()} disabled={isRefunding || !refundAmount || Number(refundAmount) <= 0 || !refundReason.trim()} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">
@@ -4929,6 +7612,41 @@ export function BookingsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Per CRL-07 (2026-08-03, per decision #173):
+          the admin-only exception modal. The form
+          lives in the
+          `CancellationExceptionModal` component (it
+          owns the input state, the validation, the
+          API call, and the error display). The
+          parent only owns the open/close + the
+          post-success refresh trigger. The modal is
+          admin-gated by the parent: the panel
+          only renders the "Apply exception" button
+          when `currentUser?.role === "admin"`, and
+          the modal itself is mounted only when
+          `showExceptionModal` is true (the parent
+          controls who can open it via the panel
+          button). A non-admin could not even
+          trigger the open handler. */}
+      <CancellationExceptionModal
+        open={showExceptionModal}
+        onClose={() => setShowExceptionModal(false)}
+        liability={selectedBooking?.cancellationLiability || null}
+        bookingId={selectedBooking?.id || ""}
+        reservationId={selectedBooking?.reservationId || null}
+        onSuccess={() => {
+          // The exception updated the stored
+          // `cancellationLiability`. Bump the
+          // panel's `refreshKey` so it re-projects
+          // the new state. The Firestore onSnapshot
+          // will also push the new value to
+          // `selectedBooking.cancellationLiability`,
+          // but the bump makes the refresh feel
+          // instant.
+          setLiabilitySnapshotKey((prev) => prev + 1);
+        }}
+      />
 
       {/* BDUX-05: Add charge modal */}
       <Modal
@@ -4974,14 +7692,17 @@ export function BookingsPage() {
               setChargeError(null);
               setIsSavingCharge(true);
               try {
-                await addDoc(collection(db, "bookings", selectedBooking.id, "charges"), {
+                const chargesRef = getSelectedChargeCollection();
+                if (!chargesRef) return;
+                await addDoc(chargesRef, {
                   label: chargeLabel.trim(),
                   amount,
                   category: chargeCategory,
                   note: chargeNote.trim(),
                   addedBy: currentUser?.uid || "staff",
                   addedAt: serverTimestamp(),
-                  voidOf: null
+                  voidOf: null,
+                  ...(selectedBooking.reservationId ? { bookingId: selectedBooking.id } : {})
                 });
                 setChargeLabel("");
                 setChargeAmount("");

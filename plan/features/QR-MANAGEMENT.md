@@ -25,7 +25,7 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 ## UI Checklist
 
 - [x] QR grid — one card per room (all rooms), shows room number, room name, and rendered QR code
-- [x] QR code rendered using `qrcode.react` — links to `/intercom/{roomId}` on `www.sparkinnbohol.com`
+- [x] QR code rendered using `qrcode.react` — links to `/intercom/{roomId}` on the env-aware base URL (see "QR URL env-awareness" below).
 - [x] QR Target selector — dropdown to select the target destination (Front Desk Intercom / Spark Essentials Store). Adjusts the generated QR URL and print label dynamically.
 - [x] Regenerate button per room — generates a new unique room QR token / QR value, updates Firestore
 - [x] Regenerate confirmation modal — "This will invalidate the current QR code. Guests with the old QR code will not be able to chat."
@@ -36,8 +36,8 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 
 ## Data & Logic Checklist
 
-- [x] QR code URL format: `https://www.sparkinnbohol.com/intercom/{roomId}`
-- [x] QR code URL format for Spark Essentials: `https://www.sparkinnbohol.com/intercom/{roomId}?tab=shop`
+- [x] QR code URL format: `${resolveApiBaseUrl()}/intercom/{roomId}` (env-aware — see "QR URL env-awareness" below)
+- [x] QR code URL format for Spark Essentials: `${resolveApiBaseUrl()}/intercom/{roomId}?tab=shop`
 - [x] `roomId` is the guest intercom route parameter; room numbers are accepted by the guest route and resolved against Firestore rooms
 - [x] Regenerate: updates optional `rooms/{roomId}.qrToken`; QR falls back to room doc ID when no token exists
 - [x] Guest route resolution: `/intercom/:roomId` accepts room doc ID, room number, or regenerated `qrToken`
@@ -70,6 +70,19 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 - [x] Print all QRs — 4 cards per A4 page, correct room data on each card
 - [x] spark inn logo appears on printed QR cards
 - [x] Download as PNG — file downloads with QR code
+
+## QR URL env-awareness (2026-07-24 fix)
+
+The QR URL is **env-aware** so a scan during a test round-trips back to the same environment the staff is working in. The base URL is `resolveApiBaseUrl()` from `admin-app/src/utils/apiBaseUrl.ts`:
+
+| Admin hostname | QR encodes | Notes |
+|---|---|---|
+| `stg-admin.sparkinnbohol.com` | `https://stg.sparkinnbohol.com/intercom/...` | Staging admin → staging QR |
+| `localhost` / `127.0.0.1` | `http://localhost:3000/intercom/...` | Local dev |
+| `admin.sparkinnbohol.com` | `https://www.sparkinnbohol.com/intercom/...` | Production admin → production QR |
+| Vercel preview (any other) | `VITE_GUEST_APP_URL` if set, else production | Set `VITE_GUEST_APP_URL` to the matching stg preview URL |
+
+**Operational rule:** real printable QRs that will be placed in physical rooms must be generated from the **production** admin (`admin.sparkinnbohol.com`), not from staging. The env-awareness exists so staff can test the full scan flow against staging without needing to swap their admin URL — QR codes generated in staging point at the staging guest app, so the test stays on the same environment.
 
 ## References
 

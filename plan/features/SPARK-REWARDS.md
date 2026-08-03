@@ -144,7 +144,7 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 - [x] Disable/enable member account (without deleting)
 - [x] Search by name or email
 - [x] Filter by tier (Deferred to Phase 2 when tiers are defined)
-- [x] Export members list as CSV (available via the full data backup export on the Reports page)
+- [x] Export members list via the full data backup (XLSX) on the Reports page (admin-only — the "Members" worksheet inside the full-backup `.xlsx` carries member number, full name, email, phone, auth provider, rewards points, tier, active, member since; per `audit-admin-sev4-2026-07-07.test.ts` §AA-32, no standalone CSV button is shipped — the XLSX Members worksheet is the canonical export)
 
 ### Data & Logic Checklist
 - [x] `onSnapshot` on `members` collection — real-time
@@ -229,8 +229,8 @@ These are documented here for awareness. Define before starting Phase 2:
 ## Edge Cases & States
 
 - [x] **Guest books anonymously then registers with same email** — on registration, query `bookings` where `guestEmail == member.email`, update all matching bookings with `memberId`; all previous stays immediately appear in My Stays
-- [x] Member books while logged in but uses different email — no auto-link; manual link by front desk from Member detail drawer
-- [x] Google account email differs from booking email — after sign-in, prompt: "We found bookings under a different email. Would you like to link them?" with the booking email pre-filled — guest confirms to trigger the email-match link
+- [x] **Front-desk manual link (Spark Rewards audit 2026-07-18 MED-3, build variant)** — **Shipped 2026-07-29** (decision #135 build variant, branch `fix/spark-rewards-med-3-link-booking`). New server endpoint `POST /api/members/link-booking` (`handleLinkBookingToMember` in `guest-app/server/handlers/members.ts`) — admin-only (front-desk 403), Zod-validated `{ memberUid, bookingId, reason (1..500) }`, 10/min/IP rate limit (mirrors `manual-adjust` + `set-active`). Server transaction re-reads the member + the booking, refuses cancelled bookings (400), test-run bookings (400), and bookings already linked to a different member (409 — no silent overwrite, no unlink from this surface), then sets `memberId` + `linkedByStaff` + `linkedAt` + `linkedReason` on the booking and writes an audit row under `bookings/audit/records/{bookingId}-link-{timestamp}` (mirrors the erasure audit shape from decision #49). Re-linking a booking to the same member is idempotent (no booking update, audit row still written — `alreadyLinked: true` in the response). The admin member drawer (`admin-app/src/pages/MembersPage.tsx`) gains a **Link Existing Booking** form below the points adjustment form, with the member's email surfaced in the helper copy so the staff can confirm the different-email context before linking. Toasts: success on a fresh link, info on a re-link (alreadyLinked). **Tests** — 14 server tests in `guest-app/tests/api/members-link-booking.test.ts` (auth + method + schema + lookup + booking-state + idempotency + audit row + Admin SDK posture) + 18 source-text tests in `admin-app/src/__tests__/med-3-link-booking.test.ts` pinning the route wiring, the handler contract, the AdminContext function, and the drawer form. 930/930 admin + 544/544 guest tests green, typecheck clean. The guest self-service prompt in the next entry remains the unbuilt half of MED-3.
+- [ ] **Deferred (Spark Rewards audit 2026-07-18 MED-3, guest self-service half)** — Google account email differs from booking email; post-sign-in prompt: "We found bookings under a different email. Would you like to link them?" with the booking email pre-filled. No such prompt exists in `guest-app/src` (the `RewardsLandingPage`, `ProfilePage`, and post-booking confirmation page are the only Spark Rewards join surfaces, and none of them offer a different-email reconciliation flow). The build variant above (front-desk manual link) closes the half the audit kept as the smaller build path; the guest self-service prompt is the larger surface and is still deferred. **Workaround** — guest can still find the booking at `/my-booking` (ref + email); staff can now also link it from the member detail drawer (no more booking-drawer `memberId`-edit dance for the common case). See decision #135.
 - [x] Member account disabled — redirect to `/contact` with message: "Your account has been disabled. Please contact us."
 - [x] Delete account request — delete `members/{uid}`, anonymize linked bookings (remove personal data), revoke Firebase Auth — per RA 10173 right to erasure
 
@@ -259,6 +259,13 @@ These are documented here for awareness. Define before starting Phase 2:
 - [x] Disable member — member cannot sign in
 - [x] `/account/*` routes redirect to `/signin` when not authenticated
 
+## Known Issues (Audit 2026-07-18)
+
+Findings from the Spark Rewards feature audit — full report in `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md`.
+
+- ✅ **9 of 10 findings closed 2026-07-25 → 2026-07-29** (HIGH email-verified gate; MED different-email reconciliation build variant; MED server-side manual points adjustment; LOW-1/2/4/5/6/7) — verbatim closure narratives in [`plan/project/archive/SPARK-REWARDS-ARCHIVE-2026-08-02.md`](../project/archive/SPARK-REWARDS-ARCHIVE-2026-08-02.md). The guest self-service "link bookings under a different email" prompt remains the unbuilt half of MED-3 and is tracked in `plan/project/ROADMAP.md`.
+- ⏸ **LOW-3 — `linkBookingsByEmail` batch not chunked to Firestore's 500-write limit** — **Deferred 2026-07-25** (decision #136). Theoretical only — a member whose email matches >500 bookings is the only failure mode and is not realistic for a single-hotel guest. Re-mark as `Deferred` rather than building the chunking logic; revisit if a future client scales beyond 500 same-email bookings. No code change.
+
 ## References
 
 - Guest auth vs admin auth: `plan/features/AUTH-ROLES.md`
@@ -267,3 +274,22 @@ These are documented here for awareness. Define before starting Phase 2:
 - Rewards signup page: `plan/features/STATIC-PAGES.md §Spark Rewards`
 - RA 10173 erasure rights: `plan/docs/SECURITY.md §Data Subject Rights`
 - Member types: `plan/docs/TYPES.md §Member`
+
+---
+
+## Earn + Clawback Pairing (MRB-15-07)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-07 sub-item, shipped v0.254.0). The `pointsHistory` ledger uses paired doc ids: `earn-${bookingId}` for the positive earn entry (written on check-out) and `clawback-${bookingId}` for the negative clawback entry (written on cancel). The pairing is the deterministic link between an earn and its subsequent clawback.
+
+### Pairing contract (the "exactly-once" guarantees)
+
+- `earn-${bookingId}` is written **exactly once** per booking on a successful check-out. There are **2 constructions** of this id in the codebase: the check-out's `awardNow` flag (the standard path) and the post-settlement path (the deferred award, used when the check-out runs without a confirmed payment). A re-check-out of the same booking is forbidden by the status matrix (`status === "checked-out"` is terminal), so a second `earn-${bookingId}` write is impossible.
+- `clawback-${bookingId}` is written **exactly once** per cancelled booking. There is **1 construction** of this id in the codebase: `handleCancelBooking`'s per-child CRL-02 + MRB-05 audit stamp block. A re-cancel of the same booking is forbidden by the status matrix (`status === "cancelled"` is terminal).
+- The `pointsHistory.points` map-based invariant `rewardsPoints == sum(pointsHistory.points)` is preserved end-to-end: an `earn-${bookingId}` entry of `+100` is balanced by a `clawback-${bookingId}` entry of `-100` if a check-out is followed by a cancel.
+
+### Why the pairing matters
+
+The pairing is the source-text guard for the cross-cutting "no duplicate earn" + "no duplicate clawback" + "balanced ledger" invariants MRB-15-01 pins. A future refactor that adds a second `earn-${bookingId}` write (e.g. on a "reissue loyalty points" feature) would silently break the invariant and double-credit the member. The MRB-15-07 audit pins the exact count of constructions so the test fails on a new construction.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-07-checkout-loyalty-earn.test.ts` (13 tests) — pins the earn/clawback pairing + the construction count. `mrb-15-01-lifecycle-invariants.test.ts` (14 tests) — pins the no-duplicate-earn + no-duplicate-clawback invariants across the full lifecycle.

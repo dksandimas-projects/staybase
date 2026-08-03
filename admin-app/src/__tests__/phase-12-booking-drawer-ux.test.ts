@@ -42,12 +42,21 @@ describe("Phase 12 — booking drawer information architecture", () => {
 
   it("keeps guest and payment context above the section tabs", () => {
     const guestIndex = workspaceSrc.indexOf("Guest information");
-    const paymentIndex = workspaceSrc.indexOf("Original booking payment reference");
+    const paymentIndex = workspaceSrc.indexOf("Payment method");
+    const refIndex = workspaceSrc.indexOf("getLatestPaymentReference(booking)");
     const navIndex = workspaceSrc.indexOf("Booking drawer sections");
     expect(guestIndex).toBeGreaterThan(0);
     expect(paymentIndex).toBeGreaterThan(guestIndex);
-    expect(navIndex).toBeGreaterThan(paymentIndex);
-    expect(pageSrc).toMatch(/onPaymentReferenceChange=\{\(value\) => persistSelectedBooking/);
+    expect(refIndex).toBeGreaterThan(paymentIndex);
+    expect(navIndex).toBeGreaterThan(refIndex);
+    // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+    // the previous inline "Original booking payment reference"
+    // edit input is gone — the canonical reference now lives on
+    // the booking's onsitePayments[] ledger and is shown in the
+    // Folio section. The sticky header surfaces a read-only
+    // "Reference" cell that calls getLatestPaymentReference().
+    expect(workspaceSrc).toMatch(/getLatestPaymentReference\(booking\)/);
+    expect(pageSrc).not.toMatch(/onPaymentReferenceChange/);
   });
 
   it("keeps inactive panels hidden even when a responsive display class is present", () => {
@@ -59,7 +68,11 @@ describe("Phase 12 — booking drawer information architecture", () => {
       "Payment Proof",
       "Guest information",
       "Payment method",
-      "Original booking payment reference",
+      // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+      // the "Original booking payment reference" inline edit was
+      // retired; the header now shows a read-only "Reference" cell
+      // sourced from the latest onsitePayments[] entry.
+      "Reference\n",
       "Check-in Registration",
       "Guest ID Attachment",
       "Stay & Accommodation",
@@ -86,6 +99,24 @@ describe("Phase 12 — booking drawer information architecture", () => {
     expect(pageSrc).toMatch(/ready=\{selectedBookingCheckInReadiness\.ready\}/);
     expect(pageSrc).toMatch(/disabled=\{!selectedBookingCheckInReadiness\?\.ready\}/);
     expect(workspaceSrc).toMatch(/Complete these items before checking in the guest/);
+  });
+
+  it("keeps registration PDF preview available after a completed form is submitted", () => {
+    const completedStateStart = regFormSrc.indexOf("{(isComplete || isReadOnly) && !showEdit ? (");
+    const editStateStart = regFormSrc.indexOf(") : (", completedStateStart);
+    const completedState = regFormSrc.slice(completedStateStart, editStateStart);
+
+    expect(completedState).toMatch(/onClick=\{onPrintPdf\}/);
+    expect(completedState).toContain("Preview Registration PDF");
+    expect(completedState).toContain("Edit registration");
+  });
+
+  it("keeps the registration PDF available read-only after checkout", () => {
+    expect(regFormSrc).toMatch(/status !== "checked-out"/);
+    expect(regFormSrc).toMatch(/const isReadOnly = status === "checked-out"/);
+    expect(regFormSrc).toMatch(/\(isComplete \|\| isReadOnly\) && !showEdit/);
+    expect(regFormSrc).toContain("View / Download Registration PDF");
+    expect(regFormSrc).toMatch(/\{!isReadOnly && \(/);
   });
 
   it("maps status to one sticky primary action", () => {

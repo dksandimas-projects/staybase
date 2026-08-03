@@ -10,7 +10,9 @@ import {
 } from "firebase/auth";
 import {
   ACTIVE_BOOKING_STATUSES,
+  BROAD_DISCOUNT_SCOPE,
   CreateRoomInput,
+  DEFAULT_BOOKING_SOURCES,
   DEFAULT_CORPORATE_PERKS,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_ROOM_TYPES,
@@ -19,14 +21,21 @@ import {
   Notification,
   type NotificationType,
   PaymentMethodConfig,
+  PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
   StoreConfig,
   bustPublicSiteContentCache,
   compressImageFile,
+  normalizeDiscountScope,
+  normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverrides,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   type BookingRateBreakdown,
+  type BookingSourceConfig,
+  type DiscountScope,
+  type ProtectedBookingSource,
   type ProtectedPaymentMethod,
+  type Reservation,
   type RoomBlock,
   type RoomTypeEntry,
   type SeasonalRateOverride,
@@ -35,7 +44,7 @@ import {
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { arrayUnion, collection, deleteField, doc, getDocs, limit, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { arrayUnion, collection, collectionGroup, deleteField, doc, getDocs, limit, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
@@ -142,6 +151,9 @@ export interface IncidentalCharge {
   addedBy: string;
   addedAt: string;
   voidOf: string | null;
+  bookingId?: string | null;
+  ledgerOwner?: "booking" | "reservation";
+  ledgerOwnerId?: string;
 }
 
 export interface Booking {
@@ -154,6 +166,18 @@ export interface Booking {
   guestEmail: string;
   guestPhone: string;
   numGuests: number;
+  // Per CHD-01 (2026-08-01, per decision #144) +
+  // EXB-01 (per decision #147) + EXB-07 (per decision #155):
+  // the admin-side Booking view carries the adult/child split
+  // + the extra bed count, matching the shared `Booking`
+  // type. `numGuests` is the persisted total; the split is
+  // optional so legacy bookings without these fields still
+  // read. The walk-in form (per EXB-07) populates all three
+  // on the create payload; the new-booking drawer reads them
+  // back for the occupancy display.
+  numAdults?: number;
+  numChildren?: number;
+  extraBedCount?: number;
   checkIn: string;
   checkOut: string;
   numNights: number;
@@ -187,7 +211,11 @@ export interface Booking {
   // link carries this token (not the raw email) in the
   // URL. See `shared/types/index.ts`.
   lookupToken: string;
-  source: "online" | "walk-in" | "phone" | "facebook" | "corporate";
+  // Per NBS-03 (2026-07-31): widened from the historical union to
+  // `string` so configured entries (e.g. "agoda" per CVQ-08) flow
+  // through without a schema change. Mirrors the shared
+  // `BookingSource` type — the duplicate inline definition is gone.
+  source: string;
   notes: string;
   memberId: string | null;
   memberDiscountPct?: number;
@@ -203,14 +231,31 @@ export interface Booking {
   checkedOutFolioTotal?: number;
   checkedOutCollectedTotal?: number;
   earlyCheckoutOriginalCheckOut?: string | null;
+  // Per CWB (decision #122, 2026-07-23): four fields
+  // stamped by `/api/bookings/confirm-with-balance` when
+  // staff transition a `payment-uploaded` booking to
+  // `confirmed` with a positive balance that will be
+  // collected at check-in. Nullable; existing bookings
+  // have all four as `null` (no migration).
+  /** Original charge-inclusive balance at the moment the booking was confirmed with money owed. Never rewritten. */
+  confirmedWithBalance?: number | null;
+  /** Required staff reason (≤500 chars) for confirming with an outstanding balance. */
+  confirmedWithBalanceReason?: string | null;
+  /** Server timestamp set by the confirm-with-balance transaction. */
+  confirmedWithBalanceAt?: string | null;
+  /** Staff UID who approved the confirm-with-balance transition. */
+  confirmedWithBalanceBy?: string | null;
   unpaidCheckoutReason?: string | null;
   unpaidCheckoutApprovedBy?: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
-  paymentReferenceNumber?: string | null;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15): stamped by the
   // `/api/bookings/reject-payment` handler.
+  // The previous top-level `paymentReferenceNumber` was retired
+  // 2026-07-24; the canonical reference now lives on each
+  // payment ledger entry's `transactionReference` (see
+  // `Booking.onsitePayments[]`).
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: string | null;
   paymentRejectedBy?: string | null;
@@ -219,6 +264,46 @@ export interface Booking {
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
+  // Per CRL-02 (2026-08-02): mirror the shared `Booking.cancelledAt`
+  // / `cancelledBy` / `cancellationSource` fields on the admin
+  // view. Hydrated by the bookings mapper (see line 1281+).
+  // Legacy null-`cancelledAt` bookings keep today's self-contained
+  // behavior — pre-live TEST DATA is reset, not migrated. All
+  // three are optional so the existing call sites that build a
+  // `Booking` literal without them (walk-in / corporate
+  // create flows) keep typing.
+  cancelledAt?: string | null;
+  cancelledBy?: string | null;
+  cancellationSource?: "guest" | "staff" | "system" | null;
+  // Per CRL-07 (2026-08-03, per decision #173):
+  // the durable refund-liability snapshot. Mirrors
+  // `shared/types.Booking.cancellationLiability`.
+  // The destructive cancel stamps this field on
+  // the booking doc (per-child cancels) or on
+  // the reservation header (reservation-scope
+  // cancels — read separately via
+  // `selectedReservationContext.cancellationLiability`).
+  // Absence / `null` / `undefined` means "no
+  // liability work to do" — typically because
+  // `policyRefund === 0` or the booking was
+  // cancelled before CRL-07 shipped.
+  cancellationLiability?: import("@spark-inn/shared").CancellationLiability | null;
+  // Per MRB-01 (2026-08-02, per decision #159): the reservation
+  // header linkage. Mirror the shared `Booking.reservationId`
+  // / `reservationRef` / `reservationPosition` /
+  // `reservationRoomCount` so the admin view can render the
+  // group ref / position badge on the bookings table. Legacy
+  // null-`reservationId` bookings keep today's self-contained
+  // behavior. MRB-02 now exposes `reservationId` +
+  // `reservationRef` on the `/api/bookings/create` response
+  // payload, so any code that hydrates fresh bookings from
+  // create needs these fields on the local type. All four
+  // are optional to match the shared type's `| null` shape
+  // and keep existing literal builders typing.
+  reservationId?: string | null;
+  reservationRef?: string | null;
+  reservationPosition?: number | null;
+  reservationRoomCount?: number | null;
   createdAt: string;
   onsitePayments?: OnsitePayment[];
   guestRegistration?: {
@@ -226,6 +311,11 @@ export interface Booking {
     address: string;
     dateOfBirth: string;
     gender: string;
+    // Per Decision #121 (2026-07-23): purpose of stay defaults to
+    // "Leisure" at the front-desk form. Free-text `otherPurpose`
+    // captures the actual reason when the staff picks "Other".
+    purposeOfStay?: string;
+    otherPurpose?: string;
     idType: string;
     idNumber: string;
     emergencyContact: string;
@@ -432,11 +522,50 @@ export interface AdminContextType {
 
   // Bookings
   bookings: Booking[];
-  updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // reservation headers + the reservation-scope paid-amount
+  // aggregate. Hydrated by the AdminContext listener so the
+  // Bookings table row can render the reservation-scope
+  // total + balance without re-summing the filtered in-memory
+  // children.
+  reservations: Reservation[];
+  reservationPaidAmount: Record<string, number>;
+  updateBookingStatus: (
+    bookingId: string,
+    status: Booking["status"],
+    details?: Partial<Booking>,
+    // Per MRB-13 (2026-08-02, per decision #166):
+    // optional request options. The cancel flow
+    // uses `options.scope` to forward the
+    // reservation-scope selector to the server.
+    // Other status transitions ignore the field.
+    options?: { scope?: "room" | "reservation" }
+  ) => void | Promise<void>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
-  addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
+  // Per fix/walkin-split-name (2026-07-25): the walk-in modal
+  // mirrors the guest `/book` page and collects `firstName` +
+  // `lastName` as separate fields. The server combines them
+  // into `Booking.guestName` for storage (matches the guest
+  // page's wire shape). No more split-on-space kludge on the
+  // client — single-name guests, compound names, and
+  // non-Western name orders all round-trip cleanly.
+  addWalkinBooking: (
+    input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & {
+      firstName: string;
+      lastName: string;
+      totalPriceOverride?: number;
+      // Per MRB-07 (2026-08-02, per decision #159): the reservation's
+      // room stays, when the desk booked more than one room.
+      rooms?: Array<{
+        roomId: string;
+        numAdults: number;
+        numChildren: number;
+        extraBedCount: number;
+      }>;
+    }
+  ) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15). Bounces a `payment-uploaded`
@@ -445,6 +574,15 @@ export interface AdminContextType {
   // notification for the bell.
   verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string }>;
   rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  // Per CWB (decision #122, 2026-07-23): staff-triggered
+  // transition from `payment-uploaded` to `confirmed` when
+  // a positive balance will be collected at check-in. Server
+  // enforces the same `unpaidCheckoutApprovalThreshold` /
+  // admin gate as the unpaid-checkout flow and returns a
+  // structured 403 with `thresholdExceeded: true` when the
+  // balance is over the limit and the operator is
+  // `front-desk` — the form handles the copy in that case.
+  confirmBookingWithBalance: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; thresholdExceeded?: boolean; threshold?: number; balance?: number }>;
   roomBlocks: RoomBlock[];
   createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
   updateRoomBlock: (input: { blockId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string }>;
@@ -480,6 +618,7 @@ export interface AdminContextType {
   members: Member[];
   updateMemberPoints: (memberId: string, amount: number, type: PointsLog["type"], reason: string) => Promise<{ success: boolean; error?: string }>;
   toggleMemberActive: (memberId: string, isActive: boolean) => Promise<{ success: boolean; error?: string }>;
+  linkBookingToMember: (memberUid: string, bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; alreadyLinked?: boolean; bookingRef?: string }>;
 
   // Intercom Inbox
   intercoms: Record<string, IntercomMessage[]>;
@@ -538,11 +677,24 @@ export interface AdminContextType {
       description: string;
       amenities: string[];
       maxCapacity: number;
+      // Per CHD-02 (2026-08-01, per decision #144): per-room-type
+      // child cap. `maxCapacity` is now the ADULT cap (the
+      // semantic shift is safe because every existing booking has
+      // `numChildren = 0`). The default seed is keyed on
+      // `maxCapacity` (a Single allows 0, a Family allows 2). Admins
+      // can tune via the Room Types editor (CHD-03). Absent fields
+      // normalize via `normalizeMaxChildren` so legacy settings hydrate.
+      maxChildren?: number;
       pricePerNight: number;
       weekendRate: number;
       corporateRate: number;
+      // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+      // `maxExtraBeds` is 0 by default (no separate `allowsExtraBed`
+      // boolean per the spec). Absent fields normalize to 0.
+      maxExtraBeds?: number;
+      extraBedRate?: number;
     }
-  ) => void;
+  ) => Promise<void>;
   updateRoomType: (
     value: string,
     updates: Partial<
@@ -555,13 +707,22 @@ export interface AdminContextType {
         | "description"
         | "amenities"
         | "maxCapacity"
+        | "maxChildren"
         | "pricePerNight"
         | "weekendRate"
         | "corporateRate"
+        | "maxExtraBeds"
+        | "extraBedRate"
       >
     >
-  ) => void;
-  deleteRoomType: (value: string) => void;
+  ) => Promise<void>;
+  deleteRoomType: (value: string) => Promise<void>;
+  // Bulk-replace the room types array in a single Firestore write.
+  // Used by the Rates matrix save, where N concurrent single-type
+  // writes would race on the shared array field (RTS-01 — see
+  // `plan/project/ROADMAP.md §RTS-02`). Throws if the write fails;
+  // rolls back the optimistic state on failure.
+  saveRoomTypes: (types: RoomTypeEntry[]) => Promise<void>;
   uploadRoomTypePhoto: (typeValue: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
   removeRoomTypePhoto: (typeValue: string, url: string) => Promise<{ success: boolean; error?: string }>;
   reorderRoomTypePhotos: (typeValue: string, imageUrls: string[]) => Promise<{ success: boolean; error?: string }>;
@@ -586,6 +747,16 @@ export interface AdminContextType {
   updatePaymentMethod: (method: string, updates: Partial<PaymentMethodConfig>) => Promise<void>;
   reorderPaymentMethods: (next: PaymentMethodConfig[]) => Promise<void>;
   deletePaymentMethod: (method: string) => Promise<void>;
+  // Per NBS-04 (2026-07-31): booking sources are admin-editable in
+  // Settings. See `plan/features/SETTINGS.md §Booking Sources` for
+  // the UX spec. Same shape as payment methods (add / update / delete
+  // / reorder) with delete-protection for system-assigned sources
+  // (`online` / `walk-in` / `corporate` per NBS-05).
+  bookingSources: BookingSourceConfig[];
+  addBookingSource: (config: BookingSourceConfig) => Promise<void>;
+  updateBookingSource: (source: string, updates: Partial<Omit<BookingSourceConfig, "source">>) => Promise<void>;
+  reorderBookingSources: (next: BookingSourceConfig[]) => Promise<void>;
+  deleteBookingSource: (source: string) => Promise<void>;
   uploadPaymentMethodQr: (
     method: string,
     file: File
@@ -1074,6 +1245,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(true);
 
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed): the
+  // reservation headers are hydrated into memory so the Bookings
+  // table row can read the reservation-scope aggregate
+  // (`totalPrice`, `paymentStatus`, denormalized counters,
+  // `aggregateRevenueAllocation`, `cancellationLiability`) WITHOUT
+  // summing the filtered in-memory children. The old behaviour
+  // (`admin-app/src/pages/BookingsPage.tsx:1701-1705`, summing
+  // `child.totalPrice` and `getBookingFolio(child).balance`)
+  // silently dropped any child hidden by an active filter —
+  // a real bug at any scale where the desk filters by room type
+  // or status. The header doesn't filter, so the bug is
+  // impossible by construction. The listener is full-collection
+  // (no query) because the reservation count is bounded (~14
+  // active at this hotel) and the alternative — per-reservation
+  // subcollection reads — would re-introduce the filter
+  // dependence.
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the reservation-scope `paidAmount` aggregate. Computed
+  // from a single `collectionGroup("payments")` listener that
+  // filters in JS to the reservation subcollection paths
+  // (`reservations/{id}/payments/{paymentId}`). Legacy
+  // `bookings/{id}/payments/{paymentId}` entries do NOT match
+  // the path regex and are excluded — they belong to the
+  // per-child legacy adapter. With ~14 active reservations
+  // and a few years of payment history, the collectionGroup
+  // load is hundreds of small docs, well under any scale
+  // concern. The `paidAmount` is the sum of positive-amount
+  // entries (sign-aware: refunds are negative per CRL-01 and
+  // reduce the paid total), matching the `paymentsTotal`
+  // semantics `getReservationFolioSummary` exposes. Used by
+  // the Bookings table reservation row for `listReservationBalance`.
+  const [reservationPaidAmount, setReservationPaidAmount] = useState<Record<string, number>>({});
+
   useEffect(() => {
     if (!currentUser) {
       setBookings([]);
@@ -1173,9 +1378,45 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             guestIdPhotoUrl: data.guestIdPhotoUrl || null,
             handledBy: data.handledBy || "",
             cancellationReason: data.cancellationReason || "",
+            // Per CRL-02 (2026-08-02): hydrate the full
+            // cancellation audit metadata. `cancelledAt` is the
+            // server-time stamp; `cancelledBy` is the staff UID
+            // (for "staff" source) or the literal "guest" /
+            // "system" (for the matching sources); `cancellationSource`
+            // is the parallel discriminator. Legacy bookings
+            // without these fields read as `null` (the type
+            // already declares them as nullable). The hydration
+            // is the read path that powers the booking drawer's
+            // audit row in a follow-up CRL-09 UI pass.
+            cancelledAt: data.cancelledAt ? parseDateTimeString(data.cancelledAt) : null,
+            cancelledBy: data.cancelledBy || null,
+            cancellationSource: data.cancellationSource || null,
+            // Per CRL-07 (2026-08-03, per decision #173):
+            // hydrate the liability snapshot from the
+            // booking doc. The destructive cancel
+            // stamps this field on the cancelled
+            // entity; reservation-scope cancels stamp
+            // it on the reservation header instead
+            // (read separately via the header's own
+            // hydration — the admin UI surfaces the
+            // reservation's liability when the
+            // selected booking is part of a
+            // multi-room reservation). Absence reads
+            // as `null` (the type already declares it
+            // nullable).
+            cancellationLiability: data.cancellationLiability || null,
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
             breakfastSelections: data.breakfastSelections || {},
+            // Per BSP-01 (fix/breakfast-served-persistence, 2026-07-25):
+            // hydrate `breakfastServed` from the snapshot so the dashboard's
+            // "Mark Served" toggle survives real-time refresh and is visible
+            // to other signed-in staff sessions. Previously the mapper only
+            // hydrated `breakfastSelections`; the served map was written
+            // successfully to Firestore (and the security rule allows it)
+            // but read back as `undefined`, so the dashboard re-rendered the
+            // row as unserved after every snapshot update.
+            breakfastServed: data.breakfastServed || {},
           });
         });
 
@@ -1253,6 +1494,164 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       active = false;
       unsubscribe();
     };
+  }, [currentUser]);
+
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // subscribe to the `reservations` collection and hydrate
+  // the headers into memory. The listener runs alongside
+  // the bookings listener (same `currentUser` gate) and
+  // has no `orderBy` because the Bookings table consumes
+  // the data as a `Record<reservationId, Reservation>`
+  // (the row is keyed by the booking's `reservationId`).
+  // The full collection is cheap at this scale (~14 active
+  // reservations at the hotel's current size; the cap is
+  // bounded by room inventory, not bookings volume).
+  useEffect(() => {
+    if (!currentUser) {
+      setReservations([]);
+      return;
+    }
+
+    const parseDateOrNull = (val: any): Date | null => {
+      if (!val) return null;
+      if (typeof val?.toDate === "function") return val.toDate();
+      if (val instanceof Date) return val;
+      if (typeof val === "string") return new Date(val);
+      if (typeof val === "object" && typeof val.seconds === "number") return new Date(val.seconds * 1000);
+      return null;
+    };
+    // Coerce to a `Date` with epoch fallback for the
+    // required fields (`checkIn`, `checkOut`, `createdAt`,
+    // `updatedAt` are all `Date` in the `Reservation`
+    // type — see `shared/types/index.ts:238`). The epoch
+    // fallback satisfies the type; the row summary
+    // (MRB-12-01) only reads `totalPrice`, so a bogus
+    // date is harmless.
+    const parseDateOrEpoch = (val: any): Date => parseDateOrNull(val) ?? new Date(0);
+
+    const unsubscribe = onSnapshot(
+      collection(db, "reservations"),
+      (snapshot) => {
+        const list: Reservation[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          return {
+            id: docSnap.id,
+            reservationRef: data.reservationRef || "",
+            leadGuestName: data.leadGuestName || "",
+            leadGuestEmail: data.leadGuestEmail || "",
+            leadGuestPhone: data.leadGuestPhone || "",
+            memberId: data.memberId ?? null,
+            checkIn: parseDateOrEpoch(data.checkIn),
+            checkOut: parseDateOrEpoch(data.checkOut),
+            numNights: Number(data.numNights) || 0,
+            originalSubtotal: Number(data.originalSubtotal) || 0,
+            discountScopeSnapshot: data.discountScopeSnapshot ?? null,
+            subtotal: Number(data.subtotal) || 0,
+            totalPrice: Number(data.totalPrice) || 0,
+            source: data.source || "online",
+            isCorporate: !!data.isCorporate,
+            corporateCode: data.corporateCode || "",
+            companyName: data.companyName || "",
+            voucherCode: data.voucherCode || "",
+            memberDiscountPct: Number(data.memberDiscountPct) || 0,
+            paymentStatus: data.paymentStatus || "awaiting-payment",
+            paymentMethod: data.paymentMethod || "",
+            paymentProofUrl: data.paymentProofUrl ?? null,
+            paymentProofPath: data.paymentProofPath ?? null,
+            termsAccepted: !!data.termsAccepted,
+            termsAcceptedAt: parseDateOrNull(data.termsAcceptedAt),
+            termsVersion: data.termsVersion || "",
+            privacyAccepted: !!data.privacyAccepted,
+            privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
+            privacyVersion: data.privacyVersion || "",
+            cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
+            roomCount: Number(data.roomCount) || 0,
+            activeRoomCount: Number(data.activeRoomCount) || 0,
+            cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
+            checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
+            checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
+            holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
+            requestFingerprint: data.requestFingerprint || "",
+            createdAt: parseDateOrEpoch(data.createdAt),
+            updatedAt: parseDateOrEpoch(data.updatedAt),
+            createdBy: data.createdBy || "guest",
+            cancellationLiability: data.cancellationLiability ?? null,
+            aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
+            // Per MRB-14 (2026-08-03, per decision #180
+            // — proposed): the `actualDateRange` field.
+            // Pre-MRB-14 reservations have no field
+            // (`undefined` falls through to the legacy
+            // per-child read in the UI + email).
+            // Post-MRB-14 reservations always carry
+            // the field. The admin surfaces + email
+            // switch to per-child dates when
+            // `isDivergent: true`.
+            actualDateRange: (() => {
+              const raw = (data as any).actualDateRange;
+              if (!raw || typeof raw !== "object") return null;
+              const earliestCheckIn = parseDateOrNull(raw.earliestCheckIn);
+              const latestCheckOut = parseDateOrNull(raw.latestCheckOut);
+              if (!earliestCheckIn || !latestCheckOut) return null;
+              return {
+                earliestCheckIn,
+                latestCheckOut,
+                isDivergent: Boolean(raw.isDivergent)
+              };
+            })()
+          } satisfies Reservation;
+        });
+        setReservations(list);
+      },
+      (error) => {
+        console.error("Error listening to reservations collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, [currentUser]);
+
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the reservation-scope `paidAmount` aggregate. A single
+  // `collectionGroup("payments")` listener scans the
+  // reservation payment subcollection paths and sums positive
+  // amounts (refunds are negative per CRL-01 and reduce the
+  // paid total — sign-aware sum, same as
+  // `getReservationFolioSummary` does in the helper). The
+  // listener does NOT include `bookings/{id}/payments/...`
+  // (the legacy adapter) — those belong to the per-child
+  // legacy flow and stay summed from the in-memory
+  // `bookings` array. Used by the Bookings table reservation
+  // row so `listReservationBalance` is independent of the
+  // active filter (MRB-12-01).
+  useEffect(() => {
+    if (!currentUser) {
+      setReservationPaidAmount({});
+      return;
+    }
+
+    const unsubscribe = onSnapshot(
+      collectionGroup(db, "payments"),
+      (snapshot) => {
+        const paidByReservation: Record<string, number> = {};
+        for (const paymentDoc of snapshot.docs) {
+          // The path is `reservations/{reservationId}/payments/{paymentId}`
+          // for new reservations. Legacy `bookings/{id}/payments/{...}`
+          // entries do NOT match — they are excluded.
+          const match = paymentDoc.ref.path.match(/^reservations\/([^/]+)\/payments\//);
+          if (!match) continue;
+          const reservationId = match[1];
+          const amount = Number(paymentDoc.data()?.amount || 0);
+          if (!Number.isFinite(amount)) continue;
+          paidByReservation[reservationId] = (paidByReservation[reservationId] || 0) + amount;
+        }
+        setReservationPaidAmount(paidByReservation);
+      },
+      (error) => {
+        console.error("Error listening to reservation payments collectionGroup:", error);
+      }
+    );
+
+    return unsubscribe;
   }, [currentUser]);
 
   const [roomBlocks, setRoomBlocks] = useState<RoomBlock[]>([]);
@@ -1420,7 +1819,26 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
-  const updateBookingStatus = async (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => {
+  const updateBookingStatus = async (
+    bookingId: string,
+    status: Booking["status"],
+    details?: Partial<Booking>,
+    // Per MRB-13 (2026-08-02, per decision #166): the
+    // cancel scope. The admin BookingsPage cancel
+    // modal surfaces a `This room` / `All N rooms`
+    // selector when the selected booking is part of
+    // a multi-room reservation. The default `"room"`
+    // preserves byte-compatible single-child behavior
+    // — the server's Zod schema also defaults
+    // `scope` to `"room"` (see
+    // `guestCancelSchema` in `bookings.ts`), so a
+    // caller that omits `options.scope` lands on the
+    // legacy per-child branch. Only the `"cancelled"`
+    // status honours `options.scope`; other status
+    // transitions ignore it (the field is silently
+    // dropped on the wire).
+    options?: { scope?: "room" | "reservation" }
+  ) => {
     try {
       const currentBooking = bookings.find((b) => b.id === bookingId);
       const isStatusChanging = currentBooking ? currentBooking.status !== status : true;
@@ -1437,6 +1855,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
 
       if (status === "cancelled") {
         const token = await auth.currentUser?.getIdToken(true);
+        // Per MRB-13: forward the scope to the server.
+        // Default to `"room"` (the schema default) so a
+        // caller that never opts in still cancels a
+        // single child — byte-equivalent to pre-MRB-13.
+        const cancelScope: "room" | "reservation" = options?.scope === "reservation" ? "reservation" : "room";
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/cancel`, {
           method: "POST",
           headers: {
@@ -1445,7 +1868,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           },
           body: JSON.stringify({
             bookingId,
-            reason: details?.cancellationReason || ""
+            reason: details?.cancellationReason || "",
+            scope: cancelScope
           })
         });
         const data = await res.json();
@@ -1552,10 +1976,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
-  const addWalkinBooking = async (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
+  const addWalkinBooking = async (
+    input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & {
+      firstName: string;
+      lastName: string;
+      totalPriceOverride?: number;
+      // Per MRB-07 (2026-08-02, per decision #159): the reservation's
+      // room stays, when the desk booked more than one room.
+      rooms?: Array<{
+        roomId: string;
+        numAdults: number;
+        numChildren: number;
+        extraBedCount: number;
+      }>;
+    }
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const bookingId = doc(collection(db, "bookings")).id;
+
+      // Per fix/walkin-split-name (2026-07-25): the walk-in
+      // modal now collects `firstName` + `lastName` separately
+      // (matching the guest `/book` page). The previous
+      // on-the-wire name-split (a single combined string split
+      // on the first space) silently produced a generic
+      // placeholder for single-name guests, mangled compound
+      // names, and reversed "Last, First" inputs. The server
+      // combines firstName + lastName into `Booking.guestName`
+      // for storage; both fields are sent over the wire
+      // as-collected.
+      const trimmedFirst = String(input.firstName || "").trim();
+      const trimmedLast = String(input.lastName || "").trim();
+      if (!trimmedFirst || !trimmedLast) {
+        return { success: false, error: "First name and last name are required." };
+      }
 
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/create-walkin`, {
         method: "POST",
@@ -1565,24 +2019,38 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         },
         body: JSON.stringify({
           bookingId,
-          roomId: booking.roomId,
-          checkIn: booking.checkIn,
-          checkOut: booking.checkOut,
-          guests: booking.numGuests,
-          hasBreakfast: booking.hasBreakfast,
+          roomId: input.roomId,
+          // Per MRB-07 (2026-08-02, per decision #159): the New Booking
+          // modal can create a reservation covering N rooms. When
+          // present this is the canonical room list — the server prices
+          // each room against its own type and writes one booking doc
+          // per room under one reservation header. Omitted for a
+          // single-room booking, which keeps the historical body shape.
+          ...(input.rooms && input.rooms.length > 1 ? { rooms: input.rooms } : {}),
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          guests: input.numGuests,
+          // Per CHD-01 + EXB-01: the desk's adult/child split and
+          // extra-bed count. These were collected by the modal but not
+          // forwarded, so the server fell back to "all adults, no extra
+          // beds" and priced every staff-created booking without them.
+          numAdults: input.numAdults,
+          numChildren: input.numChildren,
+          extraBedCount: input.extraBedCount,
+          hasBreakfast: input.hasBreakfast,
           guestDetails: {
-            firstName: booking.guestName.split(" ")[0] || "Guest",
-            lastName: booking.guestName.split(" ").slice(1).join(" ") || "Walkin",
-            email: booking.guestEmail,
-            phone: booking.guestPhone,
-            requests: booking.specialRequests
+            firstName: trimmedFirst,
+            lastName: trimmedLast,
+            email: input.guestEmail,
+            phone: input.guestPhone,
+            requests: input.specialRequests
           },
-          paymentMethod: booking.paymentMethod,
-          status: booking.status,
-          totalPriceOverride: booking.totalPriceOverride,
-          discountType: booking.discountType,
-          voucherCode: booking.voucherCode,
-          testRunId: (booking as any).testRunId || null
+          paymentMethod: input.paymentMethod,
+          status: input.status,
+          totalPriceOverride: input.totalPriceOverride,
+          discountType: input.discountType,
+          voucherCode: input.voucherCode,
+          testRunId: (input as any).testRunId || null
         })
       });
       const data = await res.json();
@@ -1677,6 +2145,43 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true };
     } catch (err: any) {
       console.error("Error rejecting payment:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  // Per CWB-01 / decision #122 (2026-07-23): staff-triggered
+  // confirm-with-balance transition. Server is the source of
+  // truth for the threshold + role check; on 403 the response
+  // carries `thresholdExceeded: true` so the form can surface
+  // the structured message without re-deriving it.
+  const confirmBookingWithBalance = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string; thresholdExceeded?: boolean; threshold?: number; balance?: number }> => {
+    const safeReason = String(reason || "").trim().slice(0, 500);
+    if (!safeReason) {
+      return { success: false, error: "A reason is required when confirming a booking with a balance owed." };
+    }
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/confirm-with-balance`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, reason: safeReason })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to confirm with balance.",
+          thresholdExceeded: Boolean(data.thresholdExceeded),
+          threshold: typeof data.threshold === "number" ? data.threshold : undefined,
+          balance: typeof data.balance === "number" ? data.balance : undefined
+        };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error confirming with balance:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -2109,43 +2614,34 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     if (!reason.trim()) {
       return { success: false, error: "A reason is required for points adjustments." };
     }
-
+    // Per Spark Rewards audit 2026-07-18 MED-1: manual points
+    // adjustment now lives server-side (Admin SDK). The server
+    // `runTransaction` couples the `rewardsPoints` write with a
+    // `pointsHistory` entry in a single commit, and the Firestore
+    // rule drops `rewardsPoints` from the staff update allowlist
+    // so the only way to mutate a member's balance is through the
+    // /api/members/* endpoint set. The `type` parameter is kept
+    // on the client for backward-compat with the existing UI but
+    // the server hardcodes `type: "manual"` (no client can inject
+    // an "earn" / "redeem" row through this path).
     try {
-      const memberRef = doc(db, "members", memberId);
-      const historyRef = doc(collection(db, "members", memberId, "pointsHistory"));
-
-      await runTransaction(db, async (transaction) => {
-        const memberDoc = await transaction.get(memberRef);
-        if (!memberDoc.exists()) {
-          throw new Error("Member account was not found.");
-        }
-
-        const currentBalance = Number(memberDoc.data().rewardsPoints || 0);
-        const nextBalance = currentBalance + amount;
-        if (nextBalance < 0) {
-          throw new Error("Points adjustment cannot reduce the member balance below zero.");
-        }
-
-        transaction.update(memberRef, {
-          rewardsPoints: nextBalance,
-          updatedAt: serverTimestamp()
-        });
-        transaction.set(historyRef, {
-          type,
-          points: amount,
-          description: type === "manual" ? `Manual adjust: ${reason.trim()}` : `Staff ${type} adjustment`,
-          reason: reason.trim(),
-          bookingId: null,
-          by: currentUser.uid,
-          at: serverTimestamp()
-        });
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/manual-adjust`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ memberId, amount, reason })
       });
-
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        return { success: false, error: data?.error || "Failed to adjust member points." };
+      }
       return { success: true };
     } catch (err: any) {
-      console.error("Error updating member points:", err);
-      const message = err?.message || "Failed to update member points.";
-      return { success: false, error: message };
+      console.error("Error adjusting member points:", err);
+      return { success: false, error: err?.message || "Failed to adjust member points." };
     }
   };
 
@@ -2168,6 +2664,54 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     } catch (err: any) {
       console.error("Error updating member account status:", err);
       return { success: false, error: err?.message || "Failed to update member account status." };
+    }
+  };
+
+  // Per Spark Rewards audit 2026-07-18 MED-3 (decision #135):
+  // front-desk manual link of an existing booking to a member when
+  // the member's account email differs from the email on an earlier
+  // anonymous booking. Admin-only on the server (the rate limit +
+  // role gate are server-enforced; this client just forwards the
+  // ID token). Returns `alreadyLinked: true` when the booking is
+  // already linked to this member (idempotent re-link) so the UI
+  // can show a softer "already linked" message instead of a
+  // success toast that looks like a new action.
+  const linkBookingToMember = async (
+    memberUid: string,
+    bookingId: string,
+    reason: string
+  ): Promise<{ success: boolean; error?: string; alreadyLinked?: boolean; bookingRef?: string }> => {
+    if (!currentUser) {
+      return { success: false, error: "Sign in before linking a booking to a member." };
+    }
+    if (!memberUid?.trim() || !bookingId?.trim()) {
+      return { success: false, error: "Both a member and a booking are required." };
+    }
+    if (!reason.trim()) {
+      return { success: false, error: "A reason is required for booking links." };
+    }
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/link-booking`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ memberUid, bookingId, reason })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        return { success: false, error: data?.error || "Failed to link booking to member." };
+      }
+      return {
+        success: true,
+        alreadyLinked: Boolean(data?.data?.alreadyLinked),
+        bookingRef: data?.data?.bookingRef
+      };
+    } catch (err: any) {
+      console.error("Error linking booking to member:", err);
+      return { success: false, error: err?.message || "Failed to link booking to member." };
     }
   };
 
@@ -3176,7 +3720,44 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
     roomTypes: [...DEFAULT_ROOM_TYPES],
-    seasonalRateOverrides: []
+    seasonalRateOverrides: [],
+    // Per DSC-01..05 (2026-08-01, per CVQ-06): per-class discount
+    // scope. Defaults to the broad scope (all classes apply to
+    // room + breakfast + extra bed) so the live preview / server
+    // math is byte-equivalent to the pre-DSC-01 behavior. The
+    // Settings → Discounts tab exposes a 3×3 checkbox editor
+    // (senior row admin-only per DSC-03). Legacy settings without
+    // the field read as the broad default via `normalizeDiscountScope`.
+    discountScope: BROAD_DISCOUNT_SCOPE,
+    // Per PEX-01 (2026-08-01, per CVQ-12 + decision #147): the
+    // window (in hours) a `pending` booking holds its room before
+    // the hold auto-expires. Snapshotted onto each booking at
+    // create time — a later Settings change never shortens or
+    // lengthens an existing guest's promise. Default 24h per the
+    // decision. The admin can shorten for large groups via the
+    // Settings UI; the per-booking `holdExpiresAt` is the only
+    // field the rest of the system reads.
+    paymentHoldWindowHours: 24,
+    // Per EXB-10 (2026-08-01, per decision #157): the
+    // hotel-wide rollaway-bed inventory. The server-side
+    // `handleCreateBooking` / `handleCreateWalkin` /
+    // `handleRescheduleBooking` transactions read this
+    // field and reject bookings that would push the
+    // overlapping-stay total above the configured cap.
+    // `0` = "no constraint" (the historical "any number"
+    // behavior) so legacy settings without the field and
+    // freshly bootstrapped projects get the
+    // pre-EXB-10 semantics for free. A positive integer
+    // is the count of rollaway beds the hotel physically
+    // owns; the create / walkin / reschedule
+    // transactions enforce
+    // `inUseAcrossOverlappingStays + requestedCount <=
+    // extraBedInventory` inside the same Firestore
+    // transaction that assigns the room. The Settings
+    // UI exposes a numeric input (deferred to a future
+    // PR — out of EXB-10's scope, which is the server
+    // invariant).
+    extraBedInventory: 0
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -3482,6 +4063,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const [breakfastConfig, setBreakfastConfig] = useState({
     isEnabled: true,
     ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+    // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
+    // "include children in the breakfast charge". The server
+    // snapshots this onto every new booking whose client did not
+    // send a per-booking override. `true` is the historical
+    // default (children pay the full rate) and the safe one —
+    // narrowing is a one-line change, unwinding under-charged
+    // bills is not.
+    breakfastIncludesChildrenDefault: true,
     silogItems: [
       { id: "sl-1", name: "Tapsilog", isActive: true },
       { id: "sl-2", name: "Longsilog", isActive: true },
@@ -3526,7 +4115,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>) }));
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
@@ -3677,7 +4266,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     { method: "add-to-bill", label: "Add to Room Bill", accountName: "", accountNumber: "", qrUrl: "", isEnabled: false, showInStore: true, showInCorporate: false }
   ]);
 
+  // Per NBS-04 (2026-07-31): booking sources are admin-editable in
+  // Settings. The seed list is `DEFAULT_BOOKING_SOURCES` (the existing
+  // 5 + "agoda" per CVQ-08). `online` / `walk-in` / `corporate` are
+  // system-assigned (`selectableAtFrontDesk: false`) and never appear
+  // in the New Booking modal's source selector. The first-time loader
+  // mirrors the paymentMethods pattern: a one-time backfill appends
+  // any missing seed entries to the persisted list and re-writes the
+  // array (idempotent, gated by a `useRef`).
+  const [bookingSources, setBookingSources] = useState<BookingSourceConfig[]>(() => DEFAULT_BOOKING_SOURCES);
+
   const hasMigratedPaymentMethodsRef = useRef(false);
+  const hasMigratedBookingSourcesRef = useRef(false);
 
   const normalizePaymentMethodConfig = (entry: any): PaymentMethodConfig => {
     const method = typeof entry?.method === "string" ? entry.method.trim() : "";
@@ -3802,6 +4402,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       showInCorporate: false
     }
   };
+  // Per WPM-04 (2026-07-31): the walk-in modal used to hardcode `card`
+  // as one of three options. After WPM-01 it sources the list from
+  // `settings/hotelConfig.paymentMethods[]`. The hotel takes cards
+  // (CVQ-07), so the `card` method must exist under Settings or the
+  // desk silently loses the option on the day WPM lands. This is NOT
+  // a protected method (the admin can delete it) and NOT store-only —
+  // it is a staff-onsite tender, which is its own backfill category.
+  // Existing records are safe either way: the legacy labels render
+  // historical `card` bookings as "Credit Card" without this backfill.
+  const STAFF_ONSITE_TENDER_BACKFILL_DEFAULTS: Record<string, PaymentMethodConfig> = {
+    card: {
+      method: "card",
+      label: "Credit Card",
+      accountName: "",
+      accountNumber: "",
+      qrUrl: "",
+      isEnabled: true,
+      showInStore: false,
+      showInCorporate: false
+    }
+  };
   useEffect(() => {
     if (!currentUser) return;
     if (hasBackfilledProtectedPaymentMethodsRef.current) return;
@@ -3814,19 +4435,114 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     const missingStore = Object.keys(STORE_PAYMENT_BACKFILL_DEFAULTS).filter(
       (key) => !persisted.some((p: unknown) => typeof (p as { method?: unknown })?.method === "string" && (p as { method: string }).method === key)
     );
-    if (missingProtected.length === 0 && missingStore.length === 0) {
+    const missingStaffOnsite = Object.keys(STAFF_ONSITE_TENDER_BACKFILL_DEFAULTS).filter(
+      (key) => !persisted.some((p: unknown) => typeof (p as { method?: unknown })?.method === "string" && (p as { method: string }).method === key)
+    );
+    if (missingProtected.length === 0 && missingStore.length === 0 && missingStaffOnsite.length === 0) {
       hasBackfilledProtectedPaymentMethodsRef.current = true;
       return;
     }
     const next = [
       ...persisted,
       ...missingProtected.map((key) => BACKFILL_DEFAULTS[key]),
-      ...missingStore.map((key) => STORE_PAYMENT_BACKFILL_DEFAULTS[key])
+      ...missingStore.map((key) => STORE_PAYMENT_BACKFILL_DEFAULTS[key]),
+      ...missingStaffOnsite.map((key) => STAFF_ONSITE_TENDER_BACKFILL_DEFAULTS[key])
     ];
     hasBackfilledProtectedPaymentMethodsRef.current = true;
     setPaymentMethods((next as any[]).map(normalizePaymentMethodConfig));
     void updateSettings("hotelConfig", { paymentMethods: next });
   }, [hotelConfig, currentUser, updateSettings]);
+
+  // Per NBS-04 (2026-07-31): booking sources backfill. On first admin
+  // load, if `settings/hotelConfig.bookingSources[]` is missing or
+  // shorter than the seed list, append the missing seed entries and
+  // re-write the array. Idempotent, gated by a `useRef` so it runs
+  // at most once per session. Does NOT downgrade entries an admin
+  // already removed — append-only.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (hasMigratedBookingSourcesRef.current) return;
+    const raw = (hotelConfig as Record<string, unknown>) || {};
+    const persisted = raw.bookingSources;
+    if (!Array.isArray(persisted)) return; // wait for the Firestore snapshot
+    const missing = DEFAULT_BOOKING_SOURCES.filter(
+      (seed) => !persisted.some((p: unknown) => typeof (p as { source?: unknown })?.source === "string" && (p as { source: string }).source === seed.source)
+    );
+    if (missing.length === 0) {
+      hasMigratedBookingSourcesRef.current = true;
+      return;
+    }
+    const next = [...persisted, ...missing];
+    hasMigratedBookingSourcesRef.current = true;
+    setBookingSources(next.map((entry: any) => normalizeBookingSourceConfig(entry)));
+    void updateSettings("hotelConfig", { bookingSources: next });
+  }, [hotelConfig, currentUser, updateSettings]);
+
+  const normalizeBookingSourceConfig = (entry: any): BookingSourceConfig => {
+    const source = typeof entry?.source === "string" ? entry.source.trim() : "";
+    const label = typeof entry?.label === "string" && entry.label.trim() ? entry.label.trim() : source;
+    const isEnabled = typeof entry?.isEnabled === "boolean" ? entry.isEnabled : true;
+    const selectableAtFrontDesk = typeof entry?.selectableAtFrontDesk === "boolean"
+      ? entry.selectableAtFrontDesk
+      : !PROTECTED_BOOKING_SOURCES.includes(source as ProtectedBookingSource);
+    return { source, label, isEnabled, selectableAtFrontDesk };
+  };
+
+  const persistBookingSources = async (next: BookingSourceConfig[]) => {
+    const previous = bookingSources;
+    setBookingSources(next);
+    try {
+      const success = await updateSettings("hotelConfig", {
+        bookingSources: next,
+        updatedAt: serverTimestamp()
+      });
+      if (!success) throw new Error("The booking source changes were not saved.");
+    } catch (error) {
+      setBookingSources(previous);
+      throw error;
+    }
+  };
+
+  const addBookingSource = async (config: BookingSourceConfig) => {
+    const normalized = normalizeBookingSourceConfig(config);
+    if (bookingSources.some((s) => s.source === normalized.source)) {
+      throw new Error(`A booking source with key "${normalized.source}" already exists.`);
+    }
+    await persistBookingSources([...bookingSources, normalized]);
+  };
+
+  const updateBookingSource = async (source: string, updates: Partial<Omit<BookingSourceConfig, "source">>) => {
+    const next = bookingSources.map((s) =>
+      s.source === source ? { ...s, ...updates, source: s.source } : s
+    );
+    await persistBookingSources(next);
+  };
+
+  const reorderBookingSources = async (next: BookingSourceConfig[]) => {
+    // Same shape as `reorderPaymentMethods` — caller passes the new
+    // full array in the desired order; we just persist. The Settings
+    // UI is responsible for enforcing the "up arrow disabled on first
+    // row, down arrow disabled on last row" rule.
+    await persistBookingSources(next);
+  };
+
+  const deleteBookingSource = async (source: string) => {
+    // Per NBS-05: protected sources cannot be deleted. `online` /
+    // `walk-in` / `corporate` are written by server code paths and
+    // deleting any of them breaks booking creation outright.
+    if (PROTECTED_BOOKING_SOURCES.includes(source as ProtectedBookingSource)) {
+      throw new Error(`"${source}" is a protected booking source and cannot be deleted.`);
+    }
+    // Also block deletion if any booking uses the source (second
+    // line of defense, same posture as `deletePaymentMethod`).
+    const attached = bookings.filter((b) => b.source === source);
+    if (attached.length > 0) {
+      throw new Error(
+        `${attached.length} booking${attached.length === 1 ? "" : "s"} reference this source. Reassign those bookings or disable this source instead.`
+      );
+    }
+    await persistBookingSources(bookingSources.filter((s) => s.source !== source));
+  };
 
   const persistPaymentMethods = async (next: PaymentMethodConfig[]) => {
     const sanitized = next.map((method) => {
@@ -4042,9 +4758,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const [roomTypes, setRoomTypes] = useState<RoomTypeEntry[]>(() => {
     return DEFAULT_ROOM_TYPES.map((t) => ({ ...t, imageUrls: [...t.imageUrls] }));
   });
+  // Per RTS-06 (2026-08-01): distinguish "not loaded yet" from "loaded
+  // and legitimately empty". The previous `roomTypes.length > 0` guard
+  // meant that a hotel which had deleted every room type would, on the
+  // next page load, see the snapshot's `[]` value, skip the effect, and
+  // fall back to the DEFAULT_ROOM_TYPES initializer — silently resurrecting
+  // all 8 deleted types. The flag flips to `true` after the first sync
+  // (whatever the length), and from then on the effect always syncs.
+  const [roomTypesLoaded, setRoomTypesLoaded] = useState(false);
 
   useEffect(() => {
-    if (Array.isArray(hotelConfig.roomTypes) && hotelConfig.roomTypes.length > 0) {
+    if (Array.isArray(hotelConfig.roomTypes)) {
       setRoomTypes(
         hotelConfig.roomTypes.map((t: any) => ({
           value: t.value,
@@ -4060,19 +4784,37 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           corporateRate: Number(t.corporateRate) || 0
         }))
       );
+      setRoomTypesLoaded(true);
     }
   }, [hotelConfig.roomTypes]);
 
   const saveRoomTypes = async (newTypes: RoomTypeEntry[]) => {
+    // Capture the prior state so we can roll back on a failed write.
+    // Previously the optimistic `setRoomTypes(newTypes)` ran before
+    // the Firestore write and was never rolled back — a failed write
+    // would leave the UI showing a delete/add/update that never
+    // persisted, and the row would silently come back on the next
+    // snapshot. That swallowed failures is RTS-04.
+    const previousTypes = roomTypes;
     setRoomTypes(newTypes);
     try {
       // Fresh-project safe replacement for the old updateDoc(doc(db, "settings", "hotelConfig")) write.
-      await updateSettings("hotelConfig", {
+      const success = await updateSettings("hotelConfig", {
         roomTypes: newTypes,
         updatedAt: serverTimestamp()
       });
+      if (!success) {
+        // `updateSettings` caught its own error, fired the toast, and
+        // returned `false` — roll back and surface the failure so the
+        // caller can react (e.g. the Settings delete handler shows its
+        // own error and keeps the row armed).
+        setRoomTypes(previousTypes);
+        throw new Error("Failed to persist room types to settings.");
+      }
     } catch (error) {
+      setRoomTypes(previousTypes);
       console.error("Failed to save room types to Firestore:", error);
+      throw error;
     }
   };
 
@@ -4086,9 +4828,16 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       description: string;
       amenities: string[];
       maxCapacity: number;
+      // Per CHD-02 (2026-08-01, per decision #144): per-type child
+      // cap. `maxCapacity` is the ADULT cap. `maxChildren` is the
+      // CHILD cap (0 = no children allowed, e.g. a Single).
+      maxChildren?: number;
       pricePerNight: number;
       weekendRate: number;
       corporateRate: number;
+      // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+      maxExtraBeds?: number;
+      extraBedRate?: number;
     }
   ) => {
     const newType: RoomTypeEntry = {
@@ -4100,9 +4849,19 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       description: rt.description || "",
       amenities: Array.isArray(rt.amenities) ? rt.amenities.filter((a) => a && a.trim()) : [],
       maxCapacity: Math.max(1, Math.floor(rt.maxCapacity)),
+      // Per CHD-02: child cap. The seed (0/1/1/1/2) lives in
+      // `DEFAULT_ROOM_TYPES` for the initial population; the
+      // admin can tune per-type here. The Add form's default
+      // reads from the type's existing record when editing.
+      maxChildren: Math.max(0, Math.floor(Number(rt.maxChildren) || 0)),
       pricePerNight: Math.max(0, rt.pricePerNight),
       weekendRate: Math.max(0, rt.weekendRate),
-      corporateRate: Math.max(0, rt.corporateRate)
+      corporateRate: Math.max(0, rt.corporateRate),
+      // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
+      // `maxExtraBeds` of 0 means the type does not allow extra
+      // beds (no separate `allowsExtraBed` boolean per the spec).
+      maxExtraBeds: Math.max(0, Math.floor(Number(rt.maxExtraBeds) || 0)),
+      extraBedRate: Math.max(0, Number(rt.extraBedRate) || 0)
     };
     const updated = [...roomTypes, newType];
     await saveRoomTypes(updated);
@@ -4120,9 +4879,12 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         | "description"
         | "amenities"
         | "maxCapacity"
+        | "maxChildren"
         | "pricePerNight"
         | "weekendRate"
         | "corporateRate"
+        | "maxExtraBeds"
+        | "extraBedRate"
       >
     >
   ) => {
@@ -4605,6 +5367,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         deleteRoom,
         hasActiveBookings,
         bookings,
+        reservations,
+        reservationPaidAmount,
         updateBookingStatus,
         resolveEarlyCheckin,
         rescheduleBooking,
@@ -4613,6 +5377,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         resendBookingEmail,
         verifyAndRecordPayment,
         rejectPayment,
+        confirmBookingWithBalance,
         roomBlocks,
         createRoomBlock,
         updateRoomBlock,
@@ -4633,6 +5398,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         members,
         updateMemberPoints,
         toggleMemberActive,
+        linkBookingToMember,
         intercoms,
         intercomThreads,
         sendIntercomMessage,
@@ -4662,6 +5428,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         addRoomType,
         updateRoomType,
         deleteRoomType,
+        saveRoomTypes,
         uploadRoomTypePhoto,
         removeRoomTypePhoto,
         reorderRoomTypePhotos,
@@ -4674,6 +5441,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         deletePaymentMethod,
         uploadPaymentMethodQr,
         resetPaymentMethodQr,
+        bookingSources,
+        addBookingSource,
+        updateBookingSource,
+        reorderBookingSources,
+        deleteBookingSource,
         staff,
         createStaff,
         disableStaff,

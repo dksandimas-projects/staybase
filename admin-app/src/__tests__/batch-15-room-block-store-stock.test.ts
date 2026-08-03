@@ -77,14 +77,28 @@ describe("Phase 11.6 Batch 15 — room block + store stock are spec-compliant", 
       // which meant a room that was blocked for a past window would still
       // block a future booking. Now they check the window vs the requested
       // checkIn / checkOut.
-      const guardMatch = bookingsHandlerSrc.match(
-        /if\s*\(\s*roomData\.status\s*===\s*["']blocked["']\s*\)\s*\{[\s\S]*?windowActive[\s\S]*?\}/
+      //
+      // Per MRB-07 (2026-08-02, per decision #159): handleCreateWalkin
+      // reads every room in the reservation in a loop, so its room doc
+      // is bound as `lineRoomData` rather than `roomData`. The guard
+      // itself is unchanged — each room still compares the requested
+      // stay against its own blocked window. Matching the window
+      // computation directly (rather than an open-ended span from the
+      // `status === "blocked"` check) keeps this from drifting onto the
+      // check-in handler's unrelated hard reject.
+      const windowGuards = bookingsHandlerSrc.match(
+        /const blockedFrom = toDateOrNull\((roomData|lineRoomData|cData)\.blockedFrom\);\s*const blockedTo = toDateOrNull\(\1\.blockedTo\);\s*const windowActive = blockedFrom && blockedTo\s*\?\s*checkInDate < blockedTo && checkOutDate > blockedFrom/g
       );
-      expect(guardMatch, "expected to find the blocked-window guard").toBeTruthy();
-      const body = guardMatch![0];
-      expect(body).toMatch(/toDateOrNull\(roomData\.blockedFrom\)/);
-      expect(body).toMatch(/toDateOrNull\(roomData\.blockedTo\)/);
-      expect(body).toMatch(/checkInDate\s*<\s*blockedTo\s*&&\s*checkOutDate\s*>\s*blockedFrom/);
+      expect(windowGuards, "expected to find the blocked-window guards").toBeTruthy();
+      // One guard per create path: the public create's candidate loop
+      // and the walk-in's per-room-stay loop.
+      expect(windowGuards!.length).toBeGreaterThanOrEqual(2);
+      // Each guard is only reached when the room is actually blocked.
+      expect(
+        bookingsHandlerSrc.match(
+          /if\s*\(\s*(?:roomData|lineRoomData|cData)\.status\s*===\s*["']blocked["']\s*\)/g
+        )!.length
+      ).toBeGreaterThanOrEqual(2);
     });
 
     it("corporate-inquiries.ts convert handler also honors the blockedFrom/blockedTo window", () => {

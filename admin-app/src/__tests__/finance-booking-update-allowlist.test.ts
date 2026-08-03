@@ -19,7 +19,6 @@ describe("FLR-02 booking update authority", () => {
       "guestRegistration",
       "breakfastSelections",
       "breakfastServed",
-      "paymentReferenceNumber",
       "discountVerified",
       "discountVerifiedBy",
       "discountRejected",
@@ -30,6 +29,12 @@ describe("FLR-02 booking update authority", () => {
     ]) {
       expect(bookingRule).toContain(`"${field}"`);
     }
+    // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+    // the top-level `paymentReferenceNumber` was retired. Staff
+    // can no longer write it directly — the canonical reference
+    // lives on each `bookings/{id}/payments/{paymentId}` entry's
+    // `transactionReference` (append-only at the rules level).
+    expect(bookingRule).not.toContain('"paymentReferenceNumber"');
     for (const forbidden of ["status", "totalPrice", "originalTotalPrice", "rateBreakdown", "pointsAwarded"]) {
       expect(bookingRule).not.toContain(`"${forbidden}"`);
     }

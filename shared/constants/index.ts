@@ -8,18 +8,59 @@ export const BOOKING_STATUSES = [
   "cancelled"
 ] as const;
 
+// Per NBS (2026-07-31): the booking source list is admin-editable in
+// Settings. `BOOKING_SOURCES` is the historical union used as a Zod
+// `z.enum(...)` source — kept for the type alias `BookingSource`
+// (which is now widened to `string` per NBS-03) and for the seed
+// defaults in `DEFAULT_BOOKING_SOURCES`. New code that needs a
+// configured list should read `settings/hotelConfig.bookingSources[]`
+// via the `bookingSources` slice of `AdminContext`.
+// `selectableAtFrontDesk: false` on a source means the system assigns
+// it (server-derived from the booking path) and the New Booking modal
+// must never offer it — choosing "Online" for a walk-in would corrupt
+// acquisition reporting (per NBS-06).
 export const BOOKING_SOURCES = ["online", "walk-in", "phone", "facebook", "corporate"] as const;
+
+// Per CVQ-08 (2026-07-31): the hotel is planning for Agoda. The seed
+// list adds Agoda as the OTA entry alongside the existing five.
+// `online` / `walk-in` / `corporate` are system-assigned and must
+// never appear in the New Booking modal's source selector.
+export type BookingSourceConfig = {
+  source: string;
+  label: string;
+  isEnabled: boolean;
+  selectableAtFrontDesk: boolean;
+};
+
+export const DEFAULT_BOOKING_SOURCES: BookingSourceConfig[] = [
+  { source: "online", label: "Online Booking", isEnabled: true, selectableAtFrontDesk: false },
+  { source: "walk-in", label: "Walk-in Desk", isEnabled: true, selectableAtFrontDesk: false },
+  { source: "corporate", label: "Corporate Codes", isEnabled: true, selectableAtFrontDesk: false },
+  { source: "phone", label: "Phone Call", isEnabled: true, selectableAtFrontDesk: true },
+  { source: "facebook", label: "Facebook / Messenger", isEnabled: true, selectableAtFrontDesk: true },
+  { source: "agoda", label: "Agoda (OTA)", isEnabled: true, selectableAtFrontDesk: true }
+];
+
+// Per NBS-05 (2026-07-31): bookings store the source *key*, so deleting
+// a source orphans every historical booking that used it. Worse,
+// `online` / `walk-in` / `corporate` are written by server code paths
+// (public booking create, corporate conversion, walk-in create) —
+// deleting any of them breaks booking creation outright. Mirror
+// `PROTECTED_PAYMENT_METHODS`: no delete button, a "Required" pill,
+// and a second-line-of-defense block in the context's delete function.
+export const PROTECTED_BOOKING_SOURCES = ["online", "walk-in", "corporate"] as const;
+export type ProtectedBookingSource = (typeof PROTECTED_BOOKING_SOURCES)[number];
 
 export const ROOM_STATUSES = ["available", "occupied", "blocked"] as const;
 
 export const HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"] as const;
 
 export const DEFAULT_ROOM_TYPES: readonly RoomTypeEntry[] = [
-  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
-  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
-  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
-  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
-  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
+  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
+  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
+  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
+  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
+  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
 ];
 
 export type RoomTypeEntry = {
@@ -42,10 +83,35 @@ export type RoomTypeEntry = {
   bedDefinition: string;
   description: string;
   amenities: string[];
+  // Per CHD-02 (2026-08-01, per decision #144 + owner
+  // decision 2026-07-31 #2): `maxCapacity` is now the
+  // **ADULT** cap. The semantic shift is safe precisely
+  // because every existing booking has `numChildren = 0`
+  // (CHD-10 is the only place children exist in the
+  // system, and it's the breakfast toggle, not the
+  // occupancy split — that lands with CHD-01). A Single
+  // realistically allows 0 children (a "Single" is a
+  // solo-stay product), while a Family allows more. The
+  // default seeds below already encode the per-type
+  // reality; admins can tune via the Room Types editor
+  // (CHD-03). Absent `maxChildren` on a legacy settings
+  // doc reads as the seed value via the normalize-on-read
+  // helper in `shared/utils/roomTypes.ts` — same
+  // permissive pattern used for the #111 surface flags.
   maxCapacity: number;
+  maxChildren?: number;
   pricePerNight: number;
   weekendRate: number;
   corporateRate: number;
+  // Per EXB-01 (2026-07-31): extra-bed allowance + rate. `maxExtraBeds`
+  // is 0 when the type does not allow extra beds (the safe default
+  // — no separate `allowsExtraBed` boolean per the spec). `extraBedRate`
+  // is the per-bed-per-night rate. The booking snapshots `extraBedRate`
+  // so a later rate change never rewrites an existing bill. Absent
+  // fields normalize to 0 on read, the same permissive pattern used
+  // for the #111 surface flags and CHD.
+  maxExtraBeds?: number;
+  extraBedRate?: number;
 };
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
@@ -319,3 +385,27 @@ export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // visitors but makes admin edits reflect on a parallel guest tab
 // in real time.
 export const PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
+
+// Per LCE-01 (decision #137, 2026-07-25): the Terms of Service
+// body is admin-editable from Settings → Legal Content and the
+// version is stamped on every booking's `consentVersion` field
+// for the audit trail. The initial version is `1.0.0` — the
+// server auto-bumps the patch level on each save (e.g. 1.0.0
+// → 1.0.1). The `v1.0.0` value is also the safe fallback when
+// `settings/websiteContent.termsVersion` is missing (e.g. a
+// legacy booking created before LCE-01 shipped). Bookings
+// created before LCE-01 don't carry a `consentVersion` field
+// at all — the per-booking copy on `/my-booking` renders the
+// fallback gracefully (no upgrade migration required).
+export const DEFAULT_TERMS_VERSION = "1.0.0";
+
+// Maximum allowed body length for admin-editable terms. A
+// terms document at the size of the current hardcoded 11-
+// section fallback is ~3.5 KB; we set the cap at 50 KB so the
+// admin has room for a much longer policy (e.g. multi-page
+// legalese) without a server round-trip per character. The
+// server validates the cap and rejects larger payloads with
+// 400; the admin editor's textarea also enforces it client-
+// side so the user sees a clear "exceeds the 50 KB limit"
+// before submission.
+export const TERMS_BODY_MAX_LENGTH = 50_000;

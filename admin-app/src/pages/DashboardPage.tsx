@@ -6,12 +6,25 @@ import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
+import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
+import { useToast } from "../components/Toast";
 import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
 import { db } from "../firebase/config";
 
+
+// Per 2026-07-24 (refactor/unify-payment-reference-fields):
+// the canonical payment reference for a booking lives on the
+// most recent entry in the booking's onsitePayments[] ledger as
+// `transactionReference`. The lookup helper
+// (`getLatestPaymentReference`) is shared via
+// `@spark-inn/shared/utils/paymentReference` so the bookings
+// table, dashboard, drawer header, and reports exports can
+// never drift from the email + lookup surfaces.
+import { getLatestPaymentReference } from "@spark-inn/shared";
 
 export function getDaysOverdue(checkOut: string, todayKey: string) {
   const checkOutTime = Date.UTC(
@@ -76,6 +89,7 @@ export function DashboardPage() {
 
   // Per PRC-13: keep every hook above the dashboard loading return so
   // the first loaded render uses the same hook order as the skeleton.
+  const toast = useToast();
   const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
   const verifySubmissionIdRef = useRef<string | null>(null);
   const [verifyAmount, setVerifyAmount] = useState("");
@@ -84,6 +98,42 @@ export function DashboardPage() {
   const [verifyNote, setVerifyNote] = useState("");
   const [verifyPending, setVerifyPending] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // Per feat/payment-success-modal: after a successful
+  // verify, surface a closing-the-loop modal that nudges
+  // the front desk to confirm the booking now that the
+  // payment is recorded. The dashboard surface uses
+  // "View booking" as the secondary CTA (navigates to
+  // the bookings page for follow-up work) instead of
+  // "Later" (the drawer surface).
+  const [verifySuccess, setVerifySuccess] = useState<null | {
+    booking: Booking;
+    amount: number;
+    method: string;
+    methodLabel: string;
+    isFullPayment: boolean;
+    remainingBalance: number;
+  }>(null);
+  const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
+  // Per CWB-04 / decision 122 (2026-07-23): opened by the
+  // post-verify partial-payment success modal's "Confirm
+  // with Balance" CTA. Carries the booking + the
+  // just-computed remaining balance so the form previews
+  // the right number even before the onSnapshot listener
+  // catches up.
+  const [confirmWithBalanceContext, setConfirmWithBalanceContext] = useState<null | {
+    booking: Booking;
+    currentBalance: number;
+  }>(null);
+
+  // Friendly method label lookup — same convention the
+  // BookingsPage uses for the onsite payment ledger.
+  const verifyMethodLabels: Record<string, string> = {
+    gcash: "GCash",
+    maya: "Maya",
+    bank: "Bank Transfer",
+    paypal: "PayPal",
+    cash: "Cash"
+  };
 
   const REJECTION_REASON_PRESETS: Array<{ label: string; value: string }> = [
     {
@@ -335,7 +385,11 @@ export function DashboardPage() {
     setVerifyTarget(booking);
     setVerifyAmount(String(booking.totalPrice - (booking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)));
     setVerifyMethod(booking.paymentMethod || "gcash");
-    setVerifyReference(booking.paymentReferenceNumber || "");
+    // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+    // the top-level `Booking.paymentReferenceNumber` was retired;
+    // staff types the ref from the GCash/bank app into the
+    // verify modal directly.
+    setVerifyReference("");
     setVerifyNote("");
     setVerifyError(null);
     setVerifyPending(false);
@@ -350,6 +404,41 @@ export function DashboardPage() {
     setVerifyNote("");
     setVerifyError(null);
     setVerifyPending(false);
+  };
+
+  // Per feat/payment-success-modal: the success modal's
+  // "Confirm Booking" CTA runs the `payment-confirmed` →
+  // `confirmed` transition. The onSnapshot listener keeps
+  // the dashboard's pending-payments list in sync, so the
+  // confirmed booking drops off the list on the next tick.
+  const handleConfirmBookingFromSuccess = async () => {
+    if (!verifySuccess) return;
+    setConfirmingBookingFromSuccess(true);
+    try {
+      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+    } catch (err: any) {
+      toast.error("Failed to confirm booking", err?.message || "Please try again.");
+    } finally {
+      setConfirmingBookingFromSuccess(false);
+      setVerifySuccess(null);
+      setVerifyTarget(null);
+    }
+  };
+
+  // Per CWB-04 / decision 122 (2026-07-23): the post-verify
+  // partial-payment variant's "Confirm with Balance" CTA
+  // opens the confirm-with-balance form. We carry the
+  // just-computed `remainingBalance` from the success modal
+  // so the form previews the right number.
+  const openConfirmWithBalanceFromSuccess = () => {
+    if (!verifySuccess) return;
+    setConfirmWithBalanceContext({
+      booking: verifySuccess.booking,
+      currentBalance: Math.max(0, verifySuccess.remainingBalance)
+    });
+    setVerifySuccess(null);
+    setVerifyTarget(null);
   };
 
   const submitVerification = async () => {
@@ -377,7 +466,36 @@ export function DashboardPage() {
       setVerifyError(result.error || "Failed to verify payment.");
       return;
     }
-    cancelVerifyForm();
+
+    // Per feat/payment-success-modal: close the loop with
+    // a confirmation modal. The server transitions to
+    // `payment-confirmed` iff the cumulative onsite total
+    // reaches `totalPrice`; we compute that client-side
+    // because the response only returns `{ success: true }`.
+    // The existing onsitePayments snapshot is pre-action
+    // (the onSnapshot listener will catch up on the next
+    // tick), so the math is correct.
+    const existingPaid = verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0;
+    const cumulativeAfter = existingPaid + amount;
+    const isFullPayment = cumulativeAfter >= verifyTarget.totalPrice && verifyTarget.totalPrice > 0;
+    setVerifySuccess({
+      booking: verifyTarget,
+      amount,
+      method: verifyMethod,
+      methodLabel: verifyMethodLabels[verifyMethod] || verifyMethod,
+      isFullPayment,
+      remainingBalance: Math.max(0, verifyTarget.totalPrice - cumulativeAfter)
+    });
+    // Reset the verify-form fields so the next open is
+    // fresh, but keep verifyTarget alive — the success
+    // modal still needs it. The modal's CTAs (Confirm
+    // Booking / View booking / dismiss) clear verifyTarget
+    // when they fire.
+    verifySubmissionIdRef.current = null;
+    setVerifyAmount("");
+    setVerifyMethod("gcash");
+    setVerifyReference("");
+    setVerifyNote("");
   };
 
   return (
@@ -494,9 +612,9 @@ export function DashboardPage() {
                     </div>
                     <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
                     <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
-                    {booking.paymentReferenceNumber && (
+                    {getLatestPaymentReference(booking) && (
                       <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-800">
-                        Ref: {booking.paymentReferenceNumber}
+                        Ref: {getLatestPaymentReference(booking)}
                       </p>
                     )}
                   </div>
@@ -1021,10 +1139,10 @@ export function DashboardPage() {
               The guest will receive an email with the reason and be asked to re-upload a corrected proof.
               The room remains <span className="font-semibold text-gray-900">held</span> — it is not freed.
             </p>
-            {rejectionTarget.paymentReferenceNumber && (
+            {getLatestPaymentReference(rejectionTarget) && (
               <div className="rounded-lg bg-gray-50 px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Guest reference number</p>
-                <p className="font-mono text-sm font-bold text-gray-900">{rejectionTarget.paymentReferenceNumber}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Reference on file</p>
+                <p className="font-mono text-sm font-bold text-gray-900">{getLatestPaymentReference(rejectionTarget)}</p>
               </div>
             )}
             <div>
@@ -1209,6 +1327,55 @@ export function DashboardPage() {
           </div>
         )}
       </Modal>
+
+      {/* PRC-13 / feat/payment-success-modal: post-verify
+          confirmation. Closes the loop and nudges the front
+          desk toward confirming the booking now that the
+          payment is recorded. The dashboard surface uses
+          "View booking" as the secondary CTA (navigates to
+          the bookings page) instead of "Later" — the staff
+          may want to do follow-up work on the booking. */}
+      <PaymentSuccessModal
+        open={verifySuccess !== null}
+        onClose={() => { if (!confirmingBookingFromSuccess) { setVerifySuccess(null); setVerifyTarget(null); } }}
+        surface="dashboard"
+        bookingRef={verifySuccess?.booking.bookingRef ?? ""}
+        guestName={verifySuccess?.booking.guestName ?? ""}
+        guestEmail={verifySuccess?.booking.guestEmail ?? ""}
+        roomType={verifySuccess?.booking.roomType ?? ""}
+        amount={verifySuccess?.amount ?? 0}
+        method={verifySuccess?.method ?? ""}
+        methodLabel={verifySuccess?.methodLabel}
+        isFullPayment={verifySuccess?.isFullPayment ?? false}
+        remainingBalance={verifySuccess?.remainingBalance}
+        onConfirmBooking={handleConfirmBookingFromSuccess}
+        confirmingBooking={confirmingBookingFromSuccess}
+        onViewBooking={() => {
+          if (!verifySuccess) return;
+          const targetId = verifySuccess.booking.id;
+          setVerifySuccess(null);
+          setVerifyTarget(null);
+          openBooking(targetId);
+        }}
+        onConfirmWithBalance={openConfirmWithBalanceFromSuccess}
+      />
+
+      {/* Per CWB-04 / decision 122 (2026-07-23): opened by
+          the post-verify success modal's partial-payment
+          "Confirm with Balance" CTA. The form owns the
+          threshold banner + the role-gated submit. On
+          success the snapshot listener refreshes the
+          dashboard's pending-payments list so the booking
+          drops off. */}
+      {confirmWithBalanceContext && (
+        <ConfirmWithBalanceForm
+          open={confirmWithBalanceContext !== null}
+          onClose={() => setConfirmWithBalanceContext(null)}
+          booking={confirmWithBalanceContext.booking}
+          currentBalance={confirmWithBalanceContext.currentBalance}
+          onConfirmed={() => setConfirmWithBalanceContext(null)}
+        />
+      )}
       <Modal
         title={imagePreview?.title ?? "Image preview"}
         open={!!imagePreview}

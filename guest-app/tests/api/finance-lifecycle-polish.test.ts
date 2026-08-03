@@ -22,7 +22,14 @@ describe("Finance Lifecycle FL-16 and FL-19", () => {
 
     expect(handler).toMatch(/PREALLOCATED_PAYMENT_ID_REGEX\.test\(String\(paymentId\)\)/);
     expect(handler).toMatch(/paymentsRef\.doc\(paymentId\)/);
-    expect(handler).toMatch(/transaction\.create\(newPaymentRef, paymentRecord\)/);
+    // Per MRB-04 Phase 2 (2026-08-02, per decision
+    // #159): the reservation-owned payment subcollection
+    // path. For new reservations the payment record
+    // includes `reservationId` + `bookingId`; for legacy
+    // null-`reservationId` bookings the record shape is
+    // byte-equivalent to the historical `paymentRecord`.
+    // The guard accepts either shape — both are valid.
+    expect(handler).toMatch(/transaction\.create\(newPaymentRef, (?:paymentRecord|recordWithReservation)\)/);
     expect(handler).toMatch(/idempotentReplay = true/);
     expect(adminBookings).toMatch(/paymentSubmissionIdRef = useRef<string \| null>\(null\)/);
     expect(adminBookings).toMatch(/addOnsitePayment\(selectedBooking\.id, paymentId, amount/);

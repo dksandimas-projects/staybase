@@ -82,8 +82,13 @@ describe("Phase 11.6 Batch 14 — booking checkIn/checkOut are always Firestore 
     });
 
     it("handleCreateBooking stores checkIn as Timestamp.fromDate(...)", () => {
+      // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): both
+      // create paths write N booking docs in a loop rather than one
+      // `transaction.set(bookingDocRef, newBooking)`, so the body is
+      // anchored on the reservation header write instead. The stored
+      // date shape is unchanged.
       const handleMatch = bookingsSrc.match(
-        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(bookingDocRef,\s*newBooking\);/
+        /async\s+function\s+handleCreateBooking\s*\([\s\S]*?transaction\.set\(reservationDocRef,\s*newReservation\);/
       );
       expect(handleMatch, "expected to find handleCreateBooking body").toBeTruthy();
       const body = handleMatch![0];
@@ -93,7 +98,7 @@ describe("Phase 11.6 Batch 14 — booking checkIn/checkOut are always Firestore 
 
     it("handleCreateWalkin stores checkIn as Timestamp.fromDate(...)", () => {
       const handleMatch = bookingsSrc.match(
-        /async\s+function\s+handleCreateWalkin\s*\([\s\S]*?transaction\.set\(bookingDocRef,\s*newBooking\);/
+        /async\s+function\s+handleCreateWalkin\s*\([\s\S]*?transaction\.set\(reservationDocRef,\s*newReservation\);/
       );
       expect(handleMatch, "expected to find handleCreateWalkin body").toBeTruthy();
       const body = handleMatch![0];

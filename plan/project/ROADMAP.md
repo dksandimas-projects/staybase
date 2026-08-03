@@ -1,39 +1,34 @@
 # Spark Inn — Build Roadmap & Checklist
-> Living document — update as work progresses
-> Last updated: July 17, 2026 (**INC-01 opened — active production incident**: July-17 security rules deployed against the July-14 app; online-payment bookings and guest intercom broken. See §Production Incident.)
+> Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
+> Last updated: August 3, 2026 (MRB-15 completed on `feature/phase-12-mrb-15-08-legacy-fallback`; running order — ETR-R).
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
 
 ## How to Use This File
 
-- Check off items as they're completed (`⬜` → `✅`)
-- Update "Last updated" date at the top on each edit
-- Add notes under items if there are blockers or decisions made
-- Commit with `docs: update ROADMAP.md` prefix (no version bump)
-- **This file holds current status and open work only.** Completed-phase checklists, shipped audit-fix batches, and closed findings live in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md` (historical, do not load routinely) and in Git history. When a phase or fix batch fully ships, move its detail to the archive and keep a one-line ✅ status here.
+- **New feature request or bug report? Follow `plan/docs/CONTRIBUTING.md §Feature Intake & Spec Workflow`** — investigate the code first, verify every claim against source rather than an MD, then spec it here as a coded block. Do not start coding from a chat message.
+- **Must be updated on every merge to `dev`** (per `plan/docs/CONTRIBUTING.md §When to Update Which MD`).
+- Check off items as they're completed (`⬜` → `✅`); for `XX-01..05` style items, mark each sub-item or convert to one `✅ **XX**` line with the shipped commit(s).
+- **This file holds current status and open work only.** Completed-phase checklists and shipped feature details live in `plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md` and `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md` (historical, do not load routinely). When a phase or feature fully ships, move its detail to the archive and keep a one-line ✅ status here.
 
 ---
 
 ## Phase Status Overview
 
-| Phase | Status | Remaining |
+| Phase | Status | Remaining / Notes |
 |---|---|---|
-| 0 — Foundation (41) · 0.5 — Wireframes (60) · 1 — Guest Shell (12) · 2 — Admin Shell & Auth (6) · 3 — Rooms (5) · 4 — Booking Flow (11) · 5 — Admin Bookings (8) · 6 — Email (10) · 7 — Corporate & Vouchers (12) · 9 — Remaining Features (6) | ✅ All shipped | 0 — details in archive |
+| 0 — Foundation · 0.5 — Wireframes · 1 — Guest Shell · 2 — Admin Shell & Auth · 3 — Rooms · 4 — Guest Booking · 5 — Admin Bookings · 6 — Email · 7 — Corporate & Vouchers · 9 — Remaining Features | ✅ All shipped | 0 — details in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) |
 | 8 — Intercom | ✅ Built (19/29) | 10 manual E2E QA items (§Phase 8 QA below) |
 | 10 — Security & Polish | 🔄 7/12 | 5 operational/QA items (§Phase 10 below) |
 | 10B — Spark Rewards | 🔄 13/14 | 1 operational item (§Phase 10B below) |
-| 11 — Staging & Launch | 🔄 2/16 | 14 operational items (§Phase 11 below) |
-| 11.5/11.6 — Audit Fixes & Launch-Readiness (50 items, 20 batches) | ✅ All 50 shipped 2026-06-16 | 0 — details in archive |
+| 11 — Staging & Launch | 🔄 2/16 | 14 operational items + production cutover (§Phase 11 below) |
+| 11.5/11.6 — Audit Fixes & Launch-Readiness (50 items) | ✅ All 50 shipped 2026-06-16 | 0 — details in archive |
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Post-Launch | 🔄 14/22 | See §Phase 12 below |
-| Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
-| Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
-| Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
-| E2E User Journey Audit (July 17) | ✅ All 17 findings fixed + merged to `dev` | Reach production via INC-01 resolution / cutover deploy |
-| **INC-01 — Production rules/app skew (July 17)** | 🔴 **ACTIVE INCIDENT** | Online-payment bookings + guest intercom broken on the live site (§Production Incident below) |
+| 12 — Enhancements, Multi-Room & CRL | ✅ Active (MRB-01..15, CRL-01..09 shipped) | Phase 12 fully shipped; follow-ups in ETR-R + BDUX (§Phase 12 below) |
+| Plan Audits (FIN, FR, FL, PF, QA, NC, AUD, SA, FLR, PC, INC) | ✅ Closed / In Prod | 0 — details in archive |
 
 ---
 
@@ -49,30 +44,30 @@
 - [ ] Mark resolved / reopen from admin Inbox updates the room-level flag and hides thread from Active tab
 - [ ] Notification sound fires only when tab is not focused; tab title unread count updates correctly
 - [ ] WebRTC active-call banner shows live duration timer; "Disconnect" button properly tears down the peer connection and media stream on both sides
-- [ ] QR regen in admin Settings → QR Management → old QR continues to work for in-flight session, new QR encodes the same `/intercom/{roomId}` URL (per `QR-MANAGEMENT.md`)
+- [ ] QR regen in admin Settings → QR Management → old QR continues to work for in-flight session, new QR encodes the same `/intercom/{roomId}` URL
 
 ---
 
 ## Phase 10 — Security & Polish: remaining items
 
-- ⬜ Firebase API key domain restriction — operational task, requires Firebase Console configuration (not a code change)
-- ⬜ Performance audit — guest site < 3s on 4G mobile, dashboard < 2s (requires Lighthouse/WebPageTest; manual QA)
-- ⬜ Cross-browser QA — Chrome, Safari, Firefox (manual QA)
-- ⬜ Mobile QA — iOS Safari, Android Chrome (375px) (manual QA)
-- ⬜ Accessibility QA — WCAG 2.1 AA checklist (`plan/docs/FRONTEND.md §Accessibility`) applied across guest-facing screens — per `LEGAL.md` commitment (tied directly to PWD discount guests who use assistive tech). Includes: keyboard navigation, screen reader labels (aria-* on all icon-only buttons, form fields, modal dialogs), color contrast 4.5:1 minimum, focus indicators, alt text on all images, form labels associated with inputs, error messages announced via aria-live. *(Per AUDIT-39)*
+- ⬜ Firebase API key domain restriction — operational task in Firebase Console
+- ⬜ Performance audit — guest site < 3s on 4G mobile, dashboard < 2s (Lighthouse/WebPageTest)
+- ⬜ Cross-browser QA — Chrome, Safari, Firefox
+- ⬜ Mobile QA — iOS Safari, Android Chrome (375px)
+- ⬜ Accessibility QA — WCAG 2.1 AA checklist (`plan/docs/FRONTEND.md §Accessibility`) across guest-facing screens
 
 ---
 
 ## Phase 10B — Spark Rewards: remaining item
 
-- ⬜ Firebase Auth — Google Sign-In provider enabled in Firebase Console (operational task — code side done; requires Firebase Console > Authentication > Sign-in method > Google > Enable)
+- ⬜ Firebase Auth — Google Sign-In provider enabled in Firebase Console (operational task)
 
 ---
 
 ## Phase 11 — Staging & Launch
 
 ### Staging (25% payment milestone)
-- ⬜ `dev` branch merged to `main` at `v0.9.0` — operational step, scheduled after client approval
+- ⬜ `dev` branch merged to `main` at `v0.9.0` — operational step after client approval
 - ⬜ Staging URLs live and shared with client — operational
 - ⬜ Client review session — bookings, dashboard, intercom — operational
 - ⬜ Feedback collected and addressed — operational
@@ -80,159 +75,114 @@
 - ✅ Production launch procedure documented — `plan/project/DEPLOY.md`
 - ✅ Pre-launch verification script — `npm run preflight`
 
-### Production Launch
+### Production Launch & Cutover (PC-05..06)
 - ⬜ Domain `sparkinnbohol.com` purchased and configured — operational
 - ⬜ Vercel custom domains set (`www.sparkinnbohol.com`, `admin.sparkinnbohol.com`) — operational
-- ⬜ VERSION bumped to `v1.0.0` via `release:` commit — operational (Husky auto-bumps)
+- ⬜ VERSION bumped to `v1.0.0` via `release:` commit — operational
 - ⬜ Final `dev` → `main` merge — operational
-- ⬜ All 14 rooms seeded with real data + photos — operational (skeleton data exists; client to upload real photos via admin UI)
-- ⬜ Hotel config + website content finalized by client — operational (via admin Settings)
-- ⬜ First admin account created for hotel owner — operational (via `/api/admin/create-staff`)
+- ⬜ All 14 rooms seeded with real data + photos — operational
+- ⬜ Hotel config + website content finalized by client — operational
+- ⬜ First admin account created for hotel owner — operational
 - ⬜ Client training session (booking management, settings, intercom) — operational
 - ⬜ Deployment confirmed live on both domains — operational
+- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
+- ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
+- ⬜ Verify live: a GCash test booking passes Step 3 with proof upload; a guest intercom message + quick request deliver to the admin inbox
+- ⬜ Confirm no stuck bookings/guests during the breakage window (check Resend logs / booking creation rate between the 2026-07-17 rules deploy and PR #118)
 
 ---
 
 ## Phase 11.7 — Admin Mobile UX: remaining item
-> Shipped 2026-06-18 at v0.90.0 (spec: `plan/features/ADMIN-MOBILE.md`, Decision #107). Full implementation record in archive.
+> Shipped 2026-06-18 at v0.90.0 (spec: `plan/features/ADMIN-MOBILE.md`).
 
-- [ ] **Deferred to P3** — Manual QA matrix (18 screens × 6 breakpoints) + real device testing (iPhone SE, iPhone 14, Pixel 7, iPad) — requires a browser/device; doc/QA matrix at `ADMIN-MOBILE.md §Manual QA matrix`
-
----
-
-## Phase 11.8 — Public Content Editability *(P0 — opened 2026-07-01)*
-> Source: `plan/project/AUDIT-PUBLIC-CONTENT-2026-07-01.md`. PR 1 (hero eyebrows + cache bust) and PR 3 (hotel contact fields) shipped 2026-07-01; implementation detail in archive. PR 2 deferred post-launch (~2 days, M effort — open after first 30 days of real data).
-
-### Open questions (close with the owner during staging review)
-- 🔴 **Q1.** Does the owner want a custom tagline / brand promise different from the white-label config defaults? If yes → Tier A. If no → keep in `hotel.config.ts`. *(Deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback.)*
-- 🔴 **Q2.** Does the owner want to customize the booking flow copy (step labels, validation messages, payment method card labels)? Most hotel SaaS sites do not expose this. Confirm before PR 2.
-- 🔴 **Q3.** Does the owner want to customize email subject + body for the 7 transactional triggers? If yes, scope a separate "Email Templates" tab in Phase 12 (out of scope for this phase).
-- 🔴 **Q4.** Does the owner want the Spark Rewards "Member Privileges" copy to be different from the current 4 hardcoded cards? If yes → Tier A. If no → keep hardcoded.
-
-### PR 2 — `feat/content-tier-a-website` *(deferred to post-launch)*
-Extends **Settings → Website Content** with new sub-objects for the rest of the public-facing pages (~35 new fields after Q1–Q4 deferrals). `homepage.sectionHeaders`, `roomsCatalog`, `contact`, and `notFound` starter batches shipped 2026-07-09. Remaining:
-
-- [ ] `corporate.perksSectionEyebrow` + `corporate.perksSectionTitle` + `corporate.cardLabels` + `corporate.inquiryForm` (labels, placeholders, button, success, error)
-- [ ] `corporate.onboardingSteps[]` — new list editor for the 3-step process (mirrors `perks[]`)
-- [ ] `rewards.howItWorks` — eyebrow + title + 3-step list editor
-- [ ] `rewards.ctaBanner` — heading + body
-- [ ] `bookingConfirm` — headlines, subtext, details card labels, payment method display labels, calendar buttons, Spark Rewards upsell block, empty state
-- [ ] `termsLastUpdated` (string) + `termsBody` (full-text override, mirrors `privacyPolicyBody`)
-- [ ] (Q2) `bookingFlow` — only if the owner answers the audit's Q2 with a yes
-- [ ] (Q4) `rewards.privileges` — only if the owner answers the audit's Q4 with a yes
-
-Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `guest-app/src/__tests__/content-tier-a-render.test.ts` covering each new field's `pickString` chain end-to-end.
-
-### Explicitly decided NOT to do (deferred per the audit's recommendation)
-- ⏸ **Footer / Navbar link order** — product IA, not content. If a hotel asks, promote to a Tier A item.
-- ⏸ **Form validation messages + voucher error messages** — code-side contract with the guest, not marketing copy.
-- ⏸ **Sign-in / sign-up page copy** — product IA, not marketing copy.
-- ⏸ **In-room chat copy (`/intercom`)** — product IA, no marketing surface.
-- ⏸ **Privacy page structured fallback body** — only reachable when `privacyPolicyBody` is empty; not a long-term editor surface.
-- ⏸ **Member portal tier labels** ("Standard Member") — depends on the Phase 2 tier system.
-- ⏸ **Email subject + body per trigger** — out of scope; ship a separate Phase 12 "Email Templates" tab if a hotel asks.
+- [ ] **Deferred to P3** — Manual QA matrix (18 screens × 6 breakpoints) + real device testing (iPhone SE, iPhone 14, Pixel 7, iPad)
 
 ---
 
-## Phase 11.9 — SEO & Open Graph *(P0 — opened 2026-07-09)*
-> Full spec: `plan/features/SEO-OPENGRAPH.md`. G1–G6 + config + admin noindex all shipped (detail in archive). Q1 (Option A build-time prerender), Q3 (`twitterHandle`), Q4 (`priceRange` = `₱₱`) resolved 2026-07-09.
+## Phase 11.8 — Public Content Editability
 
-- 🔴 **Q2.** Approve the 1200×630 OG card design (logo + tagline on brand orange) — owner.
-- ⬜ **Verify** — Facebook Sharing Debugger + WhatsApp + Viber render distinct correct cards for ≥3 URLs; X Card Validator; Google Rich Results Test on JSON-LD
-- ⬜ **Post-deploy** — submit sitemap to Google Search Console + Bing Webmaster Tools
+- 🔴 **Q1–Q4.** Owner decisions on custom tagline, booking flow copy, email templates, and member privileges.
+- [ ] **PR 2 (`feat/content-tier-a-website`)** — Deferred to post-launch (~35 fields across corporate, rewards, bookingConfirm).
 
 ---
 
-## Phase 12 — Post-Launch (Phase 2, Deferred)
-> Goal: Enhancements after stable v1.0.0. 14 features shipped (email preview, breakfast CRUD, dashboard intercom widget, early check-in workflow, calendar view, seasonal rates, Rate Calendar, discount/voucher repairs, check-in gate, PDF repair, price breakdown, Senior/PWD toggle, post-booking discounts, incidental charges FIN-14, Notification Center, payment rejection) — full records in archive.
+## Phase 11.9 — SEO & Open Graph
 
-### Deferred features
-- ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
-- ⏸ Automated test suite
-- ⏸ Additional hotel client deployments (white-label)
+- 🔴 **Q2.** Approve 1200×630 OG card design — owner.
+- ⬜ **Verify** — FB Sharing Debugger + WhatsApp + Viber + X Card Validator + Google Rich Results Test.
+- ⬜ **Post-deploy** — submit sitemap to Google Search Console + Bing Webmaster Tools.
+
+---
+
+## Phase 12 — Enhancements, Multi-Room Bookings (MRB) & Cancellation Lifecycle (CRL)
+
+### Shipped in Phase 12 (Summary)
+> Full implementation detail archived in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) and `ROADMAP-ARCHIVE-2026-07-17.md`.
+
+- ✅ **GCR / CWB / LCE / ECE / GSD / BSP / MBP / WSN / HSD / MBZ / WRV / WPM / NBS / PEX / DSC** (Shipped 2026-06 to 2026-08)
+- ✅ **CRL (Phase 1)** — Cancellation & Refund Lifecycle foundation: refund idempotency (CRL-01), immutable cancellation audit stamps (`cancelledAt`/`cancelledBy`/`cancellationSource`, CRL-02), server status matrix dual gate (CRL-03), truthful copy + staff paid-store cancel alert (CRL-04), and structured snapshotted policy (CRL-05, v0.230.0, merge `babf238`, 2026-08-02)
+- ✅ **MRB (Phase 1)** — Multi-Room Bookings foundation: `reservations/{id}` header, reservationRef (`R-YYYYMMDD-NNNNN`), transactional create/idempotency, walk-in, reschedule, corporate, N-booking assignment, reservation-owned operational/admin folio, reservation-aware confirmation receipt, and the guest multi-room cart with per-room occupancy/pricing (MRB-01..08, 2026-08-02; v0.232.0 added corporate multi-room per decision #167)
+
+### Open Cancellation & Refund Lifecycle (CRL) Tasks (CRL-06..09)
+- ✅ **CRL-05 — Structured, snapshotted cancellation policy** — shipped (v0.230.0, merge `babf238`, 2026-08-02); full spec in [`plan/project/archive/ROADMAP-SHIPPED-2026-08-02.md`](archive/ROADMAP-SHIPPED-2026-08-02.md).
+- ✅ **CRL-06 — Secure cancellation preview + guest workflow (WITH MRB-10/13)** — shipped 2026-08-02 on `feature/phase-12-crl-06-cancel-preview`. Rate-limited preview uses the same strict owner credential as destructive cancel; renders target scope, policy cutoff, net collected, policy refund, retained amount, and `staffProcessingRequired`. Guest self-service expanded to every pre-arrival state after the preview. Room-scope previews allocate the reservation folio across eligible siblings. Post-confirmation lookup card shows preview-derived refund-processing result; persisted liability + admin workflow + state email + Reports queue follow in CRL-07/08/09.
+- ✅ **CRL-07 — Reservation refund liability + admin workflow (WITH MRB-04/13)** — shipped 2026-08-03 on `feature/phase-12-crl-07-refund-liability` (decision #173). Destructive cancel materialises a `cancellationLiability` snapshot (reservation header for reservation-scope + N=1; booking doc for per-child + legacy). `policyResult` is read-only; `approvedAmount` defaults to `policyResult.policyRefund` and is reduced only via a new admin-only `POST /api/bookings/cancellation-exception` (reason ≤500 chars, amount bounded by `policyRefund`, idempotent). The existing `POST /api/bookings/add-refund` continues to record processed refunds; a new read-only `POST /api/bookings/cancellation-liability` projection returns one of five states via `computeCancellationLiabilityState`. Front-desk can cancel + see the panel; only admins can record a refund or apply an exception. Admin UI: `CancellationLiabilityPanel` + `CancellationExceptionModal`. Full spec in `plan/project/archive/ROADMAP-SHIPPED-2026-08-03.md` + `plan/docs/DECISIONS-FEATURES.md #173`. CRL-09 closes the loop.
+- ✅ **CRL-08 — Refund-state emails, notification queue, and reports (WITH MRB-09/11)** — shipped 2026-08-03 on `feature/phase-12-crl-08-refund-state-emails-and-reports` (decision #174). **(1) Cancellation email** renders the CRL-07 `liabilityProjection` breakdown. **(2) New `booking-refund-processed` email** fires from `handleAddRefund` on state change (gate inside the same `runTransaction`; idempotent replay does NOT re-send). **(3) New `cancellation-refund` `NotificationType`** — `handleCancelBooking` writes on non-null liability; `handleAddRefund` writes on state change. **(4) New Reports "Liability" tab** shows pending + amount, partials, age buckets, processed total (in range), retained revenue (in range). Dual-source read (reservation header + booking doc) is the same shape CRL-07 uses. Exports + Daily Close continue to derive from the payment ledger, never from `approvedAmount`. Full spec in `plan/project/archive/ROADMAP-SHIPPED-2026-08-03.md` + `plan/docs/DECISIONS-FEATURES.md #174`. CRL-09 closes the loop.
+- ✅ **CRL-09 — Behavioral tests, staging rehearsal, and MD sync (WITH CRL-07/08)** — shipped 2026-08-03 on `feature/phase-12-crl-09-behavioral-tests-and-md-sync` (decision #175 + #176 implementation records, v0.239.0 → v0.240.0). `firebase/tests/crl-09-lifecycle-state-machine.emulator.test.ts` (584 lines) pins the round-trip: snapshot shape on reservation header (new path) + booking doc (legacy null-`reservationId`); refund lifecycle `pending-processing` → `partially-processed` → `processed`; exception mutation; refund-id idempotency; legacy `bookings/{id}/payments/` negative-amount filter. Implementation record decisions land at `DECISIONS-FEATURES.md #175` (CRL-07) + `#176` (CRL-08). MDs synced: `BOOKING-LOOKUP.md` (post-cancel refund summary), `STORE-MANAGEMENT.md` (store-order refunds do NOT touch `cancellationLiability`). Full spec in `plan/project/archive/ROADMAP-SHIPPED-2026-08-03.md`; manual TEST DATA walkthrough in [`plan/project/CRL-09-STAGING-REHEARSAL-2026-08-03.md`](CRL-09-STAGING-REHEARSAL-2026-08-03.md).
+
+### Open Multi-Room Booking (MRB) Tasks (MRB-09..15)
+- ✅ **MRB-06 + MRB-07 + MRB-08 — multi-room reservations across all three create surfaces** — all shipped 2026-08-02: a guest can cart several rooms into one reservation on `/book`, the desk can build a mixed-type multi-room reservation from the admin New Booking modal (with the Bookings list rendering reservation rows over nested room stays), and `/corporate/book` books blocks at per-stay negotiated rates with `usageCount` counting N rooms as N uses. Full specs in [`plan/project/archive/ROADMAP-SHIPPED-2026-08-02.md`](archive/ROADMAP-SHIPPED-2026-08-02.md).
+- ✅ **MRB-09 — Emails fire from the reservation, not N rooms** — Shipped 2026-08-02 (decision #168, commits TBD). `booking-submitted` + `payment-confirmed` + `booking-confirmed` + `checkin-reminder` + `booking-confirmed-with-balance` + `booking-rescheduled` + the receipt PDF all use `buildReservationEmailView` to render a single block listing every room in the reservation; the checkin reminder cron groups by `reservationId` and sends one email per reservation. New `booking-cancelled-reservation` action + template fires from MRB-13's reservation-scope cancel path. `loadReservationEmailView(bookingId)` helper reads a booking + its reservation + siblings for the confirm / cancel / reschedule handlers. N=1 byte-equivalent. `guest-app/tests/api/mrb-09-reservation-scope-emails.test.ts` (20 source-text tests).
+- ✅ **MRB-10 — Guest lookup resolves a reservation with nested rooms** — Shipped 2026-08-02 at v0.235.0 (commits TBD, decision #169). `handleLookupBooking` returns a `kind: "reservation"` response with a `rooms[]` array of per-stay projections when the looked-up booking has a `reservationId` and the reservation has N>1 children. The `lookupSchema` accepts an optional `reservationRef` (`R-YYYYMMDD-NNNNN`) for direct reservation-scope lookups; the credential is required. The page renders a single card with the reservation header + a per-room list; cancel routes through `scope: "reservation"` (per MRB-13). Privacy posture unchanged from #126/#128/#131 (no `guestName`, `maskedEmail` only). N=1 byte-equivalent; legacy pre-MRB-01 bookings retain today's single-booking path. `guest-app/tests/api/mrb-10-reservation-lookup.test.ts` (20 source-text tests).
+- ✅ **MRB-13 — Cancellation: reservation vs room** — Shipped 2026-08-02 at v0.236.0 (commits TBD, decisions #166 spec + #170 implementation record). `POST /api/bookings/cancel` accepts an optional `scope: "room" | "reservation"` (default `"room"`, byte-compatible with pre-MRB-13). The reservation-scope branch fires when `scope === "reservation"` AND the looked-up booking has a `reservationId`; it runs ONE transaction that reads the `reservations/{id}` header + every child, splits the children into a cancellable set (skipping `checked-in`/`cancelled` + source-mismatched statuses), writes CRL-02 audit stamps + MRB-05 per-child loyalty clawback for every cancelled child, **deduplicates** voucher + corporate code `usageCount` decrements by `Map<code, count>` (a code shared by N children decrements by N — matches the MRB-08 create-time `+= assignedRooms.length` increment), and updates the reservation header (`cancelledRoomCount += cancelledCount`, `activeRoomCount -= cancelledCount` floored at 0, `paymentStatus` from the post-cancellation state via `computeReservationAggregatePaymentStatus`). One `sendBookingTrigger("booking-cancelled-reservation", view)` fires after the commit (the MRB-09 multi-room template); the per-child path keeps the legacy `sendBookingTrigger("booking-cancelled", view)` (which MRB-09 already taught to render the reservation view when `reservationId` is present). The admin `BookingsPage` cancel modal surfaces a `This room` / `All N rooms` segmented control when `selectedReservationContext` is set (N>1) and forwards the scope via a new 4th `options?: { scope?: "room" | "reservation" }` parameter on `updateBookingStatus`. The guest `/my-booking` page (per MRB-10) already routes the cancel submit through `scope: "reservation"` when `activeReservation` is set; MRB-13 makes the server honour the flag. `guest-app/tests/api/mrb-13-cancel-scope.test.ts` (29 source-text tests).
+- ✅ **MRB-11 — Reports use the correct owner for each metric** — shipped 2026-08-03 on `feature/phase-12-mrb-11-reports-owner` (decisions #177 + #178; v0.240.0 → v0.243.0). `BookingRevenueAllocation` + `Booking.revenueAllocation` + `Reservation.aggregateRevenueAllocation` (server-computed, asserted at the write boundary). `getBookingRevenueStreams` / `getReservationRevenueStreams` read the stored field; pre-MRB-11 docs fall back to `splitBookingRevenue` byte-for-byte (`"allocation: legacy-heuristic"`). `ReportsPage.tsx`'s 6 call sites switched off the heuristic. Per-stream values are GROSS; `deductionNet` is a single line. Tests: 24 + 9 + 7 = 40 new. Follow-ups: emulator round-trip test (Java not local) + the `"legacy-heuristic"` disclaimer banner. Full spec in `plan/project/archive/ROADMAP-SHIPPED-2026-08-03.md` + `plan/docs/DECISIONS-FEATURES.md #178`.
+- ✅ **MRB-12 — Admin reservation + room affordance** — shipped 2026-08-03 on `feature/phase-12-mrb-12-admin-reservation-affordance` (decision #179; v0.244.0 → v0.245.0). `AdminContext` gains a `subscribeToReservations` listener (reservations headers) + a `collectionGroup("payments")` aggregate that filters to `reservations/{id}/payments/{paymentId}` for the reservation-scope `paidAmount`. The Bookings table reservation row's Total + Balance now read the `Reservation` header + paid-amount aggregate instead of summing the filtered in-memory children — **fixes the silent filter-hides-room bug** at `admin-app/src/pages/BookingsPage.tsx:1701-1705` by construction (the header doesn't filter). The row's Status column renders the aggregate `paymentStatus` (`Awaiting` / `Verified` / `Confirmed` / `In-house` / `Completed` / `Cancelled`) + a `X cancelled` chip when `Reservation.cancelledRoomCount > 0`. The drawer's reservation strip gains three pills (Total / Paid / Balance) reading the header + paid-amount aggregate. The discount form gains a `This room` / `All N rooms` segmented control mirroring MRB-13's cancel-modal control — `scope=reservation` loops over `selectedReservationContext.rooms` and calls the existing `apply-discount` endpoint for each (no API change; a transactional `applyReservationDiscount` is the MRB-14+ follow-up). Tests: 14 new source-text tests in `mrb-12-admin-reservation-affordance.test.ts` (listener wiring, path regex, sign-aware sum, `reservationsMap` lookup, header-sourced total + balance, useMemo deps, row builder attaches the header, Status column renders the pill + cancellation chip, drawer strip shows three money pills, `Apply discount` carries the scope chip, discount form has the segmented control + the loop, scope resets on close). BDUX verification rows #144-152 close automatically (the row's group-level read, the strip's money pills, and the action-scope chip on every multi-room action together satisfy the no-scroll, all-status, no-hidden-rooms criteria). Full spec + implementation record in `plan/project/archive/ROADMAP-SHIPPED-2026-08-03.md` + `plan/docs/DECISIONS-FEATURES.md #179`.
+
+- ✅ **MRB-14 — Post-create room changes** — shipped 2026-08-03 on `feature/phase-12-mrb-14-post-create-room-changes` + `feature/phase-12-mrb-14-04-per-child-dates-ui` (decision #180; v0.246.0 → v0.248.0). **`Reservation.actualDateRange: { earliestCheckIn: Date, latestCheckOut: Date, isDivergent: boolean } | null`** added to `shared/types/index.ts`; the field is `null` for pre-MRB-14 reservations (the admin + email surfaces fall through to the legacy per-child read, byte-equivalent to pre-MRB-14). **`handleRescheduleBooking` no longer mutates the header's `checkIn` / `checkOut` / `numNights`** — the existing `transaction.update(reservationDocRef, { checkIn, checkOut, numNights, ... })` line at the old `~9700+` is removed; the handler now queries every child via `where("reservationId", "==", id)` in the same transaction + recomputes the header's `actualDateRange` (and re-stamps each child's `revenueAllocation` per the MRB-11 invariant). **New `POST /api/bookings/add-room` endpoint** (staff auth, shares the `bookings-reschedule:30/min/IP` rate-limit bucket) takes `{ reservationId, roomId, numAdults, numChildren, extraBedCount?, discountType?, voucherCode? }` — **dates are NEVER in the body**; the server reads them from the header. The new handler reuses the existing `walkinRoomStayFinancials` chain (per-line pricing, per-stream `revenueAllocation` snapshot, `getLockedManualNightlyRate` for manual-rate reservations) and updates the header in the same transaction (`roomCount += 1`, `activeRoomCount += 1`, `subtotal += newChild.subtotal`, `totalPrice += newChild.totalPrice`, `aggregateRevenueAllocation = sum(children.allocation)`, `actualDateRange` recomputed — `isDivergent` stays `false` on add-room because every child inherits the header's dates). `corporateCodes.usageCount` increments by 1 if the reservation is corporate (per MRB-08's "N rooms = N uses" rule); `vouchers.usageCount` increments by 1 if a `voucherCode` is applied. One `booking-rescheduled` email fires after the commit (the existing reservation-scope view carries the new room). Idempotency key: `add-room-${reservationId}-${roomId}-${now}` (a retry after an uncertain response replays the original commit, never appends a duplicate). **Admin modal** in `BookingsPage.tsx`'s "Add room to this reservation" button (gates on `selectedBooking.reservationId && RESCHEDULABLE_STATUSES.includes(selectedBooking.status)`). **Per-child dates UI** (MRB-14-04) on the Bookings table Dates column (`data-testid="reservation-dates-divergent"` with a "varies by room" badge + per-room tooltip), the drawer reservation strip's new `data-testid="reservation-strip-actual-range"` pill row, the `buildReservationEmailView` + `bookingRows` reservation branch (per-child dates in the rooms table + `(varies by room)` on the actual range), and the receipt PDF's Stay card "Actual range" line + per-room dates inline under each room label. Tests: 6 pure-helper tests + 5 source-text tests + 1 MRB-02.x rewrite + 1 admin hydration test + 11 endpoint tests + 2 admin modal tests + 12 per-child-dates-UI source-text tests = **38 new tests** across `shared/__tests__/mrb-14-actual-date-range.test.ts`, `guest-app/tests/api/mrb-14-reschedule-preserves-header.test.ts`, `guest-app/tests/api/mrb-14-add-room-endpoint.test.ts`, `admin-app/src/__tests__/mrb-12-admin-reservation-affordance.test.ts` (extends #180 hydration), `admin-app/src/__tests__/mrb-14-04-per-child-dates-ui.test.ts`. Full spec + implementation record in `plan/docs/DECISIONS-FEATURES.md #180`.
+### MRB-14 (Post-Create Room Changes) — shipped 2026-08-03
+> Decision #180 (spec + implementation record in `plan/docs/DECISIONS-FEATURES.md`). Builds on MRB-04 (the reservation header + aggregate counters), MRB-07 (the multi-room `WalkinRoomStay` pattern + per-action scope labels), MRB-08 (corporate + voucher `usageCount` increment-by-N), MRB-09 (the reservation-scope email view), MRB-10 (the reservation-scope guest lookup), MRB-11 (the stored `revenueAllocation` + the `aggregateRevenueAllocation`), MRB-12 (the AdminContext reservations listener + the drawer reservation strip), and `handleRescheduleBooking` at `guest-app/server/handlers/bookings.ts:9175` (the existing per-child reschedule that already updates the header).
+
+> **Driving bug — the header's `checkIn` / `checkOut` are mutated by every reschedule.** Today `handleRescheduleBooking` does `transaction.update(reservationHeaderRef, { checkIn, checkOut, numNights: ... })` to the new child's dates (line ~9700+). When the desk extends one room by 2 nights, the header's "Jan 1 → Jan 5" becomes the new child's "Jan 1 → Jan 7" — and every other room in the reservation, the email subject, the receipt PDF, the dashboard's date filter, and the checkin reminder cron all suddenly show "Jan 1 → Jan 7" even though the other 2 rooms are still "Jan 1 → Jan 5." The fix is to **freeze the header's `checkIn` / `checkOut` at create time** (they become the original shared dates) and add a new `actualDateRange` field for the children's spread. Once children diverge, every UI surface + email renders per-child dates.
+
+> **Gates:** MRB-15 (the report-reconstruction property tests pin the date-divergence accounting), BDUX (the row's per-child date column + the strip's actual-range pill close the last BDUX-04 verification row), MRB-13 (the cancel-scope picker routes through the same per-child iteration; the add-room handler shares the corporate `usageCount += 1` pattern). **Rejected:** allowing staff to add a room at NEW dates (the spec says "using its current dates" — a different-dates add would silently re-anchor the header's "shared" semantics); letting the header's `checkIn` / `checkOut` mutate on reschedule (the bug); a separate "header dates updated" email (the existing `booking-rescheduled` action with the reservation-scope view already covers it); per-child `voucher` / `corporate` re-application on add-room (the spec keeps voucher per-child + corporate per-reservation; re-applying would be a silent usage-cap violation); guest self-service add-room (out of scope for MRB v1 — the existing guest flow ends at create, and the desk is the only entity that can guarantee availability + bed-inventory + corporate-cap arithmetic on the fly).
+
+- ✅ **MRB-14-01 — `Reservation.actualDateRange` field + header dates become immutable** — shipped (PR 1 on `feature/phase-12-mrb-14-post-create-room-changes`, v0.246.0). The `Reservation` type gains `actualDateRange: { earliestCheckIn: Date, latestCheckOut: Date, isDivergent: boolean } | null`. The existing `Reservation.checkIn` / `checkOut` / `numNights` are immutable shared-dates snapshots from create time. The aggregate is recomputed transactionally by every add-room + every reschedule. The contract: `isDivergent === true` ⇔ ∃ a child whose `checkIn` or `checkOut` differs from the header's. The legacy `Reservation.checkIn` / `checkOut` are still the public-facing "shared dates" the email subject + receipt PDF + checkin reminder cron use when every child agrees; the actual range is shown when they don't. 6 pure-helper tests in `shared/__tests__/mrb-14-actual-date-range.test.ts` + 5 source-text tests in `guest-app/tests/api/mrb-14-reschedule-preserves-header.test.ts` + 1 MRB-02.x rewrite + 1 admin hydration test in `mrb-12-admin-reservation-affordance.test.ts`.
+- ✅ **MRB-14-02 — `POST /api/bookings/add-room` endpoint** — shipped (PR 2 on `feature/phase-12-mrb-14-post-create-room-changes`, v0.247.0). Staff adds a room to an existing pre-arrival reservation using the header's current dates. New schema `AddRoomBookingSchema` in `shared/schemas/booking.ts` mirrors the existing `RescheduleBookingSchema` + `WalkinRoomLineSchema`: `{ reservationId: RESERVATION_ID_REGEX, roomId, numAdults, numChildren, extraBedCount?, discountType?, voucherCode? }`. Dates are NEVER in the body. Validates: reservation exists + is pre-arrival + target room is `available` + room is not blocked for the header's dates + room is not already claimed + room type's `maxCapacity` + `maxChildren` + `maxExtraBeds` are respected. New child via existing `walkinRoomStayFinancials` chain. Header updated in the same transaction: `roomCount += 1`, `activeRoomCount += 1`, `subtotal += newChild.subtotal`, `totalPrice += newChild.totalPrice`, `aggregateRevenueAllocation = sum(children.allocation)`, `actualDateRange` recomputed (always same as header on add-room — `isDivergent` stays `false`). `corporateCodes.usageCount` += 1 per MRB-08; `vouchers.usageCount` += 1 if voucher applied. One `booking-rescheduled` email fires. Idempotency key: `add-room-${reservationId}-${roomId}-${now}`. 11 endpoint tests + 2 admin modal tests = 13 in `guest-app/tests/api/mrb-14-add-room-endpoint.test.ts` + `admin-app/src/__tests__/mrb-12-admin-reservation-affordance.test.ts`.
+- ✅ **MRB-14-03 — `handleRescheduleBooking` preserves the header's `checkIn` / `checkOut`** — shipped (PR 1, same v0.246.0). The handler no longer mutates the header's `checkIn` / `checkOut` / `numNights`; the existing `transaction.update(reservationDocRef, { checkIn, checkOut, numNights, ... })` line is removed. Handler still recomputes the header's `aggregateRevenueAllocation` (per the MRB-11 invariant) + updates the header's `actualDateRange` by re-scanning every child's `checkIn` / `checkOut`. The rescheduled child keeps the same `bookingRef`. The same `booking-rescheduled` email fires.
+- ✅ **MRB-14-04 — Per-child dates render in UI + email when divergent** — shipped (PR 3 on `feature/phase-12-mrb-14-04-per-child-dates-ui`, v0.248.0). Bookings table Dates column: `data-testid="reservation-dates-divergent"` badge with the actual range + per-room tooltip. Drawer reservation strip: new `data-testid="reservation-strip-actual-range"` pill row below the Total / Paid / Balance pills. Email `buildReservationEmailView` + `bookingRows` reservation branch: per-child dates in the rooms table + `(varies by room)` on the actual range. Receipt PDF Stay card: `Actual range` line + per-room dates inline under each room label. 12 source-text tests in `admin-app/src/__tests__/mrb-14-04-per-child-dates-ui.test.ts`.
+- ✅ **MRB-14-05 — Tests + MD sync** — shipped (this docs commit on `feature/phase-12-mrb-14-05-docs`, v0.248.0). MDs: `plan/project/ROADMAP.md` (this entry, ✅ shipped), `plan/docs/DECISIONS-FEATURES.md #180` (implementation record), `plan/features/BOOKINGS-MANAGEMENT.md` (new "Post-create room changes" subsection), `plan/docs/BACKEND.md` (the new `actualDateRange` field + the new `POST /api/bookings/add-room` route), `plan/docs/API-ROUTES.md` (the new endpoint signature + the request/response shape). The Java-gated `firebase/tests/mrb-14-add-room.emulator.test.ts` round-trip is deferred to the local environment that has the Java emulator (mirrors the MRB-11 follow-up).
+- ✅ **MRB-15 — Remaining tests + MD sync** — shipped 2026-08-03 on `feature/phase-12-mrb-15-01-lifecycle-invariants` through `feature/phase-12-mrb-15-08-legacy-fallback` (decision #181; v0.249.0 → v0.255.0). Eight source-text audit sub-items, **106 new tests across 7 new test files** + 4 updated MRB-05 tests + 1 MRB-12 rewrite = **111 net new tests** in the MRB-15 umbrella. The audits pin the cross-cutting invariants the MRB-01 → MRB-14 reservation-scope layer depends on (cheap, deterministic, <5s per file per `plan/docs/CONTRIBUTING.md §Testing`). The behavioural emulator tests (the `firebase/tests/mrb-15-*.emulator.test.ts` round-trips) are deferred to the local environment that has the Java emulator (mirrors the MRB-11 + CRL-09 + MRB-14 precedent). Sub-items MRB-15-01..MRB-15-08 listed below. **MRB-15-03 was the only audit that found a real bug** — pre-MRB-15-03, `handleCheckinBooking` and `handleCheckoutBooking` did not recompute the header's `checkedInRoomCount` / `checkedOutRoomCount` in the same `runTransaction` as the booking's own `status` flip (the counters were silently stuck at `0` forever for N>1). The aggregate `paymentStatus` was a hardcoded `["checked-in"]` / `["checked-out"]` array literal that was only correct for N=1. The 7 other audits found no real drift — the codebase was already consistent on lifecycle invariants, N=1 + legacy byte-equivalence, canonical copy, PEX fan-out, loyalty earn pairing, and legacy null-`reservationId` fallback; the source-text tests now guard against future drift on all 7. MDs: `plan/project/ROADMAP.md` (this entry, ✅ shipped), `plan/docs/DECISIONS-FEATURES.md #181` (implementation record), `plan/features/BOOKINGS-MANAGEMENT.md` (new "Lifecycle invariants" subsection + the counter-ownership contract + the legacy fallback contract + the canonical copy contract), `plan/docs/BACKEND.md` (counter ownership table + the dual-source read pattern), `plan/docs/TYPES.md` (the loyalty earn/clawback pairing contract), `plan/docs/SECURITY.md` (the `kind: "single"` legacy lookup branch), `plan/features/BOOKING-FLOW.md` (the lifecycle invariants section), `plan/features/AVAILABILITY-LOCKING.md` (the PEX fan-out contract), `plan/features/CORPORATE-BOOKING.md` (the counter-ownership contract applied to corporate codes), `plan/features/REPORTS.md` (the aggregate `paymentStatus` derivation), `plan/features/EMAIL-PDF-STORAGE.md` (the canonical copy section), `plan/features/VOUCHERS.md` (the voucher usage-count contract), `plan/features/SPARK-REWARDS.md` (the earn/clawback pairing section), `plan/features/ENVIRONMENT-TEST-RESET.md` (the Java-gated emulator follow-up section).
+  - ✅ **MRB-15-01 — Lifecycle invariants** (v0.249.0, `feature/phase-12-mrb-15-01-lifecycle-invariants`). 14 source-text tests in `guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (no-duplicate-counters/email/loyalty across the full create → cancel lifecycle; one `roomCount` increment at create; one `activeRoomCount` increment at create; one `loyalty` earn entry on eventual check-out; one per-action email template render; one `cancelledRoomCount` increment per cancelled child; one `clawback-${bookingId}` pointsHistory entry per cancelled child; the `rewardsPoints == sum(pointsHistory.points)` invariant preserved end-to-end).
+  - ✅ **MRB-15-02 — Payment-vs-room state** (v0.249.0, embedded in MRB-15-01). The `paymentStatus` aggregate reads from the child `childStatuses` array (NOT a hardcoded `["checked-in"]` / `["checked-out"]` literal — that was the MRB-15-03 fix below).
+  - ✅ **MRB-15-03 — Transactional summary counters** (v0.250.0, `feature/phase-12-mrb-15-03-transactional-counters`, **REAL BUG FIX**). 13 source-text tests in `guest-app/tests/api/mrb-15-03-transactional-counters.test.ts` + 4 updated MRB-05 tests. `handleCheckinBooking` + `handleCheckoutBooking` now read the children via `adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)` in the same `runTransaction` and recompute the header's `checkedInRoomCount` / `checkedOutRoomCount`. The aggregate `paymentStatus` is now `computeReservationAggregatePaymentStatus(postStatuses)` (correct for N>1 mixed states; was a hardcoded `["checked-in"]` / `["checked-out"]` literal). Counter ownership contract: `roomCount`→create+add-room, `activeRoomCount`→create+add-room+cancel, `cancelledRoomCount`→cancel only, `checkedInRoomCount`→check-in+check-out, `checkedOutRoomCount`→check-out only.
+  - ✅ **MRB-15-04 — N=1 + legacy null-`reservationId` byte-equivalence** (v0.251.0, `feature/phase-12-mrb-15-04-single-room-header-path`). 16 source-text tests in `guest-app/tests/api/mrb-15-04-single-room-header-path.test.ts`. For an N=1 reservation, the handler output is byte-equivalent to the pre-MRB-01 single-booking path. For a legacy pre-MRB-01 booking (no `reservationId`), the handler output is also byte-equivalent. N=1 carries `kind: "single"` (not `kind: "reservation"`) on the lookup response.
+  - ✅ **MRB-15-05 — Canonical/copy consistency** (v0.252.0, `feature/phase-12-mrb-15-05-canonical-copy`). 16 source-text tests in `guest-app/tests/api/mrb-15-05-canonical-copy.test.ts`. No real drift found. Pins: British "Cancelled" (not American "Canceled"); title-case StatusBadge labels; subject pattern `[${brandName}] <verb>: ${ref} (N room[s])`; preheaders end with period.
+  - ✅ **MRB-15-06 — PEX (hold-expires) fan-out** (v0.253.0, `feature/phase-12-mrb-15-06-pex-fan-out`). 15 source-text tests in `guest-app/tests/api/mrb-15-06-pex-fan-out.test.ts`. No real drift found. Pins the `holdExpiresAt` fan-out: `computeHoldExpiresAt` is the single stamping helper; add-room INHERITS `reservation.holdExpiresAt ?? null`; reschedule PRESERVES (Firestore field-level merge); walkin stamps `null`; reject-payment stamps a fresh value. Every `holdExpiresAt`-touching path is covered (PEX-01..06).
+  - ✅ **MRB-15-07 — Checkout + loyalty earn** (v0.254.0, `feature/phase-12-mrb-15-07-checkout-loyalty-earn`). 13 source-text tests in `guest-app/tests/api/mrb-15-07-checkout-loyalty-earn.test.ts`. Pins the loyalty earn path (positive side that pairs with MRB-15-01's clawback): `earn-${bookingId}` paired with `clawback-${bookingId}`; exactly 2 constructions of `earn-${bookingId}` (checkout's `awardNow` + post-settlement); exactly 1 `clawback-${bookingId}` construction.
+  - ✅ **MRB-15-08 — Legacy null-`reservationId` fallback** (v0.255.0, `feature/phase-12-mrb-15-08-legacy-fallback`). 19 source-text tests in `guest-app/tests/api/mrb-15-08-legacy-fallback.test.ts`. Pins: every MRB path's null-`reservationId` branch falls through to the legacy single-booking path; create / walkin ALWAYS mint a fresh `reservationId`; cancel falls through to per-child; check-in / check-out / verify-payment / mark-payment-confirmed skip the header mirror; add-payment / add-refund use the dual-source pattern; `readTransactionalFolioSnapshot` early-returns; `loadReservationEmailView` returns `null`; `handleLookupBooking` returns `kind: "single"`; `handleRecordCancellationException` uses dual-source read. CRL-07 cancellation liability snapshot lives on the booking doc for legacy + per-child cancels and on the header for new reservation-scope cancels.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
-> Shipped 2026-07-16 (BDUX-01..08 + BDUX-05a..05n complete — full contract in archive). Remaining manual/visual QA:
-
-- ⬜ Verify representative bookings in every status and conditional combination: payment proof, breakfast, Senior/PWD, voucher, Rewards, early check-in, onsite payments/refunds, incidentals, store charges, corporate source, checked-out, and cancelled.
-- ⬜ At 1440px, staff can understand guest, stay, payment state, outstanding balance, and next action without scrolling the default Overview.
-- ⬜ At 375px, there is no horizontal page scroll; all features remain reachable; the primary action stays usable above the safe area; modal/sheet focus and close behavior remain accessible.
-- ⬜ The default Folio view contains no expanded voucher, payment, refund, or incidental entry form; each remains reachable through one clearly labeled action.
-- ⬜ Opening and completing any Folio action leaves the user on the Folio tab with the updated Total, Paid, Balance, and ledger state visible.
-- ⬜ Pending payment proof can be reached from the sticky header in one action, while verified proof remains accessible without dominating the default Folio layout.
-- ⬜ No action requires more navigation steps than the current drawer for its common operational path, and the next valid status action remains reachable in one tap/click from any section.
-- ⬜ Run admin typecheck, booking/admin regression tests, and targeted manual visual QA across mobile, tablet, and desktop before marking complete.
-
-*(Controlled Unpaid Checkout (UCO-01..14) and Payment Reference Semantics (PRC-01..19) shipped 2026-07-16 with all acceptance criteria met — contracts in archive.)*
+- ⬜ Verify representative bookings across every status + conditional combination.
+- ⬜ At 1440px, staff can understand guest/stay/payment/balance/next action without scrolling the default Overview.
+- ⬜ At 375px, no horizontal scroll; primary action above safe area; modal/sheet focus + close behavior accessible.
+- ⬜ Default Folio has no expanded entry form; each reachable through one labeled action.
+- ⬜ Completing any Folio action leaves the user on Folio with updated Total/Paid/Balance/ledger visible.
+- ⬜ Pending payment proof reachable from sticky header in one action; verified proof accessible without dominating default Folio.
+- ⬜ Next valid status action reachable in one tap from any section.
+- ⬜ Run admin typecheck, booking/admin regression tests, and manual visual QA across mobile/tablet/desktop before marking complete.
 
 ### Bookings & Store Orders Filtering UX (FSO) — remaining verification
-> Phase 1 shipped 2026-07-16 (FSO-01..18 — full contract in archive). Advanced filter panel Phase 2 pending. Remaining QA:
-
-- ⬜ At 375px there is no horizontal page scroll, quick chips remain operable, and the advanced sheet can be completed one-handed above the safe area.
+- ⬜ At 375px: no horizontal scroll, quick chips operable, advanced sheet one-handed above safe area.
 
 ### Environment Test Runs & Controlled Data Reset (ETR)
-> Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **Open spec: production→staging refresh (ETR-R01..R10), Restricted Diagnostic Mode (ETR-D01..D10), one-time pre-live production reset (ETR-15..20), and verification (ETR-21 + acceptance criteria).** Full spec + shipped contract + staging-reset execution gate: `plan/features/ENVIRONMENT-TEST-RESET.md`.
+> Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **In progress: ETR-R (production-to-staging refresh) — foundation landed 2026-07-29 (R01 + R04 + R10 partial — server-side authorization, identity-replacement sanitization engine, audit row). Open: R02 (multiple modes — sanitized-snapshot is the only one in the foundation), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement with staging-reset integration — the manual import is the MVP step today).** Also open: ETR-D01..D10, ETR-15..20, ETR-21. Full spec: `plan/features/ENVIRONMENT-TEST-RESET.md`.
 
-### Finance scope boundaries (recorded decisions — do not re-open without owner request)
+### Finance scope boundaries & recommendations
 - ⏸ Expenses & P&L tracking — out of scope; system is a PMS, not accounting software; exports feed external bookkeeping/BIR
 - ⏸ Day-locking / night-audit snapshots — deferred at 14-room scale; payments are already append-only at the rules level, which covers the cash side; revisit if historical figures drift or staff grows
+- ⏸ **FLR-03 — Bound Reports ledger listeners** *(deferred with trigger)* — `collectionGroup("payments"/"charges")` loads full ledger history live on every Reports visit; fine at 14 rooms, linear forever on Blaze. **Trigger: revisit at ~1 year of operation** — switch to `recordedAt`-bounded queries; all-time Receivables fall back to one-shot `getDocs`.
+- 🔄 **FLR-05 — Operational handover** *(owner-facing)* — handover in `FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md`. Daily Close convention + accountant VAT review + staging money-path walkthrough have explicit checklists/evidence. **Remaining:** accountant confirmation + owner sign-off before next `dev → main` milestone.
 
----
-
-## Finance Lifecycle Recommendations — open items (2026-07-14)
-> Source: `plan/project/AUDIT-FINANCE-LIFECYCLE-2026-07-12.md §Post-remediation recommendations`. FLR-01/02/04 fixed 2026-07-14 (detail in archive).
-
-- ⏸ **FLR-03 — Bound the Reports ledger listeners** *(deferred with trigger)* — `collectionGroup("payments"/"charges")` listeners load the entire ledger history live on every Reports visit; fine at 14 rooms, linear growth forever on Blaze. **Trigger: revisit when the combined ledger passes a few thousand rows (~1 year of operation)** — switch to `recordedAt`-bounded queries; all-time Receivables can fall back to one-shot `getDocs`.
-- 🔄 **FLR-05 — Operational handover items** *(owner-facing, no code)* — handover prepared in `FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md`. The historical Daily Close convention is documented without editing locked closes, and the accountant VAT review plus isolated-staging money-path walkthrough now have explicit checklists/evidence records. **Remaining:** accountant confirmation and owner walkthrough/sign-off before the next `dev → main` milestone merge.
-
----
-
-## Production Environment Split — cutover queue (added 2026-07-14)
-> Source: `plan/project/PROD-CUTOVER-RUNBOOK.md` — demote `spark-inn-stg-7a7ad` to staging, stand up Vercel staging on `dev` at `stg.sparkinnbohol.com` / `stg-admin.sparkinnbohol.com`, cut production over to the clean-slate `spark-inn-prod` project. The runbook holds the step-level checklists, prod client config, and secret-handling rules (service-account key never committed). PC-05's carry-over decision is resolved: clean slate only, staff accounts pre-provisioned — `DECISIONS-FEATURES.md` Decision #119. PC-01..PC-04 done 2026-07-14 (detail in archive).
-
-- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
-- ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
-
----
-
-## 🔴 INC-01 — Production Incident: rules/app version skew *(opened 2026-07-17, ACTIVE)*
-
-> **Root cause:** the E2E-audit security rules (repo `firebase/firestore.rules` + `firebase/storage.rules`, fixed 2026-07-17) were deployed to the live Firebase project `spark-inn-stg-7a7ad` (serving `sparkinnbohol.com`), but the live app is still the 2026-07-14 build — `main` is ~133 commits behind `dev` and does not contain the matching client changes. The new rules assume the new app.
-> **Evidence (verified 2026-07-17):** deployed rules fetched via Firebase MCP match the fixed repo versions; `git show main:...IntercomPage.tsx` still sends guest messages via client `addDoc`; `git show main:...BookingPage.tsx:716,746` still calls `getDownloadURL()` after proof/ID upload.
-
-**Broken guest-facing flows on the live site:**
-
-- ⬜ **INC-01a — Online-payment bookings blocked.** X-01's rules removed public read from `bookings/{id}/payment-proof/` and `discount-id/`, but the deployed app calls `getDownloadURL()` right after `uploadBytes()` → permission-denied → guest sees a permanent "Receipt upload failed. Please check your connection and try again." and cannot pass Step 3. Affects every GCash/bank booking and every Senior/PWD ID upload. Only Pay-at-Hotel bookings without a discount ID still complete.
-- ⬜ **INC-01b — Guest intercom dead.** G-04's rule restricts `intercoms/{room}/messages` creation to staff (guests are meant to use the new rate-limited `POST /api/intercom/send-message`), but the deployed app still writes messages client-side via `addDoc` → every guest chat message and quick request fails with permission-denied.
-
-**Not affected / silver lining:** X-01 itself (publicly fetchable OSCA/PWD government-ID photos and payment screenshots) is **closed in production** — the deployed rules are correct; it's the app that's behind. Staff-side admin flows and Pay-at-Hotel bookings still work.
-
-**Resolution options (decide + execute ASAP):**
-
-1. **Recommended — emergency `dev → main` merge + production deploy.** `dev` contains the exact client changes the rules expect (path-based uploads without `getDownloadURL`, API-routed intercom sends) and is fully green (847 tests, typecheck, builds, preflight 35/35). Jumps the FLR-05 / client-approval milestone gate — an active outage justifies it, but the owner/DK must make that call explicitly.
-2. **Not recommended — partial rules rollback** (restore public `get` on the two Storage paths + guest message create). Restores service in minutes but re-opens X-01: government-ID photos become publicly fetchable again.
-3. **Fallback — cherry-pick hotfix** of the fix commits onto `main`. Smallest production delta, but drags the committed API bundle and wasn't tested as an isolated unit.
-
-**Close-out checklist:**
-- ⬜ Decide the resolution path (owner/DK)
-- ⬜ Deploy the fix; verify a live GCash test booking passes Step 3 with proof upload, and a guest intercom message + quick request deliver to the admin inbox
-- ⬜ Confirm no stuck bookings/guests during the breakage window (check Resend logs / booking creation rate since 2026-07-17 rules deploy)
-- ⬜ Record the prevention rule: **never deploy `firebase/*.rules` to a live project ahead of the app build that matches them** — rules and client ship together, or rules ship second (add to `plan/docs/GOTCHAS.md §Firebase` at close-out)
-
----
-
-## E2E User Journey Audit (2026-07-17) — all findings remediated
-
-✅ All 17 findings are fixed **and merged to `dev`**: the 3 HIGHs (`aae6808` — G-01 full-body Zod validation, C-01 RoomType-sourced conversion pricing, X-01 Storage-rule public-read removal), the 8 MEDs (`cfe6581`), and the 6 LOWs (`9b9c85e`). All 847 tests, typecheck, builds, and preflight pass. Report: `plan/docs/AUDIT-E2E-REPORT.md`.
-
-⬜ **Remaining gate:** the app-side fixes reach production via the INC-01 resolution (see above — the rules half already deployed, which is what opened the incident). X-02's white-label sweep landed for Spark Inn; re-verify it before onboarding a second white-label client.
-
----
-
-## References
-
-- **Archive (historical, non-canonical):** `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md` — full pre-compaction roadmap: Phases 0–9 checklists, Phase 11.5/11.6 batches 1–20, Wave 1–4 decision triage, Phase 11.7 implementation record, PR 1/PR 3 implementation detail, all closed audit-fix lists (FIN, FR, FL, PF, QA, NC, AUD, SA, live bugs)
-- Audit reports: `plan/project/AUDIT-*.md` (historical) · `plan/docs/AUDIT-E2E-REPORT.md` (current, holds open MED/LOW findings)
-- Decisions: `plan/docs/DECISIONS-ARCH.md` + `plan/docs/DECISIONS-FEATURES.md`
-- Goodwill scope tracking: `plan/project/GOODWILL-SCOPE-LOG.md`
-- Cutover: `plan/project/PROD-CUTOVER-RUNBOOK.md` · Deploy: `plan/project/DEPLOY.md`
+### Deferred Loyalty & Audit Tasks
+- ⏸ **MED-3 — "Different email" reconciliation (guest self-service half) — Still Deferred.** The guest self-service prompt ("We found bookings under a different email. Would you like to link them?") on the `/rewards` join surface / post-sign-in / post-booking confirmation is the larger of the two MED-3 paths. **Workaround** — guest can still find the booking at `/my-booking` (ref + email); staff can now also link it from the member detail drawer (the front-desk manual link above covers the common case without the guest needing to involve the front desk). `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md §MED-3` and decision #135 + #140.
+- ⏸ **LOW-3 — `linkBookingsByEmail` batch not chunked to Firestore's 500-write limit** — **Deferred (theoretical only)**. A single-hotel guest with >500 same-email matches is not realistic at 14-room scale. Revisit if `linkBookingsByEmail` is ever re-pointed at a multi-property or federation-level surface. No code change.

@@ -13,6 +13,7 @@
     "./utils/dates": "./utils/dates.ts",
     "./utils/images": "./utils/images.ts",
     "./utils/points": "./utils/points.ts",
+    "./utils/paymentReference": "./utils/paymentReference.ts",
     "./utils/pricing": "./utils/pricing.ts",
     "./utils/references": "./utils/references.ts",
     "./utils/vouchers": "./utils/vouchers.ts",

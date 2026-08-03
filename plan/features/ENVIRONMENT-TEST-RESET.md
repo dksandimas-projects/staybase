@@ -131,3 +131,27 @@ Production receives final end-to-end testing before real hotel operations begin.
 - Roadmap status line: `plan/project/ROADMAP.md §Phase 12`
 - Cutover procedure: `plan/project/PROD-CUTOVER-RUNBOOK.md`
 - Post-merge audit that hardened the shipped core: `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md §Post-merge Audit — 2026-07-15/16`
+
+---
+
+## Java-Gated Emulator Follow-ups (MRB-15)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15 umbrella, shipped v0.249.0 → v0.255.0). The MRB-15 audits are source-text guards (cheap, deterministic, <5s per file) that pin the cross-cutting invariants the MRB-01 → MRB-14 reservation-scope layer depends on. The behavioural emulator tests (the `firebase/tests/mrb-15-*.emulator.test.ts` round-trips) are deferred to the local environment that has the Java emulator — this section is the follow-up spec.
+
+### Why the source-text guards are sufficient at this stage
+
+The 8 MRB-15 sub-items pin invariants the codebase already exhibits (MRB-15-03 was the only audit that found a real bug, and the fix is already shipped). The source-text guards catch future drift on the contract without requiring the Java emulator to run. The full behavioural round-trip would add 8 `firebase/tests/mrb-15-*.emulator.test.ts` files that:
+
+- spin up the Firebase emulator suite (auth + firestore + storage)
+- seed a 3-room corporate reservation with a voucher + a member
+- execute the full create → add-room → reschedule → check-in → check-out → cancel lifecycle
+- assert every counter, every email, every loyalty entry, every payment status at every step
+- assert the dual-source read pattern (legacy vs new reservations)
+- assert the N=1 + legacy null-`reservationId` byte-equivalence
+
+### Follow-up scope (deferred to the Java-emulator env)
+
+The 8 emulator tests are deferred as a single follow-up batch — they share the same seed (a 3-room corporate reservation) and the same lifecycle harness. The follow-up is not blocking the MRB-15 ship: the source-text guards are the higher-signal lower-cost coverage for the cross-cutting invariants.
+
+### Test coverage (current)
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14) + `mrb-15-03-transactional-counters.test.ts` (13) + `mrb-15-04-single-room-header-path.test.ts` (16) + `mrb-15-05-canonical-copy.test.ts` (16) + `mrb-15-06-pex-fan-out.test.ts` (15) + `mrb-15-07-checkout-loyalty-earn.test.ts` (13) + `mrb-15-08-legacy-fallback.test.ts` (19) = **106 source-text tests** across 7 new test files.

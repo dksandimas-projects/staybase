@@ -55,6 +55,8 @@ Room {
 // every room of that type; consumers join by `Room.type` at read
 // time. See `plan/features/RATE-MANAGEMENT.md §W3.6` and
 // `plan/features/ROOM-MANAGEMENT.md §W3.7` for the migration notes.
+//
+// EXB-01: missing extra-bed fields normalize to 0.
 
 RoomType {
   value: string                 // unique key, lowercase, kebab-case
@@ -64,7 +66,10 @@ RoomType {
   bedDefinition: string         // e.g. "1 queen size bed"
   description: string           // one-paragraph marketing copy
   amenities: string[]           // e.g. ["WiFi", "AC", "Hot Shower", "Cable TV"]
-  maxCapacity: number           // canonical occupancy for every room of this type
+  maxCapacity: number           // adult cap (ages 12+) for every room of this type
+  maxChildren?: number          // child cap (ages 0–11); legacy values normalize by adult cap
+  maxExtraBeds?: number         // per EXB-01: hard cap on per-booking extraBedCount (0 = not allowed)
+  extraBedRate?: number         // per EXB-01: per-bed-per-night rate, snapshotted onto Booking
   pricePerNight: number         // base rate per night
   weekendRate: number           // applied for stays including Sat/Sun nights
   corporateRate: number         // flat public rate used at /corporate/book
@@ -107,22 +112,136 @@ BookingStatus =
   "pending" | "payment-uploaded" | "payment-confirmed" |
   "confirmed" | "checked-in" | "checked-out" | "cancelled"
 
-BookingSource = "online" | "walk-in" | "phone" | "facebook" | "corporate"
+// Per NBS-03 (2026-07-31): widened from the 5-value union to
+// `string` so configured entries (e.g. "agoda" per CVQ-08) flow
+// through without a schema change. The configured list lives on
+// `settings/hotelConfig.bookingSources[]`; `BOOKING_SOURCES`
+// in `shared/constants` stays as the seed/default array. Server-
+// side validation against the configured list is the authoritative
+// gate. `shared/types/index.ts` carries the same widening.
+BookingSource = string
 
 DiscountType = "" | "senior" | "pwd"
 
 PaymentMethod = "pay-at-hotel" | "gcash" | "paypal" | string
 
+PublicRoomSelection {
+  bookingId?: string                     // first selection uses the public flow's preallocated upload ID
+  roomType: string
+  numAdults: number                      // at least one adult per room
+  numChildren: number
+  extraBedCount: number
+  hasBreakfast: boolean
+  breakfastIncludesChildren: boolean
+}
+
+Reservation {
+  // Per MRB-01 (2026-08-02, per decision #159): the reservation
+  // header. Every new booking (including a one-room stay) is
+  // linked to a `reservations/{id}` document. The header owns
+  // the public ref, lead booker / contact, source / corporate
+  // context, payment proof / state, voucher / member discount,
+  // consent, group totals, and (in MRB-04) the folio at
+  // `reservations/{id}/payments` + `reservations/{id}/charges`.
+  // Per-room fields (physical room, dates per room, occupancy,
+  // rate / add-on / tax snapshots, registration, check-in / out,
+  // housekeeping) live on each child `bookings/{id}`.
+
+  id: string                              // Firestore doc ID = the preallocated UUIDv4
+  reservationRef: string                  // "R-YYYYMMDD-NNNNN" — public ref, distinct prefix from SI-
+
+  leadGuestName: string
+  leadGuestEmail: string
+  leadGuestPhone: string
+  memberId: string | null                 // server-mapped from verified email token
+
+  checkIn: Date                           // shared date range (one per reservation)
+  checkOut: Date
+  numNights: number
+
+  originalSubtotal: number               // pre-discount sum of every child room's subtotal
+  discountScopeSnapshot: DiscountScope | null   // DSC-01 snapshot
+  subtotal: number                        // sum of every child room's subtotal
+  totalPrice: number                      // sum of every child room's totalPrice
+
+  source: BookingSource                   // single value per reservation
+  isCorporate: boolean
+  corporateCode: string                   // snapshotted
+  companyName: string
+  voucherCode: string                     // flat voucher applies once (per MRB-09)
+  memberDiscountPct: number
+
+  paymentStatus: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled"
+  paymentMethod: PaymentMethod
+  paymentProofUrl: string | null          // canonical "no payment proof" is null
+  paymentProofPath: string | null
+
+  termsAccepted: boolean                  // single per reservation, covers all rooms
+  termsAcceptedAt: Date | null
+  termsVersion: string
+  privacyAccepted: boolean
+  privacyAcceptedAt: Date | null
+  privacyVersion: string
+
+  roomCount: number                       // aggregate counters, denormalized for fast UI
+  activeRoomCount: number
+  cancelledRoomCount: number
+  checkedInRoomCount: number
+  checkedOutRoomCount: number
+
+  holdExpiresAt: Date | null              // unified PEX hold (no separate large-group timer, per MRB-08)
+
+  requestFingerprint: string              // server-only; includes every room's type, occupancy, extra beds, and breakfast choices
+
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // durable refund-liability snapshot stamped onto
+  // the reservation header by reservation-scope
+  // cancels (MRB-13) + by N=1 cancels (the entire
+  // active surface today). Per-child cancels inside
+  // a multi-room reservation stamp the snapshot
+  // onto the cancelled booking instead; surviving
+  // children carry no liability. Absence / `null` /
+  // `undefined` means "no liability work to do" —
+  // typically because `policyRefund === 0` or the
+  // reservation was cancelled before CRL-07 shipped.
+  // See `CancellationLiability` + the pure
+  // `computeCancellationLiabilityState` helper in
+  // `shared/utils/cancellation.ts` for the state
+  // machine + the breakdown.
+  cancellationLiability?: CancellationLiability | null
+
+  createdAt: Date
+  updatedAt: Date
+  createdBy: string                       // staff UID or the literal "guest"
+}
+
 Booking {
   id: string
   bookingRef: string
+  // Per MRB-01 (2026-08-02, per decision #159): the reservation
+  // header linkage. Every new booking (including a one-room
+  // stay) carries server-assigned `reservationId`, denormalized
+  // `reservationRef`, `reservationPosition` (1-indexed), and
+  // `reservationRoomCount`. These are read-only projections of
+  // the parent reservation — the Firestore rules deny client
+  // writes to all four. Legacy null-reservationId bookings
+  // keep today's self-contained behavior.
+  reservationId: string | null
+  reservationRef: string | null
+  reservationPosition: number | null
+  reservationRoomCount: number | null
   roomId: string
   roomNumber: string
   roomType: RoomType
   guestName: string
   guestEmail: string
   guestPhone: string
-  numGuests: number
+  numGuests: number        // persisted total; must equal numAdults + numChildren when split exists
+  numAdults?: number       // absent derives to numGuests
+  numChildren?: number     // absent derives to 0
+  extraBedCount?: number   // absent derives to 0; capped by RoomType.maxExtraBeds
+  extraBedRate?: number     // snapshotted at create time from room type's `extraBedRate`
+  extraBedTotal?: number    // canonical computed total = extraBedCount × extraBedRate × numNights
   checkIn: Timestamp        // Firestore Timestamp — see `DECISIONS-FEATURES.md #84`
   checkOut: Timestamp       // (always stored as `Timestamp.fromDate(jsDate)`, never raw Date or ISO string)
   numNights: number
@@ -193,8 +312,55 @@ Booking {
     signatureStatus: "pending" | "signed"
   }
   breakfastSelections?: Record<string, string> // key format: yyyy-mm-dd-guest-n → silog item name
+  // Per BSP-01 (fix/breakfast-served-persistence, 2026-07-25): per-date/per-guest
+  // served flag written by the dashboard's "Mark Served" toggle. Same key
+  // format as `breakfastSelections`. Hydrated by the admin client's snapshot
+  // mapper so the state survives real-time refresh and is visible across
+  // staff sessions. Absent on legacy bookings → mapper defaults to `{}`.
+  breakfastServed?: Record<string, boolean>
   handledBy: string
   cancellationReason: string
+  // Per CRL-02 (2026-08-02): the full cancellation audit metadata.
+  // All three fields are nullable on legacy bookings; CRL-02 stamps
+  // them in the same Firestore transaction as the status flip, so a
+  // partial failure cannot leave a half-stamped cancellation. The
+  // parallel `cancellationSource` discriminator supersedes the
+  // earlier "read the reason string" pattern; both are preserved
+  // (the `cancellationReason` field stays for backwards-compatibility
+  // with PEX-05's email-template switch + Reports' legacy grouping).
+  cancelledAt: string | null
+  cancelledBy: string | null
+  cancellationSource: "guest" | "staff" | "system" | null
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // durable refund-liability snapshot stamped onto
+  // the booking doc by per-child + legacy
+  // null-`reservationId` cancels (the per-child
+  // path lives in the `else` arm of the
+  // `if (isReservationScope)` dispatch in
+  // `handleCancelBooking`; the legacy path
+  // falls through to the same branch because
+  // legacy bookings have no `reservationId`).
+  // Reservation-scope cancels stamp the snapshot
+  // onto the reservation header instead (see
+  // `Reservation.cancellationLiability`) — the
+  // booking doc's field is `undefined` for that
+  // path. Absence / `null` / `undefined` means
+  // "no liability work to do" — typically because
+  // `policyRefund === 0` (the destructive cancel
+  // never auto-refunds per CRL-04, so a no-refund
+  // cancel doesn't need a snapshot) or because
+  // the booking was cancelled before CRL-07
+  // shipped. The field is hydration-safe — the
+  // admin client's snapshot mapper defaults it to
+  // `null` when the Firestore doc has no field.
+  // See `CancellationLiability` + the pure
+  // `computeCancellationLiabilityState` helper in
+  // `shared/utils/cancellation.ts` for the state
+  // machine + the breakdown (state, outstanding,
+  // retention are derived; the stored field is
+  // the policy result + approved amount + the
+  // latest exception audit).
+  cancellationLiability?: CancellationLiability | null
   // Per BF-37 (booking-flow audit 2026-06-26) and W4.4 /
   // decision #104: per-booking email idempotency markers.
   // Written by the server when a transactional email fires so
@@ -218,11 +384,21 @@ Booking {
 }
 
 OnsitePayment {
-  id: string              // client-preallocated for idempotent onsite payment creation
+  id: string              // client-preallocated for idempotent onsite payment OR refund creation (CRL-01, 2026-08-01: refundId shares the paymentId shape)
   type: "payment" | "refund"
-  amount: number          // absolute value capped at 1,000,000
+  amount: number          // absolute value capped at 1,000,000; refund entries are negative
   method: PaymentMethod
   note: string
+  /** Tender-specific identifier for this individual ledger entry
+   *  (GCash ref, bank trace). As of 2026-07-24
+   *  (`refactor/unify-payment-reference-fields`), this is the
+   *  canonical payment reference for a booking — the previous
+   *  top-level `Booking.paymentReferenceNumber` is retired.
+   *  Required only when the method's `requireReferenceNumber`
+   *  config says so; cash and legacy entries omit it. Part of
+   *  the idempotency comparison for both payments and refunds
+   *  (amount + method + reference + note). */
+  transactionReference: string | null
   reason: string | null
   approvedBy: string | null
   recordedBy: string   // staff UID
@@ -469,6 +645,7 @@ HotelConfig {
   paymentMethods: PaymentMethodConfig[]
   intercomQuickRequests: string[]
   notificationSoundUrl: string
+  extraBedInventory?: number // EXB-10: 0/absent = no hotel-wide constraint
 }
 
 // HotelConfig additions (in hotel.config.ts)
@@ -617,6 +794,7 @@ store order placed). Live-derived from the `intercoms` listener
 ```
 NotificationType = "booking" | "payment" | "message"
                  | "arrival" | "departure" | "store-order"
+                 | "cancellation-refund"  // CRL-08 (2026-08-03, #174)
 
 NotificationEntityType = "booking" | "storeOrder" | "intercom"
 
@@ -769,4 +947,95 @@ ApiResponse<T> = ApiSuccess<T> | ApiError
 
 ## Booking Form (Zod — Step by Step)
 
-Zod schemas for the 4-step booking form live in `shared/schemas/booking.ts`. TypeScript types are derived via `z.infer`. See `plan/features/BOOKING-FLOW.md` for field-level validation rules.
+Zod schemas for the 4-step booking form live in `shared/schemas/booking.ts`. TypeScript types are derived via `z.infer`. See `plan/features/BOOKING-FLOW.md` for field-level validation rules. EXB shared helper behavior is owned by decisions #145, #153, and #157 and covered by the shared room-type, booking-add-on, and extra-bed-inventory tests.
+
+---
+
+## Cancellation Liability (CRL-07 — 2026-08-03)
+
+Per decision #173: the durable refund-liability snapshot stamped onto the cancelled entity in the same `runTransaction` as the status flip. Lives on the reservation header (`reservations/{id}.cancellationLiability`) for reservation-scope cancels + new-path N=1, and on the booking doc (`bookings/{id}.cancellationLiability`) for per-child cancels + legacy null-`reservationId` bookings. The stored fields are the immutable `policyResult` + the admin-controlled `approvedAmount` + the latest `exception` audit row. The derived fields — `state`, `outstandingAmount`, `retentionAmount` — are NEVER stored; the pure `computeCancellationLiabilityState` helper in `shared/utils/cancellation.ts` reads the stored snapshot + the cumulative `processedAmount` (from the refunds subcollection) and returns the projection.
+
+```
+CancellationPolicyResult {           // snapshot at cancel time; immutable post-cancel
+  refundPct: number                    // MIN per-room refundPct (the worst-case floor)
+  policyRefund: number                 // aggregate policy refund, 2dp
+  netCollected: number                 // aggregate net collected at cancel time
+  retainedAmount: number               // netCollected - policyRefund (what the hotel keeps under the policy)
+  cutoffHours: number                  // snapshotted cutoff (NOT the live settings value)
+  source: "settings" | "corporate-override" | "legacy-fallback"
+  snapshottedAt: Date                  // the same `now` as the cancel's `cancelledAt` — no clock skew
+}
+
+CancellationExceptionAudit {          // latest exception; overwritten on each new exception
+  approvedAmount: number               // the new approvedAmount after this exception
+  reason: string                       // required, ≤500 chars (the audit trail)
+  approvedBy: string                   // admin UID (the exception is admin-only)
+  approvedAt: Date
+}
+
+CancellationLiability {               // the stored snapshot (the contract)
+  policyResult: CancellationPolicyResult
+  approvedAmount: number               // defaults to policyResult.policyRefund; reduced only via exception
+  exception: CancellationExceptionAudit | null
+}
+
+CancellationLiabilityState {          // derived; never stored
+  "not-required"                        // policyRefund === 0 — nothing to refund
+  "retained"                            // approvedAmount < policyRefund — admin applied an exception
+  "pending-processing"                  // approvedAmount === policyRefund AND processedAmount === 0
+  "partially-processed"                 // 0 < processedAmount < approvedAmount
+  "processed"                           // processedAmount >= approvedAmount
+}
+
+// computed by the pure helper (input → output):
+computeCancellationLiabilityState({ liability, processedAmount }) → {
+  state: CancellationLiabilityState,
+  liability: CancellationLiability | null,
+  processedAmount: number,
+  outstandingAmount: number,           // approvedAmount - processedAmount, clamped ≥ 0
+  retentionAmount: number,             // policyRefund - approvedAmount, clamped ≥ 0
+  stateLabel: string                   // human-readable badge label per state
+}
+
+// The five-state machine is pinned by behavioural
+// tests in `shared/__tests__/crl-07-liability-state.test.ts`
+// (23 tests) covering the null fall-through, each
+// state, partial exception, fully-processed
+// exception, defensive coercion (negative inputs,
+// NaN, approvedAmount > policyRefund writer bug),
+// and the breakdown invariants. The pure
+// `buildCancellationLiabilitySnapshot` helper
+// produces the stored snapshot from a cancel-time
+// preview — used by the destructive cancel handler
+// in both branches (per-child + reservation-scope).
+//
+// Server projection endpoint (admin UI + future
+// Reports consumer):
+//   POST /api/bookings/cancellation-liability
+//     body: { reservationId } | { bookingId }
+//     returns: { success, data: { state, liability, processedAmount, outstandingAmount, retentionAmount, stateLabel } }
+//
+// Admin exception endpoint (the "reduce approved
+// amount" mutation):
+//   POST /api/bookings/cancellation-exception
+//     body: { reservationId | bookingId, approvedAmount: 0..policyRefund, reason: ≤500 chars }
+//     admin-only (403 for any other role)
+//     idempotency: same (amount, reason) replays the original commit
+//     never increases approvedAmount above the stored policy result
+```
+
+---
+
+## Loyalty Earn + Clawback Pairing (MRB-15-07)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-07 sub-item, shipped v0.254.0). The `pointsHistory` ledger uses paired doc ids: `earn-${bookingId}` for the positive earn entry (written on check-out) and `clawback-${bookingId}` for the negative clawback entry (written on cancel). The pairing is the deterministic link between an earn and its subsequent clawback — the same `bookingId` appears in both.
+
+### Pairing contract
+
+- `earn-${bookingId}` is the doc id for the positive earn `pointsHistory` entry on a successful check-out. **Exactly 2 constructions** of `earn-${bookingId}` exist in the codebase: the check-out's `awardNow` flag (the standard path) and the post-settlement path (the deferred award, used when the check-out runs without a confirmed payment). The JSDoc reference is not a construction.
+- `clawback-${bookingId}` is the doc id for the negative clawback `pointsHistory` entry on a cancel. **Exactly 1 construction** of `clawback-${bookingId}` exists in the codebase: `handleCancelBooking`'s per-child CRL-02 + MRB-05 audit stamp block.
+- The map-based invariant `rewardsPoints == sum(pointsHistory.points)` is preserved end-to-end: the earn entry's `+N` is balanced by the clawback entry's `-N` when a check-out is followed by a cancel (the cancel is a destructive action on a checked-out booking — the points were earned, then clawed back).
+- The pairing is the source-text guard for the cross-cutting "no duplicate earn" + "no duplicate clawback" invariants MRB-15-01 pins across the full create → cancel lifecycle.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) + `mrb-15-07-checkout-loyalty-earn.test.ts` (13 tests) — 27 source-text tests pin the earn/clawback pairing + the no-duplicate-earn + no-duplicate-clawback invariants.

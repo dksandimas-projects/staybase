@@ -68,6 +68,10 @@ const authedReq = {
   user: {
     uid: "member_123",
     email: "Guest@Example.test",
+    // Per Spark Rewards audit 2026-07-18 HIGH-1: tests assume the
+    // authed user has a verified email so the link/stays matchers
+    // still work. The unverified-path tests override this field.
+    email_verified: true,
     name: "Guest Example"
   },
   body: {
@@ -75,6 +79,11 @@ const authedReq = {
     phone: "+63 917 000 0000",
     authProvider: "email"
   }
+};
+
+const unverifiedAuthedReq = {
+  ...authedReq,
+  user: { ...authedReq.user, email_verified: false }
 };
 
 describe("/api/members/register handler", () => {
@@ -119,7 +128,8 @@ describe("/api/members/register handler", () => {
       data: {
         memberId: "member_123",
         memberNumber: "SR-00042",
-        linkedBookings: 1
+        linkedBookings: 1,
+        emailVerified: true
       }
     });
   });
@@ -144,7 +154,8 @@ describe("/api/members/register handler", () => {
       data: {
         memberId: "member_123",
         memberNumber: "SR-00007",
-        linkedBookings: 0
+        linkedBookings: 0,
+        emailVerified: true
       }
     });
   });
@@ -221,5 +232,56 @@ describe("/api/members/register handler", () => {
     });
     expect(payload.data.stays[0]).not.toHaveProperty("paymentProofUrl");
     expect(payload.data.stays[0]).not.toHaveProperty("remarks");
+  });
+
+  // Per Spark Rewards audit 2026-07-18 HIGH-1: an unverified
+  // email/password user must not be able to read their past
+  // bookings. The server returns a structured 403 with
+  // `code: "EMAIL_NOT_VERIFIED"` so the client can render the
+  // "verify your email" prompt. Same gate is enforced at the
+  // router level for /api/email/early-checkin-request.
+  test("rejects stays list with EMAIL_NOT_VERIFIED when email is unverified", async () => {
+    const res = mockResponse();
+    await handleListMemberStays({ ...unverifiedAuthedReq, method: "GET" }, res);
+    expect(res.status).toHaveBeenCalledWith(403);
+    const payload = (res.json as any).mock.calls[0][0];
+    expect(payload).toMatchObject({
+      success: false,
+      code: "EMAIL_NOT_VERIFIED"
+    });
+    expect(payload.error).toMatch(/verify your email/i);
+  });
+
+  test("skips linkBookingsByEmail when the registering user's email is unverified", async () => {
+    mockCounterDoc.exists = true;
+    mockCounterDoc.data.mockReturnValue({ count: 41 });
+    mockBookingDocs.push({
+      ref: { path: "bookings/booking_1" },
+      data: () => ({ memberId: null })
+    });
+    const res = mockResponse();
+
+    await handleRegisterMember(unverifiedAuthedReq, res);
+
+    // The member record is still created (the user is a member,
+    // just without past-booking linkage until they verify).
+    expect(mockSet).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      memberNumber: "SR-00042",
+      isMember: true
+    }), { merge: true });
+    // But the booking batch is NOT updated (no stranger's
+    // booking takeover).
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+    expect(mockBatchCommit).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+    const payload = (res.json as any).mock.calls[0][0];
+    expect(payload.data).toMatchObject({
+      memberNumber: "SR-00042",
+      linkedBookings: 0,
+      emailVerified: false
+    });
+    // The non-blocking warning is surfaced so the client can
+    // render a "verify your email" prompt.
+    expect(payload.warning).toMatch(/verify your email/i);
   });
 });

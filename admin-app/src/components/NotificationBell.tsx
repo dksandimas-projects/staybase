@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, Check, X, ShoppingBag, CalendarCheck, CalendarX, CreditCard, MessageSquareText, Inbox } from "lucide-react";
+import { Bell, Check, X, ShoppingBag, CalendarCheck, CalendarX, CreditCard, MessageSquareText, Inbox, Wallet } from "lucide-react";
 import { useAdmin } from "../context/AdminContext";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { Drawer } from "./Drawer";
@@ -26,7 +26,19 @@ const NOTIFICATION_TYPE_META: Record<NotificationType, {
   message: { label: "Message", icon: MessageSquareText, bgClass: "bg-blue-50", iconClass: "text-blue-600" },
   arrival: { label: "Arrival", icon: CalendarCheck, bgClass: "bg-amber-50", iconClass: "text-amber-600" },
   departure: { label: "Departure", icon: CalendarX, bgClass: "bg-violet-50", iconClass: "text-violet-600" },
-  "store-order": { label: "Store order", icon: ShoppingBag, bgClass: "bg-rose-50", iconClass: "text-rose-600" }
+  "store-order": { label: "Store order", icon: ShoppingBag, bgClass: "bg-rose-50", iconClass: "text-rose-600" },
+  // Per CRL-08 (2026-08-03, per decision #174):
+  // the cancellation-refund surface. The wallet
+  // icon + amber palette signal "money to
+  // process" — the desk sees this when a
+  // destructive cancel stamps a non-null
+  // `cancellationLiability` (the bell alert
+  // says "Cancellation refund pending —
+  // SI-…(Pending refund, ₱1500)") and on
+  // each state-change transition (e.g.
+  // "Refund partially refunded — SI-…
+  // (pending-processing → partially-processed)").
+  "cancellation-refund": { label: "Cancellation refund", icon: Wallet, bgClass: "bg-amber-50", iconClass: "text-amber-600" }
 };
 
 const PANEL_DESKTOP_WIDTH = 380;

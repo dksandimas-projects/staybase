@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -10,7 +10,8 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
@@ -18,13 +19,20 @@ import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
+import { handleHoldExpiryCron } from "./handlers/hold-expiry";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
-import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
+import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
   "payment-confirmed",
   "booking-confirmed",
+  // Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
+  // is a server-triggered email fired from
+  // `handleConfirmBookingWithBalance` after the transaction
+  // commits. Listed here so the email preview endpoint can
+  // render it; never reachable as a public POST.
+  "booking-confirmed-with-balance",
   "discount-rejected",
   "corporate-inquiry",
   // Per W4.4 / decision #104: the 8 new templates are
@@ -181,12 +189,17 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
   }
 }
 
-async function authenticateUser(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; name?: string; picture?: string; error?: string }> {
+async function authenticateUser(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; email_verified?: boolean; name?: string; picture?: string; error?: string }> {
   if (process.env.NODE_ENV === "test") {
     return {
       success: true,
       uid: "mock_member_uid",
       email: "member@sparkinn.com",
+      // Per Spark Rewards audit 2026-07-18 HIGH-1: tests assume the
+      // mock user has a verified email so the email-based booking
+      // matchers still work (the gate is enforced at the call site
+      // with the same `email_verified` shape).
+      email_verified: true,
       name: "Mock Member"
     };
   }
@@ -203,6 +216,15 @@ async function authenticateUser(req: VercelRequest): Promise<{ success: boolean;
       success: true,
       uid: decodedToken.uid,
       email: decodedToken.email,
+      // Per Spark Rewards audit 2026-07-18 HIGH-1: surface
+      // `email_verified` so the email-based booking matchers
+      // (registration linkage, /api/members/stays, early check-in
+      // request) can gate on it. Without this, an attacker who
+      // signs up with a victim's email could read and cancel the
+      // victim's anonymous bookings (the `lookupToken` leak in
+      // /api/members/stays is the cancel credential). Google
+      // sign-in tokens always carry `email_verified: true`.
+      email_verified: decodedToken.email_verified === true,
       name: decodedToken.name,
       picture: decodedToken.picture
     };
@@ -210,6 +232,29 @@ async function authenticateUser(req: VercelRequest): Promise<{ success: boolean;
     console.error("Token verification failed:", err);
     return { success: false, error: getTokenVerificationFailureMessage(token) };
   }
+}
+
+// Per Spark Rewards audit 2026-07-18 HIGH-1: every member-scoped
+// booking match that keys off the ID token's `email` claim must
+// first require `email_verified === true`. The `uid`-only match
+// (`booking.memberId == token.uid`) is always safe — the attacker
+// would need their own uid, which they already have. Returns a
+// structured 403 response the client recognizes (`code:
+// "EMAIL_NOT_VERIFIED"`) so it can render a "Verify your email"
+// prompt instead of a generic auth error.
+//
+// `actionLabel` is the human-readable next step rendered in the
+// error copy (e.g. "see your past stays").
+function emailClaimGuardResponse(user: { email?: string; email_verified?: boolean }, actionLabel: string) {
+  if (user.email && user.email_verified === true) return null;
+  return {
+    status: 403,
+    body: {
+      success: false,
+      code: "EMAIL_NOT_VERIFIED",
+      error: `Please verify your email address to ${actionLabel}. Check your inbox for the verification link, or resend it from your profile.`
+    }
+  };
 }
 
 
@@ -476,6 +521,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleAddRefund(req, res);
   }
 
+  // Per CRL-07 (2026-08-03, per decision #173): the
+  // admin-only exception endpoint. The handler
+  // re-checks the admin role (front-desk staff are
+  // rejected with 403) — the apiRouter-level
+  // `authenticateStaff` only verifies the staff
+  // credential, not the role. Same pattern as
+  // `add-refund` (the handler is the source of
+  // truth for the admin role check). Rate-limited
+  // at 30/min — an exception is a deliberate
+  // admin mutation, not a tap-and-confirm action.
+  if (domain === "bookings" && action === "cancellation-exception" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancellation-exception:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many exception requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleRecordCancellationException(req, res);
+  }
+
+  // Per CRL-07 (2026-08-03, per decision #173):
+  // the read-only liability projection endpoint.
+  // The admin UI + future Reports (CRL-08) call
+  // this to render the live state without
+  // computing the cumulative processed refund
+  // client-side. Authenticated-staff (any role)
+  // — the data is non-sensitive (no PII, just
+  // money-state numbers) and the admin UI uses
+  // it for the drawer panel.
+  if (domain === "bookings" && action === "cancellation-liability" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleGetCancellationLiability(req, res);
+  }
+
   if (domain === "bookings" && action === "verify-and-record-payment" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
@@ -526,8 +611,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Capture the booking snapshot before the handler
     // bounces the status to `pending` so the post-response
     // email + notification have the original
-    // `paymentReferenceNumber` + `paymentProofUrl` to
-    // surface to the guest.
+    // `paymentProofUrl` (and any `transactionReference` on
+    // the booking's onsitePayments[] ledger) to surface to
+    // the guest. Per 2026-07-24
+    // (refactor/unify-payment-reference-fields): the previous
+    // top-level `paymentReferenceNumber` is retired.
     const bookingId = String((req.body || {}).bookingId || "").trim();
     let preRejectSnapshot: any = null;
     if (bookingId) {
@@ -589,8 +677,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleConfirmBooking(req, res);
+  }
+
+  // Per CWB-01 / decision #122 (2026-07-23): staff can confirm
+  // a `payment-uploaded` booking with a positive balance when
+  // the rest will be collected at check-in. Rate-limited at
+  // the same 30/min/IP as the standard confirm + checkin +
+  // checkout routes since this is a fast tap-and-confirm
+  // action. Staff-auth required; admin role enforced inside
+  // the handler when balance > threshold.
+  if (domain === "bookings" && action === "confirm-with-balance" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm-with-balance:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many confirm-with-balance requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleConfirmBookingWithBalance(req, res);
   }
 
   if (domain === "bookings" && action === "early-checkin-resolve" && req.method === "POST") {
@@ -619,6 +728,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
 
     return await handleRescheduleBooking(req, res);
+  }
+
+  // Per MRB-14 (2026-08-03, per decision #180 — proposed):
+  // the add-room surface. Staff adds a room to an
+  // existing pre-arrival reservation using the
+  // header's current dates. Same auth posture as the
+  // reschedule surface (staff-only, 401/403 split).
+  // The rate limit shares the bookings-reschedule
+  // bucket — both are staff-driven, deliberate
+  // mutations that the desk performs a handful of
+  // times per session. A separate bucket would just
+  // starve one path at the expense of the other.
+  if (domain === "bookings" && action === "add-room" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reschedule:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many reschedule requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleAddRoomToReservation(req, res);
   }
 
   if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
@@ -686,8 +819,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    
+
     return await handleCancelBooking(req, res);
+  }
+
+  // Per CRL-06 (2026-08-02): the cancellation preview.
+  // The URL is `POST /api/bookings/cancel-preview` (the
+  // apiRouter splits on `/` and uses `[domain, action]`
+  // — a slash-separated path would drop the second
+  // segment, so the action name uses the same hyphen-
+  // separated shape as `add-payment` / `create-walkin` /
+  // `confirm-with-balance`). The preview is rate-limited
+  // independently of the cancel bucket (10/min/IP) so
+  // a flood of previews cannot starve a legitimate
+  // cancel attempt. The handler is read-only — no
+  // Turnstile, no `runTransaction`, no writes to
+  // Firestore. The same `ref + (email | token)` credential
+  // as the destructive cancel is the guest gate; the
+  // staff path bypasses (already authenticated).
+  if (domain === "bookings" && action === "cancel-preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancel-preview:${ip}`, 10, 60000)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many cancellation previews. Please try again in a minute."
+      });
+    }
+    let authResult: { success: boolean; uid?: string; email?: string } = { success: false };
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        authResult = staffAuth;
+      }
+    }
+    (req as any).staff = authResult.success ? authResult : null;
+    return await handleCancelPreview(req, res);
   }
 
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
@@ -918,6 +1083,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleSetMemberActive(req, res);
   }
 
+  // Per Spark Rewards audit 2026-07-18 MED-1: manual points
+  // adjustment now lives server-side (Admin SDK) so the
+  // `rewardsPoints` + `pointsHistory` write is in one transaction
+  // and the Firestore rule can drop `rewardsPoints` from the
+  // staff update allowlist. The handler enforces admin-only and
+  // returns 403 for front-desk (mirrors the client UI guard at
+  // MembersPage.tsx). Rate-limited to 10/min/IP — the same
+  // budget as `set-active`.
+  if (domain === "members" && action === "manual-adjust" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-manual-adjust:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many points adjustment requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
+    }
+    (req as any).staff = authResult;
+    return await handleManualAdjustPoints(req, res);
+  }
+
+  // Per Spark Rewards audit 2026-07-18 MED-3 (decision #135):
+  // manual link of an existing booking to a member, used when the
+  // member's account email differs from the email on an earlier
+  // anonymous booking. Admin-only (front-desk 403), rate-limited to
+  // 10/min/IP — the same posture as the other staff-mediated
+  // member mutations. The handler refuses cancelled / test-run
+  // bookings and refuses re-linking to a different member
+  // (no unlink from this surface; the booking-drawer memberId edit
+  // is the work-around for that).
+  if (domain === "members" && action === "link-booking" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-link-booking:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many booking-link requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can link bookings to a member." });
+    }
+    (req as any).staff = authResult;
+    return await handleLinkBookingToMember(req, res);
+  }
+
   if (domain === "members" && action === "delete-account" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-delete-account:${ip}`, 5, 60000)) {
       return res.status(429).json({ success: false, error: "Too many account deletion requests. Please try again in a minute." });
@@ -942,6 +1156,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fromEmail: process.env.RESEND_FROM_EMAIL || config.supportEmail,
       adminEmail: process.env.RESEND_ADMIN_EMAIL || config.supportEmail
     });
+  }
+
+  // Per LCE-01 (decision #137, 2026-07-25): admin-only endpoint
+  // that overwrites `settings/websiteContent.termsBody` and
+  // auto-bumps the patch version. Mirrors the existing
+  // `set-active` route's role gate + rate limit posture; the
+  // admin-only role is the gate (front-desk 403). No new
+  // Vercel function — this reuses the existing catch-all
+  // pattern per `plan/docs/VERCEL-FUNCTION-LIMIT.md`.
+  if (domain === "admin" && action === "update-terms" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-update-terms:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many terms updates. Please wait a minute and try again." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can update terms." });
+    }
+    (req as any).staff = authResult;
+    return await handleUpdateTerms(req, res);
   }
 
   if (domain === "admin" && action === "publish-seo" && req.method === "POST") {
@@ -1111,6 +1348,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!userAuth.success) {
           return res.status(401).json({ success: false, error: "Authentication required." });
         }
+        // Per Spark Rewards audit 2026-07-18 HIGH-1: gate the
+        // email-claim match in findBooking on `email_verified`. A
+        // staff caller bypasses this gate (their role token is
+        // verified and they don't key off the email claim). The
+        // member-side `emailMatches` branch in findBooking would
+        // otherwise let an unverified email/password signup fire
+        // an early check-in write against a stranger's booking.
+        if (userAuth.email_verified !== true) {
+          return res.status(403).json({
+            success: false,
+            code: "EMAIL_NOT_VERIFIED",
+            error: "Please verify your email to request early check-in. Check your inbox for the verification link, or resend it from your profile."
+          });
+        }
         (req as any).user = userAuth;
       } else {
         (req as any).staff = authResult;
@@ -1168,6 +1419,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (domain === "notifications" && action === "prune" && (req.method === "POST" || req.method === "GET")) {
 
     return await handleNotificationsPrune(req, res);
+  }
+
+  // Per PEX-06 (2026-08-01, per decision #147): the daily
+  // cleanup cron for expired `pending` payment holds. Same
+  // CRON_SECRET auth as the other Vercel cron handlers;
+  // registered in `guest-app/vercel.json` so the
+  // project-local cron config (not the monorepo-root
+  // `vercel.json`) owns the schedule. Idempotent — re-fires
+  // of the same cron tick find zero matches.
+  if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
+
+    return await handleHoldExpiryCron(req, res);
   }
 
   // ── Test Runs (ETR) ──────────────────────────────────────
@@ -1248,6 +1511,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleStagingResetExecute(req, res);
+  }
+
+  // ETR-R01 / ETR-R04 / ETR-R10 (foundation) — production-to-
+  // staging refresh preview. Accepts a JSON export of the production
+  // collections and returns the sanitized version + an audit row.
+  // See `handleStagingRefreshPreview` for the full contract.
+  if (domain === "test-runs" && action === "staging-refresh-preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-preview:${ip}`, 3, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many refresh requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can refresh staging from production." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingRefreshPreview(req, res);
   }
 
   // Fallback 404

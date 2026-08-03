@@ -33,7 +33,16 @@ export function Drawer({ title, children, footer, open, onClose, className }: Dr
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={onClose}
-            className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm"
+            // Backdrop shares z-50 with the drawer panel below it; DOM
+            // order (backdrop rendered first, panel rendered after) keeps
+            // the panel on top of its own backdrop. The Modal tier (z-[60])
+            // is one step above and is rendered later in the DOM, so when
+            // a modal opens on top of this drawer the modal backdrop still
+            // covers the drawer panel — see ROADMAP §MBZ and
+            // plan/admin-app/CLAUDE.md §Z-Index Scale. /60 (not /50)
+            // matches QRManagementPage's pattern and matches the Modal
+            // backdrop for visual consistency.
+            className="fixed inset-0 z-50 bg-gray-950/60 backdrop-blur-sm"
             aria-hidden="true"
           />
           {isMobile ? (

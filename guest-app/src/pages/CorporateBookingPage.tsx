@@ -34,10 +34,44 @@ import {
   compressImageFile,
   getDateKeyInTimezone,
   getNumNights,
+  // Per EXB-07 (2026-08-01, per decision #155): the
+  // capacity overflow rule (per decision #153) is the
+  // single source of truth for whether the requested
+  // occupancy fits the room type. The corporate /book
+  // page uses the helper client-side to render the
+  // "blocked by cap → add an extra bed" contextual
+  // message before the user reaches the review step.
+  requiredExtraBedsFor,
   staggerChild,
   staggerContainer,
-  VERSION
+  VERSION,
+  // Per MRB-02.x corporate (2026-08-02, per decision
+  // #164): the reservation-level idempotency key.
+  // Preallocated client-side so a
+  // retry-after-uncertain-response uses the same
+  // `reservationId`; the server's transaction reads it
+  // first and either replays the original commit (same
+  // `requestFingerprint`) or returns a 409 (different
+  // `requestFingerprint`). Same pattern as the public
+  // `/book` flow (`BookingPage.tsx`).
+  generateReservationId
 } from "@spark-inn/shared";
+// Per MRB-08 (2026-08-02, per decision #167): the
+// corporate `/corporate/book` page mirrors
+// `BookingPage`'s room cart (MRB-06) so a corporate
+// group can book a block of rooms. The same shared
+// `rebalanceGuestDistribution` helper distributes the
+// page-level `numAdults` + `numChildren` totals across
+// the cart's per-stay occupancy, and the same
+// `serializeBookingRoomCart` / `parseBookingRoomCart`
+// helpers round-trip the cart through the `?rooms=`
+// URL param so a refresh keeps the user's selection.
+import {
+  parseBookingRoomCart,
+  rebalanceGuestDistribution,
+  serializeBookingRoomCart,
+  type BookingRoomCartItem
+} from "../utils/bookingRoomCart";
 import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
 import { ref, uploadBytes } from "firebase/storage";
 import { storage } from "../firebase/config";
@@ -79,6 +113,16 @@ export function CorporateBookingPage() {
   const shouldReduceMotion = useReducedMotion();
   const currentStepKey = searchParams.get("step") ?? "gate";
   const [bookingId] = useState(() => doc(collection(getFirestore(), "bookings")).id);
+  // Per MRB-02.x corporate (2026-08-02, per decision
+  // #164): the reservation-level idempotency key,
+  // preallocated client-side for the same reason as
+  // `bookingId`. Held in a `useState` lazy init so the
+  // same id survives across renders and
+  // retry-after-uncertain-response. Generated via the
+  // shared `generateReservationId` helper so the id
+  // shape is guaranteed to pass `RESERVATION_ID_REGEX`
+  // validation on the server.
+  const [reservationId] = useState(() => generateReservationId());
 
   // Per BI-01 (booking-intercom audit 2026-07-06): two REAL
   // Turnstile challenges. The gate widget covers
@@ -115,12 +159,87 @@ export function CorporateBookingPage() {
   // Booking states
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
   const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
-  const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
-  // Per the room-type booking refactor: Step 1 now shows one card
-  // per room type (not per physical room). The guest picks a type;
-  // the server auto-assigns a physical room of that type inside
-  // the availability transaction.
-  const [selectedRoomType, setSelectedRoomType] = useState(searchParams.get("roomType") ?? "");
+  // Per EXB-07 (2026-08-01, per decision #155): the
+  // corporate /book page gains the same adult/child split
+  // + extra bed count the guest /book page already has.
+  // The single `guests` stepper is replaced by 3 steppers
+  // (adults >= 1, children >= 0, extra beds >= 0). The
+  // `guests` value (the persisted `numGuests` total) is
+  // derived from the adult + child sum, matching the
+  // server's CHD-04 derivation. Legacy callers that
+  // still pass `?guests=N` in the URL hydrate the sum
+  // into `numAdults = N, numChildren = 0` (the historical
+  // "all guests are adults" shape, preserved for
+  // back-compat with existing marketing links).
+  //
+  // Per MRB-08 (2026-08-02, per decision #167): the
+  // adults + children totals are still page-level. They
+  // are the guest's stated "we are N adults and M
+  // children" — the page distributes them across the
+  // room cart's per-stay occupancy via
+  // `rebalanceGuestDistribution` (same helper the public
+  // `/book` page uses per MRB-06). `extraBedCount` is no
+  // longer a per-page field; the rebalance helper
+  // derives the per-stay count from the room type's
+  // `maxExtraBeds` + the leftover guests after capacity
+  // allocation, and the server (per EXB-03) validates
+  // the result against the EXB-10 reservation-atomic
+  // inventory check.
+  const initialGuests = Number(searchParams.get("guests") ?? 2);
+  const [numAdults, setNumAdults] = useState(initialGuests);
+  const [numChildren, setNumChildren] = useState(0);
+  // Per EXB-07 (2026-08-01, per decision #155): a
+  // per-page "extra beds" stepper. This is the
+  // single-room UX — for N=1 the rebalance helper
+  // applies the count to the only stay. For N>1
+  // (per MRB-08) the per-stay extra bed count is
+  // derived by the rebalance helper from the
+  // room type's `maxExtraBeds` + leftover guests, so
+  // the page-level stepper is hidden in the cart
+  // (the per-stay count is authoritative).
+  const [extraBedCount, setExtraBedCount] = useState(0);
+  const guests = numAdults + numChildren;
+  // Per MRB-08 (2026-08-02, per decision #167): the
+  // room cart. Each entry is one room stay. Mirrors
+  // the public `/book` flow's `BookingPage.tsx` cart.
+  // Hydrated from `?rooms=` (round-tripped via
+  // `parseBookingRoomCart` / `serializeBookingRoomCart`)
+  // so a refresh keeps the user's selection. When the
+  // URL carries no `?rooms=` and no `?roomType=`, the
+  // cart starts empty and is auto-seeded with the first
+  // available type by the effect below — preserving
+  // the pre-MRB-08 "one stay of the first type"
+  // default when a corporate guest lands on Step 1 with
+  // no pre-selected type.
+  const [roomCart, setRoomCart] = useState<BookingRoomCartItem[]>(() => {
+    const fromUrl = parseBookingRoomCart(searchParams.get("rooms"));
+    return fromUrl.length > 0 ? fromUrl : [];
+  });
+  // The `selectedRoomType` page-level state from the
+  // pre-MRB-08 single-room flow is now derived from
+  // the cart: the first cart entry's type is the
+  // "primary" type for back-compat (the `?roomType=`
+  // URL param, the gate redirect, the single-room
+  // legacy read sites). Setting it from outside
+  // mutates the first cart entry — preserves the
+  // existing `selectRoomType` flow used by the
+  // Step 1 room-type cards.
+  const selectedRoomType = roomCart[0]?.roomType ?? "";
+  const setSelectedRoomType = (next: string) => {
+    setRoomCart((current) => {
+      if (current.length === 0) return current;
+      const [first, ...rest] = current;
+      return [{ ...first, roomType: next }, ...rest];
+    });
+  };
+  // Per MRB-08: the whole reservation shares one
+  // breakfast choice (every stay in the cart uses
+  // the same `rateChoice`). The per-stay pricing the
+  // server writes (MRB-04) mirrors this — every
+  // child booking doc has the same `hasBreakfast`
+  // flag. The page-level `rateChoice` is unchanged
+  // from the pre-MRB-08 implementation; the cart
+  // hydrates each stay with the same value on add.
   const [rateChoice, setRateChoice] = useState<RateChoice>(
     searchParams.get("breakfast") === "yes" ? "room-breakfast" : "room-only"
   );
@@ -176,7 +295,6 @@ export function CorporateBookingPage() {
   const [proofUpload, setProofUpload] = useState<{ name: string; path: string } | null>(null);
   const [uploadingProof, setUploadingProof] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
-  const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
   const [paymentProofError, setPaymentProofError] = useState("");
   const [termsConsent, setTermsConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -360,6 +478,126 @@ export function CorporateBookingPage() {
     [roomTypes]
   );
 
+  // Per MRB-08 (2026-08-02, per decision #167): the
+  // auto-seed effect. When the cart is empty AND the
+  // page-level occupancy is set, seed the cart with a
+  // single stay of the URL-supplied `?roomType=` (or
+  // the first available type if none). Mirrors the
+  // pre-MRB-08 "one stay of the selected type" default
+  // so a guest landing on `/corporate/book?step=select-room`
+  // with no `?rooms=` still sees a populated cart.
+  // The effect is gated on the room types having
+  // loaded (no `roomsLoading` flicker) and on the
+  // cart being empty (no-op after the user has
+  // added rooms).
+  useEffect(() => {
+    if (roomCart.length > 0) return;
+    if (roomsLoading || roomTypes.length === 0) return;
+    const fromQuery = searchParams.get("roomType");
+    const candidate = fromQuery
+      ? roomTypes.find((type) => type.value === fromQuery)
+      : availableRoomTypes[0]?.type;
+    if (!candidate) return;
+    setRoomCart([{
+      bookingId: doc(collection(getFirestore(), "bookings")).id,
+      roomType: candidate.value,
+      rateChoice,
+      numAdults: 0,
+      numChildren: 0,
+      extraBedCount: 0
+    }]);
+    // `rateChoice` is intentionally captured in the
+    // initial seed only — the user can toggle the
+    // breakfast choice later; that toggle re-stamps
+    // every stay via `setRateChoice` + a follow-up
+    // effect (below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomsLoading, roomTypes, availableRoomTypes, searchParams]);
+
+  // Per MRB-08: re-stamp the `rateChoice` field on
+  // every cart stay when the page-level toggle
+  // changes. A shared breakfast choice across the
+  // whole reservation (every stay with the same
+  // flag) is the minimum viable scope; per-stay
+  // breakfast selection is a future iteration.
+  useEffect(() => {
+    setRoomCart((current) => current.map((stay) => ({ ...stay, rateChoice })));
+  }, [rateChoice]);
+
+  // Per MRB-08: the distributed room cart. The
+  // shared `rebalanceGuestDistribution` helper
+  // distributes the page-level `numAdults` +
+  // `numChildren` totals across the cart's per-stay
+  // occupancy, respecting each room type's
+  // `maxCapacity` + `maxChildren` + `maxExtraBeds`.
+  // For N=1 the result is byte-equivalent to the
+  // pre-MRB-08 single-room path (1 adult + the rest
+  // of the adults, all the children, extra beds
+  // applied to the only stay). The result is the
+  // source of truth for the per-stay pricing and
+  // the submit body.
+  const cartDistribution = useMemo(
+    () => rebalanceGuestDistribution(
+      roomCart.length > 0 ? roomCart : [{
+        bookingId: doc(collection(getFirestore(), "bookings")).id,
+        roomType: roomTypes[0]?.value ?? "",
+        rateChoice,
+        numAdults: 0,
+        numChildren: 0,
+        extraBedCount: 0
+      }],
+      roomTypes,
+      numAdults,
+      numChildren
+    ),
+    [roomCart, roomTypes, numAdults, numChildren, rateChoice]
+  );
+  const distributedRoomCart = cartDistribution.rooms;
+  const unassignedAdults = cartDistribution.unassignedAdults;
+  const unassignedChildren = cartDistribution.unassignedChildren;
+
+  // Per MRB-08: cart mutation helpers. Each one
+  // is a one-line setState — kept named (not
+  // inlined) so the JSX stays readable and the
+  // single-room pre-MRB-08 read sites that
+  // referenced `selectedRoomType` continue to
+  // work through the derived `selectedRoomType`
+  // above.
+  function addRoomToCart(typeValue: string) {
+    setRoomCart((current) => {
+      const next = [...current];
+      // Find a type with the requested value;
+      // fall back to the first available type
+      // when the requested value isn't recognised
+      // (a stale URL can carry a deleted type).
+      const safeType = roomTypes.find((type) => type.value === typeValue)
+        ?? availableRoomTypes[0]?.type
+        ?? null;
+      if (!safeType) return current;
+      // The new stay's occupancy is left at 0
+      // adults + 0 children; the rebalance
+      // helper on the next render distributes the
+      // page totals. This keeps the helper as
+      // the single source of truth for "where
+      // do the guests go".
+      next.push({
+        bookingId: doc(collection(getFirestore(), "bookings")).id,
+        roomType: safeType.value,
+        rateChoice,
+        numAdults: 0,
+        numChildren: 0,
+        extraBedCount: 0
+      });
+      return next;
+    });
+  }
+  function removeRoomFromCart(index: number) {
+    setRoomCart((current) => current.length <= 1 ? current : current.filter((_, idx) => idx !== index));
+  }
+  function setRoomTypeAt(index: number, typeValue: string) {
+    setRoomCart((current) => current.map((stay, idx) => idx === index ? { ...stay, roomType: typeValue } : stay));
+  }
+
   const selectedTypeEntry = roomTypes.find((type) => type.value === selectedRoomType)
     ?? availableRoomTypes[0]?.type
     ?? null;
@@ -369,43 +607,105 @@ export function CorporateBookingPage() {
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRatePerPerson = breakfastConfig.ratePerPersonPerNight;
 
-  // Calculate pricing
-  // Per audit S4.1 / decision #101: prefer the negotiated rate for
-  // the chosen room type from the corporateCodes/{code} doc. Fall
-  // back to the type's flat corporateRate only when the negotiated
-  // map has no entry for this room type.
-  // Per BI-04 + CORPORATE-BOOKING.md edge case: a missing/zero
-  // `corporateRate` falls back to the standard nightly rate —
-  // never show (or charge) ₱0. Mirrors the server-side fallback
-  // in handleCreateBooking.
+  // Per MRB-08 (2026-08-02, per decision #167): the
+  // per-stay negotiated rate. Each stay's rate is
+  // resolved independently from the
+  // `corporateCodes/{code}.ratePerRoomType` map
+  // (then the stay type's flat `corporateRate`, then
+  // the standard `pricePerNight`). The pre-MRB-08
+  // single-rate fallback chain (negotiated for the
+  // primary type only) would silently over- or
+  // under-charge a mixed-type corporate block. The
+  // server's `handleCreateBooking` mirrors the same
+  // per-stay chain (see `roomStayPricing` derivation
+  // in `guest-app/server/handlers/bookings.ts`); the
+  // client preview and the server invoice are
+  // byte-equivalent as a result.
+  const perStayPricing = useMemo(() => {
+    return distributedRoomCart.map((stay) => {
+      const stayType = roomTypes.find((type) => type.value === stay.roomType);
+      const baseRate = Number(stayType?.pricePerNight) || 0;
+      const typeCorp = Number(stayType?.corporateRate) || 0;
+      const negotiated = ratePerRoomType && ratePerRoomType[stay.roomType] !== undefined
+        ? ratePerRoomType[stay.roomType]
+        : null;
+      const stayHasBreakfast = breakfastConfig.isEnabled && stay.rateChoice === "room-breakfast";
+      const stayRate = (ratePerRoomType || isFlatRate)
+        ? (negotiated !== null
+            ? negotiated
+            : (typeCorp > 0 ? typeCorp : baseRate))
+        : baseRate;
+      const stayRoomSubtotal = stayRate * nights;
+      const stayBreakfastSubtotal = stayHasBreakfast
+        ? breakfastRatePerPerson * (stay.numAdults + stay.numChildren) * nights
+        : 0;
+      const stayExtraBedRate = Number(stayType?.extraBedRate) || 0;
+      const stayExtraBedSubtotal = stayHasBreakfast ? 0 : stay.extraBedCount * stayExtraBedRate * nights;
+      // Per EXB-01 (2026-07-31): the extra-bed
+      // total is added to the room subtotal (not
+      // the breakfast subtotal). The server
+      // mirrors this in `roomStayPricing`.
+      return {
+        stay,
+        stayRate,
+        stayRoomSubtotal,
+        stayBreakfastSubtotal,
+        stayExtraBedSubtotal,
+        staySubtotal: stayRoomSubtotal + stayBreakfastSubtotal + stayExtraBedSubtotal
+      };
+    });
+  }, [distributedRoomCart, roomTypes, ratePerRoomType, isFlatRate, breakfastConfig, breakfastRatePerPerson, nights]);
+
+  // Per MRB-08: the aggregate totals. Each is the
+  // sum over the distributed room cart's per-stay
+  // lines, byte-equivalent to the server's
+  // `subtotal` / `breakfastTotal` / `extraBedTotal`
+  // / `totalPrice` derivation in `roomStayPricing`.
+  // The sticky footer + the Step 3 review card
+  // render these so the user sees one number for
+  // the whole reservation, with the per-stay
+  // breakdown available in the cart itself.
+  const roomTotal = perStayPricing.reduce((sum, line) => sum + line.stayRoomSubtotal, 0);
+  const breakfastTotal = perStayPricing.reduce((sum, line) => sum + line.stayBreakfastSubtotal, 0);
+  const extraBedTotal = perStayPricing.reduce((sum, line) => sum + line.stayExtraBedSubtotal, 0);
+  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
+  // Per MRB-08: the legacy `ratePerNight` is still the
+  // primary type's rate (used by the legacy single-room
+  // UI on the sticky footer + the Step 3 review).
+  // `hasBreakfast` is declared above (it's the page-level
+  // flag the rest of the file already reads).
   const negotiatedRate = selectedTypeEntry && ratePerRoomType && ratePerRoomType[selectedTypeEntry.value] !== undefined
     ? ratePerRoomType[selectedTypeEntry.value]
     : (selectedRoomRates?.corporateRate || selectedRoomRates?.pricePerNight || 0);
   const baseRate = negotiatedRate;
   const ratePerNight = baseRate;
 
-  const roomTotal = ratePerNight * nights;
-  const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
-  const subtotal = roomTotal + breakfastTotal;
-
   // Calculate total
-  // Per BF-08 (booking-flow audit 2026-06-26): pass the
-  // pre-computed roomTotal so the calc matches the server's
-  // `totalPrice`. Corporate bookings don't apply weekend
-  // rates (server's `!isCorporate` guard on the weekend
-  // branch), so the flat `ratePerNight * nights` is correct
-  // here. Passing it explicitly keeps the calculation in
-  // lockstep with the server.
-  const total = calculateBookingTotal({
-    ratePerNight,
-    numNights: nights,
-    roomTotal,
-    numGuests: guests,
-    breakfastRate: breakfastRatePerPerson,
-    hasBreakfast,
-    discountPct: 0, // discounts already applied to ratePerNight
-    voucherDiscount: 0 // corporate flow doesn't use standard vouchers
-  });
+  // Per BF-08 (booking-flow audit 2026-06-26) +
+  // per MRB-08 (2026-08-02, per decision #167):
+  // for N=1 the total is the pre-MRB-08 single-room
+  // sum (the legacy `calculateBookingTotal` derivation,
+  // which is byte-equivalent to the server's
+  // `subtotal` for a corporate flat or negotiated
+  // rate). For N>1 the total is the sum of the
+  // per-stay `staySubtotal` values from
+  // `perStayPricing` (the per-stay room + breakfast
+  // + extra bed lines) — which is also byte-equivalent
+  // to the server's `subtotal` for the whole
+  // reservation. The two paths produce the same
+  // number when the cart has a single stay.
+  const total = distributedRoomCart.length <= 1
+    ? calculateBookingTotal({
+        ratePerNight,
+        numNights: nights,
+        roomTotal,
+        numGuests: guests,
+        breakfastRate: breakfastRatePerPerson,
+        hasBreakfast,
+        discountPct: 0, // discounts already applied to ratePerNight
+        voucherDiscount: 0 // corporate flow doesn't use standard vouchers
+      })
+    : perStayPricing.reduce((sum, line) => sum + line.staySubtotal, 0);
 
   const stepIndicatorIndex = useMemo(() => {
     switch (currentStepKey) {
@@ -447,11 +747,58 @@ export function CorporateBookingPage() {
     setSearchParams(next, { replace: true });
   }
 
-  function updateGuests(nextGuests: number) {
-    const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
-    setGuests(safeGuests);
-    updateDateParams(checkIn, checkOut, safeGuests);
+  // Per EXB-07 (2026-08-01, per decision #155): the
+  // 3 occupancy steppers on the corporate /book page.
+  // Each stepper has a `safeX` guard so the value
+  // stays in the per-stepper range. Updating any
+  // stepper persists the values to the URL params
+  // (parallel to the legacy `?guests=N` for back-compat)
+  // so a refresh keeps the user's choice.
+  function setAdults(next: number) {
+    const safe = Math.max(1, Math.floor(Number(next) || 1));
+    setNumAdults(safe);
   }
+  function setChildren(next: number) {
+    const safe = Math.max(0, Math.floor(Number(next) || 0));
+    setNumChildren(safe);
+  }
+  function setExtraBeds(next: number) {
+    const max = Number(selectedTypeEntry?.maxExtraBeds) || 0;
+    const safe = Math.max(0, Math.min(Math.floor(Number(next) || 0), max));
+    setExtraBedCount(safe);
+  }
+  // Per EXB-07: the EXB-03 overflow rule (per decision
+  // #153) is the single source of truth for whether the
+  // requested occupancy fits the room type. The
+  // `requiredExtraBedsFor` helper is the same one the
+  // server uses, so the client-side preview is
+  // byte-equivalent to the server's `handleCreateBooking`
+  // check. When `requiredExtraBeds > extraBedCount`, the
+  // contextual hint below the steppers offers the path
+  // through (add an extra bed) instead of letting the
+  // guest hit a dead-end server error.
+  const corpOverflow = selectedTypeEntry
+    ? requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: Number(selectedTypeEntry.maxCapacity) || 0,
+        maxChildren: Number(selectedTypeEntry.maxChildren) || 0
+      })
+    : { overflowAdults: 0, overflowChildren: 0, requiredExtraBeds: 0 };
+  const corpExtraBedsAllowed = Number(selectedTypeEntry?.maxExtraBeds) || 0;
+  // Per MRB-08 (2026-08-02, per decision #167): the
+  // EXB-07 overflow hint is single-room only. For
+  // N>1 the rebalance helper handles overflow per
+  // stay; the cart UI surfaces the result. The
+  // page-level hint is therefore suppressed when the
+  // cart has more than one stay — it would be
+  // misleading (a hint about the primary type's
+  // capacity when the user is distributing the
+  // overflow across multiple rooms).
+  const corpShowOverflowHint =
+    distributedRoomCart.length <= 1
+      && selectedTypeEntry
+      && corpOverflow.requiredExtraBeds > extraBedCount;
 
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
     setSelectedRoomType(typeValue);
@@ -604,7 +951,15 @@ export function CorporateBookingPage() {
     checkOut,
     guests: String(guests),
     roomType: selectedTypeEntry?.value ?? "",
-    breakfast: hasBreakfast ? "yes" : "no"
+    breakfast: hasBreakfast ? "yes" : "no",
+    // Per MRB-08 (2026-08-02, per decision #167):
+    // round-trip the room cart through the `?rooms=`
+    // URL param so a Step 1 → Step 2 → back to
+    // Step 1 navigation preserves the cart. Same
+    // pattern as the public `/book` flow (per
+    // MRB-06). A refresh / share-link re-uses
+    // the same cart via `parseBookingRoomCart`.
+    rooms: serializeBookingRoomCart(distributedRoomCart.length > 0 ? distributedRoomCart : roomCart)
   });
 
   const reviewParams = new URLSearchParams(continueParams);
@@ -644,25 +999,92 @@ export function CorporateBookingPage() {
     setIsSubmitting(true);
     setSubmitError("");
 
-    // Validate payment reference number if required
+    // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+    // guests no longer enter a payment reference number at booking
+    // time, even on the corporate personal-pay path. Staff
+    // populates `transactionReference` on the relevant payment
+    // ledger entry when they confirm the payment.
+
+    // Per BI-05: personal pay submits the method the guest
+    // actually paid with plus the uploaded receipt URL, so the
+    // booking lands as `payment-uploaded` and staff can verify
+    // the transfer. Chargeback stays `pay-at-hotel` (settled
+    // via LOU per decision #99).
     const isPersonalPay = guestDetails.billingArrangement === "personal";
-    if (isPersonalPay) {
-      const pmConfig = corporatePaymentMethods.find((p) => p.method === paymentMethod);
-      const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
-      if (isRefRequired && !paymentReferenceNumber.trim()) {
-        setSubmitError("Please enter your payment reference number.");
-        setIsSubmitting(false);
-        return;
-      }
-    }
 
     try {
+      // Per MRB-08 (2026-08-02, per decision #167):
+      // the multi-room submit body. The cart's
+      // distributed occupancy (page-level totals
+      // rebalanced per-stay via
+      // `rebalanceGuestDistribution`) is the source
+      // of truth. `roomSelections[]` carries one
+      // entry per stay, the `roomCount` mirrors the
+      // cart's length, and the legacy single-room
+      // fields (`roomType` / `numAdults` /
+      // `numChildren` / `extraBedCount`) carry the
+      // first stay's values for back-compat with
+      // the server's existing schema validation +
+      // the requestFingerprint shape (decision
+      // #164, which includes the legacy single-room
+      // fields for idempotency replay matching).
+      // The server's `handleCreateBooking` already
+      // accepts both shapes (per MRB-06 + MRB-07);
+      // the corporate `?roomSelections=...` round-trip
+      // is the same one the public `/book` flow uses.
+      const firstStay = distributedRoomCart[0] ?? {
+        roomType: selectedTypeEntry?.value ?? "",
+        numAdults,
+        numChildren,
+        extraBedCount
+      };
       const body = {
         bookingId,
-        roomType: selectedTypeEntry?.value ?? "",
+        roomType: firstStay.roomType,
+        // Per MRB-08: the room count + per-stay
+        // selections. When the cart has a single
+        // stay, the server's pre-MRB-06 single-room
+        // path is byte-equivalent (the server
+        // auto-derives one selection from
+        // `roomType` + `numAdults` + `numChildren`
+        // + `extraBedCount` when `roomSelections`
+        // is absent, per the `createBookingSchema`
+        // + `roomCount` default of 1).
+        roomCount: distributedRoomCart.length,
+        roomSelections: distributedRoomCart.map((stay, index) => ({
+          bookingId: index === 0 ? bookingId : stay.bookingId,
+          roomType: stay.roomType,
+          numAdults: stay.numAdults,
+          numChildren: stay.numChildren,
+          extraBedCount: stay.extraBedCount,
+          hasBreakfast,
+          // Per CHD-10 (2026-07-31, per CVQ-01):
+          // the per-booking override for "include
+          // children in the breakfast charge".
+          // Shared across the whole corporate
+          // reservation (every stay uses the same
+          // breakfast config) — the server
+          // snapshots the value per-booking-doc
+          // for back-compat with the existing
+          // schema.
+          breakfastIncludesChildren: false
+        })),
         checkIn,
         checkOut,
+        // Per EXB-07 (2026-08-01, per decision #155):
+        // the corporate /book page now carries the
+        // adult/child split + the extra bed count.
+        // The server (per CHD-04 + EXB-03) validates
+        // `numAdults + numChildren === guests` and
+        // applies the EXB-03 overflow rule via
+        // `requiredExtraBedsFor`. The `guests` field
+        // is kept for back-compat with the server's
+        // derivation (it equals `numAdults + numChildren`
+        // on the wire).
         guests: Number(guestDetails.guestCount) || guests,
+        numAdults: firstStay.numAdults,
+        numChildren: firstStay.numChildren,
+        extraBedCount: firstStay.extraBedCount,
         hasBreakfast: hasBreakfast,
         guestDetails: {
           firstName: guestDetails.firstName,
@@ -687,7 +1109,6 @@ export function CorporateBookingPage() {
         paymentMethod: isPersonalPay ? paymentMethod : "pay-at-hotel",
         paymentProofUrl: null,
         paymentProofPath: isPersonalPay ? proofUpload?.path ?? null : null,
-        paymentReferenceNumber: isPersonalPay && paymentReferenceNumber.trim() ? paymentReferenceNumber.trim() : null,
         // Per W1.3 / decision #79 / audit S1.5: the server
         // derives `isCorporate` from the validated `corporateCode`
         // lookup. The client no longer sets it. The booking body's
@@ -700,6 +1121,20 @@ export function CorporateBookingPage() {
         corporateFlatRate: isFlatRate && !activeCode,
         // Per BI-01: real Turnstile token from the review-step widget.
         turnstileToken: reviewTurnstile.token,
+        // Per MRB-02.x corporate (2026-08-02, per
+        // decision #164): the client-preallocated
+        // reservation id. The server's transaction
+        // uses it as the canonical idempotency key
+        // for the create (same as the public
+        // `/book` flow's `reservationId`). The
+        // server auto-mints when absent; the
+        // preallocation lets a
+        // retry-after-uncertain-response reuse the
+        // same id so the server replays the original
+        // commit (same `requestFingerprint`) or
+        // returns a 409 (different
+        // `requestFingerprint`).
+        reservationId,
         _hp: guestDetails._hp || "",
       };
 
@@ -986,29 +1421,128 @@ export function CorporateBookingPage() {
                   }}
                 />
 
-                <label className="grid gap-2 text-sm font-medium text-gray-700">
-                  Guests
-                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                      type="button"
-                      onClick={() => updateGuests(guests - 1)}
-                    >
-                      -
-                    </button>
-                    <span className="flex items-center gap-2 text-sm text-gray-700">
-                      <Users size={16} className="text-primary" />
-                      {guests} {guests === 1 ? "guest" : "guests"}
+                {/* Per EXB-07 (2026-08-01, per decision #155):
+                    the corporate /book occupancy block.
+                    Three steppers (adults >= 1, children >= 0,
+                    extra beds >= 0 capped at the selected
+                    type's `maxExtraBeds`, hidden entirely
+                    when the type allows 0). The total
+                    `guests` is derived from the adult + child
+                    sum, matching the server's CHD-04
+                    derivation. The contextual overflow hint
+                    renders when the requested split exceeds
+                    the type's caps — strongest UX: tell the
+                    guest exactly how many extra beds to add
+                    instead of letting the server reject. */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <span>Occupancy</span>
+                    <span className="text-gray-400 normal-case font-normal">
+                      {guests} guest{guests === 1 ? "" : "s"} total
                     </span>
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                      type="button"
-                      onClick={() => updateGuests(guests + 1)}
-                    >
-                      +
-                    </button>
                   </div>
-                </label>
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Adults</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Decrease adults"
+                        onClick={() => setAdults(numAdults - 1)}
+                        disabled={numAdults <= 1}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{numAdults}</span>
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Increase adults"
+                        onClick={() => setAdults(numAdults + 1)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+                  <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                    <span>Children (0–11, free of room rate)</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Decrease children"
+                        onClick={() => setChildren(numChildren - 1)}
+                        disabled={numChildren <= 0}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-6 text-center tabular-nums">{numChildren}</span>
+                      <button
+                        className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                        type="button"
+                        aria-label="Increase children"
+                        // Cap children at (guests - 1) so at
+                        // least one adult stays — matches
+                        // the guest /book picker's invariant.
+                        onClick={() => setChildren(numChildren + 1)}
+                        disabled={numChildren >= Math.max(0, guests - 1)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </label>
+                  {/* Per MRB-08 (2026-08-02, per decision #167):
+                      the per-page "Extra beds" stepper is
+                      single-room only. When the cart has
+                      more than one room, the per-stay
+                      extra-bed count is derived by
+                      `rebalanceGuestDistribution` from the
+                      room type's `maxExtraBeds` + the
+                      leftover guests after capacity
+                      allocation (the cart renders the
+                      resulting per-stay count). The
+                      page-level stepper would be
+                      misleading for N>1 — hide it. */}
+                  {corpExtraBedsAllowed > 0 && distributedRoomCart.length <= 1 ? (
+                    <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
+                      <span>Extra beds</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          type="button"
+                          aria-label="Decrease extra beds"
+                          onClick={() => setExtraBeds(extraBedCount - 1)}
+                          disabled={extraBedCount <= 0}
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="w-6 text-center tabular-nums">{extraBedCount}</span>
+                        <button
+                          className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
+                          type="button"
+                          aria-label="Increase extra beds"
+                          onClick={() => setExtraBeds(extraBedCount + 1)}
+                          disabled={extraBedCount >= corpExtraBedsAllowed}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </label>
+                  ) : null}
+                  {corpShowOverflowHint && selectedTypeEntry ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                      {corpExtraBedsAllowed > 0 ? (
+                        <>
+                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} (or {Number(selectedTypeEntry.maxCapacity) + corpExtraBedsAllowed}/{Number(selectedTypeEntry.maxChildren) + corpExtraBedsAllowed} with {corpExtraBedsAllowed} extra bed{corpExtraBedsAllowed === 1 ? "" : "s"}). Add {corpOverflow.requiredExtraBeds} extra bed{corpOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit your group, or pick a different room.
+                        </>
+                      ) : (
+                        <>
+                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} and does not allow extra beds. Pick a different room type to fit your group.
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </aside>
@@ -1025,6 +1559,114 @@ export function CorporateBookingPage() {
                 <p className="text-xs text-gray-600">Locked to company contract terms.</p>
               </div>
             </div>
+
+            {/* Per MRB-08 (2026-08-02, per decision #167):
+                the room cart. Renders above the room-type
+                card grid so the user sees their selection
+                before scrolling. Each cart row shows the
+                room type, the per-stay negotiated or flat
+                rate, the per-stay occupancy (auto-distributed
+                by `rebalanceGuestDistribution` from the
+                page-level `numAdults` + `numChildren` totals
+                in the left panel), and a remove button. A
+                "+ Add another room" dropdown at the bottom
+                appends a new stay of the chosen type. The
+                server mirrors the per-stay breakdown in the
+                rate breakdown + the receipt PDF. */}
+            {roomCart.length > 0 && !roomsLoading ? (
+              <div className="mb-6 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">
+                    Your block ({distributedRoomCart.length} {distributedRoomCart.length === 1 ? "room" : "rooms"})
+                  </h2>
+                  <span className="text-xs text-gray-500">
+                    {unassignedAdults + unassignedChildren > 0
+                      ? `${unassignedAdults + unassignedChildren} guest${unassignedAdults + unassignedChildren === 1 ? "" : "s"} overflow`
+                      : "All guests fit"}
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {distributedRoomCart.map((stay, index) => {
+                    const stayType = roomTypes.find((type) => type.value === stay.roomType);
+                    const stayPricing = perStayPricing[index];
+                    const stayNegotiated = ratePerRoomType && ratePerRoomType[stay.roomType] !== undefined
+                      ? ratePerRoomType[stay.roomType]
+                      : null;
+                    const stayCorp = Number(stayType?.corporateRate) || 0;
+                    const stayBase = Number(stayType?.pricePerNight) || 0;
+                    const stayRate = stayNegotiated !== null
+                      ? stayNegotiated
+                      : (stayCorp > 0 ? stayCorp : stayBase);
+                    return (
+                      <div
+                        key={stay.bookingId}
+                        className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <BedDouble size={16} className="text-primary" />
+                            <span className="font-semibold text-gray-950">
+                              Room {index + 1} · {stayType?.label ?? stay.roomType}
+                            </span>
+                            {activeCode && stayNegotiated !== null ? (
+                              <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded font-semibold border border-green-200">
+                                Negotiated
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {stay.numAdults} adult{stay.numAdults === 1 ? "" : "s"}
+                            {stay.numChildren > 0 ? `, ${stay.numChildren} child${stay.numChildren === 1 ? "" : "ren"}` : ""}
+                            {stay.extraBedCount > 0 ? `, ${stay.extraBedCount} extra bed${stay.extraBedCount === 1 ? "" : "s"}` : ""}
+                            {" · "}
+                            {formatPrice(stayRate)}/night
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-bold text-gray-950">
+                            {formatPrice(stayPricing?.staySubtotal ?? 0)}
+                          </span>
+                          {distributedRoomCart.length > 1 ? (
+                            <button
+                              type="button"
+                              aria-label={`Remove room ${index + 1}`}
+                              className="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              onClick={() => removeRoomFromCart(index)}
+                            >
+                              <Minus size={14} />
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Per MRB-08: the "Add another room" picker.
+                    Lists every available room type; the user
+                    picks the type for the new stay. The
+                    server auto-assigns a physical room of
+                    that type at booking creation. The
+                    add button is disabled when no types
+                    have availability. */}
+                {availableRoomTypes.length > 0 ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="text-xs text-gray-500">Add another room:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {availableRoomTypes.map((entry) => (
+                        <button
+                          key={entry.type.value}
+                          type="button"
+                          className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 hover:border-primary hover:text-primary"
+                          onClick={() => addRoomToCart(entry.type.value)}
+                        >
+                          + {entry.type.shortLabel || entry.type.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {roomsLoading ? (
               <div className="grid gap-6 md:grid-cols-2">
@@ -1155,11 +1797,17 @@ export function CorporateBookingPage() {
           <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs text-gray-500">
-                Corporate rate for {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
-                {hasBreakfast && " (Breakfast included)"}
+                {/* Per MRB-08 (2026-08-02, per decision #167):
+                    the sticky footer copy switches to a
+                    multi-room shape when the cart has
+                    more than one stay. The N=1 wording
+                    is preserved byte-equivalent. */}
+                {distributedRoomCart.length > 1
+                  ? `Corporate block of ${distributedRoomCart.length} rooms · ${nights} ${nights === 1 ? "night" : "nights"} · ${guests} guest${guests === 1 ? "" : "s"} total${hasBreakfast ? " (Breakfast included)" : ""}`
+                  : `Corporate rate for ${nights} ${nights === 1 ? "night" : "nights"}, ${guests} ${guests === 1 ? "guest" : "guests"}${hasBreakfast ? " (Breakfast included)" : ""}`}
               </p>
               <p className="text-xl font-bold text-gray-950">
-                {formatPrice(total)} <span className="text-xs font-normal text-gray-500">negotiated total</span>
+                {formatPrice(total)} <span className="text-xs font-normal text-gray-500">{distributedRoomCart.length > 1 ? "negotiated total" : "negotiated total"}</span>
               </p>
             </div>
             <PrimaryButton to={`/corporate/book?${continueParams.toString()}`} className="sm:min-w-56">
@@ -1370,8 +2018,17 @@ export function CorporateBookingPage() {
                 label="Guests count"
                 onBlur={() => markTouched("guestCount")}
                 onChange={(value) => {
+                  // Per EXB-07 (2026-08-01, per decision #155):
+                  // the Step 2 "Guests count" form field
+                  // is a confirmation input — it overrides
+                  // the Step 1 stepper when the user edits
+                  // it. We treat the typed value as a total
+                  // count and update `numAdults` to match
+                  // (preserving `numChildren`); the EXB-03
+                  // overflow check fires on submit.
                   updateGuestDetail("guestCount", value);
-                  setGuests(Number(value) || 1);
+                  const next = Math.max(1, Number(value) || 1);
+                  setAdults(Math.max(next, numChildren));
                 }}
                 placeholder="2"
                 required
@@ -1468,14 +2125,12 @@ export function CorporateBookingPage() {
     // Per BI-05: personal pay requires the uploaded receipt before
     // Confirm unlocks. Per BI-01: Confirm also waits for the
     // Turnstile token — submitting without one is a guaranteed 400.
-    const currentPm = corporatePaymentMethods.find((p) => p.method === paymentMethod);
-    const isRefRequired = currentPm?.requireReferenceNumber !== false;
     const canConfirm =
       termsConsent &&
       Boolean(selectedTypeEntry) &&
       Boolean(reviewTurnstile.token) &&
       !uploadingProof &&
-      (!isPersonalPay || (Boolean(proofUpload) && (!isRefRequired || Boolean(paymentReferenceNumber.trim()))));
+      (!isPersonalPay || Boolean(proofUpload));
 
     return bookingShell(
       <>
@@ -1615,24 +2270,9 @@ export function CorporateBookingPage() {
                     <p className="mt-2 text-xs font-semibold text-red-600">{paymentProofError}</p>
                   )}
 
-                  {/* Reference Number Input */}
-                  {currentPm?.requireReferenceNumber !== false && (
-                    <div className="mt-4">
-                      <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
-                        <span>
-                          Payment Reference Number <span className="text-red-500">*</span>
-                        </span>
-                        <input
-                          type="text"
-                          required
-                          value={paymentReferenceNumber}
-                          onChange={(e) => setPaymentReferenceNumber(e.target.value)}
-                          placeholder="Enter transaction reference or trace number"
-                          className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light text-sm"
-                        />
-                      </label>
-                    </div>
-                  )}
+                  {/* Reference Number Input — removed 2026-07-24 (refactor/unify-payment-reference-fields).
+                      Staff populates `transactionReference` on the relevant payment ledger entry
+                      when confirming payment. The guest no longer enters a reference at booking time. */}
                 </div>
               ) : (
                 /* Company Charge Back (no LOU upload per W2.11 / decision #99) */

@@ -12,6 +12,7 @@ import {
   XCircle
 } from "lucide-react";
 import type { Booking } from "../context/AdminContext";
+import { getLatestPaymentReference } from "@spark-inn/shared";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 import { StatusBadge } from "./StatusBadge";
@@ -25,7 +26,12 @@ interface BookingDrawerWorkspaceHeaderProps {
   totalPaid: number;
   balance: number;
   missingCheckInItems: string[];
-  onPaymentReferenceChange: (value: string) => void;
+  // Per WPM-06 (2026-07-31): the header used to render the raw
+  // `booking.paymentMethod` key (e.g. "gcash" instead of "GCash"). The
+  // parent (BookingsPage) resolves the label via the same
+  // `getOnsitePaymentMethodLabel` helper the four other selectors use
+  // and passes the resolved string down.
+  paymentMethodLabel: string;
 }
 
 const sections: Array<{
@@ -47,7 +53,7 @@ export function BookingDrawerWorkspaceHeader({
   totalPaid,
   balance,
   missingCheckInItems,
-  onPaymentReferenceChange
+  paymentMethodLabel
 }: BookingDrawerWorkspaceHeaderProps) {
   const needsPaymentReview = booking.status === "payment-uploaded";
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
@@ -77,7 +83,35 @@ export function BookingDrawerWorkspaceHeader({
                 Room {booking.roomNumber} · {booking.roomType.replace(/-/g, " ")}
               </span>
               <span>{booking.checkIn} → {booking.checkOut}</span>
-              <span>{booking.numGuests} guest{booking.numGuests === 1 ? "" : "s"}</span>
+              {/* Per EXB-08 (2026-08-01, per decision #156):
+                  the drawer header's occupancy line now
+                  shows the adult/child split when both
+                  fields are present, with the extra bed
+                  count appended when > 0. Legacy pre-CHD
+                  bookings without the split read as a
+                  single `numGuests` total (the historical
+                  "all guests are adults" shape, byte-
+                  equivalent to pre-EXB-08). Matches the
+                  receipt PDF + the email helper + the
+                  /my-booking card so the staff / guest
+                  surfaces stay in lockstep. */}
+              {(() => {
+                const numAdults = Number((booking as any).numAdults);
+                const numChildren = Number((booking as any).numChildren);
+                const extraBedCount = Number((booking as any).extraBedCount);
+                if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+                  const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"}`;
+                  const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
+                    ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+                    : "";
+                  return (
+                    <span title={`${booking.numGuests || 1} guest${(booking.numGuests || 1) === 1 ? "" : "s"} total`}>
+                      {splitLabel}{extraLabel}
+                    </span>
+                  );
+                }
+                return <span>{booking.numGuests} guest{booking.numGuests === 1 ? "" : "s"}</span>;
+              })()}
             </div>
           </div>
 
@@ -117,28 +151,31 @@ export function BookingDrawerWorkspaceHeader({
                 Payment method
               </p>
               <p className="mt-2 truncate text-xs font-bold uppercase text-gray-900">
-                {booking.paymentMethod || "Not specified"}
+                {paymentMethodLabel || "Not specified"}
               </p>
             </div>
-            {booking.paymentReferenceNumber || booking.paymentMethod !== "pay-at-hotel" ? (
-              <label className="flex flex-col gap-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
-                Original booking payment reference
-                <input
-                  type="text"
-                  value={booking.paymentReferenceNumber || ""}
-                  onChange={(event) => onPaymentReferenceChange(event.target.value)}
-                  placeholder="GCash ref or bank trace #"
-                  className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium normal-case tracking-normal text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-primary"
-                />
-              </label>
-            ) : (
-              <div>
-                <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
-                  Original booking payment reference
-                </p>
-                <p className="mt-2 text-xs text-gray-400 italic">Not submitted (pay at hotel)</p>
-              </div>
-            )}
+            {/*
+              Per 2026-07-24 (refactor/unify-payment-reference-fields):
+              the top-level `Booking.paymentReferenceNumber` is gone.
+              The canonical reference now lives on the relevant
+              payment ledger entry's `transactionReference` and is
+              shown in the Folio section. The sticky header keeps
+              the payment-method summary only.
+            */}
+            <div>
+              <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                Reference
+              </p>
+              <p className="mt-2 truncate text-xs text-gray-600">
+                {getLatestPaymentReference(booking) || (
+                  booking.paymentMethod === "pay-at-hotel" ? (
+                    <span className="italic text-gray-400">Pay at hotel — no ref needed</span>
+                  ) : (
+                    <span className="italic text-gray-400">Pending verification</span>
+                  )
+                )}
+              </p>
+            </div>
           </div>
         </div>
 

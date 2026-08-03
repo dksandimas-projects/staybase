@@ -1,13 +1,21 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Edit3, Plus, XCircle } from "lucide-react";
-import { calculateSeasonalAwareRoomTotal, getNumNights, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, getNumNights, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, PaymentMethodConfig, calculateBreakfastAddOn } from "@spark-inn/shared";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
+
+// Per WPM (2026-07-31): the walk-in + calendar "Create Calendar Booking"
+// modals' Payment Term dropdown used to be hardcoded to three literal
+// options. The fix sources the options from the same Settings list every
+// other admin payment selector uses. `pay-at-hotel` is excluded from the
+// memo (booking-time intent, not a settlement tender) but prepended back
+// for walk-in since the desk needs it as a valid choice.
+const NON_TENDER_ONSITE_PAYMENT_METHODS = new Set(["cod", "add-to-bill", "pay-at-hotel"]);
 import { formatPrice } from "../utils/format";
 import config from "@config";
 
@@ -72,6 +80,7 @@ export function CalendarPage() {
     cancelRoomBlock,
     addWalkinBooking,
     updateBookingStatus,
+    paymentMethods,
     rescheduleBooking
   } = useAdmin();
   const toast = useToast();
@@ -98,7 +107,14 @@ export function CalendarPage() {
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [blockReason, setBlockReason] = useState("Maintenance");
   const [blockNotes, setBlockNotes] = useState("");
-  const [guestName, setGuestName] = useState("");
+  // Per fix/walkin-split-name (2026-07-25): the calendar's
+  // "Create Calendar Booking" modal now mirrors the guest
+  // `/book` page — firstName + lastName are collected
+  // separately. The server combines them into
+  // `Booking.guestName` for storage, matching the new
+  // AdminContext.addWalkinBooking contract.
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [guestCount, setGuestCount] = useState(1);
@@ -109,6 +125,17 @@ export function CalendarPage() {
   const [moveCheckIn, setMoveCheckIn] = useState("");
   const [moveCheckOut, setMoveCheckOut] = useState("");
   const [moveReason, setMoveReason] = useState("");
+
+  // Per WPM-01/02: walk-in + calendar-create memos for the onsite payment
+  // options. Same shape as BookingsPage's onsitePaymentMethodOptions; the
+  // duplication is the cost of the quick fix — extract to a shared hook
+  // when a third caller appears.
+  const onsitePaymentMethodOptions = useMemo<PaymentMethodConfig[]>(() => {
+    return (paymentMethods || []).filter((method) => {
+      const key = method.method.trim();
+      return key && !NON_TENDER_ONSITE_PAYMENT_METHODS.has(key);
+    });
+  }, [paymentMethods]);
 
   const days = useMemo(() => {
     const start = parseDate(startDate);
@@ -206,14 +233,28 @@ export function CalendarPage() {
 
   const handleCreateBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selection || !selectedRoom || !selectedRoomType || !guestName.trim()) return;
+    const trimmedFirst = firstName.trim();
+    const trimmedLast = lastName.trim();
+    if (!selection || !selectedRoom || !selectedRoomType || !trimmedFirst || !trimmedLast) return;
     const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-    const totalPrice = selectedRoomTotal + (hasBreakfast ? breakfastRate * guestCount * selectedNights : 0);
+    // Per EXB-02 (2026-07-31): the historical inline
+    // `hasBreakfast ? breakfastRate * guestCount * selectedNights : 0`
+    // now routes through the shared `calculateBreakfastAddOn` helper.
+    // Byte-equivalent output — the helper's defensive coercion matches
+    // the ternary's `hasBreakfast` gate and the `Number(x) || 0`
+    // pattern this site uses.
+    const totalPrice = selectedRoomTotal + calculateBreakfastAddOn({
+      hasBreakfast,
+      breakfastRate,
+      numGuests: guestCount,
+      numNights: selectedNights
+    });
     const result = await addWalkinBooking({
       roomId: selectedRoom.id,
       roomNumber: selectedRoom.roomNumber,
       roomType: selectedRoom.type,
-      guestName: guestName.trim(),
+      firstName: trimmedFirst,
+      lastName: trimmedLast,
       guestEmail: guestEmail.trim() || `calendar-${Date.now()}@example.invalid`,
       guestPhone: guestPhone.trim() || "n/a",
       numGuests: guestCount,
@@ -259,10 +300,11 @@ export function CalendarPage() {
       toast.error("Booking not created", result.error || "Please try another range.");
       return;
     }
-    toast.success("Booking created", `${guestName.trim()} is booked for Room ${selectedRoom.roomNumber}.`);
+    toast.success("Booking created", `${trimmedFirst} ${trimmedLast} is booked for Room ${selectedRoom.roomNumber}.`);
     setIsBookingModalOpen(false);
     setSelection(null);
-    setGuestName("");
+    setFirstName("");
+    setLastName("");
     setGuestEmail("");
     setGuestPhone("");
     setGuestCount(1);
@@ -444,12 +486,27 @@ export function CalendarPage() {
 
       <Modal title="Create Calendar Booking" open={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)}>
         <form onSubmit={handleCreateBooking} className="space-y-4 text-xs">
-          <label className="flex flex-col gap-2 font-semibold text-gray-700">Guest name<input required value={guestName} onChange={(e) => setGuestName(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          {/* Per fix/walkin-split-name (2026-07-25): the
+              calendar booking modal now mirrors the guest
+              `/book` page. First + last name are collected
+              separately (autoComplete hints are the same
+              standard browser-driven fill flow). */}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-2 font-semibold text-gray-700">First name<input required value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" placeholder="Maria" className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+            <label className="flex flex-col gap-2 font-semibold text-gray-700">Last name<input required value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" placeholder="Santos" className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          </div>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Email<input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Phone<input value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Guests<input type="number" min={1} value={guestCount} onChange={(e) => setGuestCount(Number(e.target.value) || 1)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           <label className="flex items-center gap-2 font-semibold text-gray-700"><input type="checkbox" checked={hasBreakfast} onChange={(e) => setHasBreakfast(e.target.checked)} /> Include breakfast</label>
-          <label className="flex flex-col gap-2 font-semibold text-gray-700">Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm"><option value="pay-at-hotel">Pay at Hotel</option><option value="cash">Cash</option><option value="card">Card</option></select></label>
+          <label className="flex flex-col gap-2 font-semibold text-gray-700">Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm">
+            {[
+              { method: "pay-at-hotel", label: "Pay at Hotel" },
+              ...onsitePaymentMethodOptions
+            ].map((m) => (
+              <option key={m.method} value={m.method}>{m.label || m.method}</option>
+            ))}
+          </select></label>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setIsBookingModalOpen(false)} className="min-h-[44px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700">Cancel</button>
             <PrimaryButton type="submit">Create booking</PrimaryButton>

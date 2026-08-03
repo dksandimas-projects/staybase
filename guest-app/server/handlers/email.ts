@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
+import { getServerBaseUrl, getServerAdminBaseUrl } from "../lib/siteUrl";
 import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5 server-side
@@ -19,8 +20,49 @@ type EmailAction =
   | "booking-submitted"
   | "payment-confirmed"
   | "booking-confirmed"
+  // Per CWB-02 / decision #122 (2026-07-23): fired when staff
+  // confirm a `payment-uploaded` booking with a positive balance
+  // via `/api/bookings/confirm-with-balance`. The template
+  // includes the original balance + staff reason so the guest
+  // knows what to settle at check-in. Room type only (never
+  // room number — booking is not yet `checked-in` per the
+  // room-number-visibility rule).
+  | "booking-confirmed-with-balance"
   | "checkin-reminder"
   | "booking-cancelled"
+  // Per MRB-09 (2026-08-02, per decision #168): the
+  // reservation-scope cancel. Fires from MRB-13's
+  // `scope: "reservation"` cancel path (one email per
+  // reservation regardless of N rooms) and from a
+  // future partial-action cancel (one room cancelled
+  // out of N — the email lists every room with its
+  // own final state). The single-room per-child
+  // `booking-cancelled` action above is unchanged; it
+  // is the per-room fallback the legacy single-room
+  // cancel path uses. The two never overlap at
+  // call time — the cancel handler picks exactly one
+  // per transaction.
+  | "booking-cancelled-reservation"
+  // Per CRL-08 (2026-08-03, per decision #174): the
+  // refund-state email. Fires from `handleAddRefund`
+  // when a successful refund commit changes the
+  // liability state (the prior state and the new
+  // state are both computed via
+  // `computeCancellationLiabilityState` with the
+  // same `processedAmount` read; a state change is
+  // the trigger, so an idempotent replay or a
+  // sub-100-peso partial within the same state does
+  // NOT re-send). The body lists the new state, the
+  // new processed total, the new outstanding amount,
+  // the retention (if any), the payment method, and
+  // the transaction reference. Subject and body
+  // include the booking reference so the guest can
+  // match the email to their records. The
+  // reservation-scope + per-child + legacy null-
+  // `reservationId` paths all route through the
+  // same template (the `loadLiabilityProjectionForEmail`
+  // helper reads the appropriate subcollection).
+  | "booking-refund-processed"
   | "corporate-inquiry"
   | "discount-rejected"
   | "early-checkin-request"
@@ -110,11 +152,56 @@ function generateReceiptPdf(booking: any): Buffer {
 
   text("Booking Ref:", String(booking.bookingRef || "—"), top); top += 6;
   text("Guest:", String(booking.guestName || "—"), top); top += 6;
-  text("Room:", `${booking.roomNumber || "—"} (${booking.roomType || ""})`, top); top += 6;
+  // Per MRB-09 (2026-08-02, per decision #168): the
+  // multi-room receipt. The PDF lists every room in
+  // the reservation with its own ref + type +
+  // per-stay total. N=1 falls through to the legacy
+  // single-room shape (byte-equivalent to pre-MRB-09).
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
+  if (rooms && rooms.length > 0) {
+    if (booking.reservationRef) {
+      text("Reservation Ref:", String(booking.reservationRef), top); top += 6;
+    }
+    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`, top); top += 6;
+    for (const room of rooms) {
+      const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
+      const value = `${String(room.bookingRef || "—")} · ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${fmtMoney(Number(room.totalPrice || 0))}`;
+      text(label, value, top); top += 5;
+    }
+  } else {
+    // Per the refactor/room-number-visibility change: only the
+    // room type is rendered on the PDF receipt. The room number
+    // is intentionally omitted so the document doesn't create a
+    // stale expectation if the room is reassigned before check-in.
+    text("Room Type:", String(booking.roomName || booking.roomType || "—"), top); top += 6;
+  }
   text("Check-in:", fmtDate(booking.checkIn), top); top += 6;
   text("Check-out:", fmtDate(booking.checkOut), top); top += 6;
   text("Nights:", String(booking.numNights || 0), top); top += 6;
-  text("Guests:", String(booking.numGuests || 1), top); top += 6;
+  // Per EXB-08 (2026-08-01, per decision #156): the
+  // email's occupancy line now shows the adult/child
+  // split when both fields are present, with the extra
+  // bed count appended when the booking has any. Legacy
+  // pre-CHD bookings without the split read as a single
+  // `numGuests` total (the historical "all guests are
+  // adults" shape, byte-equivalent to pre-EXB-08). The
+  // split is staff-visible on the receipt PDF too (per
+  // the receipt helper), so the email + receipt stay
+  // in lockstep.
+  {
+    const numAdults = Number((booking as any).numAdults);
+    const numChildren = Number((booking as any).numChildren);
+    const extraBedCount = Number((booking as any).extraBedCount);
+    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+      const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
+      text(guestLine, "", top); top += 6;
+      if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
+        text(`Extra beds: ${extraBedCount} (${extraBedCount} × ${fmtMoney((booking as any).extraBedRate)} / bed / night)`, "", top); top += 6;
+      }
+    } else {
+      text("Guests:", String(booking.numGuests || 1), top); top += 6;
+    }
+  }
   if (booking.source) { text("Source:", String(booking.source), top); top += 6; }
 
   top += 2;
@@ -171,12 +258,319 @@ function generateReceiptPdf(booking: any): Buffer {
   return Buffer.from(doc.output("arraybuffer"));
 }
 
+// Per `plan/docs/ENV-SETUP.md` and the env-aware URL fix (2026-07-24):
+// these resolve to the right environment's apex host so test emails
+// sent from the staging deployment link to staging, and emails from
+// production link to production. See `lib/siteUrl.ts` for the
+// resolution order (SITE_URL override → VERCEL_ENV → `stg.` default).
 function siteUrl(path = "") {
-  return `https://www.${config.domain}${path}`;
+  return `${getServerBaseUrl()}${path}`;
 }
 
 function adminUrl(path = "") {
-  return `https://${config.adminDomain}${path}`;
+  return `${getServerAdminBaseUrl()}${path}`;
+}
+
+// Per MRB-09 (2026-08-02, per decision #168): the
+// reservation email view. Every guest-facing booking
+// email (booking-submitted / payment-confirmed /
+// booking-confirmed / checkin-reminder /
+// booking-confirmed-with-balance / booking-rescheduled
+// / booking-cancelled / receipt PDF) renders a single
+// "block" view that lists every room in the reservation
+// instead of one room at a time. The view is a synthetic
+// object shaped to look like the legacy single-room
+// booking (so the existing templates keep working with
+// a minimal `bookingRows` tweak) plus a `rooms[]` array
+// of per-stay projections that the new code path
+// prefers when present.
+//
+// Build this once per email — pass the reservation
+// header + the N child booking docs to
+// `buildReservationEmailView` and hand the result to
+// `sendBookingTrigger` (or the receipt PDF generator)
+// instead of the per-first-child `computedData` shape
+// the pre-MRB-09 code paths used. The pre-MRB-09 path
+// is preserved: when `reservation` is `null` (a legacy
+// single-room booking without a `reservationId`), the
+// helper returns `null` and the caller falls through to
+// the legacy `bookingRows` rendering.
+//
+// Per CRL-08 (2026-08-03, per decision #174): when
+// the reservation or first child carries a
+// `cancellationLiability` snapshot, the email view
+// also carries the `liabilityProjection` field —
+// the live state + breakdown the cancellation +
+// refund-processed templates render. The view
+// builder itself stays pure (the heavy I/O +
+// state-helper call live in
+// `loadReservationEmailViewWithLiability`); the
+// projection is passed in by the caller when
+// available.
+
+// Per CRL-08 (2026-08-03, per decision #174): the
+// liability projection for an email view. Reads
+// the stored `cancellationLiability` from the
+// cancelled entity (reservation header for
+// reservation-scope cancels + new-path N=1,
+// booking doc for per-child + legacy null-
+// `reservationId` cancels) and the cumulative
+// `processedAmount` from the refunds subcollection,
+// then runs `computeCancellationLiabilityState` to
+// project the live state. The returned object is
+// the breakdown the cancellation + refund-processed
+// email templates consume.
+//
+// The helper is `null` when no `cancellationLiability`
+// exists (a pre-CRL-07 cancel, or a no-refund cancel
+// that omitted the field) OR when the refunds
+// subcollection read failed (the caller should treat
+// the absence as `processedAmount = 0` — the helper
+// `computeCancellationLiabilityState` defaults to a
+// safe value when `processedAmount` is missing).
+//
+// The dual-source read is the same shape the
+// `handleAddRefund` + `handleGetCancellationLiability`
+// (CRL-07) use. The cumulative is the absolute sum
+// of the refund entries (refunds are stored as
+// negative amounts on either subcollection per
+// CRL-01; the `|abs()|` makes the projection
+// consistent with the helper's sign convention).
+async function loadLiabilityProjectionForEmail(params: {
+  reservationId?: string | null;
+  bookingId: string;
+}): Promise<any | null> {
+  const reservationId = String(params.reservationId || "").trim();
+  const bookingId = String(params.bookingId || "").trim();
+  if (!bookingId) return null;
+  // The new path: read the reservation header's
+  // `cancellationLiability` (the source of truth
+  // for reservation-scope cancels + N=1 cancels)
+  // and the refunds subcollection. When the
+  // reservation has no liability, fall through to
+  // the per-booking read (covers per-child cancels
+  // inside a multi-room reservation + legacy null-
+  // `reservationId` bookings).
+  let liability: any = null;
+  let refundsRef: FirebaseFirestore.CollectionReference | null = null;
+  if (reservationId) {
+    const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
+    if (reservationDoc.exists) {
+      liability = (reservationDoc.data() as any)?.cancellationLiability || null;
+      if (liability) {
+        refundsRef = adminDb.collection("reservations").doc(reservationId).collection("refunds");
+      }
+    }
+  }
+  // The per-booking path: legacy null-`reservationId`
+  // bookings OR a per-child cancel inside a
+  // multi-room reservation (the cancelled child
+  // carries the snapshot; the reservation header
+  // does not).
+  if (!liability) {
+    const bookingDoc = await adminDb.collection("bookings").doc(bookingId).get();
+    if (bookingDoc.exists) {
+      liability = (bookingDoc.data() as any)?.cancellationLiability || null;
+    }
+    refundsRef = adminDb.collection("bookings").doc(bookingId).collection("payments");
+  }
+  if (!liability) return null;
+  // Read the refunds subcollection. For new
+  // reservations the canonical source is
+  // `reservations/{id}/refunds/` (the CRL-01
+  // dual-write path MRB-04 Phase 2.x shipped). For
+  // legacy bookings the refund entries are
+  // negative-amount entries on
+  // `bookings/{id}/payments/` (the historical
+  // CRL-01 convention). The cumulative is the
+  // absolute sum so the helper's sign convention
+  // matches (refunds are positive numbers in the
+  // state machine's `processedAmount`).
+  let processedAmount = 0;
+  if (refundsRef) {
+    try {
+      const snap = await refundsRef.get();
+      processedAmount = snap.docs.reduce((sum, d) => {
+        const amount = Number(d.data()?.amount || 0);
+        return sum + Math.abs(amount);
+      }, 0);
+    } catch (err) {
+      // Per CRL-08: the projection is best-effort.
+      // A failed refunds read defaults to 0 — the
+      // template renders the pending state so the
+      // guest still sees an accurate "we owe you"
+      // story.
+      console.warn("[email] Failed to read refunds subcollection for liability projection:", err);
+    }
+  }
+  // Defer the import to avoid a circular
+  // dependency at module load time. The
+  // `computeCancellationLiabilityState` helper is
+  // a pure function in the shared package.
+  const { computeCancellationLiabilityState } = await import("@spark-inn/shared");
+  return computeCancellationLiabilityState({ liability, processedAmount });
+}
+
+export function buildReservationEmailView(reservation: any, children: any[]): any | null {
+  if (!reservation || !Array.isArray(children) || children.length === 0) return null;
+  const first = children[0] || {};
+  const roomTypeLabels: string[] = children.map((c: any) => String(c.roomName || c.roomType || "Room"));
+  // Per MRB-09: aggregate the rate breakdown. The
+  // per-stay lines come from each child doc's
+  // `rateBreakdown` (per MRB-04, the snapshot is
+  // snapshotted at create time per child). The
+  // single-room legacy case (N=1) carries the same
+  // room lines + addOns + deductions the single-room
+  // email used to render.
+  const aggregateRoomLines: any[] = [];
+  let aggregateAddOns: any[] = [];
+  let aggregateDeductions: any[] = [];
+  let aggregateSubtotal = 0;
+  let aggregateTotal = 0;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    const bd = child.rateBreakdown;
+    if (bd && Array.isArray(bd.roomLines)) {
+      for (const line of bd.roomLines) {
+        aggregateRoomLines.push({
+          ...line,
+          // Per MRB-09 (decision #168): each room
+          // line is prefixed with the room's
+          // 1-indexed position so the email
+          // reader can match the line to the
+          // rooms list above. N=1 stays as
+          // "Room 1 — Room rate" (the prefix
+          // is always present).
+          label: children.length > 1
+            ? `Room ${index + 1} — ${line.label || "Room rate"}`
+            : (line.label || "Room rate")
+        });
+      }
+    }
+    if (bd && Array.isArray(bd.addOns)) {
+      aggregateAddOns = aggregateAddOns.concat(bd.addOns);
+    }
+    if (bd && Array.isArray(bd.deductions)) {
+      aggregateDeductions = aggregateDeductions.concat(bd.deductions);
+    }
+    aggregateSubtotal += Number(child.totalPrice || 0);
+  }
+  // The reservation header is the source of truth
+  // for the aggregate total (per MRB-04 — the
+  // reservation total = the sum of the per-stay
+  // allocations). Falls back to the per-children
+  // sum for the legacy case where the reservation
+  // header is missing.
+  aggregateTotal = Number(reservation.totalPrice ?? aggregateSubtotal) || aggregateSubtotal;
+  const aggregateRateBreakdown = {
+    roomSubtotal: aggregateRoomLines.reduce((sum, line) => sum + Number(line.subtotal || 0), 0),
+    addOns: aggregateAddOns,
+    deductions: aggregateDeductions,
+    roomLines: aggregateRoomLines,
+    total: aggregateTotal
+  };
+  // Per MRB-09: the per-room projections for the
+  // email body. Each entry carries the child
+  // booking's room + occupancy + pricing. The
+  // `reservationPosition` is the 1-indexed position
+  // in the reservation (1..N). `lookupToken` is
+  // each child's individual token (the per-room
+  // lookup URL is still per-child until MRB-10
+  // ships the reservation-scope lookup).
+  const roomProjections = children.map((child: any, index: number) => ({
+    position: index + 1,
+    bookingId: String(child.id || child.bookingId || ""),
+    bookingRef: String(child.bookingRef || ""),
+    lookupToken: String(child.lookupToken || ""),
+    roomId: String(child.roomId || ""),
+    roomNumber: String(child.roomNumber || ""),
+    roomType: String(child.roomType || ""),
+    roomName: child.roomName || child.roomType || "",
+    // Per MRB-14 (2026-08-03, per decision #180): per-child
+    // dates on the room projection. The header's
+    // `checkIn` / `checkOut` is the original create-time
+    // shared range and may differ from the actual range
+    // once a room has been rescheduled; the email's
+    // reservation branch reads `actualDateRange` and the
+    // per-room `checkIn` / `checkOut` below when the
+    // children have diverged.
+    checkIn: child.checkIn,
+    checkOut: child.checkOut,
+    numNights: Number(child.numNights || 0),
+    numGuests: Number(child.numGuests || 0),
+    numAdults: Number(child.numAdults || 0),
+    numChildren: Number(child.numChildren || 0),
+    extraBedCount: Number(child.extraBedCount || 0),
+    hasBreakfast: child.hasBreakfast === true,
+    ratePerNight: Number(child.ratePerNight || 0),
+    totalPrice: Number(child.totalPrice || 0)
+  }));
+  return {
+    // The legacy single-room shape — kept so the
+    // existing templates' top-level fields render
+    // the same way they did pre-MRB-09. The legacy
+    // `bookingRef` is the first room's ref (so
+    // single-room emails stay byte-equivalent);
+    // the reservation ref is the new top-level
+    // `reservationRef` field.
+    bookingRef: first.bookingRef || "",
+    guestName: String(reservation.leadGuestName || first.guestName || ""),
+    guestEmail: String(reservation.leadGuestEmail || first.guestEmail || ""),
+    guestPhone: String(reservation.leadGuestPhone || first.guestPhone || ""),
+    roomName: first.roomName || first.roomType || "",
+    roomType: first.roomType || "",
+    roomNumber: first.roomNumber || "",
+    checkIn: reservation.checkIn ?? first.checkIn,
+    checkOut: reservation.checkOut ?? first.checkOut,
+    numNights: Number(reservation.numNights ?? first.numNights ?? 0),
+    totalPrice: aggregateTotal,
+    rateBreakdown: aggregateRateBreakdown,
+    // Per MRB-09: the new top-level reservation
+    // fields. Templates + subject-line pickers
+    // check `isReservation || rooms.length > 1`
+    // to switch into the multi-room shape.
+    reservationRef: String(reservation.reservationRef || ""),
+    reservationId: String(reservation.id || ""),
+    isReservation: true,
+    roomCount: children.length,
+    activeRoomCount: Number(reservation.activeRoomCount ?? children.length),
+    rooms: roomProjections,
+    roomTypeLabels,
+    // Per MRB-14 (2026-08-03, per decision #180): the
+    // denormalised actual range (MIN of children.checkIn
+    // / MAX of children.checkOut) plus the divergent
+    // flag. Pre-MRB-14 reservations carry no field
+    // (`undefined` here); the email template falls
+    // through to the legacy shared-range render
+    // (byte-equivalent to pre-MRB-14). The `earliestCheckIn`
+    // / `latestCheckOut` are emitted as the original
+    // Firestore values (Date | Timestamp | ISO string —
+    // whatever the shared `computeReservationActualDateRange`
+    // produced) so the template can format them via the
+    // existing `formatDate` / `toDate` helpers.
+    actualDateRange: reservation.actualDateRange
+      ? {
+          earliestCheckIn: reservation.actualDateRange.earliestCheckIn,
+          latestCheckOut: reservation.actualDateRange.latestCheckOut,
+          isDivergent: Boolean(reservation.actualDateRange.isDivergent)
+        }
+      : null,
+    // Per MRB-09: source / corporate context.
+    source: reservation.source || first.source || "online",
+    isCorporate: reservation.isCorporate === true,
+    corporateCode: reservation.corporateCode || first.corporateCode || "",
+    companyName: reservation.companyName || first.companyName || "",
+    // Status passthrough so the templates can
+    // render the same "Payment recorded" / "See
+    // you soon" copy as the single-room path.
+    status: reservation.paymentStatus || first.status || "pending",
+    paymentMethod: reservation.paymentMethod || first.paymentMethod || "",
+    // Cancellation metadata (used by the
+    // reservation-scope cancel template that
+    // MRB-13 will call).
+    cancellationReason: first.cancellationReason || "",
+    cancellationSource: first.cancellationSource || ""
+  };
 }
 
 // Per H2 (hardening batch 2026-06-26): the public
@@ -261,15 +655,81 @@ function rateBreakdownRows(booking: any) {
 }
 
 function bookingRows(booking: any) {
-  const roomLabel = [
-    booking.roomNumber ? `Room ${booking.roomNumber}` : "",
-    booking.roomName || booking.roomType || ""
-  ].filter(Boolean).join(" - ");
-
+  // Per the refactor/room-number-visibility change: room
+  // number is intentionally omitted from guest emails so
+  // the assignment shown at booking time doesn't create a
+  // stale expectation if the front desk reshuffles rooms
+  // before check-in. The friendly room name (or type code
+  // as a fallback) is still surfaced so the email reads
+  // "Room: Deluxe Sea View" rather than "Room: —".
+  //
+  // Per MRB-09 (2026-08-02, per decision #168): the
+  // multi-room path. When the booking view is a
+  // reservation (the `rooms[]` array is present and
+  // has more than one entry), the table lists every
+  // room with its own ref + type + per-stay total.
+  // N=1 falls through to the legacy single-room
+  // shape (byte-equivalent to pre-MRB-09).
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
+  const isReservation = rooms && rooms.length > 0;
+  if (isReservation) {
+    // The reservation header is the source of truth
+    // for the lead guest + dates + nights. The
+    // per-room list reads the rooms[] array.
+    //
+    // Per MRB-14 (2026-08-03, per decision #180):
+    // when the children's per-child dates have
+    // diverged from the header's original shared
+    // range (`actualDateRange.isDivergent === true`),
+    // the email surfaces the actual range +
+    // "(varies by room)" and renders per-room dates
+    // in the rooms table. Pre-MRB-14 reservations
+    // carry no `actualDateRange` and fall through
+    // to the legacy shared-range render — the
+    // guest sees the original create-time range
+    // just as before.
+    const actualRange = booking.actualDateRange;
+    const isDivergent = Boolean(actualRange && actualRange.isDivergent);
+    const roomsTable = `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${rooms.map((room: any) => {
+          // Per-room dates: when divergent, show the
+          // child's own checkIn / checkOut; otherwise
+          // the room line stays compact (header
+          // dates apply to all rooms).
+          const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut
+            ? ` · ${formatDate(room.checkIn)} → ${formatDate(room.checkOut)}`
+            : "";
+          return row(`Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
+            room.bookingRef
+              ? `${escapeHtml(String(room.bookingRef))} · ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+              : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+          );
+        }).join("")}
+      </table>
+    `;
+    const checkInValue = isDivergent && actualRange.earliestCheckIn
+      ? `${formatDate(actualRange.earliestCheckIn)} from ${config.checkInTime || "14:00"} (varies by room)`
+      : `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`;
+    const checkOutValue = isDivergent && actualRange.latestCheckOut
+      ? `${formatDate(actualRange.latestCheckOut)} by ${config.checkOutTime || "12:00"} (varies by room)`
+      : `${formatDate(booking.checkOut)} by ${config.checkOutTime || "12:00"}`;
+    return `
+      ${booking.reservationRef ? row("Reservation reference", booking.reservationRef) : ""}
+      ${row("Guest", booking.guestName)}
+      ${row("Rooms", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`)}
+      ${roomsTable}
+      ${row("Check-in", checkInValue)}
+      ${row("Check-out", checkOutValue)}
+      ${row("Nights", `${booking.numNights || 0} night(s)`)}
+      ${row("Total", formatMoney(booking.totalPrice))}
+    `;
+  }
+  const roomLabel = booking.roomName || booking.roomType || "Not set";
   return `
     ${row("Booking reference", booking.bookingRef)}
     ${row("Guest", booking.guestName)}
-    ${row("Room", roomLabel || "Not set")}
+    ${row("Room type", roomLabel)}
     ${row("Check-in", `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`)}
     ${row("Check-out", `${formatDate(booking.checkOut)} by ${config.checkOutTime || "12:00"}`)}
     ${row("Nights", `${booking.numNights || 0} night(s)`)}
@@ -388,7 +848,19 @@ function emailLayout(options: {
 }
 
 async function sendEmail(to: string, subject: string, html: string, attachments?: Array<{ filename: string; content: Buffer }>) {
-  if (typeof to === "string" && to.trim().toLowerCase().endsWith("@example.invalid")) {
+  // Per Spark Rewards audit 2026-07-18 LOW-7: the send-skip guard
+  // covers BOTH the @example.invalid placeholder (used by the
+  // early "unverified email" test path) and the @invalid
+  // placeholder (used by the RA 10173 erasure path — anonymized
+  // bookings get `guestEmail: "erased@invalid"` from
+  // `handleEraseMemberAccount` in members.ts). Without this
+  // match, a stray email trigger against an erased booking would
+  // attempt delivery to `erased@invalid` and bounce at Resend
+  // instead of being cleanly skipped. The `@example.invalid`
+  // match is preserved for backward compat with any test fixtures
+  // that pre-date the audit.
+  const trimmed = typeof to === "string" ? to.trim().toLowerCase() : "";
+  if (trimmed.endsWith("@example.invalid") || trimmed.endsWith("@invalid")) {
     console.log(`Skipping email send to placeholder address: ${to}`);
     return;
   }
@@ -432,7 +904,17 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
 
   const booking = { id: snapshot.id, ...snapshot.data() };
   if (options.requireGuestMatch && user.uid) {
+    // Per Spark Rewards audit 2026-07-18 HIGH-1: the email-claim
+    // match in findBooking must require `email_verified === true`.
+    // The `memberId` match below is always safe (the attacker
+    // would need their own uid, which they already have). This is
+    // a defensive second line — the router-level gate in
+    // `apiRouter.ts` already rejects unverified users for the
+    // early-checkin-request path, but pinning the gate at the call
+    // site defends against any future caller that bypasses the
+    // router-level check.
     const emailMatches =
+      user.email_verified === true &&
       user.email &&
       String((booking as any).guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
     const memberMatches = String((booking as any).memberId || "") === String(user.uid);
@@ -472,7 +954,31 @@ function bookingSubmittedEmail(booking: any) {
   });
 }
 
-function paymentConfirmedEmail(booking: any) {
+// Per ECE-01 (2026-07-24, plan/project/ROADMAP.md §ECE-01): the
+// payment-confirmed email may include a "House rules" card sourced
+// from `settings.websiteContent.houseRules` so the guest arrives
+// knowing the property's expectations. Omitted entirely when the
+// setting is blank — no empty card, no fallback copy. Loaded by
+// `sendBookingTrigger` from Firestore; the preview handler accepts
+// it from the request body so staff can sanity-check the email.
+//
+// Per ECE-02 (2026-07-26, decision #139): the same card now also
+// appends to `booking-confirmed` + `checkin-reminder` so the
+// guest sees the rules at every "you're arriving soon" touchpoint
+// (payment → confirmed → day-before reminder), not just at
+// payment. The card block + render is identical across all three
+// templates so the staff-owned copy is single-sourced from
+// `settings.websiteContent.houseRules`.
+function houseRulesCard(houseRules?: string | null): string {
+  const trimmedRules = typeof houseRules === "string" ? houseRules.trim() : "";
+  if (!trimmedRules) return "";
+  return card(
+    "House rules",
+    `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(trimmedRules)}</p>`
+  );
+}
+
+function paymentConfirmedEmail(booking: any, houseRules?: string | null) {
   return emailLayout({
     preheader: `Payment received for booking ${booking.bookingRef}.`,
     eyebrow: "Payment verified",
@@ -481,19 +987,48 @@ function paymentConfirmedEmail(booking: any) {
     body: `
       ${callout("green", "Payment recorded", "Your reservation is one step closer to final confirmation. We will send a separate booking confirmation once the front desk completes the final review.")}
       ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "View booking",
     ctaUrl: lookupUrl(booking)
   });
 }
 
-function bookingConfirmedEmail(booking: any) {
+function bookingConfirmedEmail(booking: any, houseRules?: string | null) {
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} is confirmed.`,
     eyebrow: "Booking confirmed",
     title: "Your room is ready on our calendar",
     intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(config.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
     body: `
+      ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
+      ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      ${houseRulesCard(houseRules)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking)
+  });
+}
+
+// Per CWB-02 / decision #122 (2026-07-23): confirmation email
+// variant sent when staff confirm a `payment-uploaded` booking
+// with a positive balance. Includes the original balance + the
+// staff reason so the guest arrives knowing what to settle at
+// check-in. Room number is intentionally omitted (booking is
+// not yet `checked-in` per the room-number-visibility rule).
+function bookingConfirmedWithBalanceEmail(booking: any, balance: number, reason: string) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const reasonBlock = safeReason
+    ? `<p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;"><strong>Reason from our team:</strong> ${escapeHtml(safeReason)}</p>`
+    : "";
+  return emailLayout({
+    preheader: `Booking ${booking.bookingRef} is confirmed. ₱${safeBalance.toLocaleString("en-PH")} to settle at check-in.`,
+    eyebrow: "Booking confirmed — balance due",
+    title: "Your room is ready on our calendar",
+    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(config.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
+    body: `
+      ${callout("warm", "Balance to settle at check-in", `A balance of <strong>${escapeHtml(formatMoney(safeBalance))}</strong> remains and will be collected when you arrive.${reasonBlock}`)}
       ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
@@ -517,7 +1052,7 @@ function bookingRescheduledEmail(booking: any) {
   });
 }
 
-function checkinReminderEmail(booking: any) {
+function checkinReminderEmail(booking: any, houseRules?: string | null) {
   return emailLayout({
     preheader: `Your ${config.brandName} check-in is coming up.`,
     eyebrow: "Check-in reminder",
@@ -526,26 +1061,302 @@ function checkinReminderEmail(booking: any) {
     body: `
       ${callout("warm", "Before you arrive", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. If your arrival time changes, please contact the front desk so we can assist you smoothly.`)}
       ${card("Arrival details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Hotel address", addressLine())}</table>`)}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "Open booking lookup",
     ctaUrl: lookupUrl(booking)
   });
 }
 
+// Per CRL-08 (2026-08-03, per decision #174): the
+// liability breakdown card. Renders the policy
+// refund, retained amount, current processed
+// total, outstanding amount, and the state badge
+// from the CRL-07 `liabilityProjection` field.
+// Hidden when the projection is absent (a
+// pre-CRL-07 cancel, a no-refund cancel that
+// omitted the field) — the surrounding "no refund
+// is issued automatically" callout then serves the
+// guest. The retained-amount row is hidden when
+// `retentionAmount === 0` (no exception was
+// applied) so the layout stays clean for the
+// default path.
+function liabilityBreakdownCard(projection: any) {
+  if (!projection || !projection.liability) return "";
+  const policyResult = projection.liability.policyResult || {};
+  const refundPct = Number(policyResult.refundPct || 0);
+  const policyRefund = Number(policyResult.policyRefund || 0);
+  const netCollected = Number(policyResult.netCollected || 0);
+  const retainedAtCancel = Number(policyResult.retainedAmount || 0);
+  const approved = Number(projection.liability.approvedAmount || 0);
+  const processed = Number(projection.processedAmount || 0);
+  const outstanding = Number(projection.outstandingAmount || 0);
+  const retention = Number(projection.retentionAmount || 0);
+  const stateLabel = String(projection.stateLabel || "Pending refund");
+  const policyText = String(policyResult.policyText || "Standard cancellation policy applies.");
+  // The "extra we kept beyond the policy" row is
+  // only shown when an exception was applied
+  // (retention > 0). Same for the state badge —
+  // always present, but the wording reflects the
+  // current lifecycle position.
+  const exceptionRow = retention > 0
+    ? row("Extra retained (exception)", formatMoney(retention))
+    : "";
+  const retainedAtCancelRow = retainedAtCancel > 0 && retention === 0
+    ? row("Retained under policy", formatMoney(retainedAtCancel))
+    : "";
+  return `
+    ${card("Refund summary", `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Net collected at cancel", formatMoney(netCollected))}
+        ${row(`Policy refund (${refundPct}%)`, formatMoney(policyRefund))}
+        ${retainedAtCancelRow}
+        ${row("Approved refund", formatMoney(approved))}
+        ${row("Processed so far", formatMoney(processed))}
+        ${row("Outstanding", formatMoney(outstanding))}
+        ${exceptionRow}
+        ${row("Current state", escapeHtml(stateLabel))}
+      </table>
+      <p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">${escapeHtml(policyText)}</p>
+    `)}
+  `;
+}
+
 function bookingCancelledEmail(booking: any) {
+  // Per CRL-04 (2026-08-02): truthful communications. The previous
+  // copy said "If this cancellation was unexpected, please contact
+  // our support team right away" — which strongly implied the
+  // cancellation itself resolved any money question. It did not.
+  // The new copy distinguishes "cancellation is permanent" from
+  // "money was returned", and makes explicit that no refund is
+  // issued automatically. The wording is the same across the
+  // three `cancellationSource` values (guest / staff / system)
+  // because the underlying fact — no refund is automatic — is
+  // true in all three cases:
+  //
+  //   guest  — CRL-06 permits paid pre-arrival cancellation
+  //            after the financial preview; any applicable
+  //            refund still requires staff processing
+  //   staff  — money may or may not have been collected; the
+  //            front desk assesses refund eligibility out of band
+  //   system — PEX auto-expiry of an unpaid `pending` hold, so
+  //            no money was collected
+  //
+  // The intro line uses the source to switch the actor ("you"
+  // vs "our team" vs "the system") so the email reads naturally
+  // regardless of who initiated the cancellation. The refund
+  // sentence is identical because the rule is identical.
+  //
+  // Per CRL-08 (2026-08-03, per decision #174): when the
+  // `liabilityProjection` field is present, the email
+  // renders the financial breakdown card (policy
+  // refund, retained, processed, outstanding, state
+  // badge) AND tailors the "what happens next"
+  // callout to the actual numbers. The legacy
+  // "no refund is issued automatically" copy stays
+  // as a fallback for pre-CRL-07 cancels + the
+  // no-refund case.
+  const source = String(booking.cancellationSource || "staff");
+  const intro = source === "guest"
+    ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled at your request.`
+    : source === "system"
+      ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled because the payment hold expired.`
+      : `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled by our team.`;
+  // The breakdown-aware callout. When the
+  // projection is present, the callout references
+  // the actual policy refund + outstanding so the
+  // guest knows the precise money story. When
+  // absent, the legacy generic copy stays (a
+  // pre-CRL-07 cancel or a no-refund cancel).
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory
+    ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed — our team will reach out to arrange the refund. Processing times vary.`
+    : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> — if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.`;
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} has been cancelled.`,
     eyebrow: "Booking cancelled",
     title: "Your reservation has been cancelled",
-    intro: `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been cancelled.`,
+    intro,
     body: `
       ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
+      ${callout("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
       ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
     ctaUrl: `mailto:${config.supportEmail}`
   });
+}
+
+// Per MRB-09 (2026-08-02, per decision #168): the
+// reservation-scope cancel template. Used by
+// MRB-13's `scope: "reservation"` cancel path
+// (one transaction cancels every child, fires
+// one email) AND by a future partial-action
+// cancel (one room cancelled out of N — the
+// surviving rooms render in the "still confirmed"
+// list). The body is shaped so a partial cancel
+// reads naturally: "Room 2 was cancelled at your
+// request. Rooms 1 and 3 remain on our calendar."
+//
+// Falls back to the legacy single-room
+// `bookingCancelledEmail` rendering when the
+// reservation view is missing the `rooms[]` array
+// (a defensive guard — a code path that passes
+// only `booking.bookingRef` + `booking.guestName`
+// should still produce a sensible email). The
+// `bookingRows` helper handles the multi-room
+// rendering when the array is present.
+function bookingCancelledReservationEmail(booking: any) {
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : [];
+  const source = String(booking.cancellationSource || "staff");
+  const intro = source === "guest"
+    ? `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(config.brandName)}</strong> at your request.`
+    : source === "system"
+      ? `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(config.brandName)}</strong> because the payment hold expired.`
+      : `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(config.brandName)}</strong> by our team.`;
+  // Split the rooms into "cancelled" and "still
+  // active" so a partial cancel reads naturally.
+  // A child's `cancelledAt` is set when the cancel
+  // transaction fires (per CRL-02 audit stamps).
+  // `null` → still confirmed.
+  const cancelledRooms = rooms.filter((room: any) => room.cancelledAt);
+  const survivingRooms = rooms.filter((room: any) => !room.cancelledAt);
+  const isFullCancel = survivingRooms.length === 0;
+  const title = isFullCancel
+    ? "Your reservation has been cancelled"
+    : `Part of your reservation was cancelled (${cancelledRooms.length} of ${rooms.length} room${rooms.length === 1 ? "" : "s"})`;
+  const eyebrow = isFullCancel ? "Reservation cancelled" : "Reservation updated";
+  // Build the per-room table. The `Cancelled at`
+  // column shows the audit timestamp for cancelled
+  // rooms; the `Status` column shows "Confirmed"
+  // for surviving rooms.
+  const roomsTable = rooms.length > 0
+    ? `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${rooms.map((room: any) => {
+          const isCancelled = Boolean(room.cancelledAt);
+          const roomLabel = `Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`;
+          const ref = escapeHtml(String(room.bookingRef || "—"));
+          const status = isCancelled
+            ? `<span style="color: #b91c1c; font-weight: 600;">Cancelled</span>${room.cancellationReason ? ` · ${escapeHtml(String(room.cancellationReason))}` : ""}`
+            : `<span style="color: #166534; font-weight: 600;">Confirmed</span>`;
+          return `<tr>
+            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; vertical-align: top; width: 50%;">${roomLabel}<br/><span style="color: #6b7280; font-size: 12px;">${ref}</span></td>
+            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; text-align: right; vertical-align: top;">${status}</td>
+          </tr>`;
+        }).join("")}
+      </table>
+    `
+    : "";
+  // Per CRL-08 (2026-08-03, per decision #174):
+  // the reservation-scope path also renders the
+  // financial breakdown. Same projection shape
+  // the per-child template uses — the helper is
+  // shared. The "what happens next" callout
+  // references the actual numbers when the
+  // projection is present (a paid cancel that
+  // owes a refund); the legacy generic copy
+  // stays for the no-money case.
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory
+    ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed — our team will reach out to arrange the refund. Processing times vary.`
+    : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> — if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.`;
+  return emailLayout({
+    preheader: booking.reservationRef
+      ? `Reservation ${booking.reservationRef} was updated.`
+      : `Booking ${booking.bookingRef} has been cancelled.`,
+    eyebrow,
+    title,
+    intro,
+    body: `
+      ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
+      ${callout("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
+      ${roomsTable ? card("Rooms", roomsTable) : card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
+    `,
+    ctaLabel: "Contact support",
+    ctaUrl: `mailto:${config.supportEmail}`
+  });
+}
+
+// Per CRL-08 (2026-08-03, per decision #174): the
+// refund-state email. Sent when a successful
+// `handleAddRefund` commit changes the liability
+// state (e.g. "pending-processing" →
+// "partially-processed" or "partially-processed" →
+// "processed"). The state-change gate lives in the
+// handler — this template just renders the new
+// state + the new processed / outstanding numbers
+// + the latest refund entry (method + reference).
+// Falls through to a "your refund is being
+// processed" callout when the projection is absent
+// (a defensive guard — the state-change gate
+// already ensures a liability exists, but a
+// mid-flight read failure should not blank the
+// email).
+function bookingRefundProcessedEmail(booking: any) {
+  const projection = booking.liabilityProjection;
+  const latestRefund = booking.latestRefund || null;
+  const stateLabel = String(projection?.stateLabel || "Refund update");
+  const processed = Number(projection?.processedAmount || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const approved = Number(projection?.liability?.approvedAmount || 0);
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const retention = Number(projection?.retentionAmount || 0);
+  // The headline is the state itself — "Your
+  // refund is being processed", "Your refund has
+  // been completed", etc. The state badge is the
+  // primary signal the guest reads.
+  const subject = booking.reservationRef
+    ? `[${config.brandName}] Refund update: ${booking.reservationRef}`
+    : `[${config.brandName}] Refund update: ${booking.bookingRef}`;
+  const intro = `Dear ${escapeHtml(booking.guestName)}, here's a quick update on the refund for your ${booking.reservationRef ? "reservation" : "booking"} <strong>${escapeHtml(booking.reservationRef || booking.bookingRef)}</strong>.`;
+  // The "what this means" callout uses the state
+  // to switch the actor — the guest knows what
+  // happens next without reading the table.
+  const whatHappensNext = projection?.state === "processed"
+    ? `Your refund is now complete. The total of <strong>${formatMoney(approved)}</strong> has been returned to you. No further action is needed.`
+    : projection?.state === "retained"
+      ? `An exception was applied — <strong>${formatMoney(approved)}</strong> is approved for refund and <strong>${formatMoney(retention)}</strong> is being retained beyond the standard policy. <strong>${formatMoney(outstanding)}</strong> is still being processed.`
+      : projection?.state === "partially-processed"
+        ? `Your refund is in progress. <strong>${formatMoney(processed)}</strong> of <strong>${formatMoney(approved)}</strong> has been returned so far. <strong>${formatMoney(outstanding)}</strong> is still being processed.`
+        : `Your refund is pending. <strong>${formatMoney(approved)}</strong> is approved for return; our team will process it shortly.`;
+  // The latest-refund row surfaces the per-entry
+  // detail (method + reference). Hidden when the
+  // caller didn't pass it (the state-change handler
+  // always passes it, but the defensive guard
+  // keeps the template useful for any future
+  // re-send path).
+  const latestRefundRow = latestRefund
+    ? row("Latest refund", `${formatMoney(Math.abs(Number(latestRefund.amount || 0)))} via ${escapeHtml(String(latestRefund.method || "—"))}${latestRefund.transactionReference ? ` · Ref ${escapeHtml(String(latestRefund.transactionReference))}` : ""}`)
+    : "";
+  return {
+    subject,
+    html: emailLayout({
+      preheader: `Refund update for ${booking.reservationRef || booking.bookingRef}: ${stateLabel}.`,
+      eyebrow: "Refund update",
+      title: stateLabel,
+      intro,
+      body: `
+        ${callout("warm", "What this means", whatHappensNext)}
+        ${liabilityBreakdownCard(projection)}
+        ${latestRefund ? card("Latest refund", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${latestRefundRow}</table>`) : ""}
+        ${policyRefund > 0 ? `<p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">The cancellation policy applied to your booking entitled you to a refund of <strong>${formatMoney(policyRefund)}</strong>. Processing times vary by payment method.</p>` : ""}
+        <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
+      `,
+      ctaLabel: "Contact support",
+      ctaUrl: `mailto:${config.supportEmail}`
+    })
+  };
 }
 
 function discountRejectedEmail(booking: any) {
@@ -571,15 +1382,28 @@ function discountRejectedEmail(booking: any) {
 // payment proof from the dashboard, the booking is
 // bounced back to `pending` (room stays held) and the
 // guest is emailed with the rejection reason so they
-// can re-upload a corrected proof. Stale
-// `paymentProofUrl` + `paymentReferenceNumber` are kept
-// for audit; the re-upload is guest-driven via the
-// existing pending UI.
+// can re-upload a corrected proof. Stale `paymentProofUrl`
+// is kept for audit; the re-upload is guest-driven via
+// the existing pending UI. Per 2026-07-24
+// (refactor/unify-payment-reference-fields): the previous
+// top-level `paymentReferenceNumber` was retired; any
+// reference on file now lives on the most recent entry in
+// the booking's onsitePayments[] ledger. We surface that
+// here as "Reference on file" so the guest can re-upload
+// with the matching ref if needed.
 function paymentRejectedEmail(booking: any) {
   const reason = booking.paymentRejectionReason
     ? `Reason: ${escapeHtml(booking.paymentRejectionReason)}`
     : "We could not verify the uploaded payment proof against our records.";
-  const hasRef = Boolean(booking.paymentReferenceNumber);
+  const payments = Array.isArray(booking?.onsitePayments) ? booking.onsitePayments : [];
+  let refOnFile: string | null = null;
+  for (let i = payments.length - 1; i >= 0; i -= 1) {
+    const ref = payments[i]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) {
+      refOnFile = String(ref);
+      break;
+    }
+  }
   return emailLayout({
     preheader: `Action needed: your payment proof for booking ${booking.bookingRef} was rejected.`,
     eyebrow: "Payment needs your attention",
@@ -587,7 +1411,7 @@ function paymentRejectedEmail(booking: any) {
     intro: `Dear ${escapeHtml(booking.guestName)}, we reviewed the payment proof you uploaded for booking <strong>${escapeHtml(booking.bookingRef)}</strong> but couldn't match it to the booking.`,
     body: `
       ${callout("red", "Payment not verified", reason)}
-      ${hasRef ? callout("warm", "Reference we received", `You entered: <strong>${escapeHtml(String(booking.paymentReferenceNumber))}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
+      ${refOnFile ? callout("warm", "Reference on file", `The reference on record is <strong>${escapeHtml(refOnFile)}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
       <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your room is still held for you. To confirm your stay, please upload a corrected payment proof from the booking lookup page using the link below — your booking ref <strong>${escapeHtml(booking.bookingRef)}</strong> and email are all you need.</p>
       ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
@@ -909,7 +1733,6 @@ function storeOrderPlacedEmail(order: any) {
       ${callout("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
       ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
         ${row("Order ref", order.orderRef || "—")}
-        ${row("Room", order.roomNumber ? `Room ${order.roomNumber}` : "—")}
         ${itemsTable}
         <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
         ${totalRow}
@@ -1111,6 +1934,49 @@ export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
   );
 }
 
+// Per CRL-04 (2026-08-02): a paid GCash store order was
+// cancelled by the guest. The guest still gets the standard
+// `store-order-cancelled` email (which now states that no
+// refund is automatic per CRL-04's copy pass), but the
+// staff also needs a separate, dedicated alert: the
+// "front desk will reach out" sentence in the guest email
+// is a single sentence; the staff alert is a queue item
+// the front desk can triage. Without this, a paid order
+// can disappear into the booking's audit log with no
+// operator owning the refund follow-up.
+function staffRefundReviewEmail(order: any) {
+  return emailLayout({
+    preheader: `Paid store order ${order.orderRef} was cancelled.`,
+    eyebrow: "Refund review needed",
+    title: "A guest cancelled a paid store order",
+    intro: `A guest cancelled a paid store order at <strong>${escapeHtml(config.brandName)}</strong>. The guest was charged via the order's payment method; review the payment proof and record a refund through the order's booking if appropriate.`,
+    body: `
+      ${callout("warm", "Action required", "No refund is issued automatically by the cancellation. Open the order's payment screenshot, confirm the amount, and record a refund via the linked booking's Folio → Refund action.")}
+      ${card("Cancelled order", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef)}
+        ${row("Room", order.roomNumber || "—")}
+        ${row("Guest", order.guestName || "—")}
+        ${row("Amount", formatMoney(Number(order.totalAmount || 0)))}
+        ${row("Method", order.paymentMethod || "—")}
+        ${row("Reason", order.cancellationReason ? escapeHtml(order.cancellationReason) : "—")}
+        ${order.paymentProofUrl ? row("Payment proof", `<a href="${escapeHtml(order.paymentProofUrl)}" style="color: ${config.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Open booking",
+    ctaUrl: order.bookingId
+      ? adminUrl(`/bookings?ref=${encodeURIComponent(order.bookingId)}`)
+      : adminUrl("/bookings")
+  });
+}
+
+export async function sendStaffRefundReviewTrigger(order: any) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${config.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
+    staffRefundReviewEmail(order)
+  );
+}
+
 async function getTomorrowConfirmedBookings() {
   // Per BF-42 (booking-flow audit 2026-06-26): this is NOT
   // a duplicate of getManilaDateInfo() — it computes a
@@ -1136,47 +2002,128 @@ async function getTomorrowConfirmedBookings() {
 }
 
 export async function sendBookingTrigger(action: EmailAction, booking: any) {
+  // Per ECE-01 (2026-07-24): payment-confirmed email may include a
+  // "House rules" card sourced from `settings.websiteContent.houseRules`.
+  // Per ECE-02 (2026-07-26, decision #139): the same card also
+  // appends to booking-confirmed + checkin-reminder so the guest
+  // sees the rules at every "you're arriving soon" touchpoint.
+  // We only read the doc for the three actions that need it — every
+  // other template skips the round-trip. The doc is read
+  // non-transactionally (settings updates are infrequent, and a stale
+  // rules string on a single email is harmless — the next email picks
+  // up the latest). Omit block on blank value (no fallback copy).
+  const HOUSE_RULES_ACTIONS = new Set<EmailAction>([
+    "payment-confirmed",
+    "booking-confirmed",
+    "checkin-reminder"
+  ]);
+  let houseRules: string | null = null;
+  if (HOUSE_RULES_ACTIONS.has(action)) {
+    try {
+      const doc = await adminDb.collection("settings").doc("websiteContent").get();
+      houseRules = typeof doc.data()?.houseRules === "string" ? doc.data()?.houseRules : null;
+    } catch (error) {
+      console.warn(`Failed to load websiteContent.houseRules for ${action} email; continuing without it.`, error);
+      houseRules = null;
+    }
+  }
+
   const templates: Record<string, { subject: string; html: string; attachments?: Array<{ filename: string; content: Buffer }> }> = {
     "booking-submitted": {
-      subject: `[${config.brandName}] Booking request received: ${booking.bookingRef}`,
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // subject uses the reservation ref when the view
+      // is reservation-scope (N>1). N=1 keeps the
+      // legacy `Booking request received: <bookingRef>`
+      // subject byte-equivalent.
+      subject: booking.reservationRef
+        ? `[${config.brandName}] Booking request received: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})`
+        : `[${config.brandName}] Booking request received: ${booking.bookingRef}`,
       html: bookingSubmittedEmail(booking)
     },
     "payment-confirmed": {
-      subject: `[${config.brandName}] Payment confirmed: ${booking.bookingRef}`,
-      html: paymentConfirmedEmail(booking)
+      subject: booking.reservationRef
+        ? `[${config.brandName}] Payment confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})`
+        : `[${config.brandName}] Payment confirmed: ${booking.bookingRef}`,
+      html: paymentConfirmedEmail(booking, houseRules)
     },
     "booking-confirmed": {
-      subject: `[${config.brandName}] Booking confirmed: ${booking.bookingRef}`,
-      html: bookingConfirmedEmail(booking),
+      subject: booking.reservationRef
+        ? `[${config.brandName}] Booking confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})`
+        : `[${config.brandName}] Booking confirmed: ${booking.bookingRef}`,
+      html: bookingConfirmedEmail(booking, houseRules),
       // G-03 (E2E audit 2026-07-17): attach the receipt PDF required
       // by Decision #82. Generated server-side from persisted
       // booking/folio data. Does not expose private payment-proof
       // or ID URLs.
       attachments: [{
-        filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+        filename: booking.reservationRef
+          ? `receipt-${String(booking.reservationRef).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`
+          : `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
         content: generateReceiptPdf(booking)
       }]
     },
     "checkin-reminder": {
-      subject: `[${config.brandName}] Check-in reminder: ${booking.bookingRef}`,
-      html: checkinReminderEmail(booking)
+      subject: booking.reservationRef
+        ? `[${config.brandName}] Check-in reminder: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})`
+        : `[${config.brandName}] Check-in reminder: ${booking.bookingRef}`,
+      html: checkinReminderEmail(booking, houseRules)
     },
     "booking-cancelled": {
-      subject: `[${config.brandName}] Booking cancelled: ${booking.bookingRef}`,
+      subject: booking.reservationRef
+        ? `[${config.brandName}] Booking cancelled: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})`
+        : `[${config.brandName}] Booking cancelled: ${booking.bookingRef}`,
       html: bookingCancelledEmail(booking)
+    },
+    // Per MRB-09 (2026-08-02, per decision #168): the
+    // reservation-scope cancel. Fires from MRB-13's
+    // reservation-scope cancel path (`scope: "reservation"`
+    // in `POST /api/bookings/cancel`). The body lists every
+    // cancelled room with its own ref + final state. The
+    // subject uses the reservation ref (never a per-room
+    // ref) so the email is unambiguous about which
+    // reservation it covers. A partial reservation-scope
+    // action (e.g. one room cancelled out of three) sends
+    // this same action with the surviving rooms'
+    // `status`/`cancelledAt` fields set on the projection
+    // — the template's "rooms affected" / "rooms remaining"
+    // split makes the partial state explicit.
+    "booking-cancelled-reservation": {
+      subject: booking.reservationRef
+        ? `[${config.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})`
+        : `[${config.brandName}] Reservation updated: ${booking.bookingRef}`,
+      html: bookingCancelledReservationEmail(booking)
     },
     "discount-rejected": {
       subject: `[${config.brandName}] Discount verification update: ${booking.bookingRef}`,
       html: discountRejectedEmail(booking)
     },
     "booking-rescheduled": {
-      subject: `[${config.brandName}] Booking updated: ${booking.bookingRef}`,
+      subject: booking.reservationRef
+        ? `[${config.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})`
+        : `[${config.brandName}] Booking updated: ${booking.bookingRef}`,
       html: bookingRescheduledEmail(booking)
     },
     "payment-rejected": {
       subject: `[${config.brandName}] Action needed: payment proof rejected for ${booking.bookingRef}`,
       html: paymentRejectedEmail(booking)
-    }
+    },
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // the refund-state email. The template function
+    // returns `{ subject, html }` because the
+    // subject depends on the `liabilityProjection`
+    // field (`"Refund update: <ref>"` with no
+    // room-count parenthetical). The handler fires
+    // this action when a successful `add-refund`
+    // commit changes the liability state (the
+    // state-change gate is the trigger, not the
+    // refund entry itself — a sub-state partial
+    // does not re-send). The booking view passed
+    // by the handler carries `liabilityProjection`
+    // (the live `computeCancellationLiabilityState`
+    // result) + `latestRefund` (the just-committed
+    // refund entry, used for the "Latest refund"
+    // row).
+    "booking-refund-processed": bookingRefundProcessedEmail(booking)
   };
 
   const template = templates[action];
@@ -1185,6 +2132,34 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
   }
 
   await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
+}
+
+// Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
+// is a dedicated trigger because the email body needs the
+// original balance and staff reason, not just the booking
+// document. Mirrors the dedicated `staffNewBookingEmail` /
+// `staffNewPaymentEmail` pattern. Fired from
+// `handleConfirmBookingWithBalance` after the transaction
+// commits so the booking snapshot reflects the new status
+// (`confirmed`) and the four `confirmedWithBalance*` fields.
+//
+// Room number is intentionally omitted (booking is not yet
+// `checked-in` per the room-number-visibility rule). The
+// template uses the room type the same way
+// `bookingConfirmedEmail` does.
+export async function sendBookingConfirmedWithBalanceTrigger(booking: any, balance: number, reason: string) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const subject = `[${config.brandName}] Booking confirmed: ${booking.bookingRef} (₱${safeBalance.toLocaleString("en-PH")} due at check-in)`;
+  const html = bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason);
+  // Reuse the same receipt PDF attached to the standard
+  // booking-confirmed email — the folio snapshot at confirm
+  // time is the same.
+  const attachments = [{
+    filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+    content: generateReceiptPdf(booking)
+  }];
+  await sendEmail(booking.guestEmail, subject, html, attachments);
 }
 
 export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse, action: EmailAction) {
@@ -1283,16 +2258,111 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
 
     if (action === "checkin-reminder" && !req.body?.bookingId && !req.body?.bookingRef) {
       const bookings = await getTomorrowConfirmedBookings();
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // reservation-scope cron. The pre-MRB-09 code sent
+      // one email per booking doc, which produced N
+      // duplicate reminders for an N-room reservation —
+      // the cron would fire N identical-looking emails
+      // (same subject, same body, same guest email) at
+      // the same time, all carrying the same room info
+      // because the body rendered only the first room.
+      // The new shape groups children by `reservationId`
+      // and sends ONE email per reservation, using the
+      // reservation-scope view (every room listed).
+      // Legacy pre-MRB-01 bookings (no `reservationId`)
+      // continue through the per-child path.
       const pending = bookings.filter((booking: any) => !booking?.reminderSentAt);
-      await Promise.all(pending.map((booking: any) => sendBookingTrigger(action, booking)));
-      const sentIds = pending.map((booking: any) => booking?.id).filter(Boolean);
-      if (sentIds.length > 0) {
-        const stamp = new Date();
-        await Promise.all(sentIds.map((id: string) =>
-          adminDb.collection("bookings").doc(id).update({ reminderSentAt: stamp }).catch(() => null)
-        ));
+      const reservationGroups = new Map<string, any[]>();
+      const legacySingles: any[] = [];
+      for (const booking of pending) {
+        const reservationId = String(booking?.reservationId || "").trim();
+        if (reservationId) {
+          const list = reservationGroups.get(reservationId) || [];
+          list.push(booking);
+          reservationGroups.set(reservationId, list);
+        } else {
+          legacySingles.push(booking);
+        }
       }
-      return res.status(200).json({ success: true, data: { sent: pending.length, skipped: bookings.length - pending.length } });
+      // For each reservation, pick the first child as
+      // the "anchor" booking (carries the
+      // `reminderSentAt` flag) and pass the per-child
+      // data as the basis for the reservation view.
+      // The view is built from the captured per-child
+      // snapshot — for the cron, we use the child
+      // doc's `reservationId` + the live read of the
+      // sibling children to populate the rooms list.
+      const reservationAnchors: Array<{ anchor: any; reservationId: string }> = [];
+      for (const [reservationId, children] of reservationGroups.entries()) {
+        // Skip reservations that have already been
+        // reminded via any sibling's `reminderSentAt`
+        // (the filter above already removed children
+        // with `reminderSentAt`, so the first child
+        // here is a fresh anchor). The other children
+        // get their own `reminderSentAt` stamp in
+        // the same loop below.
+        reservationAnchors.push({ anchor: children[0], reservationId });
+      }
+      // Build the reservation views in parallel.
+      const reservationViewPromises = reservationAnchors.map(async ({ anchor, reservationId }) => {
+        const reservationRef = adminDb.collection("reservations").doc(reservationId);
+        const [reservationSnap, childrenSnap] = await Promise.all([
+          reservationRef.get(),
+          adminDb.collection("bookings")
+            .where("reservationId", "==", reservationId)
+            .get()
+        ]);
+        if (!reservationSnap.exists) {
+          // Reservation doc missing — fall back to the
+          // anchor's per-child data so the cron
+          // doesn't skip the reminder.
+          return { anchor, view: anchor };
+        }
+        const children = childrenSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+        return { anchor, view: buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children) };
+      });
+      const resolvedReservationViews = await Promise.all(reservationViewPromises);
+      // Send one email per reservation (using the
+      // view) + one per legacy single-room booking.
+      const sendTasks: Promise<any>[] = [];
+      for (const { anchor, view } of resolvedReservationViews) {
+        sendTasks.push(sendBookingTrigger(action, view || anchor));
+      }
+      for (const single of legacySingles) {
+        sendTasks.push(sendBookingTrigger(action, single));
+      }
+      await Promise.all(sendTasks);
+      // Stamp `reminderSentAt` on every child of every
+      // reminded reservation, plus every legacy single.
+      const stamp = new Date();
+      const stampTasks: Promise<any>[] = [];
+      for (const [, children] of reservationGroups.entries()) {
+        for (const child of children) {
+          stampTasks.push(
+            adminDb.collection("bookings").doc(child.id).update({ reminderSentAt: stamp }).catch(() => null)
+          );
+        }
+      }
+      for (const single of legacySingles) {
+        stampTasks.push(
+          adminDb.collection("bookings").doc(single.id).update({ reminderSentAt: stamp }).catch(() => null)
+        );
+      }
+      await Promise.all(stampTasks);
+      return res.status(200).json({
+        success: true,
+        data: {
+          sent: pending.length,
+          skipped: bookings.length - pending.length,
+          // Diagnostic — the cron response surfaces
+          // the grouping (how many reservation-scope
+          // emails vs legacy single-room emails) so
+          // the next audit can verify the
+          // consolidation worked.
+          reservations: reservationAnchors.length,
+          legacySingles: legacySingles.length
+        }
+      });
     }
 
     const hasStaff = Boolean((req as any).staff?.success);
@@ -1321,7 +2391,7 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
 
-  const { template } = req.body || {};
+  const { template, houseRules } = req.body || {};
   if (!template) {
     return res.status(400).json({ success: false, error: "Template parameter is required." });
   }
@@ -1408,16 +2478,59 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         html = bookingSubmittedEmail(mockBooking);
         break;
       case "payment-confirmed":
-        html = paymentConfirmedEmail(mockBooking);
+        // ECE-01: pass houseRules from request body so the staff can
+        // preview exactly what the guest will see.
+        html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed":
-        html = bookingConfirmedEmail(mockBooking);
+        // ECE-02: pass houseRules from request body so the staff can
+        // preview exactly what the guest will see (mirrors the
+        // payment-confirmed preview above).
+        html = bookingConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        break;
+      case "booking-confirmed-with-balance":
+        // Per CWB-02: preview uses mock balance + reason so
+        // the design / copy is reviewable from the email
+        // preview panel without a real confirm-with-balance
+        // flow. The room number is intentionally omitted
+        // (booking is not yet `checked-in`).
+        html = bookingConfirmedWithBalanceEmail(
+          { ...mockBooking, roomNumber: "" },
+          2750,
+          "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
+        );
         break;
       case "checkin-reminder":
-        html = checkinReminderEmail(mockBooking);
+        // ECE-02: pass houseRules from request body so the staff can
+        // preview exactly what the guest will see (mirrors the
+        // payment-confirmed preview above).
+        html = checkinReminderEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-cancelled":
         html = bookingCancelledEmail(mockBooking);
+        break;
+      case "booking-cancelled-reservation":
+        // Per MRB-09 (2026-08-02, per decision #168):
+        // the reservation-scope cancel preview. Use a
+        // mock reservation view (3 rooms, one
+        // cancelled) so staff can sanity-check both
+        // the full-cancel and the partial-cancel
+        // shape from the preview pane.
+        html = bookingCancelledReservationEmail({
+          ...mockBooking,
+          reservationRef: "R-20260802-00001",
+          reservationId: "rsv-mock",
+          isReservation: true,
+          roomCount: 3,
+          activeRoomCount: 2,
+          rooms: [
+            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 7200 },
+            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 3600, cancelledAt: new Date().toISOString() },
+            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasBreakfast: true, totalPrice: 9800 }
+          ],
+          cancellationReason: "Guest requested partial cancellation.",
+          cancellationSource: "guest"
+        });
         break;
       case "discount-rejected":
         html = discountRejectedEmail(mockBooking);
@@ -1425,7 +2538,12 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
       case "payment-rejected":
         html = paymentRejectedEmail({
           ...mockBooking,
-          paymentReferenceNumber: "1234567890",
+          // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+          // the canonical reference lives on the payment ledger,
+          // not on the booking doc. Mock a single onsitePayments
+          // entry so the "Reference on file" callout renders in
+          // the preview.
+          onsitePayments: [{ transactionReference: "1234567890" }],
           paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
         });
         break;

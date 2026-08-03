@@ -69,7 +69,11 @@ describe("Phase 11.7 — DataTable mobile card view (P0)", () => {
 
   describe("BookingsPage passes renderMobileCard", () => {
     it("defines renderBookingCard and renderOrderCard", () => {
-      expect(bookingsSrc).toMatch(/const renderBookingCard\s*=\s*\(row:\s*Booking\)/);
+      // Per MRB-07 (2026-08-02, per decision #159): the card renderer
+      // takes a `BookingListRow`, which is a `Booking` plus the list's
+      // row-kind discriminator, so it can also render the reservation
+      // summary card for a multi-room group.
+      expect(bookingsSrc).toMatch(/const renderBookingCard\s*=\s*\(row:\s*BookingListRow\)/);
       expect(bookingsSrc).toMatch(/const renderOrderCard\s*=\s*\(row: any\)/);
     });
 

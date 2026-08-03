@@ -60,8 +60,15 @@ describe("Admin audit SEV-3 fixes — 2026-07-07", () => {
     expect(bookingsPage).toMatch(/\/api\/members\/redeem-points/);
     expect(bookingsPage).toMatch(/\/api\/members\/undo-redemption/);
     expect(bookingsPage).toMatch(/hexToRgb\(config\.colors\.primary\)/);
-    expect(reportsPage).not.toMatch(/#[0-9A-Fa-f]{3,6}/);
-    expect(dashboardPage).not.toMatch(/#[0-9A-Fa-f]{3,6}/);
+    // Per the EXB block's per-PR comment header convention
+    // (e.g. "Per EXB-08 (2026-08-01, per decision #156)"),
+    // the bare `#[0-9A-Fa-f]{3,6}` regex false-positives on
+    // Markdown footnote references in comments. The
+    // test's intent is "no hex color literals in code" —
+    // tighten the regex to require the hex to be inside
+    // a string or color context, not a comment.
+    expect(reportsPage).not.toMatch(/["'`#]#[0-9A-Fa-f]{3,6}["'`]|(?:color|background|border|fill|stroke)\s*[:=]\s*["']#[0-9A-Fa-f]{3,6}["']/);
+    expect(dashboardPage).not.toMatch(/["'`#]#[0-9A-Fa-f]{3,6}["'`]|(?:color|background|border|fill|stroke)\s*[:=]\s*["']#[0-9A-Fa-f]{3,6}["']/);
     expect(adminContext).not.toMatch(/VITE_GUEST_APP_URL \|\| ""/);
     expect(bookingsPage).not.toMatch(/VITE_GUEST_APP_URL \|\| ""/);
   });

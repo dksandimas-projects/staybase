@@ -22,20 +22,22 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ---
 
-## Step 1 — Select Dates & Room
+## Step 1 — Select Dates & Rooms
 
 ### UI Checklist
 - [x] Check-in / check-out date pickers — blocks past dates, min 1 night enforced
-- [x] Guest count input — validated against the chosen room type's `maxCapacity`
+- [x] Adult and child inputs — validated independently against the chosen room type's adult cap (`maxCapacity`) and child cap (`maxChildren`), with configured extra beds covering either kind of overflow
 - [x] **Available room types grid** — one card per room type defined in `settings/hotelConfig.roomTypes[]` (falling back to `DEFAULT_ROOM_TYPES`). Cards are grouped by type, not per physical room — see "Room type booking" below.
 - [x] Each type card shows "X of Y available for your dates" so guests see live capacity without exposing specific room numbers
+- [x] Each type card has a 44px quantity selector, capped by live availability; selected types form a small room cart and the sticky summary shows the running reservation total
+- [x] Adults and children are distributed across the selected rooms, with one adult required per room. Each child stay is checked against that type's adult/child/extra-bed limits before the guest can continue.
 - [x] Each type card shows two options (if breakfast is enabled in `settings/breakfastConfig`):
   - [x] **Room Only** — standard rate per night
-  - [x] **Room + Breakfast** — combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` per night
+  - [x] **Room + Breakfast** — combined rate uses the chargeable breakfast occupancy: adults plus children when the booking's include-children toggle is on
 - [x] Breakfast rate shown as combined nightly total — not broken out separately on the card
 - [x] If breakfast is disabled (`breakfastConfig.isEnabled: false`) — Room Only shown, no breakfast option
 - [x] Rate per night + computed total displayed on each card
-- [x] If selected dates include mixed pricing, show a compact total breakdown so guests can see which nights used regular, weekend, or holiday/seasonal rates before they continue.
+- [x] Whenever any night uses a non-standard rate (weekend, seasonal/holiday, or corporate), show the rate panel so the headline "From {base rate}" is never higher than the total without explanation. For a single-source stay, the panel renders one line (e.g. "Weekend nights: 1 × ₱2,700" with the line subtotal on the right). For a multi-source stay, the existing "This stay uses mixed nightly rates" heading + per-source line list is used. Fully regular stays render no panel. Option price labels match the selected stay: a one-source stay shows that source's actual nightly amount, a multi-source stay prefixes the option price with "From", and a fully regular stay shows the base rate with no prefix. Per WRV (2026-08-01).
 - [x] Pre-populated if navigating from Homepage checker or Rooms page CTA
 - [x] Step indicator showing current step (1 of 4)
 - [x] "No room types available for these dates" empty state with "try fewer guests or different dates" nudge
@@ -47,9 +49,10 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Holiday/seasonal rate overrides applied per night before weekend/base rates, using the shared seasonal-aware pricing utility.
 - [x] Price breakdown model derived from the same nightly-rate calculation as the booking total; never maintain a separate client-only formula.
 - [x] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
-- [x] Breakfast combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` — recompute when guest count changes
-- [x] Selected room type, dates, guest count, and breakfast choice (`hasBreakfast: boolean`) persisted in booking context/state
+- [x] Breakfast combined rate uses adults plus included children and recomputes whenever either occupancy count or the include-children toggle changes
+- [x] Selected room types and quantities, per-room `numAdults`, `numChildren`, extra-bed count and breakfast choice, dates, and aggregate guest total persist in booking context/state
 - [x] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
+- [x] The client sends one explicit `roomSelections[]` entry per requested room. The transaction assigns distinct physical rooms, prices every child stay, applies reservation-level discounts once, and allocates the exact rounded total back to the child bookings.
 
 ---
 
@@ -77,6 +80,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ### UI Checklist
 - [x] Full booking summary (read-only) — room name, dates, nights, rate breakdown, breakfast add-on (if selected), subtotal
+- [x] Multi-room summary lists each room's type, distributed occupancy, breakfast choice, and extra-bed requirement while collecting one lead guest and one payment for the reservation
 - [x] Price breakdown section:
   - [x] Shows regular nights count × regular nightly rate when present.
   - [x] Shows weekend nights count × weekend nightly rate when present.
@@ -99,7 +103,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Payment method selector — Pay at Hotel / GCash / PayPal / other enabled methods (from `settings/hotelConfig`)
 - [x] Payment screenshot upload — shown only for non-pay-at-hotel methods
 - [x] Screenshot upload: accepts image files only, max 5MB
-- [x] **Reference number field** (owner request 2026-07-09) — shown alongside the screenshot upload only when the selected payment method's `requireReferenceNumber` is `true` (default; see `plan/features/SETTINGS.md §2 Payment Methods`). Required text field when shown; Confirm button follows the same "disabled until required fields complete" pattern as the discount ID upload above. Hidden entirely for methods with `requireReferenceNumber: false` (e.g. an admin who wants Pay at Hotel/COD-style methods to skip it).
+- [x] **No payment-reference field on the guest form** (2026-07-24) — `refactor/unify-payment-reference-fields` retired the guest-entered reference input from the booking page (and the corporate personal-pay path). The canonical payment reference now lives exclusively on each entry in the `bookings/{id}/payments/` ledger as `transactionReference`, staff-populated via **Verify & Record Payment** / **Record Payment**. The per-method `requireReferenceNumber` flag in `settings/hotelConfig.paymentMethods[]` is now enforced only on the staff verify/add-payment endpoints, never on the guest form. See `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics` for the post-unification contract.
 - [x] Payment method QR code or account info displayed based on selection
 - [x] Cancellation policy — collapsible section showing `settings/websiteContent.cancellationPolicy`
 - [x] Terms & conditions checkbox (required)
@@ -113,21 +117,24 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Discount and voucher calculations happen client-side for display, server-side for storage
 - [x] The breakdown shown in Step 3 is recomputed server-side during booking creation; client-provided totals or breakdown lines are advisory only and must not be trusted.
 - [x] Server response returns the persisted breakdown so Step 4 can show the authoritative explanation for the final total.
+- [x] Per MRB-06, `/api/bookings/create` accepts the explicit room cart, returns all assigned rooms, and keeps the historical single-room fields for compatible callers. The request fingerprint includes per-room occupancy, extra beds, and breakfast choices so changed retries conflict instead of replaying stale pricing.
 - [x] Booking flow preallocates a Firestore booking document ID before Step 3 uploads; `/api/bookings/create` must create the booking document at that same ID
+- [x] Per MRB-02 (2026-08-02, per decision #164): the public `/book` flow preallocates a `reservationId` (UUIDv4, generated client-side via the shared `generateReservationId()` helper) and sends it in the body of `/api/bookings/create`. The server's transaction reads the `reservations/{id}` header first as the idempotency anchor: same `reservationId` + same `requestFingerprint` → idempotent replay (returns the existing booking's response with `idempotentReplay: true`); same `reservationId` + different `requestFingerprint` → 409 conflict; header exists but child missing → 500. The preallocation is held in a `useState` lazy init so the same id survives across renders and retry-after-uncertain-response (the user re-tries without reloading the page; the id is reused). The response payload mirrors the same `reservationId` + `reservationRef` + `idempotentReplay` shape across the three paths (fresh create, reservation-level replay, legacy booking-level replay) so the confirmation page can deep-link to `/manage?reservation=<id>` regardless of which path produced the booking.
 - [x] Payment screenshot uploaded to Firebase Storage before booking creation using the preallocated booking ID path
 - [x] `paymentProofUrl` stored in booking document
-- [x] `paymentReferenceNumber` stored on booking document when collected; server-side, `/api/bookings/create` re-checks the selected method's `requireReferenceNumber` (never trusts a client-side-only skip) and rejects creation if required but missing — mirrors the existing discount ID server-side re-check pattern. `requireReferenceNumber` only gates whether the **guest** is asked/required to provide it at booking time — it does not limit staff. Staff can always view, add, or edit `paymentReferenceNumber` from the admin booking drawer regardless of that setting (see `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`), since front desk may need to add one manually when confirming a payment even for a method the guest wasn't asked to supply it for.
+- [x] **No top-level `paymentReferenceNumber` is written by the public flow** (2026-07-24) — guests no longer provide a payment reference number at booking creation. The server-side `requireReferenceNumber` re-check in `/api/bookings/create` was removed. The flag now applies only to staff-side verify/add-payment endpoints (see `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`).
 - [x] Pay at Hotel: no upload required, `paymentMethod = "pay-at-hotel"`
-- [x] Discount ID photo uploaded to Firebase Storage before booking creation (when discount is selected) using the preallocated booking ID path; `discountIdPhotoUrl` stored on booking document
-- [x] Discount ID upload is required client-side but also validated server-side — if `discountType != ""` and `discountIdPhotoUrl` is null, booking creation is rejected
+- [x] Discount ID photo uploaded to Firebase Storage before booking creation (when discount is selected) using the preallocated booking ID path; `discountIdPhotoPath` stored on booking document (staff resolves a short-lived signed URL via `/api/storage/signed-url` for the drawer preview — per X-01, anonymous guest clients must never call `getDownloadURL` on the private bucket, see `plan/docs/AUDIT-E2E-REPORT.md §X-01`)
+- [x] Discount ID upload is required client-side but also validated server-side — if `discountType != ""` and `discountIdPhotoPath` is null, booking creation is rejected. The path is sufficient evidence the ID was uploaded: it has already been matched against `isExpectedBookingUploadPath` (strict prefix `bookings/{bookingId}/discount-id/` + randomized filename) and the `discountIdPhotoUrl` field, if provided, has been allowlist-validated against the Firebase Storage bucket prefix
 
 ---
 
 ## Step 4 — Booking Confirmation
 
 ### UI Checklist
-- [x] Booking reference number displayed prominently (Apollo heading)
+- [x] Reservation reference number displayed prominently (Apollo heading)
 - [x] Full booking summary with authoritative price breakdown returned by `/api/bookings/create`
+- [x] Multi-room confirmations list every assigned room and use the reservation reference for calendar and management links
 - [x] Add to Calendar button (ICS file download or Google Calendar deep link)
 - [x] Payment instructions based on selected payment method
 - [x] Pay at Hotel: "Present this confirmation at check-in. Payment is due upon arrival."
@@ -231,7 +238,7 @@ Let guests understand why the final booking total changes when their stay includ
 
 ### UX Requirements
 
-- Step 1 room cards should stay scannable: show the final stay total and a small expandable/inline note only when more than one rate source is present.
+- Step 1 room cards should stay scannable: show the final stay total and a small inline note whenever any rate source is non-standard, not only when more than one source is present. A single-source weekend stay is the most common weekend booking and was previously silent on the rate charged. The option price label must match the selected stay — no headline-vs-total surprise. Per WRV (2026-08-01).
 - Step 3 must show the full breakdown before terms/payment confirmation so the guest can catch surprises before submitting.
 - Labels should use plain language: "Regular nights", "Weekend nights", and the seasonal override name such as "Holy Week".
 - Deductions should be visibly negative and ordered after add-ons.
@@ -254,6 +261,48 @@ Let guests understand why the final booking total changes when their stay includ
 
 - A booking that spans weekday and weekend nights shows separate lines explaining both rates.
 - A booking that spans a holiday/seasonal override shows the override label and rate, and does not double-count weekend pricing for those nights.
+- A booking that is **entirely** a non-regular rate (e.g. a Saturday→Sunday weekend-only stay, or a stay fully inside a seasonal/holiday window) shows the rate panel on Step 1 even though the breakdown is a single line, and the option price labels reflect the actual source's nightly amount. Per WRV (2026-08-01).
 - The Step 3 total, API-created `totalPrice`, Step 4 total, lookup page, email summary, and admin receipt agree.
 - Existing bookings without `rateBreakdown` still render a sensible summary.
 - No public response leaks payment proof URLs, internal notes, or unrelated booking PII.
+
+---
+
+## Children in Booking (CHD-05)
+
+Step 1 separates the total group into adults aged 12+ and children aged 0–11. Room-type availability evaluates the adult and child caps independently; it does not count every child against the adult cap.
+
+The server validates `numAdults + numChildren === numGuests` inside both public and walk-in creation transactions. Room types are normalized before their caps are read, so legacy types receive the configured per-capacity child default. The historical combined `numGuests > maxCapacity` check must not return: `maxCapacity` is the adult cap, not total occupancy. Legacy requests without the split derive to all adults and zero children.
+
+- [x] The child stepper states the selected room type's included child allowance and explains when the current group reaches its limit.
+- [x] Extra beds may cover adult or child overflow. The picker uses the same shared overflow rule as the server, explains the exact number of additional beds required, and blocks continuation until that requirement is met.
+- [x] Room cards show adult, child, and extra-bed allowances instead of an ambiguous total capacity.
+- [x] Children and extra-bed counts persist across booking-step URLs and refreshes.
+- [x] The picker and price summary explicitly state that children have no additional room charge. Breakfast and a required extra bed remain separate chargeable add-ons.
+- [x] Touched stepper controls meet the 44px minimum and cap guidance is announced as live status text.
+
+---
+
+## Extra Bed (EXB-01..10)
+
+Step 1 shows adults, children, and extra-bed steppers; extra beds appear only when the selected room type allows them and reset when the type changes. The shared overflow rule requires enough beds for adult and child occupancy above the type caps, while the server separately rejects counts above `maxExtraBeds`.
+
+The server snapshots `extraBedRate` on creation and preserves that snapshot during reschedule. Extra-bed cost is count × snapshotted rate × nights and remains independent of breakfast occupancy. Step 3 displays it as its own add-on line. Hotel-wide inventory, when configured above zero, is enforced transactionally; the field currently has no admin Settings editor.
+
+Coverage: room-type boundary tests, server cap guards, multi-night add-on tests, and `guest-app/tests/api/exb-09-rate-snapshotting-and-breakfast-coupling.test.ts`. See decisions #145, #153–#158 and `plan/docs/BACKEND.md` for the canonical data contracts.
+
+---
+
+## Lifecycle Invariants (MRB-15-01)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-01 sub-item, shipped v0.249.0). The full create → cancel lifecycle must produce exactly ONE of each cross-cutting effect: counter increment, email template render, loyalty earn/clawback entry, status flip. The MRB-15-01 audit pins these invariants in source-text form so a future refactor cannot silently double-fire any of them.
+
+### Cross-cutting invariants (the lifecycle "exactly-once" guarantees)
+
+- **Counter increments**: exactly ONE `roomCount` increment at create, exactly ONE `activeRoomCount` increment at create, exactly ONE `cancelledRoomCount` increment per cancelled child. See `plan/docs/BACKEND.md §Reservation Aggregate Counter Ownership (MRB-15)` for the full counter ownership table.
+- **Email template renders**: exactly ONE per-action email template render (no `booking-cancelled` AND `booking-cancelled-reservation` firing for the same destroy). The dispatch is in `handleCancelBooking`'s `postTransactionAction: "booking-cancelled" | "booking-cancelled-reservation"` local.
+- **Loyalty earn + clawback**: exactly ONE `earn-${bookingId}` pointsHistory entry on the eventual check-out, exactly ONE `clawback-${bookingId}` pointsHistory entry per cancelled child. The pairing uses deterministic doc ids (see `plan/docs/TYPES.md §Loyalty Earn + Clawback Pairing (MRB-15-07)`).
+- **Status flips**: exactly ONE status transition per child per lifecycle event. The status matrix is the server-authoritative source.
+
+### Test coverage
+
+`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) — pins the "exactly-once" guarantees for every cross-cutting effect in the create → cancel lifecycle.
