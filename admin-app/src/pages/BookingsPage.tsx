@@ -510,6 +510,15 @@ export function BookingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { 
     bookings, 
+    // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+    // reservation headers + the reservation-scope paid-amount
+    // aggregate. The Bookings table row reads these so the
+    // row's `totalPrice` and `listReservationBalance` are
+    // independent of the active filter (the old code summed
+    // the filtered in-memory children and silently dropped
+    // any child hidden by the filter).
+    reservations,
+    reservationPaidAmount,
     rooms, 
     updateBookingStatus, 
     resolveEarlyCheckin,
@@ -1648,6 +1657,16 @@ export function BookingsPage() {
   ]);
   const bookingListIsGrouped = !OPERATIONAL_QUICK_VIEWS.has(bookingQuickView);
 
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // a `Map<reservationId, Reservation>` lookup so the row builder
+  // can read the header in O(1). Rebuilt only when the
+  // `reservations` array reference changes (i.e. on snapshot
+  // updates, not on every render).
+  const reservationsMap = useMemo(
+    () => new Map(reservations.map((reservation) => [reservation.id, reservation])),
+    [reservations]
+  );
+
   // Which reservations the desk has expanded. Collapsed by default so
   // a group booking reads as one line until the desk asks for the
   // rooms.
@@ -1698,11 +1717,27 @@ export function BookingsPage() {
       const sorted = [...group].sort(
         (a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0)
       );
-      const reservationTotal = sorted.reduce((sum, child) => sum + (child.totalPrice || 0), 0);
-      const reservationBalance = sorted.reduce(
-        (sum, child) => sum + getBookingFolio(child).balance,
-        0
-      );
+      // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+      // the row's `totalPrice` and `listReservationBalance` are
+      // read from the `Reservation` header + the reservation-scope
+      // paid-amount aggregate (`reservations` + `reservationPaidAmount`
+      // from the AdminContext listener). The header doesn't filter,
+      // so the previously-existing bug — where the row's
+      // `listReservationBalance` summed the FILTERED children and
+      // silently dropped any child hidden by an active filter —
+      // is fixed by construction. When the header is not yet in
+      // memory (cold-start race; the listener hydrates on the
+      // first snapshot), fall back to the child sum so the first
+      // paint byte-matches the pre-MRB-12 surface; the listener's
+      // next tick replaces the row with the header-sourced values.
+      const reservationHeader = reservationsMap.get(reservationId);
+      const paidAmount = reservationPaidAmount[reservationId] || 0;
+      const reservationTotal = reservationHeader
+        ? reservationHeader.totalPrice
+        : sorted.reduce((sum, child) => sum + (child.totalPrice || 0), 0);
+      const reservationBalance = reservationHeader
+        ? Math.max(0, reservationHeader.totalPrice - paidAmount)
+        : sorted.reduce((sum, child) => sum + getBookingFolio(child).balance, 0);
       // The reservation row borrows the lead room's identity for the
       // fields every column already knows how to read, and overrides
       // the ones that are reservation-scoped (money, room label,
@@ -1731,7 +1766,7 @@ export function BookingsPage() {
       }
     }
     return rows;
-  }, [filteredRows, bookingListIsGrouped, expandedReservationIds]);
+  }, [filteredRows, bookingListIsGrouped, expandedReservationIds, reservationsMap, reservationPaidAmount]);
 
   // Per MRB-07 (2026-08-02, per decision #159): the reservation context
   // for whatever booking the drawer currently has open. `null` for a

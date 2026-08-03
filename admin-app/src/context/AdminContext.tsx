@@ -35,6 +35,7 @@ import {
   type DiscountScope,
   type ProtectedBookingSource,
   type ProtectedPaymentMethod,
+  type Reservation,
   type RoomBlock,
   type RoomTypeEntry,
   type SeasonalRateOverride,
@@ -43,7 +44,7 @@ import {
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { arrayUnion, collection, deleteField, doc, getDocs, limit, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { arrayUnion, collection, collectionGroup, deleteField, doc, getDocs, limit, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
@@ -521,6 +522,14 @@ export interface AdminContextType {
 
   // Bookings
   bookings: Booking[];
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // reservation headers + the reservation-scope paid-amount
+  // aggregate. Hydrated by the AdminContext listener so the
+  // Bookings table row can render the reservation-scope
+  // total + balance without re-summing the filtered in-memory
+  // children.
+  reservations: Reservation[];
+  reservationPaidAmount: Record<string, number>;
   updateBookingStatus: (
     bookingId: string,
     status: Booking["status"],
@@ -1236,6 +1245,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(true);
 
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed): the
+  // reservation headers are hydrated into memory so the Bookings
+  // table row can read the reservation-scope aggregate
+  // (`totalPrice`, `paymentStatus`, denormalized counters,
+  // `aggregateRevenueAllocation`, `cancellationLiability`) WITHOUT
+  // summing the filtered in-memory children. The old behaviour
+  // (`admin-app/src/pages/BookingsPage.tsx:1701-1705`, summing
+  // `child.totalPrice` and `getBookingFolio(child).balance`)
+  // silently dropped any child hidden by an active filter —
+  // a real bug at any scale where the desk filters by room type
+  // or status. The header doesn't filter, so the bug is
+  // impossible by construction. The listener is full-collection
+  // (no query) because the reservation count is bounded (~14
+  // active at this hotel) and the alternative — per-reservation
+  // subcollection reads — would re-introduce the filter
+  // dependence.
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the reservation-scope `paidAmount` aggregate. Computed
+  // from a single `collectionGroup("payments")` listener that
+  // filters in JS to the reservation subcollection paths
+  // (`reservations/{id}/payments/{paymentId}`). Legacy
+  // `bookings/{id}/payments/{paymentId}` entries do NOT match
+  // the path regex and are excluded — they belong to the
+  // per-child legacy adapter. With ~14 active reservations
+  // and a few years of payment history, the collectionGroup
+  // load is hundreds of small docs, well under any scale
+  // concern. The `paidAmount` is the sum of positive-amount
+  // entries (sign-aware: refunds are negative per CRL-01 and
+  // reduce the paid total), matching the `paymentsTotal`
+  // semantics `getReservationFolioSummary` exposes. Used by
+  // the Bookings table reservation row for `listReservationBalance`.
+  const [reservationPaidAmount, setReservationPaidAmount] = useState<Record<string, number>>({});
+
   useEffect(() => {
     if (!currentUser) {
       setBookings([]);
@@ -1451,6 +1494,143 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       active = false;
       unsubscribe();
     };
+  }, [currentUser]);
+
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // subscribe to the `reservations` collection and hydrate
+  // the headers into memory. The listener runs alongside
+  // the bookings listener (same `currentUser` gate) and
+  // has no `orderBy` because the Bookings table consumes
+  // the data as a `Record<reservationId, Reservation>`
+  // (the row is keyed by the booking's `reservationId`).
+  // The full collection is cheap at this scale (~14 active
+  // reservations at the hotel's current size; the cap is
+  // bounded by room inventory, not bookings volume).
+  useEffect(() => {
+    if (!currentUser) {
+      setReservations([]);
+      return;
+    }
+
+    const parseDateOrNull = (val: any): Date | null => {
+      if (!val) return null;
+      if (typeof val?.toDate === "function") return val.toDate();
+      if (val instanceof Date) return val;
+      if (typeof val === "string") return new Date(val);
+      if (typeof val === "object" && typeof val.seconds === "number") return new Date(val.seconds * 1000);
+      return null;
+    };
+    // Coerce to a `Date` with epoch fallback for the
+    // required fields (`checkIn`, `checkOut`, `createdAt`,
+    // `updatedAt` are all `Date` in the `Reservation`
+    // type — see `shared/types/index.ts:238`). The epoch
+    // fallback satisfies the type; the row summary
+    // (MRB-12-01) only reads `totalPrice`, so a bogus
+    // date is harmless.
+    const parseDateOrEpoch = (val: any): Date => parseDateOrNull(val) ?? new Date(0);
+
+    const unsubscribe = onSnapshot(
+      collection(db, "reservations"),
+      (snapshot) => {
+        const list: Reservation[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          return {
+            id: docSnap.id,
+            reservationRef: data.reservationRef || "",
+            leadGuestName: data.leadGuestName || "",
+            leadGuestEmail: data.leadGuestEmail || "",
+            leadGuestPhone: data.leadGuestPhone || "",
+            memberId: data.memberId ?? null,
+            checkIn: parseDateOrEpoch(data.checkIn),
+            checkOut: parseDateOrEpoch(data.checkOut),
+            numNights: Number(data.numNights) || 0,
+            originalSubtotal: Number(data.originalSubtotal) || 0,
+            discountScopeSnapshot: data.discountScopeSnapshot ?? null,
+            subtotal: Number(data.subtotal) || 0,
+            totalPrice: Number(data.totalPrice) || 0,
+            source: data.source || "online",
+            isCorporate: !!data.isCorporate,
+            corporateCode: data.corporateCode || "",
+            companyName: data.companyName || "",
+            voucherCode: data.voucherCode || "",
+            memberDiscountPct: Number(data.memberDiscountPct) || 0,
+            paymentStatus: data.paymentStatus || "awaiting-payment",
+            paymentMethod: data.paymentMethod || "",
+            paymentProofUrl: data.paymentProofUrl ?? null,
+            paymentProofPath: data.paymentProofPath ?? null,
+            termsAccepted: !!data.termsAccepted,
+            termsAcceptedAt: parseDateOrNull(data.termsAcceptedAt),
+            termsVersion: data.termsVersion || "",
+            privacyAccepted: !!data.privacyAccepted,
+            privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
+            privacyVersion: data.privacyVersion || "",
+            cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
+            roomCount: Number(data.roomCount) || 0,
+            activeRoomCount: Number(data.activeRoomCount) || 0,
+            cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
+            checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
+            checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
+            holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
+            requestFingerprint: data.requestFingerprint || "",
+            createdAt: parseDateOrEpoch(data.createdAt),
+            updatedAt: parseDateOrEpoch(data.updatedAt),
+            createdBy: data.createdBy || "guest",
+            cancellationLiability: data.cancellationLiability ?? null,
+            aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null
+          } satisfies Reservation;
+        });
+        setReservations(list);
+      },
+      (error) => {
+        console.error("Error listening to reservations collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, [currentUser]);
+
+  // Per MRB-12 (2026-08-03, per decision #179 — proposed):
+  // the reservation-scope `paidAmount` aggregate. A single
+  // `collectionGroup("payments")` listener scans the
+  // reservation payment subcollection paths and sums positive
+  // amounts (refunds are negative per CRL-01 and reduce the
+  // paid total — sign-aware sum, same as
+  // `getReservationFolioSummary` does in the helper). The
+  // listener does NOT include `bookings/{id}/payments/...`
+  // (the legacy adapter) — those belong to the per-child
+  // legacy flow and stay summed from the in-memory
+  // `bookings` array. Used by the Bookings table reservation
+  // row so `listReservationBalance` is independent of the
+  // active filter (MRB-12-01).
+  useEffect(() => {
+    if (!currentUser) {
+      setReservationPaidAmount({});
+      return;
+    }
+
+    const unsubscribe = onSnapshot(
+      collectionGroup(db, "payments"),
+      (snapshot) => {
+        const paidByReservation: Record<string, number> = {};
+        for (const paymentDoc of snapshot.docs) {
+          // The path is `reservations/{reservationId}/payments/{paymentId}`
+          // for new reservations. Legacy `bookings/{id}/payments/{...}`
+          // entries do NOT match — they are excluded.
+          const match = paymentDoc.ref.path.match(/^reservations\/([^/]+)\/payments\//);
+          if (!match) continue;
+          const reservationId = match[1];
+          const amount = Number(paymentDoc.data()?.amount || 0);
+          if (!Number.isFinite(amount)) continue;
+          paidByReservation[reservationId] = (paidByReservation[reservationId] || 0) + amount;
+        }
+        setReservationPaidAmount(paidByReservation);
+      },
+      (error) => {
+        console.error("Error listening to reservation payments collectionGroup:", error);
+      }
+    );
+
+    return unsubscribe;
   }, [currentUser]);
 
   const [roomBlocks, setRoomBlocks] = useState<RoomBlock[]>([]);
@@ -5166,6 +5346,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         deleteRoom,
         hasActiveBookings,
         bookings,
+        reservations,
+        reservationPaidAmount,
         updateBookingStatus,
         resolveEarlyCheckin,
         rescheduleBooking,
