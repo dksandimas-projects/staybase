@@ -49,6 +49,34 @@ export const WalkinGuestDetailsSchema = z.object({
 // its own occupancy so the reservation's guests are distributed across
 // rooms rather than duplicated onto every room. The rooms in one
 // reservation may be of different types — the server prices each line
+// Per MRB-11 (2026-08-03, per decision #177): the
+// stored per-stream revenue allocation. Every booking
+// created after MRB-11 lands carries a snapshot of this
+// shape on the doc, computed by the server's
+// `computeBookingRevenueAllocation` helper before the
+// write. The schema is `.optional()` because the input
+// is optional — **per the 2026-08-03 design call, the
+// server always computes the allocation before the
+// write**; the input field exists for the rare
+// pre-computed case (e.g. a future client preview that
+// wants to show the breakdown before submitting). The
+// `totalNet === booking.totalPrice` invariant is the
+// contract — the schema accepts any 2dp-rounded
+// non-negative numbers, the server asserts the
+// invariant at the write boundary. `deductionNet` may
+// be 0 (no discounts applied).
+export const BookingRevenueAllocationSchema = z
+  .object({
+    roomNet: z.coerce.number().finite().min(0),
+    breakfastNet: z.coerce.number().finite().min(0),
+    addOnNet: z.coerce.number().finite().min(0),
+    deductionNet: z.coerce.number().finite().min(0),
+    totalNet: z.coerce.number().finite().min(0)
+  })
+  .strict();
+
+export type BookingRevenueAllocationInput = z.infer<typeof BookingRevenueAllocationSchema>;
+
 // against its own type entry and stores the per-room allocation.
 export const WalkinRoomLineSchema = z.object({
   roomId: z.string().trim().min(1).max(64),
@@ -123,7 +151,18 @@ export const WalkinBookingSchema = z.object({
   // form with a new `bookingId`); the optional field is here
   // so a future walk-in client that does preallocate can
   // ride the same idempotency contract.
-  reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional()
+  reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+  // Per MRB-11 (2026-08-03, per decision #177): the
+  // optional revenue allocation. Per the 2026-08-03
+  // design call, the server always computes this before
+  // the write — the input is accepted but the server
+  // recomputes via the same pricing chain and asserts
+  // the `totalNet === booking.totalPrice` invariant at
+  // the write boundary. Pre-MRB-11 callers omit it; the
+  // server fills it in. A future client preview may
+  // supply it to skip the server recompute, but the
+  // server's value is the only one written to the doc.
+  revenueAllocation: BookingRevenueAllocationSchema.optional()
 }).strict();
 
 export type BookingDatesInput = z.infer<typeof BookingDatesSchema>;
@@ -173,3 +212,4 @@ export const RescheduleBookingSchema = z.object({
 export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;
 export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;
 export type WalkinRoomLineInput = z.infer<typeof WalkinRoomLineSchema>;
+

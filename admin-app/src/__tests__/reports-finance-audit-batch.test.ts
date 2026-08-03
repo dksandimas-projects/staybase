@@ -147,10 +147,32 @@ describe("ReportsPage finance-audit wiring", () => {
     expect(reports).toMatch(/b\.status === "payment-confirmed" \|\| b\.status === "confirmed"/);
   });
 
-  it("FL-01 — room and breakfast streams split the booking net total", () => {
-    expect(reports.match(/splitBookingRevenue\(b\)\.room \* fraction/g)).toHaveLength(3);
-    expect(reports).toMatch(/splitBookingRevenue\(b\)\.breakfast \* fraction/);
-    expect(reports).toMatch(/const bookingRevenue = splitBookingRevenue\(b\)/);
+  it("MRB-11 — Reports surface reads the stored `revenueAllocation` (or the legacy-heuristic fallback for pre-MRB-11 docs)", () => {
+    // Per decision #177 (2026-08-03): every KPI + chart + table
+    // that used `splitBookingRevenue(b).room` / `.breakfast`
+    // (the historical proportional split of the post-discount
+    // total) now reads `getBookingRevenueStreams(b).roomNet` /
+    // `.breakfastNet`. The new helper:
+    //   - returns the stored GROSS per-stream values when
+    //     `booking.revenueAllocation` is present (post-MRB-11);
+    //   - falls back to the legacy `splitBookingRevenue` math
+    //     byte-for-byte for pre-MRB-11 docs (so a single-day
+    //     report on historical data returns the same numbers
+    //     as before the upgrade);
+    //   - tags the result `"allocation: 'stored'"` vs
+    //     `"allocation: 'legacy-heuristic'"` so the export
+    //     can surface the heuristic to the accountant.
+    // The 3 room-stream call sites + 1 breakfast call site +
+    // 1 slot-mapping call site mirror the historical pattern.
+    expect(reports.match(/getBookingRevenueStreams\(b\)\.roomNet \* fraction/g)).toHaveLength(3);
+    expect(reports).toMatch(/getBookingRevenueStreams\(b\)\.breakfastNet \* fraction/);
+    expect(reports).toMatch(/const bookingRevenue = getBookingRevenueStreams\(b\)/);
+    // The historical `splitBookingRevenue` import is gone
+    // from ReportsPage — the per-stream math is now in
+    // `getBookingRevenueStreams` (shared bookingFolio.ts),
+    // so the export is deterministic across the two apps
+    // (admin reports + the eventual MD sync to BACKEND).
+    expect(reports).not.toMatch(/import\s*\{[^}]*splitBookingRevenue[^}]*\}\s*from\s*["']\.\.\/utils\/finance["']/);
   });
 
   it("FR-05 — payment/charge listeners are stable (not re-subscribed on booking changes)", () => {

@@ -108,11 +108,14 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 
 #### Summary Cards (top of tab)
 - [x] **Total Revenue** — combined across all streams for the selected period
-- [x] **Room Revenue** — net room share of booking `totalPrice`; booking-level deductions are allocated proportionally across the locked gross room and breakfast amounts
-- [x] **Breakfast Revenue** — net breakfast share of booking `totalPrice`; derived from the locked breakfast amount and reduced by the same proportional deduction allocation
+- [x] **Room Revenue** — per MRB-11 (2026-08-03, per decision #177): the stored `Booking.revenueAllocation.roomNet` (gross) for post-MRB-11 docs, or the legacy `splitBookingRevenue` proportional split for pre-MRB-11 docs (tagged `"allocation: legacy-heuristic"` in the export). The deduction is shown as a single `Discounts given` line — the per-stream value is the gross amount, not the post-deduction share.
+- [x] **Breakfast Revenue** — per MRB-11: `Booking.revenueAllocation.breakfastNet` (gross) for post-MRB-11 docs; legacy split for pre-MRB-11 docs.
+- [x] **Add-on Revenue** — per MRB-11: `Booking.revenueAllocation.addOnNet` (extra-bed + future add-ons) for post-MRB-11 docs. Pre-MRB-11 docs bundle add-ons into the room share (the export tag is `"legacy-heuristic"`).
+- [x] **Discounts given** — per MRB-11: `Booking.revenueAllocation.deductionNet` (sum of senior + voucher + member + corporate adjustments) for post-MRB-11 docs. Pre-MRB-11 docs show 0 here because the legacy math already netted the deductions into the per-stream values.
 - [x] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
 - [x] **Incidental Revenue** — net sum of append-only `bookings/{id}/charges` entries, including negative void reversals
 - [x] **Total Transactions** — count of bookings + delivered store orders combined
+- [x] **Allocation column** — per MRB-11: every export row carries a `"allocation"` field (`"stored"` for post-MRB-11 docs, `"legacy-heuristic"` for pre-MRB-11 docs). The XLSX + PDF + CSV exports add a top-of-file disclaimer when ANY row is `"legacy-heuristic"`: `Note: <N> bookings in this range pre-date MRB-11 and use the legacy proportional split — the aggregate may differ by up to 0.5%`.
 
 #### Charts
 - [x] **Revenue by stream (stacked bar chart)** — one bar per month, stacked by Room / Breakfast / Store / Incidentals
@@ -252,9 +255,10 @@ See `plan/features/STORE-MANAGEMENT.md §Store Reports` for the full store manag
 
 ## Manual QA — Sales Report
 
-- [x] Total Revenue card matches the sum of all four disjoint stream totals
-- [x] Room Revenue plus Breakfast Revenue matches net booking `totalPrice` for the period without counting breakfast twice
-- [x] Breakfast Revenue matches the proportionally allocated net breakfast share for each breakfast booking
+- [x] Total Revenue card matches the sum of all disjoint stream totals
+- [x] Per MRB-11 (2026-08-03, per decision #177): Room + Breakfast + Add-on + (Deduction line) equals booking `totalPrice` for post-MRB-11 docs (the stored allocation). Pre-MRB-11 docs use the legacy proportional split — Room + Breakfast = `totalPrice` exactly (no separate add-on / deduction line because the old math bundled them into the room share).
+- [x] Room Revenue matches the stored `revenueAllocation.roomNet` (gross) for post-MRB-11 docs
+- [x] Breakfast Revenue matches the stored `revenueAllocation.breakfastNet` (gross) for post-MRB-11 docs
 - [x] Store Revenue matches sum of `totalAmount` across delivered store orders for the period
 - [x] Stacked bar chart shows correct monthly breakdown per stream
 - [x] Bookings sub-table rows match booking count in Bookings Management for same period

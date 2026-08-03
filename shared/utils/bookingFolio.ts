@@ -15,7 +15,8 @@
 // step. This file is the single source of truth — pure refactor,
 // zero behavior change, pinned by `shared/__tests__/booking-folio.test.ts`.
 
-import type { ReservationPaymentStatus } from "../types";
+import type { BookingRevenueAllocation, ReservationPaymentStatus } from "../types";
+import { calculateDiscountChain, type DiscountScope } from "./bookingDiscounts";
 
 /**
  * The minimal shape the folio math needs from a `Booking`. The
@@ -591,3 +592,321 @@ export function computeReservationAggregatePaymentStatus(
   // statuses that don't match any prior tier).
   return "in-house";
 }
+
+// Per MRB-11 (2026-08-03, per decision #177): the
+// per-stream revenue allocation read path. Reports
+// uses this to read room + breakfast + add-on revenue
+// without re-running the pricing chain. The stored
+// `revenueAllocation` field is the source of truth for
+// post-MRB-11 bookings; pre-MRB-11 bookings fall back
+// to the legacy `splitBookingRevenue` proportional
+// split and are tagged `"allocation: legacy-heuristic"`
+// so the export row + the export's banner can surface
+// the heuristic to the accountant.
+
+/**
+ * The minimal shape the revenue-stream math needs from
+ * a `Booking`. The shared `Booking` type satisfies this;
+ * admin-app's `Booking` is structurally compatible via
+ * duck typing — the function only reads `revenueAllocation`
+ * + a few rateBreakdown + flat-rate fields. The narrow
+ * input keeps the helper pure + easy to test.
+ */
+export interface RevenueBookingInput {
+  /** Stored allocation (post-MRB-11). Absent on pre-MRB-11 bookings. */
+  revenueAllocation?: BookingRevenueAllocation | null;
+  totalPrice: number;
+  /** Locked gross room rate. Used by the legacy fallback. */
+  rateBreakdown?: {
+    roomSubtotal?: number | null;
+  } | null;
+  ratePerNight: number;
+  numNights: number;
+  numGuests?: number;
+  breakfastRate?: number | null;
+  hasBreakfast?: boolean | null;
+}
+
+export interface RevenueReservationInput {
+  /** Stored aggregate (post-MRB-11). Absent on pre-MRB-11 reservations. */
+  aggregateRevenueAllocation?: BookingRevenueAllocation | null;
+  totalPrice: number;
+}
+
+export interface BookingRevenueStreams {
+  /** Room share the guest pays (gross, pre-deduction; the per-stream NET is `roomNet − roomNet's pro-rated share of deductionNet`). */
+  roomNet: number;
+  /** Breakfast share the guest pays. */
+  breakfastNet: number;
+  /** Add-on (extra bed + future add-ons) share the guest pays. */
+  addOnNet: number;
+  /** Total deductions applied (sum of senior + voucher + member + corporate adjustments). The per-stream nets above already NET OUT the deductions — this is the headline "discounts given" number for reporting. */
+  deductionNet: number;
+  /** The final bill. Equals `booking.totalPrice` by construction. */
+  totalNet: number;
+  /** Tag for the export row: `"stored"` reads the doc field; `"legacy-heuristic"` falls back to the pre-MRB-11 proportional split. */
+  allocation: "stored" | "legacy-heuristic";
+}
+
+/**
+ * Round a 2dp currency value defensively. Returns 0 for
+ * non-finite inputs. Per CRL-05 / BF-12 convention:
+ * 2dp is the canonical granularity for money in the
+ * system; anything beyond 2dp would surface in the
+ * export as a false-precision artifact.
+ */
+function round2(value: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+
+/**
+ * Assert the per-stream allocation sums to the total.
+ * Per MRB-11 design call: the server asserts this at
+ * the write boundary before the Firestore write. The
+ * 0.01 tolerance handles accumulated 2dp-rounding noise
+ * (each per-stream value is rounded independently; the
+ * sum can drift by ±0.01 across 5 streams). The helper
+ * returns the same allocation so the server can chain
+ * `assertBookingRevenueAllocationInvariant(allocation)`
+ * inline.
+ */
+export function assertBookingRevenueAllocationInvariant(
+  allocation: BookingRevenueAllocation,
+  totalPrice: number
+): BookingRevenueAllocation {
+  // The per-stream values are individually rounded to 2dp
+  // BEFORE the sum, so each can carry ±0.005 of noise; with
+  // 4 streams the worst-case accumulated error is ±0.02
+  // before the per-stream rounding. The 0.05 tolerance
+  // absorbs the 4-field round + the IEEE 754 double-precision
+  // representation noise (e.g. `4000.01` in JS is actually
+  // `4000.010000000000036`; summing 5 such values drifts by
+  // a few 1e-13). The 1.00 catch in the test pins the
+  // throw path (a real miscalculation will be off by at
+  // least one whole currency unit, not by 0.0001).
+  const computed = round2(
+    round2(allocation.roomNet) +
+      round2(allocation.breakfastNet) +
+      round2(allocation.addOnNet) -
+      round2(allocation.deductionNet)
+  );
+  const expected = round2(totalPrice);
+  if (Math.abs(computed - expected) > 0.05) {
+    throw new Error(
+      `[MRB-11] revenue allocation invariant violation: ` +
+        `roomNet(${allocation.roomNet}) + breakfastNet(${allocation.breakfastNet}) + ` +
+        `addOnNet(${allocation.addOnNet}) - deductionNet(${allocation.deductionNet}) = ${computed}, ` +
+        `expected totalNet(${expected}). This is a server-side bug — the pricing chain returned an inconsistent allocation.`
+    );
+  }
+  return allocation;
+}
+
+/**
+ * Read the per-stream revenue allocation for a single
+ * booking. Returns the stored field when present
+ * (post-MRB-11); falls back to the legacy
+ * `splitBookingRevenue` proportional split for pre-MRB-11
+ * bookings and tags the result `"allocation: legacy-heuristic"`.
+ *
+ * The legacy fallback preserves the pre-MRB-11 byte-equivalent
+ * math (a single-day report on a doc without `revenueAllocation`
+ * returns the same numbers the old code did), so the day this
+ * ships does not produce surprise jumps in the Reports for
+ * historical data. The `addOnNet` term is 0 in the legacy
+ * path because the old math bundled add-ons into the room
+ * stream; the export tag tells the user this.
+ */
+export function getBookingRevenueStreams(
+  booking: RevenueBookingInput
+): BookingRevenueStreams {
+  if (booking.revenueAllocation) {
+    return { ...booking.revenueAllocation, allocation: "stored" };
+  }
+  // Legacy fallback: same math as `splitBookingRevenue` in
+  // `admin-app/src/utils/finance.ts`. Re-derived here so
+  // the shared helper doesn't import admin-app code.
+  const total = round2(Number(booking.totalPrice) || 0);
+  const roomSubtotalRaw = Number(booking.rateBreakdown?.roomSubtotal);
+  const roomSubtotal = Number.isFinite(roomSubtotalRaw) && roomSubtotalRaw > 0
+    ? roomSubtotalRaw
+    : round2(Number(booking.ratePerNight) || 0) * Math.max(0, Number(booking.numNights) || 0);
+  const nights = Math.max(0, Number(booking.numNights) || 0);
+  const breakfastGross = round2(
+    (booking.hasBreakfast ? Number(booking.breakfastRate) || 0 : 0) *
+      Math.max(0, Number(booking.numGuests) || 0) *
+      nights
+  );
+  let room = total;
+  let breakfast = 0;
+  if (total > 0 && breakfastGross > 0 && roomSubtotal > 0) {
+    const grossTotal = roomSubtotal + breakfastGross;
+    breakfast = round2((total * breakfastGross) / grossTotal);
+    room = round2(total - breakfast);
+  }
+  return {
+    roomNet: room,
+    breakfastNet: breakfast,
+    addOnNet: 0,
+    deductionNet: 0,
+    totalNet: total,
+    allocation: "legacy-heuristic"
+  };
+}
+
+/**
+ * Read the per-stream revenue allocation for a
+ * reservation. Returns the stored aggregate when
+ * present (post-MRB-11); sums the children's
+ * `getBookingRevenueStreams` otherwise. The fallback
+ * handles pre-MRB-11 reservations AND the rare
+ * post-MRB-11 reservation where the aggregate is null
+ * (the brief window between child-creation and the
+ * aggregate update — `getReservationRevenueStreams`
+ * never returns a partial; it always falls through to
+ * the child sum when the aggregate is null).
+ */
+export function getReservationRevenueStreams(
+  reservation: RevenueReservationInput,
+  children: RevenueBookingInput[]
+): BookingRevenueStreams {
+  if (reservation.aggregateRevenueAllocation) {
+    return { ...reservation.aggregateRevenueAllocation, allocation: "stored" };
+  }
+  // Sum the children. Defensive against missing fields
+  // (treats each as 0). The allocation tag follows the
+  // child rule: if the aggregate is null AND every child
+  // has a stored allocation, the aggregate is `"stored"`
+  // (the children are the source of truth and they
+  // unanimously carry the new field); if the aggregate
+  // is null AND any child is on the legacy fallback, the
+  // aggregate is `"legacy-heuristic"` (the byte-equivalent
+  // math is preserved by the same proportional split each
+  // child applies); if the aggregate is null AND there
+  // are no children, the aggregate is `"legacy-heuristic"`
+  // (no stored data to read — the export row will tag
+  // the empty reservation as heuristic).
+  let roomNet = 0;
+  let breakfastNet = 0;
+  let addOnNet = 0;
+  let deductionNet = 0;
+  let totalNet = 0;
+  let anyChildLegacy = false;
+  let anyChild = false;
+  for (const child of children) {
+    anyChild = true;
+    const streams = getBookingRevenueStreams(child);
+    roomNet = round2(roomNet + streams.roomNet);
+    breakfastNet = round2(breakfastNet + streams.breakfastNet);
+    addOnNet = round2(addOnNet + streams.addOnNet);
+    deductionNet = round2(deductionNet + streams.deductionNet);
+    totalNet = round2(totalNet + streams.totalNet);
+    if (streams.allocation !== "stored") {
+      anyChildLegacy = true;
+    }
+  }
+  const allocation: BookingRevenueStreams["allocation"] =
+    !anyChild || anyChildLegacy ? "legacy-heuristic" : "stored";
+  return {
+    roomNet,
+    breakfastNet,
+    addOnNet,
+    deductionNet,
+    totalNet,
+    allocation
+  };
+}
+
+// Per MRB-11 (2026-08-03, per decision #177): the
+// per-stream allocation write path. The server uses
+// this at create / walkin / corporate / reschedule
+// time to populate `booking.revenueAllocation` and
+// `reservation.aggregateRevenueAllocation` BEFORE the
+// Firestore write. The math routes through the same
+// `calculateDiscountChain` the total uses, so the
+// stored `totalNet` always equals the existing
+// `totalPrice` and the `assertBookingRevenueAllocationInvariant`
+// check passes.
+
+export interface ComputeBookingRevenueAllocationInput {
+  ratePerNight: number;
+  numNights: number;
+  numGuests?: number;
+  breakfastRate?: number | null;
+  hasBreakfast?: boolean | null;
+  /** Per-night extra-bed subtotal (the "add-on" stream). Composed into the chain so the deductions see the full pre-discount subtotal. Default 0. */
+  extraBedTotal?: number;
+  discountPct?: number | null;
+  voucherDiscount?: number | null;
+  memberDiscountPct?: number | null;
+  discountScope?: DiscountScope | null;
+  /** The final `booking.totalPrice` for the invariant assertion. */
+  totalPrice: number;
+}
+
+/**
+ * Compute the per-stream revenue allocation from the
+ * same inputs `calculateBookingTotal` takes. The 3
+ * streams are `room` (ratePerNight × numNights), `breakfast`
+ * (rate × guests × nights), and `addOn` (extraBedTotal).
+ * Each per-stream value is the GROSS amount (pre-deduction)
+ * — `deductionNet` is the single line for the total
+ * deductions (the senior + voucher + member sum from
+ * the existing `calculateDiscountChain`). The invariant
+ * `roomNet + breakfastNet + addOnNet − deductionNet === totalNet`
+ * holds by construction. All values round to 2dp. Throws
+ * via `assertBookingRevenueAllocationInvariant` if the
+ * per-stream sum drifts more than 0.05 from the input
+ * `totalPrice` — a server-side bug, not a caller error.
+ *
+ * The pro-rate-by-stream-share math (an earlier draft
+ * that NETted each per-stream value) was rejected because
+ * it left the `deductionNet` field with no semantic
+ * meaning — the per-stream values already absorbed the
+ * deductions, so the invariant reduced to
+ * `sum(perStream) === totalNet` (with `deductionNet = 0`).
+ * Storing the GROSS per-stream + a single `deductionNet`
+ * matches the existing `rateBreakdown.deductions[]` shape
+ * and gives the report view a clean "room revenue" +
+ * "discounts given" split.
+ */
+export function computeBookingRevenueAllocation(
+  input: ComputeBookingRevenueAllocationInput
+): BookingRevenueAllocation {
+  const ratePerNight = Number(input.ratePerNight) || 0;
+  const numNights = Math.max(0, Number(input.numNights) || 0);
+  const roomTotal = round2(ratePerNight * numNights);
+  const breakfastTotal = round2(
+    (input.hasBreakfast ? Number(input.breakfastRate) || 0 : 0) *
+      Math.max(0, Number(input.numGuests) || 0) *
+      numNights
+  );
+  const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
+
+  const chain = calculateDiscountChain({
+    roomTotal,
+    breakfastTotal,
+    extraBedTotal,
+    seniorPct: input.discountPct,
+    voucherAmount: input.voucherDiscount,
+    memberPct: input.memberDiscountPct,
+    scope: input.discountScope,
+    round: true
+  });
+  const deductionNet = round2(
+    chain.seniorDeduction + chain.voucherDeduction + chain.memberDeduction
+  );
+
+  const roomNet = roomTotal;
+  const breakfastNet = breakfastTotal;
+  const addOnNet = extraBedTotal;
+  const totalNet = round2(Number(input.totalPrice) || 0);
+
+  return assertBookingRevenueAllocationInvariant(
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
+    totalNet
+  );
+}
+
