@@ -53,37 +53,56 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
   });
 
-  it("derives the highest child split supported by the selected room", () => {
+  it("derives the highest child split supported by the selected room (with auto-bump per CHD-11.1)", () => {
     const maxChildrenBlock = bookingPageSrc.match(
       /const selectedMaxSelectableChildren = useMemo\([\s\S]*?\n\s*\}, \[guests, selectedMaxExtraBeds, selectedTypeEntry\]\);/
     );
     expect(maxChildrenBlock).toBeTruthy();
-    expect(maxChildrenBlock![0]).toMatch(/children <= Math\.max\(0, guests - 1\)/);
-    expect(maxChildrenBlock![0]).toMatch(/numAdults:\s*guests - children/);
+    // Per CHD-11.1 (2026-08-04, per decision #192): the
+    // loop bound is `10` (the soft cap from CHD-11), not
+    // `Math.max(0, guests - 1)`. The pre-CHD-11.1 bound
+    // prevented the user from exploring children counts
+    // the room actually supports (with auto-bump).
+    expect(maxChildrenBlock![0]).toMatch(/children <= 10/);
+    // The new derivation uses `effectiveGuests = max(guests,
+    // children + 1)` (the auto-bump scenario) and
+    // `numAdults = effectiveGuests - children`. The
+    // `numAdults` is always `>= 1` after the auto-bump.
+    expect(maxChildrenBlock![0]).toMatch(/effectiveGuests = Math\.max\(guests, children \+ 1\)/);
+    expect(maxChildrenBlock![0]).toMatch(/numAdults = effectiveGuests - children/);
     expect(maxChildrenBlock![0]).toMatch(
       /overflow\.requiredExtraBeds <= selectedMaxExtraBeds/
     );
   });
 
-  it("soft-caps the child stepper (CHD-11) and explains the room's hint", () => {
+  it("soft-caps the child stepper (CHD-11) and explains the room's hint (with auto-bump per CHD-11.1)", () => {
     // Per CHD-11 (2026-08-04, per decision #184): the children
     // picker is no longer bounded by the per-type `maxChildren`
     // cap. The hard cap was a dead-end at the exploration stage
     // — the cap belongs at the commit surface (the submit gate
     // + the room-type card's Fits/Tight/Doesn't fit indicator),
-    // not the picker. The soft cap is `MIN(10, guests - 1)` —
+    // not the picker. The soft cap was `MIN(10, guests - 1)` —
     // a sanity guard, not a domain constraint. The
-    // `guests - 1` floor preserves the "at least one adult"
+    // `guests - 1` floor preserved the "at least one adult"
     // invariant. The "You have reached this room type's limit"
     // dead-end tail is gone.
+    //
+    // Per CHD-11.1 (2026-08-04, per decision #192): the
+    // soft cap is now `MIN(10, selectedMaxSelectableChildren)`
+    // — the room's capacity (with auto-bump), not the
+    // booking's "guests - 1" cap. The auto-bump in
+    // `updateChildren` maintains the "at least one adult"
+    // invariant without hard-capping the children count.
     expect(bookingPageSrc).toMatch(/Children \(0–11\)/);
     expect(bookingPageSrc).toMatch(
       /updateChildren\(numChildren \+ 1\)/
     );
     // Soft cap: the + button is gated at the soft-floor
-    // `MIN(10, guests - 1)`, not the per-type cap.
+    // `MIN(10, selectedMaxSelectableChildren)` (the room's
+    // capacity with auto-bump), not the per-type cap and
+    // not the booking's "guests - 1" cap.
     expect(bookingPageSrc).toMatch(
-      /numChildren >= Math\.min\(10, Math\.max\(0, guests - 1\)\)/
+      /numChildren >= Math\.min\(10, selectedMaxSelectableChildren\)/
     );
     // The pre-CHD-11 per-type cap is no longer enforced at
     // the picker. The per-type `selectedMaxSelectableChildren`
