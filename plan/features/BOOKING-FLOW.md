@@ -925,3 +925,145 @@ The behavioural test (the user lands on `/book` with no URL params, sees no sele
 ### Test coverage
 
 `guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) — pins the "exactly-once" guarantees for every cross-cutting effect in the create → cancel lifecycle.
+
+---
+
+## CHD-11.1 — Picker Auto-Bumps Guests to Fit More Children
+> Proposed 2026-08-04, per decision #192 (operator feedback post-EXB-11.3 review). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:874-903` (the `updateGuests` + `updateChildren` functions), `BookingPage.tsx:536-552` (the `selectedMaxSelectableChildren` derivation), `BookingPage.tsx:2189-2220` (the children stepper's `+` button disabled condition). Sibling to CHD-11 — same picker surface, different UX refinement.
+
+### The problem
+
+Operator-reported 2026-08-04 (post-EXB-11.3 review): "why is it for the single room, it says up to 1 adult + 2 children but for the picker, the + button is disabled so I am only limited to 1 children." The reproduction: 1 Single Room (`maxCapacity: 1`, `maxChildren: 2`, `maxExtraBeds: 1`), 2 guests (1 adult + 1 child). The user wants to add a 2nd child. The room card's amenity line says "Up to 1 adult + 2 children", but the picker's `+` button is disabled (greyed out) at 1 child.
+
+**Root cause.** The pre-CHD-11.1 `updateChildren` function at `BookingPage.tsx:892-903` clamps to `Math.min(Math.max(nextChildren, 0), selectedMaxSelectableChildren, Math.max(0, guests - 1))`. The `Math.max(0, guests - 1)` is the "at least one adult in the booking" invariant (per CHD-05) — a hard cap that prevents the picker from going past `guests - 1` children. With 2 guests, that's 1 child max. The user can't even attempt to add a 2nd child.
+
+But the room CAN hold 1 adult + 2 children (= 3 occupants, within the Single Room's soft capacity of `maxCapacity + maxChildren = 1 + 2 = 3` occupants, no extra bed needed). The picker's hard cap is preventing the user from reaching a state the room card says is valid.
+
+The constraint is two-layered:
+- **Booking constraint** (per CHD-05): `numAdults + numChildren = guests`, `numAdults >= 1`. With 2 guests, the booking can have at most 1 child.
+- **Room constraint** (per CHD-11): the room can hold up to `maxCapacity + maxChildren + maxExtraBeds` occupants, with the per-bucket caps (`maxCapacity` adults, `maxChildren` children). The room can hold 1 adult + 2 children in the Single Room's 3-slot soft capacity.
+
+The pre-CHD-11.1 picker enforces the **booking** constraint as a hard cap, but the **room** constraint is more permissive. The fix: let the picker respect the **room** constraint (the higher of the two), and auto-bump the booking's `guests` to maintain the **booking** invariant when needed.
+
+### The fix — refactor `updateChildren` + `selectedMaxSelectableChildren` to auto-bump `guests`
+
+**Three-part change to `BookingPage.tsx`:**
+
+1. **Refactor `updateGuests` + `updateChildren` to share a `setOccupancy` helper.** The two functions duplicate the URL-update logic (both write `guests` + `children` + `roomType` to the URL). Extract a `setOccupancy(nextGuests, nextChildren)` helper that does the clamping + URL write, and have both functions call it. The clamping in `setOccupancy` includes the `safeGuests - 1` floor for children (so `updateGuests(1)` still clamps children to 0 — the "at least 1 adult" invariant is preserved for guest drops too).
+
+2. **Change `updateChildren` to auto-bump `guests` when the desired children would leave 0 adults.** Instead of clamping to `Math.max(0, guests - 1)`, compute `desiredChildren = min(max(nextChildren, 0), selectedMaxSelectableChildren)`, then `newGuests = max(guests, desiredChildren + 1)`, and call `setOccupancy(newGuests, desiredChildren)`. The auto-bump ensures `numAdults = newGuests - desiredChildren >= 1` — the "at least 1 adult" invariant is preserved.
+
+3. **Update `selectedMaxSelectableChildren` derivation to account for the auto-bump.** The existing derivation at `BookingPage.tsx:536-552` loops `children` from 0 to `Math.max(0, guests - 1)`, computing the overflow for each `(children, guests - children)` pair. With the auto-bump, the user can go above `guests - 1` (the auto-bump handles the invariant). The new derivation:
+   - For each `N` from 0 to 10 (the soft cap from CHD-11):
+     - `effectiveGuests = max(originalGuests, N + 1)` (auto-bump if needed)
+     - `numAdults = effectiveGuests - N` (always >= 1 after auto-bump)
+     - `overflow = requiredExtraBedsFor({ numAdults, numChildren: N, maxCapacity, maxChildren }).requiredExtraBeds`
+     - If `overflow <= maxExtraBeds`, `N` is supported.
+   - The highest supported `N` is the cap.
+   - The existing `for` loop's bound `Math.max(0, guests - 1)` becomes `10` (or some higher bound). The new formula handles the auto-bump scenario.
+
+4. **Update the children stepper's `+` button disabled condition.** Currently `numChildren >= Math.min(10, Math.max(0, guests - 1))` (per `BookingPage.tsx:2217`). The new condition: `numChildren >= Math.min(10, selectedMaxSelectableChildren)`. The `selectedMaxSelectableChildren` is now the room's capacity (with auto-bump), not the booking's "guests - 1" cap.
+
+### What the user sees
+
+**Before CHD-11.1 (the bug):**
+- 2 guests (1 adult + 1 child), 1 Single Room in cart.
+- Children picker shows "1 child (1 adult)" with the `+` button disabled.
+- User can't add a 2nd child even though the room can hold 1 adult + 2 children.
+- Room card's amenity line says "Up to 1 adult + 2 children" but the picker prevents it.
+
+**After CHD-11.1 (the fix):**
+- 2 guests (1 adult + 1 child), 1 Single Room in cart.
+- Children picker shows "1 child (1 adult)" with the `+` button **enabled**.
+- User clicks `+` on children → 3 guests (1 adult + 2 children), picker shows "2 children (1 adult)", room card's "Fits your group" chip shows (the room fits 1 adult + 2 children in the soft capacity).
+- User clicks `+` again → 4 guests (1 adult + 3 children), picker shows "3 children (1 adult)", room card's "Fits your group" chip shows (the room fits 1 adult + 3 children with 1 extra bed).
+- User clicks `+` again → 5 guests (1 adult + 4 children), picker shows "4 children (1 adult)", `+` button is now disabled (the room's cap with `maxExtraBeds 1` is 3 children; the `+` won't go past).
+- The CHD-11 capacity chip on the room card updates live (Fits / Tight / Doesn't fit) based on the new guest count.
+
+**The "at least 1 adult" invariant is still preserved.** The auto-bump maintains `numAdults = newGuests - numChildren >= 1` for every state transition. If the user manually decrements `guests` (via the Adults stepper — wait, there's no Adults stepper, just Guests; the `updateGuests` function is the entry point), `updateGuests(1)` clamps children to 0 (via `safeChildren = min(numChildren, max(0, safeGuests - 1))` in `setOccupancy`).
+
+### Why the new derivation is right
+
+The pre-CHD-11.1 derivation was bounded by `guests - 1` (the booking's "at least 1 adult" invariant). This was correct for the pre-CHD-11.1 cap (the picker hard-capped at `guests - 1`), but the cap was too restrictive — the user couldn't reach states the room supported. With the auto-bump, the user can go above `guests - 1` (the auto-bump handles the invariant), so the derivation should bound by the **room's** capacity (10, the soft cap), not the booking's invariant.
+
+The auto-bump in the derivation handles the invariant naturally:
+- For each candidate `N`, compute the post-bump `effectiveGuests` and `numAdults`.
+- The room supports `N` children if the overflow (with the post-bump `numAdults`) fits in `maxExtraBeds`.
+
+This is the right model: the user is free to pick any `N` the room supports, and the auto-bump maintains the booking's invariant.
+
+### What this changes for the data model
+
+**Nothing.** The `guests: number` state stays. The `numChildren: number` state stays. The `numAdults = max(0, guests - numChildren)` derivation stays. The `selectedMaxSelectableChildren` derivation is updated (same name, new formula). The `setOccupancy` helper is new (extracted from `updateGuests` + `updateChildren`). The `updateGuests` and `updateChildren` functions stay (call `setOccupancy`).
+
+### What this changes for the related work
+
+- **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` per child. CHD-11.1 only changes the client-side picker behavior. The invariant is preserved via auto-bump (client) and server-side validation (server).
+- **CHD-11 (soft-constraint picker)** — the per-type `maxChildren` cap is still the upper bound. The picker just allows the user to explore up to that cap (and beyond, with extra beds) instead of hard-capping at `guests - 1`. The CHD-11 capacity chip on the room card is the verification surface.
+- **EXB-11 + EXB-11.1 + EXB-11.2 (extra-bed toggle + auto-init)** — the extras toggle's `requiredExtraBedsFor` is the same helper used in the new `selectedMaxSelectableChildren` derivation. The auto-init useEffect at `BookingPage.tsx:740-758` re-fires when `numAdults` or `numChildren` change (via the `roomCart` and the per-type check). No change.
+- **Step 2/3 aside** — the extra-bed pricing updates live as the user changes the children count. No change.
+- **MRB-15-10 + MRB-15-11 (admin room-type CRUD + photo gallery)** — unrelated. The admin surface for editing `maxChildren` and `maxExtraBeds` is unchanged.
+- **CHD-13 (homepage search widget)** — unrelated. The homepage widget sends `?guests=...&children=...` to `/book`, which is the URL pre-fill. The `/book` page reads both via `searchParams.get("guests")` and `searchParams.get("children")` at `BookingPage.tsx:214,220`. The picker init from the URL params is unchanged.
+- **EXB-11.3 (no default room-type selection)** — independent. EXB-11.3 removes the auto-select branch on page load. CHD-11.1 changes the children picker's auto-bump behavior. They don't interact (EXB-11.3 affects the room-type card selection; CHD-11.1 affects the children stepper).
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+New `guest-app/tests/api/chd-11-1-picker-auto-bump-guests.test.ts` (source-text guards on `BookingPage.tsx`):
+
+- A `setOccupancy(nextGuests, nextChildren)` helper is **defined** (the extracted shared function).
+- `updateGuests` calls `setOccupancy(nextGuests, numChildren)` (no change in children's behavior).
+- `updateChildren` computes `desiredChildren = min(max(nextChildren, 0), selectedMaxSelectableChildren)` (no `guests - 1` cap) and `newGuests = max(guests, desiredChildren + 1)` (the auto-bump).
+- The `Math.max(0, guests - 1)` clamp is **gone** from `updateChildren` (was at line 896 of the pre-CHD-11.1 file).
+- The `selectedMaxSelectableChildren` derivation's loop bound is **not** `Math.max(0, guests - 1)` anymore — it's the soft cap (e.g., `10`).
+- The new derivation uses `effectiveGuests = max(guests, N + 1)` (the auto-bump scenario) when computing the overflow.
+- The children stepper's `+` button disabled condition is `numChildren >= Math.min(10, selectedMaxSelectableChildren)` (not `Math.max(0, guests - 1)`).
+- The `Math.max(0, guests - 1)` formula in the `+` button's disabled condition is **gone**.
+
+The behavioural test (the user starts at 2 guests + 1 child, clicks `+` on children, sees 3 guests + 2 children, the room's "Fits your group" chip shows) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **Don't auto-bump; let the user manually bump guests via the Guests stepper first.** Forces the user to do a 2-step action (bump guests, then bump children). The auto-bump is a 1-step action. Worse UX.
+- **Show a hint: "Want 2 children? Bump up guests to 3+" with a quick action.** Hint + quick action is more UI than auto-bump. The auto-bump is invisible and the right thing happens.
+- **Remove the "at least 1 adult" invariant entirely (allow 0 adults + N children).** Violates the CHD-05 contract. The server validates `numAdults >= 1`; the client should too. The auto-bump is the right way to maintain the invariant.
+- **Keep the existing `selectedMaxSelectableChildren` derivation bounded by `guests - 1` and just allow the picker to go above that bound (without a derivation update).** The cap would be wrong for higher children counts. The derivation must be updated to match the new cap.
+- **A "harder" fix: when the user clicks `+` on children and it would leave 0 adults, show a modal asking "Bump up to 3 guests?"** Modal is a friction point. The auto-bump is invisible.
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - **Extract `setOccupancy(nextGuests, nextChildren)` helper** at the location of the existing `updateGuests` (around line 874). The helper does the clamping (`safeGuests`, `safeChildren`), the `setGuests` + `setNumChildren` + `setGuestDetails` updates, and the URL write.
+  - **Refactor `updateGuests`** to call `setOccupancy(nextGuests, numChildren)` (no change in behavior).
+  - **Refactor `updateChildren`** to:
+    - Compute `desiredChildren = Math.min(Math.max(nextChildren, 0), selectedMaxSelectableChildren)`.
+    - Compute `newGuests = Math.max(guests, desiredChildren + 1)`.
+    - Call `setOccupancy(newGuests, desiredChildren)`.
+  - **Update `selectedMaxSelectableChildren` derivation** to:
+    - Loop `N` from 0 to 10 (the soft cap).
+    - For each `N`, compute `effectiveGuests = Math.max(guests, N + 1)` and `numAdults = effectiveGuests - N`.
+    - Compute the overflow via `requiredExtraBedsFor` with `(numAdults, N, maxCapacity, maxChildren)`.
+    - If `overflow <= maxExtraBeds`, the cap is at least `N`.
+  - **Update the children stepper's `+` button disabled condition** from `numChildren >= Math.min(10, Math.max(0, guests - 1))` to `numChildren >= Math.min(10, selectedMaxSelectableChildren)`.
+  - The `−` button's disabled condition (`numChildren <= 0`) is unchanged.
+  - The `setNumChildren` and `setGuests` state setters stay.
+  - The URL pre-fill from `searchParams.get("guests")` and `searchParams.get("children")` is unchanged.
+  - ~20 lines changed in `BookingPage.tsx` (extracted helper + refactored functions + updated derivation + updated disabled condition).
+
+### Gates
+
+- **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` and `numAdults >= 1`. The client-side auto-bump maintains the invariant; the server-side validation is a safety net.
+- **CHD-11 (soft-constraint picker)** — the per-type `maxChildren` cap is still the upper bound. The picker just allows the user to explore up to that cap (and beyond, with extra beds) instead of hard-capping at `guests - 1`. The CHD-11 capacity chip on the room card is the verification surface.
+- **EXB-11 + EXB-11.1 + EXB-11.2 (extra-bed toggle + auto-init)** — the extras toggle uses the same `requiredExtraBedsFor` helper as the new `selectedMaxSelectableChildren` derivation. The auto-init useEffect re-fires when `numAdults` or `numChildren` change. No change.
+- **Step 2/3 aside** — the extra-bed pricing updates live. No change.
+- **MRB-15-10 + MRB-15-11** — unrelated.
+- **CHD-13 (homepage search widget)** — unrelated. The homepage widget sends `?guests=...&children=...`; the `/book` page reads both. The picker init from the URL is unchanged.
+- **EXB-11.3 (no default room-type selection)** — independent. EXB-11.3 affects the room-type card selection on page load; CHD-11.1 affects the children stepper. They don't interact.
+
+### Phase 2 (deferred, NOT in CHD-11.1)
+
+- **A separate "Adults" stepper on the homepage widget and `/book` picker** (instead of the single "Guests" stepper that auto-derives adults from `guests - children`). The current shape (one Guests stepper + one Children stepper, with `numAdults` derived) is consistent with `/book` and the homepage widget. Mirroring CHD-13's "Adults + Children" popover. Out of scope — the auto-bump is the right fix for the current surface; a separate Adults stepper is a bigger UX change.
+- **Smarter auto-bump: when the user clicks `+` on children and the room doesn't support the result, show a hint ("Add a second room to fit 3 children") instead of just disabling the `+` button.** A future UX work item; the CHD-11 capacity chip + the submit gate are the current surfaces for "room doesn't fit".
+- **A "Reset to 1 adult + 0 children" quick action** that sets guests to 1 and children to 0 in one click. A future UX work item; out of scope.
+- **Visual feedback when the auto-bump fires** (e.g., the Guests stepper briefly highlights to show "we added a guest for you"). The auto-bump is silent in the spec; a future UX work item could add visual feedback. Out of scope — the auto-bump is the right default; the user notices the change in the stepper display.
+
+---
