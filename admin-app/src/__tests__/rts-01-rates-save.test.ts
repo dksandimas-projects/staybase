@@ -117,18 +117,48 @@ describe("RTS-04 — saveRoomTypes throws and rolls back on a failed write", () 
 
 describe("RTS-01 — no other fan-out sites write the same array field concurrently", () => {
   // Per RTS-07: never fan out per-item writes to a single Firestore array
-  // field. Audit the two callers of updateRoomType that previously sat
-  // outside the dangerous shape (`uploadRoomTypePhoto` /
-  // `removeRoomTypePhoto` / `reorderRoomTypePhotos` are singly-called)
-  // and confirm they have not regressed into a Promise.all fan-out.
-  it("uploadRoomTypePhoto still calls updateRoomType singly", () => {
+  // field. Audit the three photo-gallery functions
+  // (`uploadRoomTypePhoto` / `removeRoomTypePhoto` /
+  // `reorderRoomTypePhotos`) and confirm they have not regressed
+  // into a `Promise.all` fan-out.
+  //
+  // Per MRB-15-11 (2026-08-04, per decision #188): the pre-MRB-15-11
+  // shape was `await updateRoomType(typeValue, { imageUrls: next })`
+  // — a single (non-fan-out) write. The post-MRB-15-11 shape is
+  // `await runTransaction(db, async (tx) => { ... })` — also a
+  // single (atomic) write. The audit shape stays "no `Promise.all`
+  // fan-out"; the mechanism changes from `updateRoomType` to
+  // `runTransaction`.
+  it("uploadRoomTypePhoto writes the photo append inside a single `runTransaction` (not a `Promise.all` fan-out)", () => {
     const uploadFn = adminContextSrc.match(
       /const uploadRoomTypePhoto = async[\s\S]*?\n  \};\n/
     );
     expect(uploadFn).toBeTruthy();
-    // The call site must be `await updateRoomType(typeValue, { imageUrls: next })`,
-    // not wrapped in a `Promise.all`.
-    expect(uploadFn![0]).toMatch(/await updateRoomType\(typeValue, \{ imageUrls: next \}\)/);
-    expect(uploadFn![0]).not.toMatch(/Promise\.all\([^)]*updateRoomType/);
+    // The write must be inside a `runTransaction(db, ...)` (atomic),
+    // not wrapped in a `Promise.all` over multiple writes.
+    expect(uploadFn![0]).toMatch(/runTransaction\(db, async \(tx\) => \{/);
+    expect(uploadFn![0]).toMatch(/tx\.update\(hotelConfigRef, \{/);
+    expect(uploadFn![0]).not.toMatch(/Promise\.all\([^)]*runTransaction/);
+    expect(uploadFn![0]).not.toMatch(/Promise\.all\([^)]*updateDoc/);
+  });
+
+  it("removeRoomTypePhoto writes the photo remove inside a single `runTransaction` (not a `Promise.all` fan-out)", () => {
+    const removeFn = adminContextSrc.match(
+      /const removeRoomTypePhoto = async[\s\S]*?\n  \};\n/
+    );
+    expect(removeFn).toBeTruthy();
+    expect(removeFn![0]).toMatch(/runTransaction\(db, async \(tx\) => \{/);
+    expect(removeFn![0]).toMatch(/tx\.update\(hotelConfigRef, \{/);
+    expect(removeFn![0]).not.toMatch(/Promise\.all\([^)]*runTransaction/);
+  });
+
+  it("reorderRoomTypePhotos writes the reorder inside a single `runTransaction` (not a `Promise.all` fan-out)", () => {
+    const reorderFn = adminContextSrc.match(
+      /const reorderRoomTypePhotos = async[\s\S]*?\n  \};\n/
+    );
+    expect(reorderFn).toBeTruthy();
+    expect(reorderFn![0]).toMatch(/runTransaction\(db, async \(tx\) => \{/);
+    expect(reorderFn![0]).toMatch(/tx\.update\(hotelConfigRef, \{/);
+    expect(reorderFn![0]).not.toMatch(/Promise\.all\([^)]*runTransaction/);
   });
 });
