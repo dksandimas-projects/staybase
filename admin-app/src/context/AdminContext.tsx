@@ -4976,7 +4976,29 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Per `plan/features/SETTINGS.md §Room Types` — upload a single
   // photo for a room type, append its download URL to the type's
   // `imageUrls[]`, and persist. Enforces `MAX_ROOM_TYPE_PHOTOS`.
+  // Per MRB-15-11 (2026-08-04, per decision #188): the
+  // read-modify-write is wrapped in `runTransaction` so the
+  // multi-photo upload race is eliminated. The pre-MRB-15-11
+  // shape read from the in-memory `roomTypes` cache (a
+  // React-side copy of the Firestore snapshot) and wrote the
+  // full array via `updateRoomType` → `saveRoomTypes`; a
+  // `for (const file of accepted) { await uploadRoomTypePhoto(...) }`
+  // loop in the SettingsPage handler would read stale
+  // in-memory state between iterations because the
+  // subscription hadn't fired the previous write locally yet,
+  // so the (N+1)th call would overwrite the array with a
+  // single-element array `[url(N+1)]`. The transaction reads
+  // from Firestore (`tx.get(hotelConfigRef)`) so every call
+  // sees the latest committed state. The Storage upload
+  // stays OUTSIDE the transaction (Storage ops can't be in a
+  // Firestore tx); the cap check moves INSIDE the transaction
+  // so a parallel admin's append can't slip past the cap;
+  // the on-cap-reject cleanup deletes the just-uploaded
+  // Storage object so it doesn't become an orphan.
   const uploadRoomTypePhoto = async (typeValue: string, file: File): Promise<{ success: boolean; error?: string; url?: string }> => {
+    // Client-side UX hint: disable the upload button when
+    // the in-memory state already shows the cap reached.
+    // The transaction-side cap check is the source of truth.
     const type = roomTypes.find((t) => t.value === typeValue);
     if (!type) return { success: false, error: "Room type not found." };
     if (type.imageUrls.length >= MAX_ROOM_TYPE_PHOTOS) {
@@ -4990,8 +5012,58 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       const fileRef = storageRef(storage, path);
       await uploadBytes(fileRef, file);
       const url = await getDownloadURL(fileRef);
-      const next = [...type.imageUrls, url];
-      await updateRoomType(typeValue, { imageUrls: next });
+      const hotelConfigRef = doc(db, "settings", "hotelConfig");
+      // Set by the transaction body when the cap is exceeded
+      // (a parallel admin landed between the client-side
+      // check and the transaction commit). The transaction
+      // returns normally without writing when this fires, so
+      // no Firestore retries are spent on a terminal reject.
+      let capRejected = false;
+      try {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(hotelConfigRef);
+          const data = snap.data();
+          const currentRoomTypes = Array.isArray(data?.roomTypes) ? data.roomTypes : [];
+          const idx = currentRoomTypes.findIndex((t) => t.value === typeValue);
+          if (idx < 0) {
+            // The type was deleted between the client check
+            // and the transaction. Treat as a cap-reject
+            // path (cleanup + return false) — the user can
+            // refresh and re-pick.
+            throw new Error("Room type not found in settings document.");
+          }
+          const current = currentRoomTypes[idx];
+          const currentImageUrls = Array.isArray(current.imageUrls) ? current.imageUrls : [];
+          if (currentImageUrls.length >= MAX_ROOM_TYPE_PHOTOS) {
+            capRejected = true;
+            // Don't write — return normally so the
+            // transaction commits a no-op.
+            return;
+          }
+          const newRoomTypes = [...currentRoomTypes];
+          newRoomTypes[idx] = { ...current, imageUrls: [...currentImageUrls, url] };
+          tx.update(hotelConfigRef, {
+            roomTypes: newRoomTypes,
+            updatedAt: serverTimestamp()
+          });
+        });
+      } catch (txErr) {
+        // Non-cap-reject failure (type deleted, network,
+        // permission). Best-effort cleanup of the
+        // just-uploaded Storage object.
+        await deleteObject(fileRef).catch((cleanupErr) => {
+          console.warn(`Storage cleanup for failed upload ${path} skipped:`, cleanupErr);
+        });
+        throw txErr;
+      }
+      if (capRejected) {
+        await deleteObject(fileRef).catch((cleanupErr) => {
+          console.warn(`Storage cleanup for capped upload ${path} skipped:`, cleanupErr);
+        });
+        const error = `Maximum ${MAX_ROOM_TYPE_PHOTOS} photos per room type.`;
+        notify.warning("Photo limit reached", error);
+        return { success: false, error };
+      }
       return { success: true, url };
     } catch (error) {
       console.error("Error uploading room type photo:", error);
@@ -5005,12 +5077,38 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // best-effort delete the underlying Storage object. The list
   // update always runs even if the Storage delete fails (the file
   // becomes orphaned but the type stays consistent).
+  // Per MRB-15-11: same `runTransaction` wrap as upload — the
+  // pre-MRB-15-11 read-modify-write on the in-memory
+  // `roomTypes` cache had the same race as the upload path
+  // (the SettingsPage handler at `SettingsPage.tsx:5660`
+  // triggers this on the per-photo delete click; a
+  // concurrent reorder or upload could clobber the in-memory
+  // read).
   const removeRoomTypePhoto = async (typeValue: string, url: string): Promise<{ success: boolean; error?: string }> => {
-    const type = roomTypes.find((t) => t.value === typeValue);
-    if (!type) return { success: false, error: "Room type not found." };
     try {
-      const next = type.imageUrls.filter((u) => u !== url);
-      await updateRoomType(typeValue, { imageUrls: next });
+      const hotelConfigRef = doc(db, "settings", "hotelConfig");
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(hotelConfigRef);
+        const data = snap.data();
+        const currentRoomTypes = Array.isArray(data?.roomTypes) ? data.roomTypes : [];
+        const idx = currentRoomTypes.findIndex((t) => t.value === typeValue);
+        if (idx < 0) {
+          throw new Error("Room type not found in settings document.");
+        }
+        const current = currentRoomTypes[idx];
+        const currentImageUrls: string[] = Array.isArray(current.imageUrls) ? current.imageUrls : [];
+        const newImageUrls = currentImageUrls.filter((u: string) => u !== url);
+        const newRoomTypes = [...currentRoomTypes];
+        newRoomTypes[idx] = { ...current, imageUrls: newImageUrls };
+        tx.update(hotelConfigRef, {
+          roomTypes: newRoomTypes,
+          updatedAt: serverTimestamp()
+        });
+      });
+      // Best-effort Storage cleanup after the Firestore write
+      // commits. The list update always runs even if the
+      // Storage delete fails (the file becomes orphaned but
+      // the type stays consistent).
       try {
         const fileRef = storageRef(storage, url);
         await deleteObject(fileRef);
@@ -5027,11 +5125,31 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   };
 
   // Persist a new ordering of `imageUrls[]` for a room type.
+  // Per MRB-15-11: same `runTransaction` wrap as upload +
+  // remove — the pre-MRB-15-11 read-modify-write on the
+  // in-memory `roomTypes` cache had the same race (drag-to-
+  // reorder is a single-user action, lower race surface, but
+  // using the same pattern keeps the contract consistent and
+  // gets the same atomicity guarantee).
   const reorderRoomTypePhotos = async (typeValue: string, imageUrls: string[]): Promise<{ success: boolean; error?: string }> => {
-    const type = roomTypes.find((t) => t.value === typeValue);
-    if (!type) return { success: false, error: "Room type not found." };
     try {
-      await updateRoomType(typeValue, { imageUrls });
+      const hotelConfigRef = doc(db, "settings", "hotelConfig");
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(hotelConfigRef);
+        const data = snap.data();
+        const currentRoomTypes = Array.isArray(data?.roomTypes) ? data.roomTypes : [];
+        const idx = currentRoomTypes.findIndex((t) => t.value === typeValue);
+        if (idx < 0) {
+          throw new Error("Room type not found in settings document.");
+        }
+        const current = currentRoomTypes[idx];
+        const newRoomTypes = [...currentRoomTypes];
+        newRoomTypes[idx] = { ...current, imageUrls };
+        tx.update(hotelConfigRef, {
+          roomTypes: newRoomTypes,
+          updatedAt: serverTimestamp()
+        });
+      });
       return { success: true };
     } catch (error) {
       console.error("Error reordering room type photos:", error);

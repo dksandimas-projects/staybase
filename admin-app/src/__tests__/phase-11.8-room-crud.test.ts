@@ -227,20 +227,36 @@ describe("Phase 11.8 — Room CRUD (create + delete)", () => {
       expect(adminContextSrc).toMatch(/Maximum \$\{MAX_ROOM_TYPE_PHOTOS\} photos per room type\./);
     });
 
-    it("uploadRoomTypePhoto uploads to room-types/{typeValue}/ and appends the URL", () => {
+    it("uploadRoomTypePhoto uploads to room-types/{typeValue}/ and appends the URL via `runTransaction`", () => {
+      // Per MRB-15-11 (2026-08-04, per decision #188): the
+      // pre-MRB-15-11 read-modify-write on the in-memory
+      // `roomTypes` cache (`updateRoomType` → `saveRoomTypes`)
+      // is replaced by a `runTransaction(db, ...)` wrap. The
+      // Storage upload shape is unchanged.
       expect(adminContextSrc).toMatch(/`room-types\/\$\{typeValue\}\/\$\{Date\.now\(\)\}-\$\{safeName\}`/);
       expect(adminContextSrc).toMatch(/uploadBytes\(fileRef,\s*file\)/);
       expect(adminContextSrc).toMatch(/getDownloadURL\(fileRef\)/);
-      expect(adminContextSrc).toMatch(/updateRoomType\(typeValue,\s*\{\s*imageUrls:\s*next\s*\}\)/);
+      expect(adminContextSrc).toMatch(/runTransaction\(db, async \(tx\) => \{[\s\S]*?imageUrls: \[\.\.\.currentImageUrls, url\]/);
     });
 
-    it("removeRoomTypePhoto filters the URL out of the type's imageUrls and best-effort deletes from Storage", () => {
-      expect(adminContextSrc).toMatch(/type\.imageUrls\.filter\(\s*\(u\)\s*=>\s*u\s*!==\s*url\s*\)/);
+    it("removeRoomTypePhoto filters the URL out of the type's imageUrls (inside `runTransaction`) and best-effort deletes from Storage", () => {
+      // Per MRB-15-11: the read-modify-write (filter + write)
+      // is inside `runTransaction`. The Storage `deleteObject`
+      // stays OUTSIDE the transaction (best-effort, post-commit).
+      expect(adminContextSrc).toMatch(/currentImageUrls\.filter\(\(u: string\) => u !== url\)/);
+      expect(adminContextSrc).toMatch(/runTransaction\(db, async \(tx\) => \{[\s\S]*?currentImageUrls\.filter/);
       expect(adminContextSrc).toMatch(/deleteObject\(fileRef\)/);
     });
 
-    it("reorderRoomTypePhotos writes the new ordering via updateRoomType", () => {
-      expect(adminContextSrc).toMatch(/updateRoomType\(typeValue,\s*\{\s*imageUrls\s*\}\)/);
+    it("reorderRoomTypePhotos writes the new ordering via `runTransaction` (atomic reorder)", () => {
+      // Per MRB-15-11: the reorder write is inside
+      // `runTransaction` so the in-memory cache race is
+      // eliminated. The function does NOT go through
+      // `updateRoomType` — the transaction writes the whole
+      // `roomTypes` array directly.
+      expect(adminContextSrc).toMatch(/runTransaction\(db, async \(tx\) => \{[\s\S]*?newRoomTypes\[idx\] = \{ \.\.\.current, imageUrls \}/);
+      expect(adminContextSrc).toMatch(/tx\.update\(hotelConfigRef, \{[\s\S]*?roomTypes: newRoomTypes/);
+      expect(adminContextSrc).toMatch(/updatedAt: serverTimestamp\(\)/);
     });
 
     it("addRoomType initializes an empty imageUrls array on new types", () => {
