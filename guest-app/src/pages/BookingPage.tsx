@@ -534,14 +534,33 @@ export function BookingPage() {
     0
   );
   // The selected type may use its rollaway-bed allowance for adult
-  // or child overflow. Find the highest child split supported for the
-  // current total rather than silently stopping at `maxChildren`.
+  // or child overflow. Find the highest child split supported for
+  // the current total rather than silently stopping at `maxChildren`.
+  //
+  // Per CHD-11.1 (2026-08-04, per decision #192): the
+  // `updateChildren` function auto-bumps `guests` when the user
+  // clicks `+` on children beyond the current total. The
+  // derivation here mirrors that auto-bump — for each candidate
+  // child count `N`, the effective `guests` is `max(originalGuests,
+  // N + 1)` (auto-bump if needed), so `numAdults = effectiveGuests
+  // - N` is always `>= 1`. The loop bound is `10` (the soft cap
+  // from CHD-11), not `Math.max(0, guests - 1)` — the pre-CHD-11.1
+  // bound prevented the user from exploring children counts the
+  // room actually supports (with auto-bump).
   const selectedMaxSelectableChildren = useMemo(() => {
     if (!selectedTypeEntry) return Math.max(0, guests - 1);
     let highest = 0;
-    for (let children = 0; children <= Math.max(0, guests - 1); children += 1) {
+    for (let children = 0; children <= 10; children += 1) {
+      // Per CHD-11.1: with auto-bump, the booking's
+      // "at least 1 adult" invariant is maintained by
+      // bumping `guests` to `max(originalGuests, N + 1)`.
+      // The room supports `N` children if the overflow
+      // (with the auto-bumped `numAdults`) fits in
+      // `maxExtraBeds`.
+      const effectiveGuests = Math.max(guests, children + 1);
+      const numAdults = effectiveGuests - children;
       const overflow = requiredExtraBedsFor({
-        numAdults: guests - children,
+        numAdults,
         numChildren: children,
         maxCapacity: Number(selectedTypeEntry.maxCapacity) || 0,
         maxChildren: Number(selectedTypeEntry.maxChildren) || 0
@@ -878,9 +897,23 @@ export function BookingPage() {
     setSearchParams(next, { replace: true });
   }
 
-  function updateGuests(nextGuests: number) {
+  // Per CHD-11.1 (2026-08-04, per decision #192): the
+  // `updateGuests` and `updateChildren` functions share a
+  // `setOccupancy` helper that handles the clamping + URL
+  // write. The previous shape had two duplicate URL-write
+  // blocks; the new shape is a single source of truth for
+  // the occupancy mutation. The helper preserves the
+  // "at least 1 adult in the booking" invariant by clamping
+  // children to `safeGuests - 1` when guests drops below the
+  // current children count (so `updateGuests(1)` with 2
+  // children becomes 1 guest + 0 children).
+  function setOccupancy(nextGuests: number, nextChildren: number) {
     const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
-    const safeChildren = Math.min(numChildren, Math.max(0, safeGuests - 1));
+    const safeChildren = Math.min(
+      Math.max(nextChildren, 0),
+      selectedMaxSelectableChildren,
+      Math.max(0, safeGuests - 1)
+    );
     setGuests(safeGuests);
     setNumChildren(safeChildren);
     setGuestDetails((current) => ({
@@ -896,17 +929,29 @@ export function BookingPage() {
     setSearchParams(next, { replace: true });
   }
 
+  function updateGuests(nextGuests: number) {
+    // No change in children when guests change
+    // (children may be clamped to `safeGuests - 1`
+    // by `setOccupancy` if guests drops below the
+    // current children count).
+    setOccupancy(nextGuests, numChildren);
+  }
+
   function updateChildren(nextChildren: number) {
-    const safeChildren = Math.min(
+    // Per CHD-11.1: auto-bump `guests` to maintain
+    // the "at least 1 adult" invariant. The pre-CHD-11.1
+    // shape hard-capped children at `guests - 1` here,
+    // which prevented the user from picking more
+    // children than the booking's total allowed. With
+    // auto-bump, the user can go above `guests - 1` if
+    // the room supports it; the `guests` is bumped
+    // along with the children so `numAdults >= 1`.
+    const desiredChildren = Math.min(
       Math.max(nextChildren, 0),
-      selectedMaxSelectableChildren,
-      Math.max(0, guests - 1)
+      selectedMaxSelectableChildren
     );
-    setNumChildren(safeChildren);
-    const next = new URLSearchParams(searchParams);
-    next.set("children", String(safeChildren));
-    next.set("guests", String(guests));
-    setSearchParams(next, { replace: true });
+    const newGuests = Math.max(guests, desiredChildren + 1);
+    setOccupancy(newGuests, desiredChildren);
   }
 
   function validateUploadFile(file: File) {
@@ -2208,13 +2253,18 @@ export function BookingPage() {
                     aria-label="Increase children count"
                     aria-describedby="children-cap-help"
                     onClick={() => updateChildren(numChildren + 1)}
-                    // Soft cap: MIN(10, guests - 1). The 10 is a
-                    // "stop the + at 100" sanity guard, not a
-                    // capacity rule. The `guests - 1` floor is
-                    // the existing "at least one adult"
-                    // invariant (preserved from the pre-CHD-11
-                    // shape).
-                    disabled={numChildren >= Math.min(10, Math.max(0, guests - 1))}
+                    // Per CHD-11.1: the cap is the room's
+                    // `selectedMaxSelectableChildren` (with
+                    // auto-bump) bounded by the soft cap of
+                    // 10. The pre-CHD-11.1 shape capped at
+                    // `Math.min(10, Math.max(0, guests - 1))`
+                    // (the booking's "at least 1 adult"
+                    // invariant), which prevented the user
+                    // from picking children counts the room
+                    // actually supports. The auto-bump in
+                    // `updateChildren` maintains the invariant
+                    // without hard-capping the children count.
+                    disabled={numChildren >= Math.min(10, selectedMaxSelectableChildren)}
                   >
                     <Plus size={16} />
                   </button>
