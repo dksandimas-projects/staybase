@@ -1,6 +1,6 @@
-import { BedDouble, Car, Coffee, Gift, MapPin, Palmtree, Search, Sparkles, Star, Users, Wifi } from "lucide-react";
+import { BedDouble, Car, ChevronDown, Coffee, Gift, MapPin, Minus, Palmtree, Plus, Search, Sparkles, Star, Users, Wifi } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fadeUp, getDateKeyInTimezone, staggerChild, staggerContainer } from "@spark-inn/shared";
 import config from "@config";
@@ -59,7 +59,49 @@ export function HomePage() {
   const { user, memberProfile } = useGuestAuth();
   const [checkIn, setCheckIn] = useState(() => getDateKeyInTimezone(config.timezone, 1));
   const [checkOut, setCheckOut] = useState(() => getDateKeyInTimezone(config.timezone, 2));
-  const [guests, setGuests] = useState(2);
+  // Per CHD-13 (2026-08-04, per decision #187): the
+  // homepage "Guests" field is now a popover with two
+  // steppers (Adults + Children) instead of a flat
+  // 1-6 `<select>`. The split matches the `/book` picker
+  // shape so the first-contact widget agrees with the
+  // booking flow's pre-fill. Defaults mirror the
+  // spec: Adults min 1 max 10 default 2, Children min 0
+  // max 10 default 0. The `total` is derived as
+  // `adults + children` (what the URL's `guests` param
+  // already carries — the `/book` page's
+  // `Math.max(0, guests - children)` derivation at
+  // `BookingPage.tsx:221` is unchanged).
+  const [adults, setAdults] = useState(2);
+  const [children, setChildren] = useState(0);
+  const total = adults + children;
+  // Popover open/close + the click-outside / Escape
+  // dismissal (mirrors the Navbar dropdown pattern at
+  // `Navbar.tsx:65-75`).
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!popoverOpen) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (
+        popoverRef.current
+        && !popoverRef.current.contains(e.target as Node)
+        && triggerRef.current
+        && !triggerRef.current.contains(e.target as Node)
+      ) {
+        setPopoverOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [popoverOpen]);
 
   // Resolve `featuredTypeValues` to a list of physical rooms
   // for the "Stay with us" section. Each type value is matched
@@ -122,7 +164,15 @@ export function HomePage() {
     const params = new URLSearchParams({
       checkIn,
       checkOut,
-      guests: String(guests)
+      guests: String(total),
+      // Per CHD-13 (2026-08-04, per decision #187): the
+      // children's count is now part of the URL contract.
+      // The `/book` page already reads
+      // `searchParams.get("children")` at `BookingPage.tsx:220`
+      // (the CHD-10 pre-fill), so the homepage widget just
+      // needs to send the new param — the `/book` reader
+      // is unchanged.
+      children: String(children)
     });
     // Per the catalog-only /rooms refactor: the rooms page no longer
     // surfaces date-aware availability, so the homepage checker's
@@ -206,20 +256,149 @@ export function HomePage() {
               onCheckOutChange={setCheckOut}
               orientation="horizontal"
             />
-            <label className="grid gap-2 text-sm font-medium text-gray-700 lg:min-w-36">
-              Guests
-              <select
-                className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
-                value={guests}
-                onChange={(event) => setGuests(Number(event.target.value))}
+            {/* Per CHD-13 (2026-08-04, per decision #187):
+                the "Guests" field is now a popover with
+                two steppers (Adults + Children) instead
+                of a flat 1-6 `<select>`. The trigger
+                shows the current split; the popover
+                holds the two stepper rows + a "Done"
+                button. The split is sent on Search via
+                `guests=adults+children` + `children=N`
+                (the `/book` page already reads both —
+                `BookingPage.tsx:214` and `:220`). The
+                popover dismisses on outside click
+                (mousedown) and Escape key (mirrors
+                the Navbar dropdown pattern at
+                `Navbar.tsx:65-75`). The trigger's
+                `aria-haspopup="dialog"` +
+                `aria-expanded` + `aria-controls`
+                pattern is the standard popover
+                contract; the popover's
+                `role="dialog"` + `aria-labelledby`
+                gives screen readers a name. */}
+            <div className="relative grid gap-2 text-sm font-medium text-gray-700 lg:min-w-36">
+              <span id="guests-popover-title">Guests</span>
+              <button
+                ref={triggerRef}
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={popoverOpen}
+                aria-controls="guests-popover"
+                onClick={() => setPopoverOpen((open) => !open)}
+                data-testid="guests-trigger"
+                className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition hover:border-gray-300 focus:border-primary focus:ring-2 focus:ring-primary-light"
               >
-                {[1, 2, 3, 4, 5, 6].map((value) => (
-                  <option key={value} value={value}>
-                    {value} {value === 1 ? "guest" : "guests"}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <span>
+                  {adults} {adults === 1 ? "adult" : "adults"}
+                  {children > 0
+                    ? `, ${children} ${children === 1 ? "child" : "children"}`
+                    : ""}
+                </span>
+                <ChevronDown
+                  size={16}
+                  className={`ml-2 shrink-0 text-gray-500 transition ${popoverOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {popoverOpen ? (
+                <div
+                  ref={popoverRef}
+                  id="guests-popover"
+                  role="dialog"
+                  aria-labelledby="guests-popover-title"
+                  data-testid="guests-popover"
+                  className="absolute left-0 right-0 top-full z-30 mt-2 rounded-card-lg bg-white p-4 shadow-xl ring-1 ring-gray-200"
+                >
+                  <div className="space-y-3">
+                    <div
+                      className="flex items-center justify-between gap-3"
+                      data-testid="adults-stepper"
+                    >
+                      <label
+                        htmlFor="adults-stepper-input"
+                        className="text-sm font-medium text-gray-700"
+                      >
+                        Adults
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          aria-label="Decrease adults count"
+                          className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={adults <= 1}
+                          onClick={() => setAdults(Math.max(1, adults - 1))}
+                        >
+                          <Minus size={16} />
+                        </button>
+                        <span
+                          id="adults-stepper-input"
+                          aria-live="polite"
+                          aria-label="Adults count"
+                          className="min-w-8 text-center text-sm font-semibold text-gray-950"
+                        >
+                          {adults}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Increase adults count"
+                          className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={adults >= 10}
+                          onClick={() => setAdults(Math.min(10, adults + 1))}
+                        >
+                          <Plus size={16} />
+                        </button>
+                      </div>
+                    </div>
+                    <div
+                      className="flex items-center justify-between gap-3"
+                      data-testid="children-stepper"
+                    >
+                      <label
+                        htmlFor="children-stepper-input"
+                        className="text-sm font-medium text-gray-700"
+                      >
+                        Children (0–11)
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          aria-label="Decrease children count"
+                          className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={children <= 0}
+                          onClick={() => setChildren(Math.max(0, children - 1))}
+                        >
+                          <Minus size={16} />
+                        </button>
+                        <span
+                          id="children-stepper-input"
+                          aria-live="polite"
+                          aria-label="Children count"
+                          className="min-w-8 text-center text-sm font-semibold text-gray-950"
+                        >
+                          {children}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Increase children count"
+                          className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={children >= 10}
+                          onClick={() => setChildren(Math.min(10, children + 1))}
+                        >
+                          <Plus size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPopoverOpen(false)}
+                    data-testid="guests-popover-done"
+                    className="mt-4 w-full rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-dark"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <PrimaryButton type="button" className="lg:min-w-48" onClick={searchAvailability}>
               <Search size={18} />
               Search
