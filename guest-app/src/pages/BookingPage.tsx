@@ -2452,144 +2452,6 @@ export function BookingPage() {
                           );
                         })()}
 
-                        {/* Per EXB-11 (2026-08-04, per decision
-                            #186): the per-type "Extras" sub-section.
-                            Surfaces the extra-bed count as a
-                            user-controlled 0..maxExtraBeds counter
-                            on each room-type card, with the
-                            per-bed-per-night rate + stay total
-                            inline, and a soft-floor warning when
-                            the type's `maxExtraBeds` cap is below
-                            the per-room overflow the group needs.
-                            The user is in control — the soft floor
-                            is enforced via the `[−]` button being
-                            disabled (not by auto-setting the
-                            count), and the submit gate (per CHD-11)
-                            catches the over-cap case at Step 1 →
-                            Step 2. Hidden entirely when
-                            `maxExtraBeds === 0` per the spec's
-                            "no extra bed" edge case. */}
-                        {(() => {
-                          const typeMaxExtraBeds = Number(type.maxExtraBeds) || 0;
-                          if (typeMaxExtraBeds === 0) return null;
-                          // All rooms of this type share the
-                          // same per-type count (the toggle
-                          // is per-type, not per-room — see the
-                          // spec's "per-type vs per-room" edge
-                          // case). `updateExtraBedCount` mirrors
-                          // the user's pick onto every room.
-                          const userExtraBeds = selectedTypeRooms[0]?.extraBedCount ?? 0;
-                          const typeExtraBedRate = Number(type.extraBedRate) || 0;
-                          // The per-room overflow for this type
-                          // against the current group. The
-                          // soft floor is `requiredExtraBeds`
-                          // (the per-room count the group needs
-                          // to fit without over-cap). When the
-                          // type's `maxExtraBeds` is below this,
-                          // the type cannot satisfy the group
-                          // and the warning fires.
-                          const perTypeOverflow = requiredExtraBedsFor({
-                            numAdults,
-                            numChildren,
-                            maxCapacity: Number(type.maxCapacity) || 0,
-                            maxChildren: Number(type.maxChildren) || 0
-                          });
-                          const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
-                          const overCap = softFloor > typeMaxExtraBeds;
-                          // The rate is only meaningful when the
-                          // user has at least one room of this
-                          // type in the cart (the counter has
-                          // nothing to multiply against when
-                          // `typeQuantity === 0`). The
-                          // disabled-when-zero-rows state on the
-                          // counter buttons keeps the UX honest.
-                          const stayTotal = userExtraBeds * typeExtraBedRate * nights;
-                          return (
-                            <div
-                              className="mt-4 grid gap-2"
-                              aria-label={`${type.label} extras`}
-                              data-testid={`extras-stepper-${type.value}`}
-                            >
-                              <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
-                                <span>
-                                  <span className="block text-sm font-semibold text-gray-950">Extra beds</span>
-                                  <span className="block text-xs text-gray-500">
-                                    {typeQuantity > 0
-                                      ? `${formatPrice(typeExtraBedRate)} / bed / night`
-                                      : "Add at least one room to set extra beds"}
-                                  </span>
-                                </span>
-                                <span className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    aria-label={`Remove one extra bed from ${type.label}`}
-                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                    // Disabled at the soft floor
-                                    // (`userExtraBeds <= softFloor`)
-                                    // and when there are no rooms
-                                    // of this type to mirror the
-                                    // count onto.
-                                    disabled={typeQuantity === 0 || userExtraBeds <= softFloor}
-                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds - 1, typeMaxExtraBeds)}
-                                  >
-                                    <Minus size={16} />
-                                  </button>
-                                  <span
-                                    className="min-w-8 text-center text-lg font-semibold text-gray-950"
-                                    aria-live="polite"
-                                    data-testid={`extras-count-${type.value}`}
-                                  >
-                                    {userExtraBeds}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    aria-label={`Add one extra bed to ${type.label}`}
-                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                    disabled={typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds}
-                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds + 1, typeMaxExtraBeds)}
-                                  >
-                                    <Plus size={16} />
-                                  </button>
-                                </span>
-                              </div>
-                              {/* Stay total: hidden when the
-                                  count is 0 (no noise) per the
-                                  spec's "What the toggle shows"
-                                  section. */}
-                              {typeQuantity > 0 && userExtraBeds > 0 ? (
-                                <p
-                                  className="text-xs text-gray-600"
-                                  data-testid={`extras-stay-total-${type.value}`}
-                                >
-                                  {formatPrice(stayTotal)} for {nights} {nights === 1 ? "night" : "nights"}
-                                </p>
-                              ) : null}
-                              {/* Soft-floor warning: fires when
-                                  the type's `maxExtraBeds` cap
-                                  cannot cover the per-room
-                                  overflow. The submit gate
-                                  (per CHD-11) catches the
-                                  over-cap case at Step 1 → Step
-                                  2; this warning is the inline
-                                  nudge. Per the spec, the
-                                  message is "Room needs N extra
-                                  beds to fit your group. You can
-                                  add up to N here." (the second
-                                  N is the cap, the first is the
-                                  soft floor). */}
-                              {typeQuantity > 0 && overCap ? (
-                                <p
-                                  className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-700"
-                                  data-testid={`extras-soft-floor-warning-${type.value}`}
-                                  role="status"
-                                >
-                                  {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
-                                </p>
-                              ) : null}
-                            </div>
-                          );
-                        })()}
-
                         <div className="mt-6 grid gap-3">
                           <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
                             <span>
@@ -2677,6 +2539,200 @@ export function BookingPage() {
                             )}
                           </div>
                         ) : null}
+
+                        {/* Per EXB-11 (2026-08-04, per decision
+                            #186) + EXB-11.1 (2026-08-04, per decision
+                            #189): the per-type "Extras" sub-section.
+                            Per EXB-11.1: moved to the BOTTOM of the
+                            card (after the rate options + mixed-rates
+                            panel) and rendered as a binary checkbox
+                            when `maxExtraBeds === 1` (the counter is
+                            the wrong shape for a yes/no decision; the
+                            user can only set 0 or 1, but the counter
+                            presents 3 affordances). For
+                            `maxExtraBeds >= 2`, the EXB-11 counter
+                            shape stays. The data model is unchanged:
+                            `room.extraBedCount: number` (0 or 1 for
+                            the checkbox case; 0..maxExtraBeds for the
+                            counter case). `rebalanceGuestDistribution`
+                            clamping unchanged. `updateExtraBedCount`
+                            unchanged. Cart URL serialization
+                            unchanged. Hidden when `maxExtraBeds === 0`
+                            per the EXB-11 "no extra bed" edge case. */}
+                        {(() => {
+                          const typeMaxExtraBeds = Number(type.maxExtraBeds) || 0;
+                          if (typeMaxExtraBeds === 0) return null;
+                          // All rooms of this type share the
+                          // same per-type count (the toggle is
+                          // per-type, not per-room — see the
+                          // spec's "per-type vs per-room" edge
+                          // case). `updateExtraBedCount` mirrors
+                          // the user's pick onto every room.
+                          const userExtraBeds = selectedTypeRooms[0]?.extraBedCount ?? 0;
+                          const typeExtraBedRate = Number(type.extraBedRate) || 0;
+                          // The per-room overflow for this type
+                          // against the current group. The soft
+                          // floor is `requiredExtraBeds` (the
+                          // per-room count the group needs to
+                          // fit without over-cap). When the
+                          // type's `maxExtraBeds` is below this,
+                          // the type cannot satisfy the group
+                          // and the warning fires.
+                          const perTypeOverflow = requiredExtraBedsFor({
+                            numAdults,
+                            numChildren,
+                            maxCapacity: Number(type.maxCapacity) || 0,
+                            maxChildren: Number(type.maxChildren) || 0
+                          });
+                          const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
+                          const overCap = softFloor > typeMaxExtraBeds;
+                          // The rate is only meaningful when the
+                          // user has at least one room of this
+                          // type in the cart (the toggle has
+                          // nothing to multiply against when
+                          // `typeQuantity === 0`). The
+                          // disabled-when-zero-rows state on the
+                          // control keeps the UX honest.
+                          const stayTotal = userExtraBeds * typeExtraBedRate * nights;
+                          // Per EXB-11.1: the checkbox is the
+                          // right shape when `maxExtraBeds === 1`
+                          // (a binary decision). For N >= 2, the
+                          // counter is the right shape (the user
+                          // might want exactly 1, not all-or-
+                          // nothing). The `data-testid` markers
+                          // differ between branches so the test
+                          // surface is unambiguous.
+                          if (typeMaxExtraBeds === 1) {
+                            return (
+                              <div
+                                className="mt-6 grid gap-2"
+                                aria-label={`${type.label} extras`}
+                                data-testid={`extras-stepper-${type.value}`}
+                              >
+                                <label
+                                  htmlFor={`extras-checkbox-${type.value}`}
+                                  className="flex min-h-14 cursor-pointer items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4"
+                                >
+                                  <span>
+                                    <span className="block text-sm font-semibold text-gray-950">Add an extra bed</span>
+                                    <span className="block text-xs text-gray-500">
+                                      {typeQuantity > 0
+                                        ? `${formatPrice(typeExtraBedRate)} / bed / night`
+                                        : "Add at least one room to set extra beds"}
+                                    </span>
+                                  </span>
+                                  <input
+                                    type="checkbox"
+                                    id={`extras-checkbox-${type.value}`}
+                                    data-testid={`extras-checkbox-${type.value}`}
+                                    checked={userExtraBeds === 1}
+                                    // Disabled when (a) no rooms
+                                    // of this type exist (nothing
+                                    // to mirror the count onto),
+                                    // or (b) the soft floor requires
+                                    // the extra bed (>= 1) but the
+                                    // user hasn't enabled it yet.
+                                    // The latter case is the
+                                    // "forced on" affordance.
+                                    disabled={typeQuantity === 0 || (userExtraBeds === 0 && softFloor >= 1)}
+                                    onChange={(e) => updateExtraBedCount(type.value, e.target.checked ? 1 : 0, typeMaxExtraBeds)}
+                                    aria-describedby={softFloor >= 1 ? `extras-soft-floor-warning-${type.value}` : undefined}
+                                    className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
+                                  />
+                                </label>
+                                {/* Stay total + soft-floor
+                                    warning (shared with the
+                                    counter branch). */}
+                                {typeQuantity > 0 && userExtraBeds > 0 ? (
+                                  <p
+                                    className="text-xs text-gray-600"
+                                    data-testid={`extras-stay-total-${type.value}`}
+                                  >
+                                    {formatPrice(stayTotal)} for {nights} {nights === 1 ? "night" : "nights"}
+                                  </p>
+                                ) : null}
+                                {typeQuantity > 0 && overCap ? (
+                                  <p
+                                    className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-700"
+                                    data-testid={`extras-soft-floor-warning-${type.value}`}
+                                    role="status"
+                                  >
+                                    {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
+                                  </p>
+                                ) : null}
+                              </div>
+                            );
+                          }
+                          // Counter branch (maxExtraBeds >= 2,
+                          // EXB-11 unchanged).
+                          return (
+                            <div
+                              className="mt-6 grid gap-2"
+                              aria-label={`${type.label} extras`}
+                              data-testid={`extras-stepper-${type.value}`}
+                            >
+                              <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
+                                <span>
+                                  <span className="block text-sm font-semibold text-gray-950">Extra beds</span>
+                                  <span className="block text-xs text-gray-500">
+                                    {typeQuantity > 0
+                                      ? `${formatPrice(typeExtraBedRate)} / bed / night`
+                                      : "Add at least one room to set extra beds"}
+                                  </span>
+                                </span>
+                                <span className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove one extra bed from ${type.label}`}
+                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                    // Disabled at the soft floor
+                                    // (`userExtraBeds <= softFloor`)
+                                    // and when there are no rooms
+                                    // of this type to mirror the
+                                    // count onto.
+                                    disabled={typeQuantity === 0 || userExtraBeds <= softFloor}
+                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds - 1, typeMaxExtraBeds)}
+                                  >
+                                    <Minus size={16} />
+                                  </button>
+                                  <span
+                                    className="min-w-8 text-center text-lg font-semibold text-gray-950"
+                                    aria-live="polite"
+                                    data-testid={`extras-count-${type.value}`}
+                                  >
+                                    {userExtraBeds}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    aria-label={`Add one extra bed to ${type.label}`}
+                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                    disabled={typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds}
+                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds + 1, typeMaxExtraBeds)}
+                                  >
+                                    <Plus size={16} />
+                                  </button>
+                                </span>
+                              </div>
+                              {typeQuantity > 0 && userExtraBeds > 0 ? (
+                                <p
+                                  className="text-xs text-gray-600"
+                                  data-testid={`extras-stay-total-${type.value}`}
+                                >
+                                  {formatPrice(stayTotal)} for {nights} {nights === 1 ? "night" : "nights"}
+                                </p>
+                              ) : null}
+                              {typeQuantity > 0 && overCap ? (
+                                <p
+                                  className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-700"
+                                  data-testid={`extras-soft-floor-warning-${type.value}`}
+                                  role="status"
+                                >
+                                  {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </motion.article>
