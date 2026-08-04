@@ -833,27 +833,34 @@ export function BookingPage() {
     };
   }, [checkIn, checkOut]);
 
+  // Per EXB-11.3 (2026-08-04, per decision #191): no
+  // default room-type selection on page load. The
+  // pre-EXB-11.3 useEffect had an `if (roomCart.length
+  // === 0 && availableRoomTypes[0])` branch that
+  // auto-picked the first available room type and
+  // silently added it to the cart. The operator now
+  // thinks this is the wrong default — the system
+  // committed the user to a room type before any
+  // input. The new pattern: page load = empty cart,
+  // empty selection. The user fills both.
+  //
+  // The sync branch below fires when the cart has rooms
+  // but the selection doesn't match (e.g., after a
+  // URL-driven pre-fill via `?roomType=` or `?rooms=`,
+  // or after the user adds a second room type). The
+  // URL-driven pre-fill at `BookingPage.tsx:244` (for
+  // `selectedRoomType`) and the cart parser (for
+  // `roomCart`) handle the deep-link case — a
+  // `/book?roomType=single-room` URL still pre-fills
+  // the selection; a `/book?rooms=single-room:1:2:0:0`
+  // URL still pre-fills the cart + selection via the
+  // sync branch.
   useEffect(() => {
-    if (roomCart.length === 0 && availableRoomTypes[0]) {
-      const defaultType = availableRoomTypes[0].type.value;
-      setSelectedRoomType(defaultType);
-      setRoomCart([{
-        bookingId,
-        roomType: defaultType,
-        rateChoice,
-        numAdults,
-        numChildren,
-        extraBedCount: 0
-      }]);
-      return;
-    }
-
     if (!roomCart.some((room) => room.roomType === selectedRoomType) && roomCart[0]) {
       setSelectedRoomType(roomCart[0].roomType);
       setRateChoice(roomCart[0].rateChoice);
     }
   }, [
-    availableRoomTypes,
     bookingId,
     numAdults,
     numChildren,

@@ -789,6 +789,127 @@ The behavioural test (the user adds a room + changes the guest count, the counte
 
 ---
 
+## EXB-11.3 — No Default Room-Type Selection on `/book` Page Load
+> Proposed 2026-08-04, per decision #191 (operator feedback post-EXB-11.2 shipped surface). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:836-863` (the auto-select useEffect). Sibling to EXB-11 + EXB-11.1 + EXB-11.2 — same `/book` surface, different UX refinement.
+
+### The problem
+
+Operator-reported 2026-08-04 (post-EXB-11.2 review): "can we also maybe remove the default selection of room type upon page load for /book." The pre-EXB-11.3 surface has a UX anti-pattern: on page load, the first available room type is auto-selected and silently added to the cart (1 room). The user lands on `/book` with a pre-checked rate option, a "Fits your group" chip, an active "Rooms" stepper showing "1", and a pre-populated "Your cart" line — all without the user having explicitly chosen anything.
+
+**Root cause.** The pre-EXB-11.3 `useEffect` at `BookingPage.tsx:836-849` had this branch:
+```ts
+if (roomCart.length === 0 && availableRoomTypes[0]) {
+  const defaultType = availableRoomTypes[0].type.value;
+  setSelectedRoomType(defaultType);
+  setRoomCart([{ ...defaultType, numAdults, numChildren, extraBedCount: 0 }]);
+  return;
+}
+```
+This was added as a "smart default" — the user lands on `/book`, sees a preselected room, can immediately proceed to Step 2. The operator now thinks this is the wrong default: the user should explicitly choose a room type. The pre-selection is presumptuous — the system has silently committed the user to a specific room type before they've made any choice. The user has to actively CHANGE the selection if they don't want the first type, which is a worse UX than actively CHOOSING a type.
+
+### The fix — delete the auto-select branch, keep the sync branch + URL pre-fill
+
+**Two-part change to `BookingPage.tsx:836-863`:**
+
+1. **Delete the auto-select branch (lines 837-849)** — the `if (roomCart.length === 0 && availableRoomTypes[0])` block. On page load, the cart is empty and no room type is pre-selected. The user must click a rate option ("Room Only" or "Room + Breakfast") on a card to add 1 of that type to the cart (the existing `selectRoomType` function at `BookingPage.tsx:935-960` handles this — it's the user-explicit path that was already wired).
+
+2. **Keep the sync branch (lines 851-854)** — `if (!roomCart.some((room) => room.roomType === selectedRoomType) && roomCart[0]) { setSelectedRoomType(roomCart[0].roomType); ... }`. This branch fires when the cart has rooms but the selection doesn't match (e.g., after a URL-driven pre-fill, or after the user adds a second room type). It syncs the selection to match the cart. Without this branch, a deep-link to `/book?rooms=single-room:1:2:0:0` would have an empty selection even though the cart has 1 Single Room.
+
+**URL-driven pre-fill stays.** The `selectedRoomType` state is initialized from `searchParams.get("roomType")` at `BookingPage.tsx:244`, and `roomCart` is initialized from `searchParams.get("rooms")` (via the cart parser). A deep-link to `/book?roomType=single-room` or `/book?rooms=single-room:1:2:0:0` is intentional pre-fill — the user explicitly chose that URL. The auto-select branch is only about the case where neither is present, and the user lands on a fresh `/book` page with an empty cart.
+
+**Dependency array trims `availableRoomTypes`.** The remaining sync branch doesn't read `availableRoomTypes`, so it can come out of the `useEffect`'s dependency array. (The `availableRoomTypes` is still used elsewhere — the sync branch's check `roomCart[0]` is enough; the selection stays as the cart's first type, regardless of availability, until `fetchAvailability` finishes and the cart is rebuilt.)
+
+### What the user sees
+
+**Before EXB-11.3 (the bug):**
+- Page load: `Single Room` is pre-selected (the orange "Room Only" radio is filled), 1 Single Room is in the cart, the "Fits your group" chip is showing, the "Your cart" section shows `1× Single Room · 1 adult · 1 child`.
+- The user has to ACTIVELY CHANGE the selection if they don't want the Single Room.
+
+**After EXB-11.3 (the fix):**
+- Page load: no rate option is active on any card, the cart is empty, no "Fits your group" chip is showing, the "Your cart" section is empty (just the header), the bottom bar shows the existing disabled "Add at least one room" CTA.
+- The user ACTIVELY CHOOSES a room type by clicking a rate option on a card → that type is added to the cart (1 room), the selection is set, the rate option becomes active, the chip + cart summary + bottom bar update.
+- Deep-link to `/book?roomType=single-room` or `/book?rooms=single-room:1:2:0:0`: the pre-fill is intentional (the user typed the URL), the cart + selection are populated from the URL params. No behavior change here.
+
+### Why the "smart default" was wrong
+
+Three reasons the auto-select was a worse UX than the explicit-choice pattern:
+
+1. **Presumptuous.** The system committed the user to a room type before any input. If the user wanted a different type (e.g., a Family instead of a Single), they had to actively CHANGE the selection, which is a worse path than actively CHOOSING.
+2. **Hidden state mutation.** The auto-select silently mutates two state values (`selectedRoomType` and `roomCart`) on first render. The user doesn't know about the mutation unless they look at the URL or the cart. The explicit-choice pattern is honest: the cart is empty until the user does something.
+3. **Surprise on re-render.** If the user has a `?roomType=family` URL param, the auto-select branch (which only fires when `selectedRoomType` is empty) doesn't fire — but if the URL param is missing, the auto-select picks the first available, which might not match what the user wanted from a previous session. The URL pre-fill is the right shape for "user has chosen"; the auto-select is the wrong shape for "user hasn't chosen yet".
+
+The new pattern: **page load = empty cart, empty selection**. The user fills both. The deep-link URL pre-fill is intentional (the user typed the URL).
+
+### What this changes for the data model
+
+**Nothing.** The `selectedRoomType: string` state stays. The `roomCart: RoomCartEntry[]` state stays. The `selectRoomType` function (user click handler) stays. The `updateRoomQuantity` function (user changes quantity) stays. The `useEffect` is the only change.
+
+### What this changes for the related work
+
+- **CHD-12 (cart summary)** — the "Your cart" section already has an empty-state (just shows the "Your cart" header, no rows below at `BookingPage.tsx:2255-2256`). No change needed.
+- **CHD-11 (capacity chip)** — the per-type `Fits / Tight / Doesn't fit` chip is gated on `isSelected = typeQuantity > 0` at `BookingPage.tsx:2346`. With no auto-select, no chip is showing on page load. The user adds a room → the chip renders. No change needed.
+- **EXB-11 + EXB-11.1 + EXB-11.2 (extras toggle)** — the IIFE renders when `typeMaxExtraBeds > 0`, but the extras are only meaningful when the user has selected the type. The auto-init useEffect at `BookingPage.tsx:740-758` only fires for types in the cart, so empty cart = no auto-init. No change needed.
+- **Step 2/3 aside** — the extra-bed + breakfast + voucher aside is gated on `selectedRoomType` non-empty. With no auto-select, the aside is hidden on page load. The user adds a room → the aside renders. No change needed.
+- **Step 1 → Step 2 "Next" button** — the disabled button's label is already wired at `BookingPage.tsx:2896-2900` to be "Add at least one room" when `distributedRoomCart.length === 0`. With no auto-select, this is the default state on page load. No change needed.
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+New `guest-app/tests/api/exb-11-3-no-default-room-type-on-load.test.ts` (source-text guards on `BookingPage.tsx`):
+
+- The `if (roomCart.length === 0 && availableRoomTypes[0])` auto-select branch is **gone** from the `useEffect` at `BookingPage.tsx:836-863`.
+- The auto-select branch's `setSelectedRoomType(defaultType)` call is **gone**.
+- The auto-select branch's `setRoomCart([{ ...defaultType, ... }])` call is **gone**.
+- The sync branch (`!roomCart.some((room) => room.roomType === selectedRoomType) && roomCart[0]`) is **still present** (for the deep-link / re-render path).
+- The `selectRoomType` function (user click handler) at `BookingPage.tsx:935-960` is **unchanged** — it still adds 1 of the type to the cart when called.
+- The `updateRoomQuantity` function (user changes quantity) is **unchanged**.
+- The bottom bar's "Add at least one room" CTA label is **still present** (the existing disabled-state label at `BookingPage.tsx:2900`).
+- The URL-driven pre-fill (`searchParams.get("roomType")` at line 244, `searchParams.get("rooms")` via the cart parser) is **unchanged**.
+
+The behavioural test (the user lands on `/book` with no URL params, sees no selection, clicks a rate option, the type is added to the cart) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **Keep the auto-select but show a small "we picked this for you" helper text.** The helper text is a label, not a fix. The user still has to actively change the selection to opt out. Same UX problem.
+- **Auto-select the first type that FITS the current group, not just the first available.** Smarter default, but the user might have a preference (e.g., they want a Family Room even if the Single Room fits). The auto-select is still presumptuous; the user should choose.
+- **Auto-select the first type but require the user to confirm ("Confirm your selection: Single Room").** A confirmation step is a friction point. The empty-cart default + the existing rate-option buttons is the cleaner shape.
+- **Replace the auto-select with a "Recommended for you" badge on the first card.** The badge is a label, not a fix. The user can still ignore it. The empty-cart default is more honest.
+- **Auto-select based on the homepage's URL params (e.g., if the user came from the homepage with 2 adults, pre-select the type that fits 2 adults).** Smart default, but the operator's ask is explicit: no default. The user should choose. (The URL param `?roomType=` is still respected — that's the user EXPLICITLY choosing via a deep link, which is a different intent.)
+- **Auto-select the first type but don't add to the cart (just mark the rate option as "active").** Half-fix. The active rate option without a cart row is confusing — the "Your cart" section is empty, but the rate option is filled. The user can't tell if they have 0 rooms or 1 room.
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - Remove the `if (roomCart.length === 0 && availableRoomTypes[0]) { ... }` branch at lines 837-849.
+  - Keep the sync branch at lines 851-854.
+  - Trim `availableRoomTypes` from the `useEffect`'s dependency array at line 856 (no longer used in the remaining branch).
+  - The `selectRoomType` function at `BookingPage.tsx:935-960` is unchanged.
+  - The `updateRoomQuantity` function at `BookingPage.tsx:962-...` is unchanged.
+  - The `selectedRoomType` state at `BookingPage.tsx:244` is unchanged (still initialized from `searchParams.get("roomType")`).
+  - The `roomCart` state at `BookingPage.tsx:243` is unchanged (still initialized from `searchParams.get("rooms")` via the cart parser).
+  - The bottom bar's disabled-state label at `BookingPage.tsx:2900` ("Add at least one room") is unchanged.
+  - ~14 lines removed + 1 line from the dependency array.
+
+### Gates
+
+- **CHD-12 (cart summary)** — the "Your cart" empty-state is already wired (just shows the header). No change.
+- **CHD-11 (capacity chip)** — the chip is gated on `isSelected = typeQuantity > 0`. No change.
+- **EXB-11 + EXB-11.1 + EXB-11.2 (extras toggle + auto-init)** — the IIFE + auto-init useEffect are gated on `typeMaxExtraBeds > 0` and `roomCart.length > 0` (via the per-type check). No change.
+- **Step 2/3 aside** — gated on `selectedRoomType` non-empty. No change.
+- **Step 1 → Step 2 "Next" button** — the "Add at least one room" CTA is already wired. No change.
+- **MRB-15-10 + MRB-15-11 (admin room-type CRUD + photo gallery)** — unrelated. The admin surface for editing room types is unchanged.
+- **CHD-13 (homepage search widget)** — unrelated. The homepage widget sends the user to `/book?guests=...&children=...` without a `?roomType=` param, so the deep-link pre-fill doesn't fire; the user lands on the empty-cart default state and picks a type. That's the intended flow.
+
+### Phase 2 (deferred, NOT in EXB-11.3)
+
+- **"Recommended for you" badge on the first card** (e.g., based on the homepage's search params). A future UX work item if the operator wants to add a soft hint without auto-selecting. Out of scope — the operator's ask is "no default", and a recommendation badge is a different shape.
+- **A "Recently viewed" section on `/book`** that shows room types the user has clicked on in previous sessions. A future UX work item; would require storing the click history in localStorage or a session-scoped store.
+- **Auto-select the first type that fits AND add it to the cart, but only for returning users** (e.g., a returning user with a saved cart). A future UX work item; would require user auth + cart persistence.
+- **Re-introduce the auto-select as a hidden `?autoSelect=true` URL param** for A/B testing. A future testing work item; out of scope.
+
+---
+
+---
+
 ---
 
 ## Lifecycle Invariants (MRB-15-01)
