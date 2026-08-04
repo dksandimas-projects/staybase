@@ -713,6 +713,52 @@ export function BookingPage() {
     ? selectedRoomRates.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0)
     : 0;
 
+  // Per EXB-11.2 (2026-08-04, per decision #190):
+  // auto-sync the cart's per-type `extraBedCount` to the
+  // soft floor whenever the soft floor exceeds the cart's
+  // current value. The pre-EXB-11.2 surface had a real UX
+  // bug — for a Single Room (maxCapacity 1, maxExtraBeds 1)
+  // with 2 guests, the checkbox rendered as `unchecked +
+  // disabled` (the user couldn't click to enable, the cart
+  // was silently at 0, the submit gate caught it later with
+  // a confusing error). The auto-init enforces the FLOOR
+  // (the minimum required for the group to fit), not the
+  // cap. The user can still decrement back to 0 if the soft
+  // floor drops (e.g. they reduce the guest count from 2 to
+  // 1) and the useEffect re-fires to re-init only if the soft
+  // floor is still > 0. The dependency array includes
+  // `roomCart` so the effect re-fires when the cart changes
+  // (e.g. the user adds/removes a room). The effect loops
+  // over the cart's distinct types so multi-type carts are
+  // handled correctly. After the first fire, the cart has
+  // the soft-floor value and the next run is a no-op
+  // (no infinite loop). The `updateExtraBedCount` helper
+  // at `BookingPage.tsx:957` is unchanged — its
+  // `safeCount = Math.min(Math.max(nextCount, 0), maxCount)`
+  // clamp already handles the over-cap case (soft floor
+  // clamped to cap).
+  useEffect(() => {
+    for (const room of roomCart) {
+      const type = roomTypes.find((t) => t.value === room.roomType);
+      if (!type) continue;
+      const typeMaxExtraBeds = Number(type.maxExtraBeds) || 0;
+      if (typeMaxExtraBeds === 0) continue;
+      const typeRooms = roomCart.filter((r) => r.roomType === room.roomType);
+      if (typeRooms.length === 0) continue;
+      const currentExtraBeds = typeRooms[0]?.extraBedCount ?? 0;
+      const perTypeOverflow = requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: Number(type.maxCapacity) || 0,
+        maxChildren: Number(type.maxChildren) || 0
+      });
+      const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
+      if (softFloor > currentExtraBeds) {
+        updateExtraBedCount(room.roomType, softFloor, typeMaxExtraBeds);
+      }
+    }
+  }, [numAdults, numChildren, roomCart, roomTypes]);
+
   // Real-time Firestore Listeners and Config Fetches
   useEffect(() => {
     async function fetchConfigs() {
@@ -2542,7 +2588,8 @@ export function BookingPage() {
 
                         {/* Per EXB-11 (2026-08-04, per decision
                             #186) + EXB-11.1 (2026-08-04, per decision
-                            #189): the per-type "Extras" sub-section.
+                            #189) + EXB-11.2 (2026-08-04, per decision
+                            #190): the per-type "Extras" sub-section.
                             Per EXB-11.1: moved to the BOTTOM of the
                             card (after the rate options + mixed-rates
                             panel) and rendered as a binary checkbox
@@ -2558,7 +2605,29 @@ export function BookingPage() {
                             clamping unchanged. `updateExtraBedCount`
                             unchanged. Cart URL serialization
                             unchanged. Hidden when `maxExtraBeds === 0`
-                            per the EXB-11 "no extra bed" edge case. */}
+                            per the EXB-11 "no extra bed" edge case.
+
+                            Per EXB-11.2: the visual reads from
+                            `displayExtraBeds = Math.max(softFloor,
+                            userExtraBeds)` (the soft-floor floor,
+                            not the cart) so the checkbox is
+                            `checked + disabled` and the counter
+                            shows the soft floor (not 0) on first
+                            render. A component-level `useEffect`
+                            (above this IIFE) auto-syncs the cart
+                            to the soft floor whenever
+                            `softFloor > userExtraBeds`. This
+                            reverses the EXB-11.1 "no auto-init"
+                            stance — that stance was wrong because
+                            the EXB-11.1 spec's own 3-state model
+                            requires `checked + disabled` when
+                            `softFloor === 1`, but `checked` reads
+                            from the cart, and the cart was at 0.
+                            The auto-init enforces the FLOOR (the
+                            minimum required for the group to fit),
+                            not the cap. The user can decrement
+                            back to 0 if the soft floor drops
+                            (e.g. they reduce the guest count). */}
                         {(() => {
                           const typeMaxExtraBeds = Number(type.maxExtraBeds) || 0;
                           if (typeMaxExtraBeds === 0) return null;
@@ -2586,14 +2655,33 @@ export function BookingPage() {
                           });
                           const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
                           const overCap = softFloor > typeMaxExtraBeds;
+                          // Per EXB-11.2 (2026-08-04, per decision
+                          // #190): the visual reads from
+                          // `displayExtraBeds` (the soft-floor
+                          // floor, not the cart). The auto-init
+                          // useEffect above syncs the cart to the
+                          // soft floor, but the visual needs to be
+                          // correct on the FIRST render too (before
+                          // the useEffect fires). `displayExtraBeds`
+                          // is `max(softFloor, userExtraBeds)` so:
+                          // - when the user has at least the soft
+                          //   floor, the visual matches the cart
+                          // - when the cart is below the soft
+                          //   floor, the visual still shows the
+                          //   soft floor (no "0 → 1" flash)
+                          const displayExtraBeds = Math.max(softFloor, userExtraBeds);
                           // The rate is only meaningful when the
                           // user has at least one room of this
                           // type in the cart (the toggle has
                           // nothing to multiply against when
                           // `typeQuantity === 0`). The
                           // disabled-when-zero-rows state on the
-                          // control keeps the UX honest.
-                          const stayTotal = userExtraBeds * typeExtraBedRate * nights;
+                          // control keeps the UX honest. The stay
+                          // total uses `displayExtraBeds` so the
+                          // price is correct on first render
+                          // (matches the auto-init useEffect's
+                          // post-fire cart value).
+                          const stayTotal = displayExtraBeds * typeExtraBedRate * nights;
                           // Per EXB-11.1: the checkbox is the
                           // right shape when `maxExtraBeds === 1`
                           // (a binary decision). For N >= 2, the
@@ -2625,16 +2713,31 @@ export function BookingPage() {
                                     type="checkbox"
                                     id={`extras-checkbox-${type.value}`}
                                     data-testid={`extras-checkbox-${type.value}`}
-                                    checked={userExtraBeds === 1}
-                                    // Disabled when (a) no rooms
-                                    // of this type exist (nothing
-                                    // to mirror the count onto),
-                                    // or (b) the soft floor requires
-                                    // the extra bed (>= 1) but the
-                                    // user hasn't enabled it yet.
-                                    // The latter case is the
-                                    // "forced on" affordance.
-                                    disabled={typeQuantity === 0 || (userExtraBeds === 0 && softFloor >= 1)}
+                                    // Per EXB-11.2: read from
+                                    // `displayExtraBeds` (the soft
+                                    // floor, not the cart) so the
+                                    // checkbox is `checked` when
+                                    // the system requires the
+                                    // extra bed, even on first
+                                    // render before the auto-init
+                                    // useEffect fires.
+                                    checked={displayExtraBeds === 1}
+                                    // Per EXB-11.2: the disabled
+                                    // rule is the EXB-11.1 "forced
+                                    // on" affordance — disabled
+                                    // when the soft floor requires
+                                    // the extra bed (>= 1). The
+                                    // old `(userExtraBeds === 0 &&
+                                    // softFloor >= 1)` rule
+                                    // blocked the user from
+                                    // clicking to enable a
+                                    // required extra bed; the
+                                    // auto-init useEffect now
+                                    // keeps the cart in sync with
+                                    // the soft floor, so the user
+                                    // never has to click to
+                                    // enable.
+                                    disabled={typeQuantity === 0 || softFloor >= 1}
                                     onChange={(e) => updateExtraBedCount(type.value, e.target.checked ? 1 : 0, typeMaxExtraBeds)}
                                     aria-describedby={softFloor >= 1 ? `extras-soft-floor-warning-${type.value}` : undefined}
                                     className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
@@ -2642,8 +2745,16 @@ export function BookingPage() {
                                 </label>
                                 {/* Stay total + soft-floor
                                     warning (shared with the
-                                    counter branch). */}
-                                {typeQuantity > 0 && userExtraBeds > 0 ? (
+                                    counter branch). The
+                                    `displayExtraBeds > 0` gate
+                                    mirrors the EXB-11.1 spec
+                                    (hide "₱0 for 2 nights" —
+                                    it's noise) but uses the
+                                    soft-floor floor so the price
+                                    renders on first render
+                                    before the auto-init
+                                    useEffect fires. */}
+                                {typeQuantity > 0 && displayExtraBeds > 0 ? (
                                   <p
                                     className="text-xs text-gray-600"
                                     data-testid={`extras-stay-total-${type.value}`}
@@ -2685,13 +2796,23 @@ export function BookingPage() {
                                     type="button"
                                     aria-label={`Remove one extra bed from ${type.label}`}
                                     className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                    // Disabled at the soft floor
-                                    // (`userExtraBeds <= softFloor`)
-                                    // and when there are no rooms
-                                    // of this type to mirror the
-                                    // count onto.
-                                    disabled={typeQuantity === 0 || userExtraBeds <= softFloor}
-                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds - 1, typeMaxExtraBeds)}
+                                    // Per EXB-11.2: disabled at
+                                    // the soft floor
+                                    // (`displayExtraBeds <=
+                                    // softFloor`) and when there
+                                    // are no rooms of this type
+                                    // to mirror the count onto.
+                                    // Using `displayExtraBeds`
+                                    // (not `userExtraBeds`) means
+                                    // the button is disabled AT
+                                    // the soft floor (not below
+                                    // it) — the auto-init
+                                    // useEffect keeps the cart
+                                    // at the soft floor, and the
+                                    // `[−]` correctly blocks the
+                                    // user from going below it.
+                                    disabled={typeQuantity === 0 || displayExtraBeds <= softFloor}
+                                    onClick={() => updateExtraBedCount(type.value, displayExtraBeds - 1, typeMaxExtraBeds)}
                                   >
                                     <Minus size={16} />
                                   </button>
@@ -2700,14 +2821,14 @@ export function BookingPage() {
                                     aria-live="polite"
                                     data-testid={`extras-count-${type.value}`}
                                   >
-                                    {userExtraBeds}
+                                    {displayExtraBeds}
                                   </span>
                                   <button
                                     type="button"
                                     aria-label={`Add one extra bed to ${type.label}`}
                                     className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                    disabled={typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds}
-                                    onClick={() => updateExtraBedCount(type.value, userExtraBeds + 1, typeMaxExtraBeds)}
+                                    disabled={typeQuantity === 0 || displayExtraBeds >= typeMaxExtraBeds}
+                                    onClick={() => updateExtraBedCount(type.value, displayExtraBeds + 1, typeMaxExtraBeds)}
                                   >
                                     <Plus size={16} />
                                   </button>
