@@ -88,27 +88,33 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     // dead-end tail is gone.
     //
     // Per CHD-11.1 (2026-08-04, per decision #192): the
-    // soft cap is now `MIN(10, selectedMaxSelectableChildren)`
+    // soft cap was `MIN(10, selectedMaxSelectableChildren)`
     // — the room's capacity (with auto-bump), not the
     // booking's "guests - 1" cap. The auto-bump in
-    // `updateChildren` maintains the "at least one adult"
+    // `updateChildren` maintained the "at least one adult"
     // invariant without hard-capping the children count.
+    //
+    // Per CHD-11.2 (2026-08-05, per decision #193): the
+    // soft cap is now just `10` (the CHD-11 sanity guard),
+    // NOT the room's capacity. The picker is the exploration
+    // surface; the "Fits your group" chip + the submit gate
+    // are the commit surfaces. The user can pick any number
+    // up to 10; the chip + submit gate tell them if it works.
     expect(bookingPageSrc).toMatch(/Children \(0–11\)/);
     expect(bookingPageSrc).toMatch(
       /updateChildren\(numChildren \+ 1\)/
     );
-    // Soft cap: the + button is gated at the soft-floor
-    // `MIN(10, selectedMaxSelectableChildren)` (the room's
-    // capacity with auto-bump), not the per-type cap and
-    // not the booking's "guests - 1" cap.
+    // Soft cap: the + button is gated at `10` (the
+    // CHD-11 sanity guard), not the room's capacity
+    // and not the booking's "guests - 1" cap.
     expect(bookingPageSrc).toMatch(
-      /numChildren >= Math\.min\(10, selectedMaxSelectableChildren\)/
+      /numChildren >= 10/
     );
     // The pre-CHD-11 per-type cap is no longer enforced at
     // the picker. The per-type `selectedMaxSelectableChildren`
     // useMemo is still used (for the "Up to N can fit when
-    // extra beds cover the overflow" hint) but does NOT
-    // gate the picker.
+    // extra beds cover the overflow" hint + the capacity
+    // chip) but does NOT gate the picker.
     expect(bookingPageSrc).not.toMatch(
       /numChildren >= selectedMaxSelectableChildren\s*\|\|/
     );

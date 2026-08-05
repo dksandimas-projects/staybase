@@ -124,21 +124,28 @@ describe("CHD-11.1 — picker auto-bumps guests to fit more children", () => {
     );
   });
 
-  it("the children stepper's `+` button disabled condition is `numChildren >= Math.min(10, selectedMaxSelectableChildren)` (not `Math.max(0, guests - 1)`)", () => {
+  it("the children stepper's `+` button disabled condition is `numChildren >= 10` (not the room's capacity, not `Math.max(0, guests - 1)`)", () => {
     // The pre-CHD-11.1 disabled condition was
     // `numChildren >= Math.min(10, Math.max(0,
-    // guests - 1))`. The new condition uses
-    // `selectedMaxSelectableChildren` (the room's
-    // capacity, with auto-bump) instead of the
-    // booking's "guests - 1" cap.
+    // guests - 1))`. The CHD-11.1 condition was
+    // `numChildren >= Math.min(10,
+    // selectedMaxSelectableChildren)` (the room's
+    // capacity with auto-bump). The CHD-11.2
+    // condition is just `numChildren >= 10` (the
+    // CHD-11 soft cap, not the room's capacity).
     expect(bookingPageSrc).toMatch(
-      /disabled=\{numChildren >= Math\.min\(10, selectedMaxSelectableChildren\)\}/
+      /disabled=\{numChildren >= 10\}/
     );
     // The pre-CHD-11.1 disabled condition is
     // gone (the `Math.max(0, guests - 1)`
     // floor on the `+` button).
     expect(bookingPageSrc).not.toMatch(
       /disabled=\{numChildren >= Math\.min\(10, Math\.max\(0, guests - 1\)\)\}/
+    );
+    // The pre-CHD-11.2 disabled condition is
+    // also gone (the room's capacity as the cap).
+    expect(bookingPageSrc).not.toMatch(
+      /disabled=\{numChildren >= Math\.min\(10, selectedMaxSelectableChildren\)\}/
     );
   });
 
