@@ -1067,3 +1067,132 @@ The behavioural test (the user starts at 2 guests + 1 child, clicks `+` on child
 - **Visual feedback when the auto-bump fires** (e.g., the Guests stepper briefly highlights to show "we added a guest for you"). The auto-bump is silent in the spec; a future UX work item could add visual feedback. Out of scope — the auto-bump is the right default; the user notices the change in the stepper display.
 
 ---
+
+## CHD-11.2 — Picker Cap Raised to Soft 10 (No Per-Type Cap on the `+` Button)
+> Proposed 2026-08-05, per decision #193 (operator feedback post-CHD-11.1 review). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:2189-2220` (the children stepper's `+` button disabled condition). Sibling to CHD-11 + CHD-11.1 — same picker surface, different UX refinement.
+
+### The problem
+
+Operator-reported 2026-08-05 (post-CHD-11.1 review): "why is it the children + chip is disabled after 3? maybe we can disable that disabling?" The pre-CHD-11.2 surface has a UX issue: the children picker's `+` button is disabled at the room's capacity (e.g., 3 for a Single Room with `maxCapacity: 1`, `maxChildren: 2`, `maxExtraBeds: 1`). The user can pick up to 3 children, but not more — even though the system can validate the over-cap case via the "Fits your group" chip + the submit gate.
+
+**Root cause.** The pre-CHD-11.2 `+` button's `disabled` condition was `numChildren >= Math.min(10, selectedMaxSelectableChildren)` (per `BookingPage.tsx:2217`). The `selectedMaxSelectableChildren` is the room's capacity (with auto-bump, per CHD-11.1) — for a Single Room, that's 3 children (1 adult + 3 children = 4 occupants, with 1 extra bed, within the hard capacity of `maxCapacity + maxChildren + maxExtraBeds = 1 + 2 + 1 = 4`). The picker is hard-capping at the room's capacity, which is the wrong enforcement surface — per CHD-11's "exploration-first, validation-on-commit" pattern, the picker should be an exploration surface (let the user pick any number), and the "Fits your group" chip + the submit gate are the commit surfaces (validate the room fits).
+
+**The trade-off the operator hit.** With the pre-CHD-11.2 cap, the user wanted to pick 4 children in 1 Single Room (which would require 3 extra beds, maxExtraBeds 1 → "doesn't fit"). The picker blocked them at 3. The "Fits your group" chip would have shown "Doesn't fit", and the submit gate would have surfaced the over-cap error. But the picker never gave them the chance to explore the over-cap state — they were stuck at 3.
+
+### The fix — raise the picker cap to the soft 10 (CHD-11's sanity guard)
+
+**One-line change to `BookingPage.tsx`:**
+
+The `+` button's `disabled` condition changes from:
+```tsx
+disabled={numChildren >= Math.min(10, selectedMaxSelectableChildren)}
+```
+to:
+```tsx
+disabled={numChildren >= 10}
+```
+
+The `selectedMaxSelectableChildren` derivation stays (it's still used by the "Fits your group" chip + the CHD-11 capacity indicator at `BookingPage.tsx:2175` and the cart summary). The `−` button's `disabled` condition (`numChildren <= 0`) is unchanged. The auto-bump in `updateChildren` is unchanged (per CHD-11.1). The URL pre-fill from `searchParams.get("children")` is unchanged.
+
+### What the user sees
+
+**Before CHD-11.2 (the bug):**
+- 1 Single Room (maxCapacity: 1, maxChildren: 2, maxExtraBeds: 1), 2 guests.
+- Children picker: `+` button enabled at 0, 1, 2; disabled at 3 (the room's capacity).
+- User wants to pick 4 children to see the "Doesn't fit" chip + decide whether to add a second room.
+- The picker blocks them at 3. They have to manually change `guests` to 5 first (to allow 4 children via auto-bump), then back to 4 — a 2-step action.
+
+**After CHD-11.2 (the fix):**
+- 1 Single Room, 2 guests, 0 children.
+- Children picker: `+` button enabled at 0..9; disabled at 10 (the soft cap from CHD-11).
+- User clicks `+` 3 times → 3 children, 3 guests (auto-bump), `+` still enabled. "Fits your group" chip shows.
+- User clicks `+` once more → 4 children, 4 guests (auto-bump), `+` still enabled. "Doesn't fit" chip shows (the room needs 3 extra beds, maxExtraBeds 1).
+- User clicks `+` repeatedly until 10 children, 10 guests. `+` disabled. The "Doesn't fit" chip stays. The submit gate catches it.
+- User can now explore freely: pick any number, the chip + submit gate tell them if it works. They can decide whether to add a second room, remove children, or pick a different room type.
+
+**The auto-bump from CHD-11.1 still works.** When the user clicks `+` on children beyond the current `guests - 1` (the "at least 1 adult" invariant), `updateChildren` auto-bumps `guests` to `max(guests, desiredChildren + 1)`. The user can keep clicking `+` without manually bumping `guests` first.
+
+**The submit gate still validates.** The existing CHD-11 submit gate (at `BookingPage.tsx:2896-2900` and the `cartFitsGroup` derivation) catches the over-cap case at Step 1 → Step 2 with the "Pick a different room type, add a second room, or remove a guest" error. The picker is no longer blocking the user from reaching this state; the submit gate is.
+
+### Why the soft 10 is the right cap (not the room's capacity, not unlimited)
+
+The CHD-11 spec says the soft cap is `MIN(10, guests - 1)` — a "stop the + at 100" sanity guard, not a capacity rule. The 10 is a UX sanity guard (no one books a 50-child hotel room via the homepage widget). The pre-CHD-11.2 cap of `MIN(10, selectedMaxSelectableChildren)` overrode the 10 with the room's capacity, which is the wrong layer.
+
+The new cap `10` (the CHD-11 sanity guard) is:
+- **Higher than the per-type capacity** for most room types (a Family Room's `selectedMaxSelectableChildren` is typically 4-6, so the soft 10 is more permissive).
+- **Lower than "unlimited"** — a sanity guard against pathological inputs (e.g., a returning user who hits `+` 50 times).
+- **Consistent with the homepage widget's children picker** (CHD-13), which also uses 0-10.
+
+### What this changes for the data model
+
+**Nothing.** The `numChildren: number` state stays. The `selectedMaxSelectableChildren` derivation stays (used by the chip + capacity indicator). The `updateChildren` function is unchanged (per CHD-11.1). The `setOccupancy` helper is unchanged. The auto-bump is unchanged. The submit gate is unchanged.
+
+### What this changes for the related work
+
+- **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` and `numAdults >= 1`. The client-side picker is just less restrictive; the server is the authoritative gate.
+- **CHD-11 (soft-constraint picker)** — the picker is now a true exploration surface. The "Fits your group" chip + the submit gate are the commit surfaces. The CHD-11 promise ("exploration-first, validation-on-commit") is now fully realized.
+- **CHD-11.1 (auto-bump guests)** — the auto-bump in `updateChildren` is unchanged. The user's experience is smoother because they can now click `+` repeatedly without manually bumping `guests` first.
+- **CHD-12 (cart summary)** — the per-type "N extra beds" inline pill is unchanged. The data is the same shape; only the picker's cap changes.
+- **EXB-11 + EXB-11.1 + EXB-11.2 (extras toggle + auto-init)** — the extras toggle uses `requiredExtraBedsFor` to compute the soft floor; the auto-init useEffect re-fires when `numAdults` or `numChildren` change. No change.
+- **Step 2/3 aside** — the extra-bed pricing updates live. No change.
+- **MRB-15-10 + MRB-15-11** — unrelated.
+- **CHD-13 (homepage search widget)** — the homepage widget's children picker is also capped at 0-10 (per CHD-13). The new cap is consistent with the homepage widget.
+- **EXB-11.3 (no default room-type selection)** — independent.
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+New `guest-app/tests/api/chd-11-2-picker-cap-soft-10.test.ts` (source-text guards on `BookingPage.tsx`):
+
+- The children stepper's `+` button disabled condition is `numChildren >= 10` (NOT `Math.min(10, selectedMaxSelectableChildren)`).
+- The pre-CHD-11.2 disabled condition (`numChildren >= Math.min(10, selectedMaxSelectableChildren)`) is **gone**.
+- The `selectedMaxSelectableChildren` derivation is **still present** (still used by the "Fits your group" chip + the CHD-11 capacity indicator).
+- The `−` button's disabled condition (`numChildren <= 0`) is unchanged.
+- The `updateChildren` function (with the CHD-11.1 auto-bump) is unchanged.
+- The `setOccupancy` helper (with the `safeGuests - 1` floor for children) is unchanged.
+- The submit gate (`cartFitsGroup` derivation) is unchanged.
+
+The behavioural test (the user clicks `+` on children past 3, sees the "Doesn't fit" chip, decides what to do) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **No upper cap at all (let the user click `+` indefinitely).** A sanity guard is needed. The soft 10 is the right balance: more permissive than the room's capacity, less chaotic than unlimited.
+- **Cap at `MIN(20, selectedMaxSelectableChildren)` or some other higher value.** The CHD-11 spec's `10` is the right sanity guard. No reason to deviate.
+- **Cap at `guests` (the booking's total).** This is the pre-CHD-11.1 behavior — the user can pick `guests - 1` children max, then the picker blocks them. The auto-bump in CHD-11.1 already handles the "at least 1 adult" invariant; the soft 10 is the only cap needed.
+- **Remove the cap AND remove the auto-bump (let the user pick 0 adults + N children).** Violates the CHD-05 contract. The server validates `numAdults >= 1`; the client should too.
+- **Show a "Room full" tooltip when the user clicks `+` past the room's capacity.** A tooltip is a friction point. The "Doesn't fit" chip + the submit gate are the existing surfaces for "the room doesn't fit"; the picker doesn't need to add another.
+- **Change the chip to be more aggressive (e.g., red border + warning text) when the user is over the room's capacity.** The existing chip is already a "Fits / Tight / Doesn't fit" indicator. The color + label is enough signal. No new visual treatment needed.
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - Change the children stepper's `+` button disabled condition from `numChildren >= Math.min(10, selectedMaxSelectableChildren)` to `numChildren >= 10` (one-line change at `BookingPage.tsx:2217`).
+  - Update the comment block above the disabled condition (currently at `BookingPage.tsx:2211-2216`) to document the new shape and reference the CHD-11.2 decision.
+  - The `selectedMaxSelectableChildren` derivation is unchanged.
+  - The `−` button's disabled condition is unchanged.
+  - The `updateChildren` function (with the auto-bump) is unchanged.
+  - The "Fits your group" chip + the submit gate are unchanged.
+  - ~5 lines changed (1 regex update + the comment block).
+
+### Gates
+
+- **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` and `numAdults >= 1`. The client-side picker is just less restrictive; the server is the authoritative gate.
+- **CHD-11 (soft-constraint picker)** — the picker is now a true exploration surface. The "Fits your group" chip + the submit gate are the commit surfaces. The CHD-11 promise is now fully realized.
+- **CHD-11.1 (auto-bump guests)** — the auto-bump in `updateChildren` is unchanged. The user's experience is smoother because they can now click `+` repeatedly without manually bumping `guests` first.
+- **CHD-12 (cart summary)** — the per-type "N extra beds" inline pill is unchanged. The data is the same shape; only the picker's cap changes.
+- **EXB-11 + EXB-11.1 + EXB-11.2** — the extras toggle + auto-init useEffect are unchanged. The auto-init re-fires when `numAdults` or `numChildren` change.
+- **Step 2/3 aside** — unchanged.
+- **MRB-15-10 + MRB-15-11** — unrelated.
+- **CHD-13 (homepage search widget)** — the homepage widget's children picker is also capped at 0-10. The new cap is consistent.
+- **EXB-11.3 (no default room-type selection)** — independent.
+
+### Phase 2 (deferred, NOT in CHD-11.2)
+
+- **A more aggressive "Fits your group" chip when the user is over the room's capacity** (e.g., red border + warning text). The existing chip is already a "Fits / Tight / Doesn't fit" indicator; the color + label is enough signal. A future UX work item could add more visual treatment.
+- **A "Room full" tooltip on the `+` button when the user is past the room's capacity.** A tooltip is a friction point. The "Doesn't fit" chip + the submit gate are the existing surfaces.
+- **A "0 adults + N children" mode (remove the "at least 1 adult" invariant for dorm-style rooms).** Out of scope — the CHD-05 contract preserves the invariant. A future work item could add a "Dorm" room type with `maxAdults: 0, maxChildren: 20` if the operator wants to support youth-group bookings.
+- **A "Reset to 1 adult + 0 children" quick action** (a single click to reset the picker). A future UX work item; out of scope.
+- **Per-room-type picker cap** (e.g., a "Preschool" room type caps at 5 children, a "Family" room type caps at 8). A future work item; out of scope — the soft 10 is the right sanity guard for now.
+
+---
+
+---
