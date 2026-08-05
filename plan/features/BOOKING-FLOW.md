@@ -1488,3 +1488,142 @@ The "at least 1 adult" rule is a domain constraint (per CHD-05, the server requi
 - **Visual feedback when the submit button is disabled due to 0 adults** (e.g., a red ring on the Guests stepper) — a future UX work item; the error message at line 727 is sufficient for now.
 - **Server-side allow `numAdults: 0` per-room** (relax CHD-05) — out of scope; the per-room "at least 1 guest" is a real domain rule.
 - **A "Reset to 1 adult + 0 children" quick action** — a future UX work item; out of scope.
+
+## CHD-11.5 — Explicit Adults + Children Picker
+> Proposed 2026-08-05, per decision #196 (operator feedback post-CHD-11.4 review). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:214-221, 891-980, 2216-2242` (the Guests stepper, the `setOccupancy` + `updateGuests` helpers, the `selectedMaxSelectableChildren` derivation), `guest-app/src/pages/HomePage.tsx:160-180` (the URL writing in `searchAvailability`). Sibling to CHD-11 through CHD-11.4 — same picker surface, deeper UX fix.
+
+### The problem
+
+Operator-reported 2026-08-05 (post-CHD-11.4 review): "I was thinking of instead of asking the number of guests, lets just ask the number of adults and children." The pre-CHD-11.5 surface asks for "Guests" (the total) + "Children" (a sub-count), with `numAdults` derived as `guests - numChildren`. The user wants the picker to ask for **Adults** and **Children** directly, with the total derived. The current shape is indirect: the user thinks "I have 4 adults and 3 kids" but has to translate that to "7 guests" + "3 children." The new shape is direct: the user picks 4 adults and 3 kids, and the total is derived.
+
+This is also the more honest shape:
+- The "at least 1 adult" rule (per CHD-05) is enforced at the Adults stepper's min (1), not via the submit gate.
+- The 0-adults case is naturally impossible (the picker min is 1).
+- The homepage widget (per CHD-13) already has separate Adults + Children steppers — the /book picker now matches.
+- CHD-11.1's auto-bump + CHD-11.3's symmetric auto-bump + CHD-11.4's "submit gate catches 0 adults" are all moot — the picker becomes a "naturally" free expression surface because the user picks adults directly.
+
+### The fix
+
+Multi-part change to `BookingPage.tsx` + `HomePage.tsx`:
+
+**(1) Replace the "Guests" state with "Adults" state in `BookingPage`.** `const [guests, setGuests] = useState(...)` becomes `const [adults, setAdults] = useState(...)`. The `numAdults` derivation `Math.max(0, guests - numChildren)` is gone — `numAdults = adults` (the state itself). The `guests` value (used by the server + the cart summary + Step 2/3) is now derived as `const guests = adults + numChildren`.
+
+**(2) Rename `updateGuests` → `updateAdults` and `setOccupancy(nextGuests, nextChildren)` → `setOccupancy(nextAdults, nextChildren)`.** The function signatures change. The `setOccupancy` body clamps `safeAdults = Math.min(Math.max(nextAdults, 1), maxGuestCapacity)` and `safeChildren = Math.max(0, Math.min(nextChildren, safeAdults))` (children can be up to `adults`, so `numAdults = adults - children` can be 0 in theory — but the Adults stepper's min 1 enforces the "at least 1 adult" rule). The `setOccupancy` writes the URL with `?adults=N&children=N` (replacing `?guests=N&children=N`).
+
+**(3) Update the URL contract: `?guests=N&children=N` → `?adults=N&children=N`.** The new contract is `?adults=N&children=N`. For backward compat (deep links from CHD-13, SEO, etc.), the URL reader also accepts `?guests=N&children=N` and derives `adults = max(1, guests - children)` (the historical derivation). When the picker writes the URL, it writes the new contract (`?adults=N&children=N`). Old URLs continue to work; new URLs are the canonical shape.
+
+**(4) Replace the "Guests" stepper with the "Adults" stepper in the picker UI.** The "Guests" stepper at `BookingPage.tsx:2216-2242` becomes the "Adults" stepper. The Adults stepper has min 1 (the "at least 1 adult" rule is enforced at the picker, not the submit gate) and max `maxGuestCapacity`. The Children stepper stays (min 0, max 10, soft cap from CHD-11.2). The helper text under Children (the "This room includes space for N children" line + the "Pick a room type" nudge) is updated to reference `adults` instead of `guests`.
+
+**(5) Update `selectedMaxSelectableChildren` derivation.** The derivation at `BookingPage.tsx:550-571` uses `Math.max(guests, children + 1)` to model the historical auto-bump scenario. With CHD-11.5, the auto-bump is gone — `effectiveGuests = adults + children` is just the total. The derivation simplifies: for each candidate child count `N`, compute overflow with `numAdults = adults` (the user's chosen adults) + `N` children. The highest `N` with `overflow <= maxExtraBeds` is the cap. The derivation's purpose (chip's "Up to N can fit" hint) is unchanged.
+
+**(6) Update `HomePage` URL writing.** `HomePage.tsx:160-180` writes `?guests=N&children=N` (where `N = adults + children`). The new shape writes `?adults=N&children=N` (without the `guests` param). The Homepage widget's state (`adults` + `children`, separate) is unchanged.
+
+**(7) Update the submit gate's "at least 1 adult" check.** The existing `numAdults >= 1` check at `BookingPage.tsx:724` is now redundant (the picker enforces it), but stays as defense in depth (deep-links, race conditions). The error message at line 727 ("Choose enough rooms to assign every adult and child, with at least one adult in each room.") is unchanged. The per-room `cartDistributionComplete` check at line 463 (every room has `numAdults >= 1`) is unchanged.
+
+### What this changes
+
+- **Picker UI** — the "Guests" stepper becomes the "Adults" stepper. The user picks adults directly; the total is derived as `adults + numChildren`.
+- **Picker behavior** — the Adults stepper has min 1 (the "at least 1 adult" rule). The Children stepper has min 0, max 10 (CHD-11.2). The user can freely set both values within these bounds.
+- **URL contract** — `?adults=N&children=N` is the new canonical shape. `?guests=N&children=N` is still accepted (backward compat) and converted to `?adults=N&children=N` on the next URL write.
+- **Server contract** — unchanged. The server still validates `numAdults + numChildren === guests` (consistency) + `numAdults + numChildren >= 1` per room (CHD-05). The client now sends `numAdults` + `numChildren` per room + `guests = adults + numChildren` for the booking.
+- **Cart summary** — unchanged. The per-type "N adults + M children" inline pill (CHD-12) shows the same data; just `N` is now the state, not derived.
+- **Submit gate** — the "at least 1 adult" check is now enforced at the picker (Adults min 1) + the submit gate (defense in depth). The 0-adults case is naturally impossible.
+
+### What the user sees after the change
+
+- **Picker** — two steppers: "Adults" (1-N) and "Children (0-11)" (0-10). The Children stepper's helper text shows "X adults" inline (same as before, just `X` is now the state).
+- **2 adults + 1 child** — pickers: Adults=2, Children=1. Total: 3. Submit enabled.
+- **17 guests (10 children) case from the operator screenshot** — pickers: Adults=7, Children=10. Total: 17. The Adults stepper can go up to `maxGuestCapacity` (whatever the cap is, e.g., 20). The Children stepper is capped at 10. Submit enabled if the room fits; disabled with the "Pick a room type" hint otherwise.
+- **Deep link to `?guests=5&children=2`** — the URL reader derives `adults = max(1, 5 - 2) = 3`. The picker shows Adults=3, Children=2. On the next URL write, the URL becomes `?adults=3&children=2`.
+
+### What this changes for the data model
+
+Nothing. `numAdults` state (renamed from `guests - numChildren` derivation) is now the state. `numChildren` state stays. The server-side `numAdults + numChildren === guests` consistency check is preserved. The cart serialization (`?rooms=`) is unchanged. The Step 2/3 aside uses the same per-room `numAdults + numChildren` data.
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - `const [guests, setGuests] = useState(...)` → `const [adults, setAdults] = useState(...)`. The URL reader at line 214 reads `searchParams.get("adults")` first, falls back to `searchParams.get("guests")` (with `adults = max(1, guests - children)`).
+  - `const numAdults = Math.max(0, guests - numChildren)` → `const numAdults = adults` (the state). The `guests` value is derived as `const guests = adults + numChildren` for the server + cart summary.
+  - `function setOccupancy(nextGuests, nextChildren)` → `function setOccupancy(nextAdults, nextChildren)`. The body updates: `safeAdults = Math.min(Math.max(nextAdults, 1), maxGuestCapacity)` + `safeChildren = Math.max(0, Math.min(nextChildren, safeAdults))` (children can be up to `safeAdults` so `numAdults = safeAdults - safeChildren` can be 0). The URL write at line 942 changes `next.set("guests", ...)` to `next.set("adults", ...)`.
+  - `function updateGuests(nextGuests)` → `function updateAdults(nextAdults)`. The body calls `setOccupancy(nextAdults, numChildren)`.
+  - The picker UI at lines 2216-2242: "Guests" label becomes "Adults". The `aria-label="Remove one guest"` → `aria-label="Remove one adult"`. The `aria-label="Add one guest"` → `aria-label="Add one adult"`. The display `{guests} guests` → `{adults} {adults === 1 ? "adult" : "adults"}`. The `disabled={guests <= 1}` → `disabled={adults <= 1}`. The `onClick={() => updateGuests(guests - 1)}` → `onClick={() => updateAdults(adults - 1)}`. The `disabled={guests >= maxGuestCapacity}` → `disabled={adults >= maxGuestCapacity}`. The `onClick={() => updateGuests(guests + 1)}` → `onClick={() => updateAdults(adults + 1)}`.
+  - The Children picker helper text at line 2315: `numChildren >= Math.min(10, Math.max(0, guests - 1))` → `numChildren >= Math.min(10, ...)` (the bound is different — the historical "guests - 1" was for the "at least 1 adult" invariant; now it's `adults + children - 1` but the helper text logic needs a re-look — likely just `numChildren >= 10` is the right condition since the picker is free).
+  - The `selectedMaxSelectableChildren` derivation at lines 550-571: `Math.max(guests, children + 1)` → `Math.max(adults, 0) + children` (no auto-bump; the effective total is `adults + children` for the user's chosen adults + candidate child count).
+  - The submit gate at line 724 (`numAdults >= 1`) is unchanged (defense in depth).
+  - The Step 2 `Number of guests` field at line 1542 stays (it shows the total `guests = adults + numChildren`). The Step 2 handler at line 1303 (`guests: Number(guestDetails.guestCount) || guests`) stays. The Step 2 changes write back to `guests` (the total), which is now derived — the Step 2 changes update `adults` (if guests increases, bump adults; if guests decreases, clamp adults to max(1, guests - numChildren)).
+  - The `cartFitsGroup` over-capacity check (line 471) is unchanged.
+  - The `cartDistributionComplete` per-room check (line 463) is unchanged.
+
+- `guest-app/src/pages/HomePage.tsx`:
+  - The `searchAvailability` URL writing at lines 160-180: `guests: String(total)` (where `total = adults + children`) is removed. The new URL is `?adults=N&children=N` where `N = adults` (the state) and `N = children` (the state). The `guests` param is no longer written by HomePage.
+
+- `guest-app/src/utils/bookingRoomCart.ts`:
+  - The `rebalanceGuestDistribution` function (line 57) is unchanged (it takes `totalAdults` + `totalChildren`; the caller now passes `adults` + `numChildren` instead of `numAdults` + `numChildren`, but the shape is the same).
+
+### Tests
+
+New `chd-11-5-explicit-adults-picker.test.ts`:
+- The "Guests" label in the picker is gone.
+- The "Adults" label is present in the picker.
+- The Adults stepper has `aria-label="Remove one adult"` + `aria-label="Add one adult"`.
+- The Adults stepper's `disabled` condition is `adults <= 1` (the min) and `adults >= maxGuestCapacity` (the max).
+- The `updateAdults` function is defined.
+- The `setOccupancy(nextAdults, nextChildren)` helper is defined.
+- The `setOccupancy` body writes `?adults=N&children=N` (not `?guests=N&children=N`).
+- The URL reader reads `searchParams.get("adults")` first, falls back to `searchParams.get("guests")`.
+- The `numAdults` state is `adults` (not derived from `guests - numChildren`).
+- The `guests` derivation is `adults + numChildren` (for the server + cart summary).
+- The `selectedMaxSelectableChildren` derivation uses `effectiveGuests = adults + children` (no auto-bump).
+- The Children stepper's `+` button's `disabled` condition is `numChildren >= 10` (CHD-11.2, unchanged).
+- The submit gate's `numAdults >= 1` check stays (defense in depth).
+- The `cartFitsGroup` over-capacity check stays.
+- The `cartDistributionComplete` per-room check stays.
+
+### MDs to update
+
+- `plan/project/ROADMAP.md` (this entry, ⬜ open).
+- `plan/docs/DECISIONS-FEATURES.md #196` (this decision).
+- `plan/features/BOOKING-FLOW.md §CHD-11.5 — Explicit Adults + Children Picker` (this spec).
+- Update 5 prior test files (`chd-05-guest-child-cap.test.ts`, `chd-11-1-picker-auto-bump-guests.test.ts`, `chd-11-2-picker-cap-soft-10.test.ts`, `chd-11-3-symmetric-auto-bump.test.ts`, `chd-11-4-picker-free-expression.test.ts`) to reflect the new state shape (the references to `updateGuests`, `setOccupancy(nextGuests, nextChildren)`, the `Math.max(0, guests - 1)` clamp, etc. are gone).
+
+### Why the explicit Adults + Children picker is the right shape
+
+The current "Guests + Children" shape is a derived-shape picker. The user thinks in terms of adults and children (the domain model), but the picker asks for the total + a sub-count. The derivation `numAdults = guests - numChildren` is invisible to the user — they don't see "3 adults" in the picker, they see "3 guests" (and the "3 adults" only appears in the Children stepper's helper text as `(3 adults)`).
+
+The explicit Adults + Children picker is the **direct-shape picker**. The user picks the domain model directly: "I have 4 adults and 3 kids." The total `guests = 7` is derived and shown in the cart summary, but the picker is honest about what's being asked. The "at least 1 adult" rule is enforced at the picker (Adults min 1), not via a hidden derivation. The 0-adults case is naturally impossible. The submit gate becomes defense in depth (the picker can't produce an invalid state via the UI).
+
+This also matches the homepage widget (CHD-13) which already has separate Adults + Children steppers. The two surfaces are now consistent — the user sees the same shape on the homepage and on /book.
+
+### Rejected alternatives
+
+- **Keep the "Guests + Children" shape but rename "Guests" to "Adults"** — semantically wrong. "Guests" means the total; "Adults" means a sub-count. The user would pick "Adults" but see the total derivation break (the picker would say "4 adults" but `numChildren = 3` so `guests = 7`, and the chip's hint text would still say "(4 adults)" not "(7 guests)"). The shape change is the point.
+- **Add a separate "Adults" stepper alongside the "Guests" stepper** — three steppers. The user picks Guests (total) + Children + Adults (extra). This is overengineered; the Adults picker REPLACES the Guests picker.
+- **Change the URL contract without backward compat** — breaks deep links from CHD-13 + SEO + any external links. The backward-compat layer (read `?guests=N&children=N` as `?adults=N&children=N`) is cheap and handles the transition.
+- **Server-side change to take `?adults=N&children=N` (drop the `guests` param)** — the server already takes `numAdults + numChildren` (per the createBookingSchema's optional fields). The `guests` param is derived server-side. No server change needed.
+- **Rename the homepage widget's "Guests" trigger to "Adults" + "Children"** — the homepage widget is a popover with two steppers (Adults + Children). The trigger button is a single "Guests" button. Renaming it to "People" or "Travelers" is a separate UX work item; out of scope for CHD-11.5.
+
+### Gates
+
+- **CHD-05** (server contract) — the `numAdults: min(0).max(100)` + `numChildren: min(0).max(100)` + `numAdults + numChildren >= 1` per-room check + `numAdults + numChildren === guests` consistency check is unchanged. The client's new shape sends the same data (just `numAdults` is now the state, not derived).
+- **CHD-11** (the picker is an exploration surface) — the new shape fully realizes the CHD-11 promise. The chip + submit gate are the only validation surfaces; the picker is free (within the Adults min 1 + Children max 10 bounds).
+- **CHD-11.1** (auto-bump in `updateChildren`) — **reversed by CHD-11.4, moot in CHD-11.5**. The auto-bump is gone; the picker is free.
+- **CHD-11.2** (soft cap of 10) — unchanged. The `+` button's `disabled = numChildren >= 10` stays.
+- **CHD-11.3** (symmetric auto-bump + per-type cap removed) — **reversed by CHD-11.4, moot in CHD-11.5**. The auto-bump is gone; the per-type cap removal stays (the picker is free).
+- **CHD-11.4** (free expression + submit-gate enforcement) — **the "submit gate catches 0 adults" check is now redundant** (the picker enforces Adults min 1). The check stays as defense in depth. The auto-bump removal is unchanged.
+- **CHD-12** (cart summary) — unchanged. The per-type "N adults + M children" inline pill shows the same data; just `N` is now the state, not derived.
+- **CHD-13** (homepage search widget) — **the URL contract changes from `?guests=N&children=N` to `?adults=N&children=N`**. The homepage widget's state (Adults + Children, separate) is unchanged. The URL writing in `searchAvailability` is updated to write the new contract.
+- **EXB-11** + **EXB-11.1** + **EXB-11.2** (extra-bed toggle) — unchanged. The extras toggle re-fires when `numAdults` or `numChildren` change.
+- **Step 2/3 aside** (extra-bed pricing) — unchanged. The pricing uses `room.numAdults` + `room.numChildren` from the cart distribution.
+- **MRB-15-10** + **MRB-15-11** (admin CRUD + photo gallery) — unrelated.
+- **EXB-11.3** (no default room-type selection) — independent.
+
+### Phase 2 (deferred, NOT in CHD-11.5)
+
+- **Rename the homepage widget's "Guests" trigger button** to "People" or "Travelers" (the popover trigger label is currently "Guests" but the popover content is "Adults + Children"). A future UX work item; the trigger label is a minor surface.
+- **Add a "Reset to 1 adult + 0 children" quick action** in the picker. A future UX work item; out of scope.
+- **Show the total `guests = adults + children` in the picker UI** (e.g., "Total: 7 guests" below the two steppers). A future UX work item; the cart summary already shows the total.
+- **Server-side allow `numAdults: 0` per-room** (relax CHD-05) — out of scope; the per-room "at least 1 guest" is a real domain rule. The new picker enforces min 1 at the Adults stepper, so this doesn't affect the client.
+- **A "0 adults + N children" preset button** — out of scope; the new picker enforces min 1 at the Adults stepper, so the user can't set 0 adults.
+
+---

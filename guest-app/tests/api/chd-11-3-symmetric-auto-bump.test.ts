@@ -71,8 +71,11 @@ describe("CHD-11.3 — per-type cap removed from picker (auto-bump reversed in C
     // The CHD-11.4 chain is
     // `Math.max(0, Math.min(nextChildren, safeGuests))`
     // — no `- 1`, no `selectedMaxSelectableChildren`.
+    // The CHD-11.5 chain renames `safeGuests` to
+    // `safeAdults` (the picker is now Adults +
+    // Children directly).
     expect(bookingPageSrc).toMatch(
-      /const safeChildren = Math\.max\(\s*0,\s*Math\.min\(nextChildren, safeGuests\)\s*\)/
+      /const safeChildren = Math\.max\(\s*0,\s*Math\.min\(nextChildren, safeAdults\)\s*\)/
     );
     // The pre-CHD-11.3 chain (with the per-type cap) is gone.
     expect(bookingPageSrc).not.toMatch(
@@ -115,17 +118,17 @@ describe("CHD-11.3 — per-type cap removed from picker (auto-bump reversed in C
     );
   });
 
-  it("the `Math.max(0, safeGuests - 1)` clamp is GONE (reversed in CHD-11.4)", () => {
+  it("the `Math.max(0, safeGuests - 1)` clamp is GONE (reversed in CHD-11.4 + renamed in CHD-11.5)", () => {
     // The pre-CHD-11.4 clamp
     // `Math.min(nextChildren, safeGuests - 1)` is
     // gone (CHD-11.4). The new chain is
-    // `Math.min(nextChildren, safeGuests)` (no
-    // `- 1`).
+    // `Math.min(nextChildren, safeAdults)` (no
+    // `- 1`; renamed in CHD-11.5).
     expect(bookingPageSrc).not.toMatch(
       /Math\.min\(nextChildren, safeGuests - 1\)/
     );
     expect(bookingPageSrc).toMatch(
-      /Math\.min\(nextChildren, safeGuests\)/
+      /Math\.min\(nextChildren, safeAdults\)/
     );
   });
 
@@ -141,7 +144,7 @@ describe("CHD-11.3 — per-type cap removed from picker (auto-bump reversed in C
     );
   });
 
-  it("the `selectedMaxSelectableChildren` is NOT used in any clamping chain (only in the chip's hint text, stays in CHD-11.4)", () => {
+  it("the `selectedMaxSelectableChildren` is NOT used in any clamping chain (only in the chip's hint text, stays in CHD-11.5)", () => {
     // The per-type cap is removed from
     // `setOccupancy` + `updateChildren` clamping
     // (CHD-11.3). It's still used in the chip's
@@ -151,12 +154,13 @@ describe("CHD-11.3 — per-type cap removed from picker (auto-bump reversed in C
     // closes with the matching `}` at the same
     // indent. We use the `function setOccupancy`
     // anchor as the start, and the closing `}`
-    // before `function updateGuests` as the end.
+    // before `function updateAdults` as the end
+    // (renamed in CHD-11.5).
     const setOccupancyStart = bookingPageSrc.indexOf(
-      "function setOccupancy(nextGuests: number, nextChildren: number)"
+      "function setOccupancy(nextAdults: number, nextChildren: number)"
     );
     const setOccupancyEnd = bookingPageSrc.indexOf(
-      "}\n\n  function updateGuests(",
+      "}\n\n  function updateAdults(",
       setOccupancyStart
     );
     const setOccupancyBody = bookingPageSrc.slice(
@@ -181,18 +185,20 @@ describe("CHD-11.3 — per-type cap removed from picker (auto-bump reversed in C
     expect(updateChildrenBody).not.toMatch(/selectedMaxSelectableChildren/);
   });
 
-  it("the `+` button's `disabled` condition is `numChildren >= 10` (CHD-11.2's soft cap, unchanged in CHD-11.4)", () => {
+  it("the `+` button's `disabled` condition is `numChildren >= 10` (CHD-11.2's soft cap, unchanged in CHD-11.5)", () => {
     // The picker cap (10) is unchanged from
     // CHD-11.2. The per-type cap is gone from
     // the picker (CHD-11.3). The "at least 1
     // adult" auto-bump is gone (CHD-11.4). The
-    // only picker-side cap is the soft 10.
+    // picker is now Adults + Children directly
+    // (CHD-11.5). The only picker-side cap is
+    // the soft 10.
     expect(bookingPageSrc).toMatch(
       /disabled=\{numChildren >= 10\}/
     );
   });
 
-  it("the submit gate (`cartFitsGroup` derivation) is unchanged (the picker is no longer the enforcement layer, stays in CHD-11.4)", () => {
+  it("the submit gate (`cartFitsGroup` derivation) is unchanged (the picker is no longer the enforcement layer, stays in CHD-11.5)", () => {
     // The submit gate catches the over-cap
     // case at Step 1 → Step 2. The picker
     // is no longer the enforcement layer;
@@ -203,21 +209,24 @@ describe("CHD-11.3 — per-type cap removed from picker (auto-bump reversed in C
     );
   });
 
-  it("the `selectedMaxSelectableChildren` derivation's formula is unchanged (CHD-11.1's auto-bump scenario stays as a derivation, even though the auto-bump is gone)", () => {
-    // The derivation itself is unchanged.
-    // It still uses `effectiveGuests = max(guests,
-    // N + 1)` to model the historical
-    // auto-bump scenario. The derivation is
-    // no longer used as a clamp on the
-    // picker (CHD-11.3), and the auto-bump
-    // itself is gone (CHD-11.4). But the
-    // derivation stays (used by the chip's
-    // hint text).
+  it("the `selectedMaxSelectableChildren` derivation uses the user's `adults` (no auto-bump, per CHD-11.5)", () => {
+    // The pre-CHD-11.5 derivation used
+    // `effectiveGuests = max(guests, N + 1)`
+    // to model the historical auto-bump
+    // scenario. The CHD-11.5 derivation uses
+    // the user's `adults` directly (no
+    // auto-bump). The derivation is no longer
+    // used as a clamp on the picker (CHD-11.3),
+    // the auto-bump is gone (CHD-11.4), and the
+    // derivation is simplified (CHD-11.5). The
+    // derivation stays (used by the chip's hint
+    // text).
     expect(bookingPageSrc).toMatch(
-      /const effectiveGuests = Math\.max\(guests, children \+ 1\)/
+      /numAdults: adults,/
     );
-    expect(bookingPageSrc).toMatch(
-      /const numAdults = effectiveGuests - children/
+    // The pre-CHD-11.5 auto-bump formula is gone.
+    expect(bookingPageSrc).not.toMatch(
+      /const effectiveGuests = Math\.max\(guests, children \+ 1\)/
     );
   });
 });

@@ -53,9 +53,9 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
   });
 
-  it("derives the highest child split supported by the selected room (with auto-bump per CHD-11.1)", () => {
+  it("derives the highest child split supported by the selected room (no auto-bump per CHD-11.5)", () => {
     const maxChildrenBlock = bookingPageSrc.match(
-      /const selectedMaxSelectableChildren = useMemo\([\s\S]*?\n\s*\}, \[guests, selectedMaxExtraBeds, selectedTypeEntry\]\);/
+      /const selectedMaxSelectableChildren = useMemo\([\s\S]*?\n\s*\}, \[adults, selectedMaxExtraBeds, selectedTypeEntry\]\);/
     );
     expect(maxChildrenBlock).toBeTruthy();
     // Per CHD-11.1 (2026-08-04, per decision #192): the
@@ -64,12 +64,12 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     // prevented the user from exploring children counts
     // the room actually supports (with auto-bump).
     expect(maxChildrenBlock![0]).toMatch(/children <= 10/);
-    // The new derivation uses `effectiveGuests = max(guests,
-    // children + 1)` (the auto-bump scenario) and
-    // `numAdults = effectiveGuests - children`. The
-    // `numAdults` is always `>= 1` after the auto-bump.
-    expect(maxChildrenBlock![0]).toMatch(/effectiveGuests = Math\.max\(guests, children \+ 1\)/);
-    expect(maxChildrenBlock![0]).toMatch(/numAdults = effectiveGuests - children/);
+    // The new derivation (per CHD-11.5) uses the user's
+    // `adults` directly (no auto-bump). The historical
+    // `effectiveGuests = max(guests, children + 1)`
+    // (CHD-11.1) is gone; the picker is now Adults +
+    // Children directly.
+    expect(maxChildrenBlock![0]).toMatch(/numAdults: adults,/);
     expect(maxChildrenBlock![0]).toMatch(
       /overflow\.requiredExtraBeds <= selectedMaxExtraBeds/
     );

@@ -66,14 +66,12 @@ export function HomePage() {
   // shape so the first-contact widget agrees with the
   // booking flow's pre-fill. Defaults mirror the
   // spec: Adults min 1 max 10 default 2, Children min 0
-  // max 10 default 0. The `total` is derived as
-  // `adults + children` (what the URL's `guests` param
-  // already carries — the `/book` page's
-  // `Math.max(0, guests - children)` derivation at
-  // `BookingPage.tsx:221` is unchanged).
+  // max 10 default 0. Per CHD-11.5 (2026-08-05, per
+  // decision #196): the URL contract is now
+  // `?adults=N&children=N` (replaces `?guests=N&children=N`).
+  // The `/book` URL reader accepts both shapes.
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
-  const total = adults + children;
   // Popover open/close + the click-outside / Escape
   // dismissal (mirrors the Navbar dropdown pattern at
   // `Navbar.tsx:65-75`).
@@ -161,17 +159,21 @@ export function HomePage() {
   const memberName = memberProfile?.fullName?.split(" ")[0] || user?.displayName?.split(" ")[0] || "there";
 
   function searchAvailability() {
+    // Per CHD-11.5 (2026-08-05, per decision #196): the
+    // URL contract is now `?adults=N&children=N` (the new
+    // contract). The pre-CHD-11.5 contract was
+    // `?guests=N&children=N` (the total). The /book
+    // URL reader accepts both shapes (reads `?adults=N`
+    // first, falls back to `?guests=N`). The homepage
+    // widget has separate Adults + Children steppers
+    // (per CHD-13) — the URL now writes the split
+    // directly.
     const params = new URLSearchParams({
       checkIn,
       checkOut,
-      guests: String(total),
+      adults: String(adults),
       // Per CHD-13 (2026-08-04, per decision #187): the
-      // children's count is now part of the URL contract.
-      // The `/book` page already reads
-      // `searchParams.get("children")` at `BookingPage.tsx:220`
-      // (the CHD-10 pre-fill), so the homepage widget just
-      // needs to send the new param — the `/book` reader
-      // is unchanged.
+      // children's count is part of the URL contract.
       children: String(children)
     });
     // Per the catalog-only /rooms refactor: the rooms page no longer

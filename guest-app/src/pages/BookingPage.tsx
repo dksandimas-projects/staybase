@@ -211,14 +211,31 @@ export function BookingPage() {
 
   const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
   const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
-  const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
+  // Per CHD-11.5 (2026-08-05, per decision #196): the picker
+  // asks for Adults + Children directly, not Guests (total) +
+  // Children. `adults` is the state; `guests` is derived as
+  // `adults + numChildren` (used by the server + the cart
+  // summary). The URL contract is `?adults=N&children=N`; for
+  // backward compat, the URL reader also accepts the historical
+  // `?guests=N&children=N` shape and derives `adults = max(1,
+  // guests - numChildren)`. The picker enforces the "at least 1
+  // adult" rule (per CHD-05) at the Adults min (1) — the submit
+  // gate's `numAdults >= 1` check stays as defense in depth.
+  const initialAdultsParam = searchParams.get("adults");
+  const initialGuestsParam = searchParams.get("guests");
+  const initialAdults = initialAdultsParam !== null
+    ? Math.max(1, Number(initialAdultsParam) || 1)
+    : initialGuestsParam !== null
+      ? Math.max(1, Number(initialGuestsParam) - Number(searchParams.get("children") ?? 0))
+      : 2;
+  const [adults, setAdults] = useState(initialAdults);
   // Per CHD-10 (2026-07-31, per CVQ-01): children (0-11) split out
   // from the total guest count so the breakfast toggle can deduct
-  // them from the bill. `numAdults` is derived as `guests - numChildren`
-  // (validated to stay ≥ 1). Seed from the `children` URL param so
+  // them from the bill. Seed from the `children` URL param so
   // deep links can pre-fill, then default to 0.
   const [numChildren, setNumChildren] = useState(Number(searchParams.get("children") ?? 0));
-  const numAdults = Math.max(0, guests - numChildren);
+  const numAdults = adults;
+  const guests = numAdults + numChildren;
   // The per-booking override for "include children in the breakfast
   // charge". Defaults to the admin default from
   // `settings/breakfastConfig.breakfastIncludesChildrenDefault`.
@@ -257,7 +274,7 @@ export function BookingPage() {
     lastName: searchParams.get("lastName") ?? "",
     email: searchParams.get("email") ?? "",
     phone: searchParams.get("phone") ?? "",
-    guestCount: String(Number(searchParams.get("guests") ?? 2)),
+    guestCount: String((Number(searchParams.get("adults")) || (Number(searchParams.get("guests")) || 2)) + Number(searchParams.get("children") ?? 0)),
     requests: searchParams.get("requests") ?? "",
     consent: false,
     _hp: ""
@@ -537,30 +554,26 @@ export function BookingPage() {
   // or child overflow. Find the highest child split supported for
   // the current total rather than silently stopping at `maxChildren`.
   //
-  // Per CHD-11.1 (2026-08-04, per decision #192): the
-  // `updateChildren` function auto-bumps `guests` when the user
-  // clicks `+` on children beyond the current total. The
-  // derivation here mirrors that auto-bump — for each candidate
-  // child count `N`, the effective `guests` is `max(originalGuests,
-  // N + 1)` (auto-bump if needed), so `numAdults = effectiveGuests
-  // - N` is always `>= 1`. The loop bound is `10` (the soft cap
-  // from CHD-11), not `Math.max(0, guests - 1)` — the pre-CHD-11.1
-  // bound prevented the user from exploring children counts the
-  // room actually supports (with auto-bump).
+  // Per CHD-11.5 (2026-08-05, per decision #196): the picker
+  // asks for Adults + Children directly. The historical
+  // auto-bump scenario (CHD-11.1) is gone — the effective
+  // total is just `adults + N` (the user's chosen adults +
+  // candidate child count). The room supports `N` children
+  // if the overflow (with the user's `adults` count) fits
+  // in `maxExtraBeds`. The derivation is used by the chip's
+  // "Up to N can fit" hint.
   const selectedMaxSelectableChildren = useMemo(() => {
-    if (!selectedTypeEntry) return Math.max(0, guests - 1);
+    if (!selectedTypeEntry) return Math.max(0, adults - 1);
     let highest = 0;
     for (let children = 0; children <= 10; children += 1) {
-      // Per CHD-11.1: with auto-bump, the booking's
-      // "at least 1 adult" invariant is maintained by
-      // bumping `guests` to `max(originalGuests, N + 1)`.
-      // The room supports `N` children if the overflow
-      // (with the auto-bumped `numAdults`) fits in
-      // `maxExtraBeds`.
-      const effectiveGuests = Math.max(guests, children + 1);
-      const numAdults = effectiveGuests - children;
+      // Per CHD-11.5: no auto-bump. The effective
+      // total is `adults + children` (the user's
+      // chosen adults + candidate child count).
+      // The room supports `N` children if the
+      // overflow (with the user's `adults`) fits
+      // in `maxExtraBeds`.
       const overflow = requiredExtraBedsFor({
-        numAdults,
+        numAdults: adults,
         numChildren: children,
         maxCapacity: Number(selectedTypeEntry.maxCapacity) || 0,
         maxChildren: Number(selectedTypeEntry.maxChildren) || 0
@@ -568,7 +581,7 @@ export function BookingPage() {
       if (overflow.requiredExtraBeds <= selectedMaxExtraBeds) highest = children;
     }
     return highest;
-  }, [guests, selectedMaxExtraBeds, selectedTypeEntry]);
+  }, [adults, selectedMaxExtraBeds, selectedTypeEntry]);
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
 
@@ -692,6 +705,12 @@ export function BookingPage() {
     step: "guest-details",
     checkIn,
     checkOut,
+    // Per CHD-11.5: the picker URL is `?adults=N&children=N`
+    // (the new contract). The Step 2/3 + confirm URLs use
+    // `?guests=N&children=N` (the total) — the confirm page
+    // displays "X Guests" and doesn't need the split. The
+    // BookingPage URL reader handles both shapes (reads
+    // `?adults=N` first, falls back to `?guests=N`).
     guests: String(guests),
     children: String(numChildren),
     roomType: selectedTypeEntry?.value ?? "",
@@ -888,93 +907,84 @@ export function BookingPage() {
     selectedRoomType
   ]);
 
-  function updateDateParams(nextCheckIn = checkIn, nextCheckOut = checkOut, nextGuests = guests) {
+  function updateDateParams(nextCheckIn = checkIn, nextCheckOut = checkOut, nextAdults = adults) {
     const next = new URLSearchParams(searchParams);
     next.set("checkIn", nextCheckIn);
     next.set("checkOut", nextCheckOut);
-    next.set("guests", String(nextGuests));
+    next.set("adults", String(nextAdults));
     if (selectedRoomType) next.set("roomType", selectedRoomType);
     setSearchParams(next, { replace: true });
   }
 
-  // Per CHD-11.1 (2026-08-04, per decision #192): the
-  // `updateGuests` and `updateChildren` functions share a
+  // Per CHD-11.5 (2026-08-05, per decision #196): the
+  // `updateAdults` and `updateChildren` functions share a
   // `setOccupancy` helper that handles the clamping + URL
-  // write. The previous shape had two duplicate URL-write
-  // blocks; the new shape is a single source of truth for
-  // the occupancy mutation.
+  // write. The new shape takes `nextAdults` (the adults
+  // count) + `nextChildren` (the children count) — the
+  // total `guests` is derived as `adults + numChildren`.
+  // The URL contract is `?adults=N&children=N` (replaces
+  // `?guests=N&children=N`); for backward compat, the URL
+  // reader at line 214 accepts the historical
+  // `?guests=N&children=N` shape.
   //
-  // Per CHD-11.3 (2026-08-05, per decision #194): the
-  // per-type cap (`selectedMaxSelectableChildren`) is
-  // removed from both `setOccupancy` and `updateChildren`.
-  // The per-type cap is enforced by the "Fits your group"
-  // chip + the submit gate, not the picker. The
-  // `selectedMaxSelectableChildren` derivation stays (used
-  // by the chip's hint text).
-  //
-  // Per CHD-11.4 (2026-08-05, per decision #195): the
-  // "at least 1 adult" auto-bump + clamp is removed. The
-  // picker is a free expression surface; the submit gate
-  // (the `numAdults >= 1` check at line 724 + the per-room
-  // `cartDistributionComplete` check) enforces the rule.
-  // The `safeChildren` clamp chain is now
-  // `Math.max(0, Math.min(nextChildren, safeGuests))` —
-  // children can be up to `safeGuests` (so `numAdults =
-  // safeGuests - safeChildren` can be 0). The "at least 1
-  // adult" rule is a domain rule (per CHD-05, the server
-  // requires at least 1 guest per room); the client
-  // enforces it at the submit gate, not in the picker.
-  function setOccupancy(nextGuests: number, nextChildren: number) {
-    const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
+  // The "at least 1 adult" rule (per CHD-05) is enforced
+  // at the Adults stepper's min (1) — the picker can't
+  // produce an invalid state via the UI. The `safeAdults
+  // = Math.min(Math.max(nextAdults, 1), maxGuestCapacity)`
+  // clamp stays as defense in depth (deep-links, race
+  // conditions). The `safeChildren` clamp chain is
+  // `Math.max(0, Math.min(nextChildren, safeAdults))` —
+  // children can be up to `safeAdults` (so the picker
+  // can't go past the user's chosen adults count). The
+  // CHD-11.1 + CHD-11.3 auto-bumps are gone (CHD-11.4);
+  // CHD-11.5 replaces the `?guests=N` contract.
+  function setOccupancy(nextAdults: number, nextChildren: number) {
+    const safeAdults = Math.min(Math.max(nextAdults, 1), maxGuestCapacity);
     const safeChildren = Math.max(
       0,
-      Math.min(nextChildren, safeGuests)
+      Math.min(nextChildren, safeAdults)
     );
-    setGuests(safeGuests);
+    setAdults(safeAdults);
     setNumChildren(safeChildren);
     setGuestDetails((current) => ({
       ...current,
-      guestCount: String(safeGuests)
+      guestCount: String(safeAdults + safeChildren)
     }));
     const next = new URLSearchParams(searchParams);
     next.set("checkIn", checkIn);
     next.set("checkOut", checkOut);
-    next.set("guests", String(safeGuests));
+    next.set("adults", String(safeAdults));
     next.set("children", String(safeChildren));
     if (selectedRoomType) next.set("roomType", selectedRoomType);
     setSearchParams(next, { replace: true });
   }
 
-  function updateGuests(nextGuests: number) {
-    // Per CHD-11.4: no auto-bump. The picker is a free
-    // expression surface. The pre-CHD-11.3 shape called
-    // `setOccupancy(nextGuests, numChildren)` directly
-    // (the "no change in children" behavior). The
-    // CHD-11.3 shape added a symmetric auto-bump to
-    // mirror `updateChildren`'s auto-bump. CHD-11.4
-    // removes both auto-bumps — the "at least 1 adult"
-    // rule is enforced at the submit gate, not in the
-    // picker. If `guests < numChildren`, the user can
-    // see the state (`numAdults = max(0, guests - children)
-    // = 0`) and the submit gate surfaces the violation.
-    setOccupancy(nextGuests, numChildren);
+  function updateAdults(nextAdults: number) {
+    // Per CHD-11.5: the Adults stepper is the new
+    // primary control. The "at least 1 adult" rule
+    // is enforced at the picker min (1), not via
+    // auto-bump (CHD-11.4). The helper clamps
+    // `safeAdults` to `min(max(nextAdults, 1),
+    // maxGuestCapacity)`. No auto-bump; the
+    // `numChildren` is preserved.
+    setOccupancy(nextAdults, numChildren);
   }
 
   function updateChildren(nextChildren: number) {
-    // Per CHD-11.4: no auto-bump. The picker is a free
-    // expression surface. The CHD-11.1 auto-bump and
-    // the CHD-11.3 per-type cap removal both stay
-    // conceptually — but the auto-bump is removed. The
-    // `desiredChildren` is just `Math.max(nextChildren,
-    // 0)` (the floor of 0; the upper bound is the soft 10
-    // on the `+` button). The "at least 1 adult" rule is
-    // enforced at the submit gate, not in the picker. If
-    // `numChildren > guests`, the `safeGuests` floor in
-    // `setOccupancy` clamps children down to `guests`
-    // (so `numAdults = 0`), and the submit gate catches
-    // the violation.
+    // Per CHD-11.4: no auto-bump. The picker is a
+    // free expression surface. The `desiredChildren`
+    // is just `Math.max(nextChildren, 0)` (the floor
+    // of 0; the upper bound is the soft 10 on the
+    // `+` button). The "at least 1 adult" rule is
+    // enforced at the Adults stepper's min (1), not
+    // in the children picker. If `numChildren >
+    // adults`, the `safeAdults` floor in
+    // `setOccupancy` clamps children down to
+    // `safeAdults` (so `numAdults = 0` would be
+    // possible in theory, but the picker min of 1
+    // prevents it).
     const desiredChildren = Math.max(nextChildren, 0);
-    setOccupancy(guests, desiredChildren);
+    setOccupancy(adults, desiredChildren);
   }
 
   function validateUploadFile(file: File) {
@@ -1108,10 +1118,17 @@ export function BookingPage() {
     // the Step 2 value is the single source of truth that flows
     // into the submitted body + downstream totals.
     if (field === "guestCount") {
+      // Per CHD-11.5: the Step 2 "Number of guests" field
+      // is the TOTAL (adults + children). The user types
+      // the total; we convert to `adults = max(1, total -
+      // numChildren)` for the Adults state. The picker
+      // enforces the "at least 1 adult" rule (Adults min
+      // 1) — the clamp `Math.max(1, ...)` mirrors it.
       const parsed = Number(value);
       if (Number.isFinite(parsed) && parsed >= 1) {
-        setGuests(parsed);
-        updateDateParams(checkIn, checkOut, parsed);
+        const newAdults = Math.max(1, parsed - numChildren);
+        setAdults(newAdults);
+        updateDateParams(checkIn, checkOut, newAdults);
       }
     }
   }
@@ -1300,6 +1317,10 @@ export function BookingPage() {
           // corporate page (`CorporateBookingPage.tsx:619`) and
           // prefer the parsed Step 2 value, falling back to the
           // Step 1 stepper for guests who never reached Step 2.
+          // The server's createBookingSchema takes `guests`
+          // (total) + optional `numAdults` + `numChildren`
+          // (split). We send the total from the Step 2 field
+          // (or the derived `guests = adults + numChildren`).
           guests: Number(guestDetails.guestCount) || guests,
           hasBreakfast: breakfastConfig.isEnabled && firstRoomSelection.rateChoice === "room-breakfast",
           // Per CHD-10 (2026-07-31, per CVQ-01): the per-booking
@@ -2205,36 +2226,36 @@ export function BookingPage() {
                 checkOut={checkOut}
                 onCheckInChange={(value) => {
                   setCheckIn(value);
-                  updateDateParams(value, checkOut, guests);
+                  updateDateParams(value, checkOut, adults);
                 }}
                 onCheckOutChange={(value) => {
                   setCheckOut(value);
-                  updateDateParams(checkIn, value, guests);
+                  updateDateParams(checkIn, value, adults);
                 }}
               />
 
               <label className="grid gap-2 text-sm font-medium text-gray-700">
-                Guests
+                Adults
                 <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
                   <button
-                    aria-label="Remove one guest"
+                    aria-label="Remove one adult"
                     className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={guests <= 1}
+                    disabled={adults <= 1}
                     type="button"
-                    onClick={() => updateGuests(guests - 1)}
+                    onClick={() => updateAdults(adults - 1)}
                   >
                     <Minus size={16} />
                   </button>
                   <span className="flex items-center gap-2 text-sm text-gray-700">
                     <Users size={16} className="text-primary" />
-                    {guests} {guests === 1 ? "guest" : "guests"}
+                    {adults} {adults === 1 ? "adult" : "adults"}
                   </span>
                   <button
-                    aria-label="Add one guest"
+                    aria-label="Add one adult"
                     className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={guests >= maxGuestCapacity}
+                    disabled={adults >= maxGuestCapacity}
                     type="button"
-                    onClick={() => updateGuests(guests + 1)}
+                    onClick={() => updateAdults(adults + 1)}
                   >
                     <Plus size={16} />
                   </button>
@@ -2249,11 +2270,14 @@ export function BookingPage() {
                   and the cap belongs at the commit surface
                   (the Step 1 → Step 2 submit gate + the
                   room-type card's Fits/Tight/Doesn't fit
-                  indicator), not at the picker. Soft cap is
-                  `MIN(10, guests - 1)` — a sanity guard, not a
-                  domain constraint. The `guests - 1` floor
-                  preserves the existing "at least one adult"
-                  invariant. */}
+                  indicator), not at the picker. Per CHD-11.2
+                  (decision #193): the soft cap is `10` (a
+                  sanity guard, not a domain constraint). Per
+                  CHD-11.5 (decision #196): the picker is
+                  Adults + Children directly; the children
+                  cap of 10 stays (the historical "at least
+                  one adult" floor is no longer needed — the
+                  Adults stepper's min 1 enforces the rule). */}
               <label className="grid gap-2 text-sm font-medium text-gray-700">
                 Children (0–11)
                 <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
@@ -2311,8 +2335,17 @@ export function BookingPage() {
                           "you have reached this room type's
                           limit" tail with a forward-looking
                           nudge. The cap belongs at the submit
-                          gate + the room-type card, not here. */}
-                      {numChildren >= Math.min(10, Math.max(0, guests - 1))
+                          gate + the room-type card, not here.
+                          Per CHD-11.5: the historical
+                          `Math.max(0, guests - 1)` floor is
+                          gone — the Adults stepper's min 1
+                          enforces the "at least 1 adult" rule.
+                          The new floor is `Math.min(10, 0)` =
+                          0 (effectively just `0`), but the
+                          `+` button's `disabled` is
+                          `numChildren >= 10` so the nudge
+                          fires only at the soft cap. */}
+                      {numChildren >= 10
                         ? " Pick a room type that fits your group, or add a second room."
                         : ""}
                     </>
