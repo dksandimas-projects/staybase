@@ -40,11 +40,13 @@ describe("CHD-11.4 — free expression in the picker (submit-gate enforces 'at l
   it("the `setOccupancy` `safeChildren` clamp chain is `Math.max(0, Math.min(nextChildren, safeGuests))` (no '- 1' floor)", () => {
     // The pre-CHD-11.4 chain was
     // `Math.max(0, Math.min(nextChildren, safeGuests - 1))`.
-    // The new chain is `Math.max(0, Math.min(nextChildren, safeGuests))`
+    // The CHD-11.4 chain is `Math.max(0, Math.min(nextChildren, safeGuests))`
     // — children can be up to `safeGuests`, so `numAdults =
     // safeGuests - safeChildren` can be 0.
+    // The CHD-11.5 chain renames `safeGuests` to `safeAdults`
+    // (the picker is now Adults + Children directly).
     expect(bookingPageSrc).toMatch(
-      /const safeChildren = Math\.max\(\s*0,\s*Math\.min\(nextChildren, safeGuests\)\s*\)/
+      /const safeChildren = Math\.max\(\s*0,\s*Math\.min\(nextChildren, safeAdults\)\s*\)/
     );
     // The pre-CHD-11.4 chain (with the `- 1` floor) is gone.
     expect(bookingPageSrc).not.toMatch(
@@ -57,21 +59,25 @@ describe("CHD-11.4 — free expression in the picker (submit-gate enforces 'at l
     // `newGuests = max(guests, desiredChildren + 1)`
     // (the CHD-11.1 auto-bump) to maintain the
     // "at least 1 adult" invariant. The new shape
-    // calls `setOccupancy(guests, desiredChildren)`
-    // directly — no auto-bump. The submit gate
-    // catches the 0-adults case.
+    // calls `setOccupancy(adults, desiredChildren)`
+    // directly — no auto-bump. The "at least 1
+    // adult" rule is enforced at the Adults
+    // stepper's min (1) in CHD-11.5.
     expect(bookingPageSrc).not.toMatch(
       /const newGuests = Math\.max\(guests, desiredChildren \+ 1\)/
     );
   });
 
-  it("`updateChildren` calls `setOccupancy(guests, desiredChildren)` directly (no auto-bump intermediate)", () => {
+  it("`updateChildren` calls `setOccupancy(adults, desiredChildren)` directly (no auto-bump intermediate)", () => {
     // The pre-CHD-11.4 shape was
     // `setOccupancy(newGuests, desiredChildren)`
     // where `newGuests = max(guests, desiredChildren + 1)`.
-    // The new shape is
+    // The CHD-11.4 shape was
     // `setOccupancy(guests, desiredChildren)` — no
     // `newGuests` intermediate.
+    // The CHD-11.5 shape is
+    // `setOccupancy(adults, desiredChildren)` —
+    // uses the new `adults` state.
     // Slice the `updateChildren` body — anchor on
     // the function signature and the closing `}`
     // before `function validateUploadFile`.
@@ -87,60 +93,71 @@ describe("CHD-11.4 — free expression in the picker (submit-gate enforces 'at l
       updateChildrenEnd
     );
     expect(updateChildrenBody).toMatch(
-      /setOccupancy\(guests, desiredChildren\)/
+      /setOccupancy\(adults, desiredChildren\)/
     );
     // The pre-CHD-11.4 intermediate `newGuests` is
     // gone from the `updateChildren` body.
     expect(updateChildrenBody).not.toMatch(/newGuests/);
   });
 
-  it("`updateGuests` has NO symmetric auto-bump (no `newGuests = max(nextGuests, numChildren + 1)`)", () => {
+  it("`updateAdults` (renamed from `updateGuests` in CHD-11.5) has NO symmetric auto-bump (no `newGuests = max(nextGuests, numChildren + 1)`)", () => {
     // The pre-CHD-11.4 `updateGuests` (post-CHD-11.3)
     // computed `newGuests = max(nextGuests,
     // numChildren + 1)` (the symmetric auto-bump) to
     // mirror `updateChildren`'s auto-bump. The new
-    // shape calls `setOccupancy(nextGuests, numChildren)`
-    // directly — no auto-bump.
+    // shape calls `setOccupancy(nextAdults, numChildren)`
+    // directly — no auto-bump. Renamed from
+    // `updateGuests` to `updateAdults` in CHD-11.5.
     expect(bookingPageSrc).not.toMatch(
       /const newGuests = Math\.max\(nextGuests, numChildren \+ 1\)/
     );
   });
 
-  it("`updateGuests` calls `setOccupancy(nextGuests, numChildren)` directly (no auto-bump intermediate)", () => {
+  it("`updateAdults` calls `setOccupancy(nextAdults, numChildren)` directly (no auto-bump intermediate)", () => {
     // The pre-CHD-11.4 shape was
     // `setOccupancy(newGuests, numChildren)` where
     // `newGuests = max(nextGuests, numChildren + 1)`.
-    // The new shape is
+    // The CHD-11.4 shape was
     // `setOccupancy(nextGuests, numChildren)` — no
     // `newGuests` intermediate.
-    // Slice the `updateGuests` body — anchor on the
+    // The CHD-11.5 shape is
+    // `setOccupancy(nextAdults, numChildren)` —
+    // uses the new `adults` state.
+    // Slice the `updateAdults` body — anchor on the
     // function signature and the closing `}` before
     // `function updateChildren`.
-    const updateGuestsStart = bookingPageSrc.indexOf(
-      "function updateGuests(nextGuests: number)"
+    const updateAdultsStart = bookingPageSrc.indexOf(
+      "function updateAdults(nextAdults: number)"
     );
-    const updateGuestsEnd = bookingPageSrc.indexOf(
+    const updateAdultsEnd = bookingPageSrc.indexOf(
       "}\n\n  function updateChildren(",
-      updateGuestsStart
+      updateAdultsStart
     );
-    const updateGuestsBody = bookingPageSrc.slice(
-      updateGuestsStart,
-      updateGuestsEnd
+    const updateAdultsBody = bookingPageSrc.slice(
+      updateAdultsStart,
+      updateAdultsEnd
     );
-    expect(updateGuestsBody).toMatch(
-      /setOccupancy\(nextGuests, numChildren\)/
+    expect(updateAdultsBody).toMatch(
+      /setOccupancy\(nextAdults, numChildren\)/
     );
     // The pre-CHD-11.4 intermediate `newGuests` is
-    // gone from the `updateGuests` body.
-    expect(updateGuestsBody).not.toMatch(/newGuests/);
+    // gone from the `updateAdults` body.
+    expect(updateAdultsBody).not.toMatch(/newGuests/);
   });
 
-  it("the `numAdults = max(0, guests - numChildren)` derivation stays (line 221)", () => {
-    // The `numAdults` derivation is unchanged. It's
-    // the post-state derivation, not a pre-state
-    // auto-bump. The user sees `numAdults` in the
-    // chip's hint text + the cart summary.
+  it("the `numAdults = adults` state stays (was `numAdults = max(0, guests - numChildren)` derivation, renamed in CHD-11.5)", () => {
+    // The pre-CHD-11.5 `numAdults` derivation
+    // was `Math.max(0, guests - numChildren)`.
+    // The CHD-11.5 `numAdults` is the state
+    // `adults` (no derivation). The total
+    // `guests = numAdults + numChildren` is
+    // derived (used by the server + cart
+    // summary).
     expect(bookingPageSrc).toMatch(
+      /const numAdults = adults/
+    );
+    // The pre-CHD-11.5 derivation is gone.
+    expect(bookingPageSrc).not.toMatch(
       /const numAdults = Math\.max\(0, guests - numChildren\)/
     );
   });

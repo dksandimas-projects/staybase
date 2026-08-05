@@ -83,7 +83,16 @@ describe("CHD-11 — soft-constraint children picker on /book", () => {
     // which enforced the per-type cap. The CHD-11 disabled
     // condition is the soft cap `MIN(10, guests - 1)` only —
     // the per-type cap is no longer gated at the picker.
+    // Per CHD-11.5 (decision #196): the `Math.max(0,
+    // guests - 1)` floor is gone — the picker is now
+    // Adults + Children directly; the Adults stepper
+    // min 1 enforces the "at least 1 adult" rule. The
+    // current condition is `numChildren >= 10` (the
+    // soft cap only).
     expect(childrenStepperSlice).toMatch(
+      /numChildren >= 10/
+    );
+    expect(childrenStepperSlice).not.toMatch(
       /numChildren >= Math\.min\(10, Math\.max\(0, guests - 1\)\)/
     );
     expect(childrenStepperSlice).not.toMatch(
