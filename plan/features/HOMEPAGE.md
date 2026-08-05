@@ -28,6 +28,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
 
 - [x] Hero section — full-viewport, background photo, Apollo heading, tagline in Apollo Italic, single CTA button (Spark Orange)
 - [x] Availability checker — check-in / check-out date pickers + guest count + Search button, rendered above the fold within or directly below the hero
+- [ ] Availability checker — children count is part of the guest picker (CHD-13, proposed 2026-08-03) — the "Guests" field becomes a popover with two steppers (Adults 1-10, Children 0-10) instead of a flat 1-6 select. The trigger label shows the split ("2 adults" or "2 adults, 1 child"). The Search button navigates to `/book?checkIn=...&checkOut=...&guests=...&children=...` — the `/book` page already reads `searchParams.get("children")` (per CHD-05), so the URL contract is in place; the homepage widget just needs to send the new param.
 - [x] 3 featured room cards — pulled from `settings/websiteContent.homepage.featuredTypeValues` (a list of room TYPE values, not physical room IDs). The page resolves each type to its first *active* room of that type. Card content — image, name, bed description, key amenities, price per night, Book Now CTA — all comes from the room's **type** via `useRoomTypes` (per `plan/features/SETTINGS.md §Room Type Photos`) — `roomType.imageUrls[0]` is the hero image, pricing + max guests come from the type via `getRoomTypeRates(roomTypes, room.type)` (per W3.6), bed description + amenities come from the type via `roomTypes.find(t => t.value === room.type)?.X` (per W3.7). The resolved physical room is only used for the `key` and the Book Now deep link. Capped at `MAX_FEATURED_TYPES = 3`.
 - [x] Amenities grid — icon + title + description per item, content from `settings/websiteContent.homepage.amenities`
 - [x] Services section — displays Tour Packages and Car Rentals as two service cards
@@ -127,3 +128,79 @@ The trade-off vs a per-photo JPEG LQIP is that the placeholder is a generic colo
 - Footer and Navbar: `plan/guest-app/CLAUDE.md`
 - Featured room + amenity content editing: `plan/features/SETTINGS.md §Website Content`
 - Design tokens: `plan/docs/FRONTEND.md`
+
+---
+
+## Children in Search Widget (CHD-13)
+> Proposed 2026-08-03, per decision #187. Spec-only — no code yet. Files: `guest-app/src/pages/HomePage.tsx:194-228` (the availability checker block — current shape is a flat `<select>` for 1-6 guests). Sibling to CHD-11 (soft-constraint picker on `/book`) but a different surface — the homepage is a quick-search, not a full booking.
+
+### The problem
+
+The homepage availability checker at `guest-app/src/pages/HomePage.tsx:194-228` has a flat `<select>` for guests (1-6) — no children split. Three reasons this is the wrong shape:
+
+1. **The first contact is missing the children's split.** Per CHD-05, every booking has an adults + children split, and the children's count is server-validated as part of the public creation transaction. The homepage widget's "2 guests" is ambiguous — 2 adults, or 1 adult + 1 child, or 2 children? The guest has to re-specify the split on `/book`.
+2. **The current cap of 6 is artificially restrictive.** The 14-room hotel sees real "buy out the whole hotel" group bookings (e.g. 8 adults + 4 children for a wedding party). The flat `<select>` caps at 6 total, forcing the group to abandon the homepage search and re-specify on `/book` — and the /book picker has no total cap, so they get a different shape on the second surface.
+3. **The Search button URL contract already has the `children` param.** The `/book` page reads `searchParams.get("children")` at `BookingPage.tsx:211` — the homepage widget just needs to send the new param. The change is purely a client-side widget + a URL param, no server-side work.
+
+### The fix — popover with two steppers (Adults + Children), matching the /book picker shape
+
+**Replace the flat `<select>` (1-6 guests) with a small popover anchored to a "Guests" trigger. The popover has two rows:**
+
+```
+┌──────────────────────────────┐
+│ Adults                [−] 2 [+]│
+│ Children (0-11)       [−] 0 [+]│
+│                              │
+│            [ Done ]          │
+└──────────────────────────────┘
+```
+
+The trigger button shows the current split: "2 adults" (no children) or "2 adults, 1 child" (with children). When the popover is closed and the user reopens it, the steppers reflect the current state.
+
+The popover's `−` / `+` controls follow the same shape as the `/book` picker:
+- **Adults**: min 1, max 10, default 2 (matches the `/book` `guests` invariant of "at least one adult").
+- **Children**: min 0, max 10 (matches the CHD-11 soft cap on the `/book` picker).
+- **Total cap**: removed — the 1-6 cap on the current `<select>` was a UI simplification, not a domain constraint. The `/book` picker has no total cap (children are unbounded, adults can grow to fill the children step), so removing the homepage cap means the two surfaces agree.
+
+The "Done" button closes the popover. Click-outside-to-close is also enabled (the standard popover dismissal). The trigger itself is a `button` with `aria-haspopup="dialog"` and `aria-expanded` for screen readers; the popover is a `role="dialog"` with `aria-labelledby="guests-popover-title"` and a focus trap.
+
+### URL contract on Search
+
+The Search button navigates to `/book` with all three occupancy params:
+- `guests` = `adults + children` (total — the existing contract, what `/book` reads at `BookingPage.tsx:205`)
+- `children` = children count (new — what `/book` already reads at `BookingPage.tsx:211`)
+- (the third param, "adults", is derived on `/book` as `Math.max(0, guests - children)` at `BookingPage.tsx:212`)
+
+The existing `searchAvailability` function at `HomePage.tsx:121-133` gains `children: String(children)` in the `URLSearchParams` constructor. No change to the `/book` page's URL reader.
+
+### What this changes for the data model
+
+**Nothing.** The popover is a UI control; the underlying state is two `useState<number>` hooks (`adults`, `children`). The URL is the only persistence path. No new schema, no new server-side field, no new validation.
+
+### What this changes for the related work
+
+- **CHD-05 contract preserved** — server still validates `numAdults + numChildren === numGuests` per child; the homepage widget just feeds the right `guests` + `children` pair into the URL so the `/book` page's pre-fill is correct.
+- **CHD-11 (soft-constraint picker)** — the homepage widget uses the same soft cap (10) for children as the `/book` picker; the same age range label "Children (0-11)" appears in both surfaces. The shapes match.
+- **CHD-12 (cart-style summary)** — unrelated; the cart summary is a post-cart surface, the homepage widget is a pre-cart surface. The two don't touch.
+- **EXB-11 (extra-bed toggle)** — the homepage widget does NOT include an extra-bed picker. Extra beds are a cart-time decision (per EXB-01..10: server snapshots `extraBedRate` on creation); the homepage widget is a quick-search, not a full add-on picker. The `/book` page handles the extra-bed selection.
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+- `guest-app/tests/api/chd-13-children-in-search-widget.test.ts` (new) — source-text guards on `HomePage.tsx`:
+  - The flat `<select>` (1-6 guests) is gone; replaced with a popover trigger button
+  - The popover trigger has `aria-haspopup="dialog"` and `aria-expanded` attributes
+  - The popover contains two stepper rows: "Adults" and "Children (0-11)" (with the age range label)
+  - The "Children (0-11)" stepper has `aria-label="Children count"` and `aria-live="polite"` (matches the `/book` picker shape)
+  - The "Adults" stepper is min 1 max 10, the "Children" stepper is min 0 max 10
+  - The trigger label is "N adults" when `children === 0`, "N adults, M child(ren)" when `children > 0`
+  - The "Done" button is present
+  - The `searchAvailability` function includes `children: String(children)` in the URL params (verify via regex on the function body)
+- `guest-app/tests/api/chd-children-occupancy.test.ts` (existing) — re-verify CHD-05 contract is preserved (the URL contract on `/book` is unchanged).
+
+### Rejected alternatives
+
+- **Keep the flat `<select>`, just add a separate `<select>` for children next to it.** Adds two drop-downs in a row that's already tight on mobile (the widget stacks vertically on small screens per the existing responsive layout, but two side-by-side selects take more horizontal space than a popover trigger). The popover is the more compact shape.
+- **Use a single combined "Guests" stepper that decrements adults before children** (e.g. `[−] 3 [+]`, with an internal "adults=2, children=1" split). Hidden from the user but matches the soft-constraint "exploration-first" spirit. The split is too important to hide — adults and children have different rates (children are free, adults pay the room rate), different age semantics (0-11 vs 12+), and the /book picker is split. Hiding the split would create a different shape on the homepage than on /book.
+- **Skip the children picker on the homepage — just send `children=0` and let /book re-prompt.** The /book page already inherits children from the URL; passing `children=0` silently when the user actually has 2 children is a worse outcome than adding a 2-row popover. The whole point of the spec is to capture the children's count at the first surface.
+- **Make the popover a 4-row widget (Adults, Children 0-5, Children 6-11, Teens 12+).** The age range split (0-11 vs 12+) is a real domain boundary per CHD-10 (12+ counts as adult for both rate and breakfast). But the /book picker collapses to "Children (0-11)" only — a child of 12 is treated as an adult there. Mirroring that shape on the homepage keeps the two surfaces consistent. A "Children (0-5) / (6-11) / (12+)" age-tier split is a future CHD-14 if the operator wants to differentiate pricing by age.
+- **Show the children picker on the homepage but cap at 6 (matching the old total cap).** Defeats the point of the spec — the 1-6 cap is what's being removed.

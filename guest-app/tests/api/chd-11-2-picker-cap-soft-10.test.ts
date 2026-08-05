@@ -1,0 +1,119 @@
+// Per CHD-11.2 (2026-08-05, per decision #193): source-text
+// regression tests for the "picker cap raised to soft 10 (no
+// per-type cap on the + button)" UX refinement. The
+// pre-CHD-11.2 surface hard-capped the children picker's `+`
+// button at the room's capacity (e.g., 3 for a Single Room
+// with `maxCapacity: 1`, `maxChildren: 2`, `maxExtraBeds: 1`).
+// The user could pick up to 3 children, but not more — even
+// though the system can validate the over-cap case via the
+// "Fits your group" chip + the submit gate.
+//
+// CHD-11.2 flow:
+//   1. The children stepper's `+` button's `disabled`
+//      condition is `numChildren >= 10` (the CHD-11 soft
+//      cap, not the room's capacity).
+//   2. The pre-CHD-11.2 condition
+//      (`numChildren >= Math.min(10,
+//      selectedMaxSelectableChildren)`) is gone.
+//   3. The `selectedMaxSelectableChildren` derivation
+//      stays (still used by the "Fits your group" chip +
+//      the CHD-11 capacity indicator).
+//   4. The `−` button's `disabled` condition is unchanged.
+//   5. The `updateChildren` function (with the CHD-11.1
+//      auto-bump) is unchanged.
+//   6. The `setOccupancy` helper is unchanged.
+//   7. The submit gate is unchanged.
+
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const bookingPageSrc = readFileSync(
+  resolve(__dirname, "../../src/pages/BookingPage.tsx"),
+  "utf8"
+);
+
+describe("CHD-11.2 — picker cap raised to soft 10 (no per-type cap on the + button)", () => {
+  it("the children stepper's `+` button disabled condition is `numChildren >= 10` (NOT the room's capacity)", () => {
+    // Per CHD-11.2: the cap is the soft 10 (the
+    // CHD-11 sanity guard), not the room's
+    // capacity. The pre-CHD-11.2 cap of
+    // `Math.min(10, selectedMaxSelectableChildren)`
+    // overrode the 10 with the room's capacity,
+    // which is the wrong layer.
+    expect(bookingPageSrc).toMatch(
+      /disabled=\{numChildren >= 10\}/
+    );
+  });
+
+  it("the pre-CHD-11.2 condition `numChildren >= Math.min(10, selectedMaxSelectableChildren)` is gone", () => {
+    // The pre-CHD-11.2 cap was the room's
+    // capacity (`selectedMaxSelectableChildren`)
+    // bounded by 10. The new cap is just 10.
+    expect(bookingPageSrc).not.toMatch(
+      /disabled=\{numChildren >= Math\.min\(10, selectedMaxSelectableChildren\)\}/
+    );
+  });
+
+  it("the `selectedMaxSelectableChildren` derivation is still present (used by the chip + capacity indicator)", () => {
+    // The derivation stays — the "Fits your
+    // group" chip + the CHD-11 capacity indicator
+    // still use it. The picker just doesn't gate
+    // on it anymore.
+    expect(bookingPageSrc).toMatch(
+      /const selectedMaxSelectableChildren = useMemo\(\(\) => \{/
+    );
+    // The new formula (per CHD-11.1): the
+    // loop bound is 10, and the derivation
+    // uses `effectiveGuests = max(guests, N + 1)`.
+    expect(bookingPageSrc).toMatch(
+      /effectiveGuests = Math\.max\(guests, children \+ 1\)/
+    );
+  });
+
+  it("the `−` button's `disabled` condition (`numChildren <= 0`) is unchanged", () => {
+    // The `−` button is disabled when the
+    // count is 0. Unchanged from CHD-11.
+    expect(bookingPageSrc).toMatch(/disabled=\{numChildren <= 0\}/);
+  });
+
+  it("the `updateChildren` function (with the CHD-11.1 auto-bump) is unchanged", () => {
+    // The auto-bump in `updateChildren` is
+    // unchanged. The new cap doesn't affect
+    // the auto-bump logic.
+    expect(bookingPageSrc).toMatch(
+      /function updateChildren\(nextChildren: number\)/
+    );
+    expect(bookingPageSrc).toMatch(
+      /const desiredChildren = Math\.min\(\s*Math\.max\(nextChildren, 0\),\s*selectedMaxSelectableChildren\s*\)/
+    );
+    expect(bookingPageSrc).toMatch(
+      /const newGuests = Math\.max\(guests, desiredChildren \+ 1\)/
+    );
+  });
+
+  it("the `setOccupancy` helper (with the `safeGuests - 1` floor for children) is unchanged", () => {
+    // The helper that the auto-bump uses
+    // stays — it handles the clamping + URL
+    // write. The `safeGuests - 1` floor for
+    // children is preserved (so `updateGuests(1)`
+    // still clamps children to 0).
+    expect(bookingPageSrc).toMatch(
+      /function setOccupancy\(nextGuests: number, nextChildren: number\)/
+    );
+    expect(bookingPageSrc).toMatch(
+      /const safeChildren = Math\.min\(\s*Math\.max\(nextChildren, 0\),\s*selectedMaxSelectableChildren,\s*Math\.max\(0, safeGuests - 1\)\s*\)/
+    );
+  });
+
+  it("the submit gate (`cartFitsGroup` derivation) is unchanged (the picker is no longer the enforcement layer)", () => {
+    // The submit gate catches the over-cap
+    // case at Step 1 → Step 2. The picker
+    // is no longer the enforcement layer;
+    // the gate is.
+    expect(bookingPageSrc).toMatch(/cartFitsGroup/);
+    expect(bookingPageSrc).toMatch(
+      /cartIsReady = cartHasAvailability && cartDistributionComplete && cartFitsGroup/
+    );
+  });
+});

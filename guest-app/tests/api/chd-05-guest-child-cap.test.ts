@@ -53,29 +53,79 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
   });
 
-  it("derives the highest child split supported by the selected room", () => {
+  it("derives the highest child split supported by the selected room (with auto-bump per CHD-11.1)", () => {
     const maxChildrenBlock = bookingPageSrc.match(
       /const selectedMaxSelectableChildren = useMemo\([\s\S]*?\n\s*\}, \[guests, selectedMaxExtraBeds, selectedTypeEntry\]\);/
     );
     expect(maxChildrenBlock).toBeTruthy();
-    expect(maxChildrenBlock![0]).toMatch(/children <= Math\.max\(0, guests - 1\)/);
-    expect(maxChildrenBlock![0]).toMatch(/numAdults:\s*guests - children/);
+    // Per CHD-11.1 (2026-08-04, per decision #192): the
+    // loop bound is `10` (the soft cap from CHD-11), not
+    // `Math.max(0, guests - 1)`. The pre-CHD-11.1 bound
+    // prevented the user from exploring children counts
+    // the room actually supports (with auto-bump).
+    expect(maxChildrenBlock![0]).toMatch(/children <= 10/);
+    // The new derivation uses `effectiveGuests = max(guests,
+    // children + 1)` (the auto-bump scenario) and
+    // `numAdults = effectiveGuests - children`. The
+    // `numAdults` is always `>= 1` after the auto-bump.
+    expect(maxChildrenBlock![0]).toMatch(/effectiveGuests = Math\.max\(guests, children \+ 1\)/);
+    expect(maxChildrenBlock![0]).toMatch(/numAdults = effectiveGuests - children/);
     expect(maxChildrenBlock![0]).toMatch(
       /overflow\.requiredExtraBeds <= selectedMaxExtraBeds/
     );
   });
 
-  it("caps the child stepper visibly and explains the selected room's limit", () => {
+  it("soft-caps the child stepper (CHD-11) and explains the room's hint (with auto-bump per CHD-11.1)", () => {
+    // Per CHD-11 (2026-08-04, per decision #184): the children
+    // picker is no longer bounded by the per-type `maxChildren`
+    // cap. The hard cap was a dead-end at the exploration stage
+    // — the cap belongs at the commit surface (the submit gate
+    // + the room-type card's Fits/Tight/Doesn't fit indicator),
+    // not the picker. The soft cap was `MIN(10, guests - 1)` —
+    // a sanity guard, not a domain constraint. The
+    // `guests - 1` floor preserved the "at least one adult"
+    // invariant. The "You have reached this room type's limit"
+    // dead-end tail is gone.
+    //
+    // Per CHD-11.1 (2026-08-04, per decision #192): the
+    // soft cap was `MIN(10, selectedMaxSelectableChildren)`
+    // — the room's capacity (with auto-bump), not the
+    // booking's "guests - 1" cap. The auto-bump in
+    // `updateChildren` maintained the "at least one adult"
+    // invariant without hard-capping the children count.
+    //
+    // Per CHD-11.2 (2026-08-05, per decision #193): the
+    // soft cap is now just `10` (the CHD-11 sanity guard),
+    // NOT the room's capacity. The picker is the exploration
+    // surface; the "Fits your group" chip + the submit gate
+    // are the commit surfaces. The user can pick any number
+    // up to 10; the chip + submit gate tell them if it works.
     expect(bookingPageSrc).toMatch(/Children \(0–11\)/);
     expect(bookingPageSrc).toMatch(
       /updateChildren\(numChildren \+ 1\)/
     );
+    // Soft cap: the + button is gated at `10` (the
+    // CHD-11 sanity guard), not the room's capacity
+    // and not the booking's "guests - 1" cap.
     expect(bookingPageSrc).toMatch(
-      /numChildren >= selectedMaxSelectableChildren/
+      /numChildren >= 10/
+    );
+    // The pre-CHD-11 per-type cap is no longer enforced at
+    // the picker. The per-type `selectedMaxSelectableChildren`
+    // useMemo is still used (for the "Up to N can fit when
+    // extra beds cover the overflow" hint + the capacity
+    // chip) but does NOT gate the picker.
+    expect(bookingPageSrc).not.toMatch(
+      /numChildren >= selectedMaxSelectableChildren\s*\|\|/
     );
     expect(bookingPageSrc).toMatch(/id="children-cap-help"/);
     expect(bookingPageSrc).toMatch(/aria-describedby="children-cap-help"/);
-    expect(bookingPageSrc).toMatch(/You have reached this room type’s limit for the current group/);
+    // The dead-end "You have reached this room type's limit"
+    // message is gone; replaced with a forward-looking
+    // "Pick a room type that fits your group, or add a
+    // second room." nudge.
+    expect(bookingPageSrc).not.toMatch(/You have reached this room type.s limit for the current group/);
+    expect(bookingPageSrc).toMatch(/Pick a room type that fits your group, or add a second room\./);
   });
 
   it("states that children are free of the room charge in the picker and price summary", () => {
@@ -105,18 +155,27 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
   });
 
   it("persists the distributed room cart across booking-step URLs", () => {
-    expect(bookingPageSrc).toMatch(
-      /extraBedCount[\s\S]{0,100}searchParams\.get\("extraBeds"\)/
-    );
+    // Per EXB-11 (2026-08-04, per decision #186): the
+    // per-room `extraBedCount` is serialized via the cart
+    // (`rooms=` URL param via `serializeBookingRoomCart`),
+    // NOT a separate `extraBeds=` URL param. The cart is
+    // the single source of truth for the per-room count.
+    // The pre-EXB-11 shape had a `useState` for
+    // `extraBedCount` and a `setExtraBedCount` setter
+    // that mirrored the count into `extraBeds=`. Both are
+    // gone — the cart's per-room field is the only path.
     const continueParams = bookingPageSrc.match(
       /const continueParams = new URLSearchParams\(\{[\s\S]*?\}\);/
     );
     expect(continueParams).toBeTruthy();
     expect(continueParams![0]).toMatch(/children:\s*String\(numChildren\)/);
-    expect(continueParams![0]).toMatch(/extraBeds:\s*String\(extraBedCount\)/);
+    // The `extraBeds` URL param is gone.
+    expect(continueParams![0]).not.toMatch(/extraBeds:\s*String\(/);
     expect(bookingPageSrc).toMatch(
       /continueParams\.set\("rooms", serializeBookingRoomCart\(distributedRoomCart\)\)/
     );
+    // The old `searchParams.get("extraBeds")` reader is gone.
+    expect(bookingPageSrc).not.toMatch(/searchParams\.get\("extraBeds"\)/);
   });
 
   it("keeps every touched occupancy control at least 44px", () => {

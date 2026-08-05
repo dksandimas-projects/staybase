@@ -1506,6 +1506,26 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // The full collection is cheap at this scale (~14 active
   // reservations at the hotel's current size; the cap is
   // bounded by room inventory, not bookings volume).
+  //
+  // Per MRB-15-09 (2026-08-03, per decision #182): the
+  // `isStaff()` rule on `/reservations/{id}` requires the
+  // current ID token to carry the `role` custom claim.
+  // The auth gate above (`onAuthStateChanged` at L809)
+  // calls `getIdTokenResult(firebaseUser, true)` to
+  // validate the role, but the Firestore SDK uses its own
+  // cached ID token for the listener handshake — if the
+  // SDK's cache is one refresh behind the `currentUser`
+  // state (e.g. the staff claim was just minted server-side
+  // and the cached token still lacks it), the listener
+  // attaches with the stale token and the server replies
+  // `Missing or insufficient permissions` on the first
+  // query. The fix is to force a token refresh inside this
+  // effect, BEFORE `onSnapshot` is called, so the SDK
+  // issues the listener request with the up-to-date claims.
+  // The async IIFE is the same shape the bookings listener
+  // uses; the `cancelled` flag protects against the
+  // unmount-mid-refresh race (a stale refresh resolving
+  // after cleanup must NOT re-attach the listener).
   useEffect(() => {
     if (!currentUser) {
       setReservations([]);
@@ -1529,85 +1549,110 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // date is harmless.
     const parseDateOrEpoch = (val: any): Date => parseDateOrNull(val) ?? new Date(0);
 
-    const unsubscribe = onSnapshot(
-      collection(db, "reservations"),
-      (snapshot) => {
-        const list: Reservation[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() as any;
-          return {
-            id: docSnap.id,
-            reservationRef: data.reservationRef || "",
-            leadGuestName: data.leadGuestName || "",
-            leadGuestEmail: data.leadGuestEmail || "",
-            leadGuestPhone: data.leadGuestPhone || "",
-            memberId: data.memberId ?? null,
-            checkIn: parseDateOrEpoch(data.checkIn),
-            checkOut: parseDateOrEpoch(data.checkOut),
-            numNights: Number(data.numNights) || 0,
-            originalSubtotal: Number(data.originalSubtotal) || 0,
-            discountScopeSnapshot: data.discountScopeSnapshot ?? null,
-            subtotal: Number(data.subtotal) || 0,
-            totalPrice: Number(data.totalPrice) || 0,
-            source: data.source || "online",
-            isCorporate: !!data.isCorporate,
-            corporateCode: data.corporateCode || "",
-            companyName: data.companyName || "",
-            voucherCode: data.voucherCode || "",
-            memberDiscountPct: Number(data.memberDiscountPct) || 0,
-            paymentStatus: data.paymentStatus || "awaiting-payment",
-            paymentMethod: data.paymentMethod || "",
-            paymentProofUrl: data.paymentProofUrl ?? null,
-            paymentProofPath: data.paymentProofPath ?? null,
-            termsAccepted: !!data.termsAccepted,
-            termsAcceptedAt: parseDateOrNull(data.termsAcceptedAt),
-            termsVersion: data.termsVersion || "",
-            privacyAccepted: !!data.privacyAccepted,
-            privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
-            privacyVersion: data.privacyVersion || "",
-            cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
-            roomCount: Number(data.roomCount) || 0,
-            activeRoomCount: Number(data.activeRoomCount) || 0,
-            cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
-            checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
-            checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
-            holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
-            requestFingerprint: data.requestFingerprint || "",
-            createdAt: parseDateOrEpoch(data.createdAt),
-            updatedAt: parseDateOrEpoch(data.updatedAt),
-            createdBy: data.createdBy || "guest",
-            cancellationLiability: data.cancellationLiability ?? null,
-            aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
-            // Per MRB-14 (2026-08-03, per decision #180
-            // — proposed): the `actualDateRange` field.
-            // Pre-MRB-14 reservations have no field
-            // (`undefined` falls through to the legacy
-            // per-child read in the UI + email).
-            // Post-MRB-14 reservations always carry
-            // the field. The admin surfaces + email
-            // switch to per-child dates when
-            // `isDivergent: true`.
-            actualDateRange: (() => {
-              const raw = (data as any).actualDateRange;
-              if (!raw || typeof raw !== "object") return null;
-              const earliestCheckIn = parseDateOrNull(raw.earliestCheckIn);
-              const latestCheckOut = parseDateOrNull(raw.latestCheckOut);
-              if (!earliestCheckIn || !latestCheckOut) return null;
-              return {
-                earliestCheckIn,
-                latestCheckOut,
-                isDivergent: Boolean(raw.isDivergent)
-              };
-            })()
-          } satisfies Reservation;
-        });
-        setReservations(list);
-      },
-      (error) => {
-        console.error("Error listening to reservations collection:", error);
-      }
-    );
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
 
-    return unsubscribe;
+    // Force-refresh the ID token so the listener's
+    // handshake carries the staff `role` custom claim.
+    // `getIdToken(true)` is idempotent — if the cached
+    // token is already fresh, the SDK returns it without
+    // a network round-trip; if it's stale, the SDK
+    // exchanges the refresh token for a fresh ID token
+    // with the up-to-date claims. The await is what
+    // makes the listener attach after the refresh.
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+
+      unsubscribe = onSnapshot(
+        collection(db, "reservations"),
+        (snapshot) => {
+          const list: Reservation[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as any;
+            return {
+              id: docSnap.id,
+              reservationRef: data.reservationRef || "",
+              leadGuestName: data.leadGuestName || "",
+              leadGuestEmail: data.leadGuestEmail || "",
+              leadGuestPhone: data.leadGuestPhone || "",
+              memberId: data.memberId ?? null,
+              checkIn: parseDateOrEpoch(data.checkIn),
+              checkOut: parseDateOrEpoch(data.checkOut),
+              numNights: Number(data.numNights) || 0,
+              originalSubtotal: Number(data.originalSubtotal) || 0,
+              discountScopeSnapshot: data.discountScopeSnapshot ?? null,
+              subtotal: Number(data.subtotal) || 0,
+              totalPrice: Number(data.totalPrice) || 0,
+              source: data.source || "online",
+              isCorporate: !!data.isCorporate,
+              corporateCode: data.corporateCode || "",
+              companyName: data.companyName || "",
+              voucherCode: data.voucherCode || "",
+              memberDiscountPct: Number(data.memberDiscountPct) || 0,
+              paymentStatus: data.paymentStatus || "awaiting-payment",
+              paymentMethod: data.paymentMethod || "",
+              paymentProofUrl: data.paymentProofUrl ?? null,
+              paymentProofPath: data.paymentProofPath ?? null,
+              termsAccepted: !!data.termsAccepted,
+              termsAcceptedAt: parseDateOrNull(data.termsAcceptedAt),
+              termsVersion: data.termsVersion || "",
+              privacyAccepted: !!data.privacyAccepted,
+              privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
+              privacyVersion: data.privacyVersion || "",
+              cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
+              roomCount: Number(data.roomCount) || 0,
+              activeRoomCount: Number(data.activeRoomCount) || 0,
+              cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
+              checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
+              checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
+              holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
+              requestFingerprint: data.requestFingerprint || "",
+              createdAt: parseDateOrEpoch(data.createdAt),
+              updatedAt: parseDateOrEpoch(data.updatedAt),
+              createdBy: data.createdBy || "guest",
+              cancellationLiability: data.cancellationLiability ?? null,
+              aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
+              // Per MRB-14 (2026-08-03, per decision #180
+              // — proposed): the `actualDateRange` field.
+              // Pre-MRB-14 reservations have no field
+              // (`undefined` falls through to the legacy
+              // per-child read in the UI + email).
+              // Post-MRB-14 reservations always carry
+              // the field. The admin surfaces + email
+              // switch to per-child dates when
+              // `isDivergent: true`.
+              actualDateRange: (() => {
+                const raw = (data as any).actualDateRange;
+                if (!raw || typeof raw !== "object") return null;
+                const earliestCheckIn = parseDateOrNull(raw.earliestCheckIn);
+                const latestCheckOut = parseDateOrNull(raw.latestCheckOut);
+                if (!earliestCheckIn || !latestCheckOut) return null;
+                return {
+                  earliestCheckIn,
+                  latestCheckOut,
+                  isDivergent: Boolean(raw.isDivergent)
+                };
+              })()
+            } satisfies Reservation;
+          });
+          setReservations(list);
+        },
+        (error) => {
+          console.error("Error listening to reservations collection:", error);
+        }
+      );
+    }).catch((refreshError) => {
+      // If the refresh itself fails (e.g. network down or
+      // refresh token revoked), surface it — the listener
+      // never attached, so the UI just stays on its last
+      // known state. A future refresh + sign-in will retry.
+      if (cancelled) return;
+      console.error("Error refreshing auth token before reservations listener:", refreshError);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [currentUser]);
 
   // Per MRB-12 (2026-08-03, per decision #179 — proposed):
@@ -4781,7 +4826,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           maxCapacity: Number(t.maxCapacity) || 1,
           pricePerNight: Number(t.pricePerNight) || 0,
           weekendRate: Number(t.weekendRate) || 0,
-          corporateRate: Number(t.corporateRate) || 0
+          corporateRate: Number(t.corporateRate) || 0,
+          // Per MRB-15-10 (2026-08-03, per decision #183):
+          // the previous hydration mapping dropped the
+          // three CHD-03 / EXB-01 fields below, which
+          // silently reset them to `?? 0` on every snapshot
+          // echo. The Edit form's `defaultValue={editType
+          // .maxChildren ?? 0}` then rendered 0 in the
+          // input even when Firestore held a non-zero
+          // value, the table's `{type.maxChildren ?? 0}`
+          // always showed 0 children, and a save that
+          // DIDN'T touch the field would overwrite the
+          // stored value with the form's 0. Preserve
+          // every field the type's contract guarantees.
+          maxChildren: Math.max(0, Math.floor(Number(t.maxChildren) || 0)),
+          maxExtraBeds: Math.max(0, Math.floor(Number(t.maxExtraBeds) || 0)),
+          extraBedRate: Math.max(0, Number(t.extraBedRate) || 0)
         }))
       );
       setRoomTypesLoaded(true);
@@ -4916,7 +4976,29 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Per `plan/features/SETTINGS.md §Room Types` — upload a single
   // photo for a room type, append its download URL to the type's
   // `imageUrls[]`, and persist. Enforces `MAX_ROOM_TYPE_PHOTOS`.
+  // Per MRB-15-11 (2026-08-04, per decision #188): the
+  // read-modify-write is wrapped in `runTransaction` so the
+  // multi-photo upload race is eliminated. The pre-MRB-15-11
+  // shape read from the in-memory `roomTypes` cache (a
+  // React-side copy of the Firestore snapshot) and wrote the
+  // full array via `updateRoomType` → `saveRoomTypes`; a
+  // `for (const file of accepted) { await uploadRoomTypePhoto(...) }`
+  // loop in the SettingsPage handler would read stale
+  // in-memory state between iterations because the
+  // subscription hadn't fired the previous write locally yet,
+  // so the (N+1)th call would overwrite the array with a
+  // single-element array `[url(N+1)]`. The transaction reads
+  // from Firestore (`tx.get(hotelConfigRef)`) so every call
+  // sees the latest committed state. The Storage upload
+  // stays OUTSIDE the transaction (Storage ops can't be in a
+  // Firestore tx); the cap check moves INSIDE the transaction
+  // so a parallel admin's append can't slip past the cap;
+  // the on-cap-reject cleanup deletes the just-uploaded
+  // Storage object so it doesn't become an orphan.
   const uploadRoomTypePhoto = async (typeValue: string, file: File): Promise<{ success: boolean; error?: string; url?: string }> => {
+    // Client-side UX hint: disable the upload button when
+    // the in-memory state already shows the cap reached.
+    // The transaction-side cap check is the source of truth.
     const type = roomTypes.find((t) => t.value === typeValue);
     if (!type) return { success: false, error: "Room type not found." };
     if (type.imageUrls.length >= MAX_ROOM_TYPE_PHOTOS) {
@@ -4930,8 +5012,58 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       const fileRef = storageRef(storage, path);
       await uploadBytes(fileRef, file);
       const url = await getDownloadURL(fileRef);
-      const next = [...type.imageUrls, url];
-      await updateRoomType(typeValue, { imageUrls: next });
+      const hotelConfigRef = doc(db, "settings", "hotelConfig");
+      // Set by the transaction body when the cap is exceeded
+      // (a parallel admin landed between the client-side
+      // check and the transaction commit). The transaction
+      // returns normally without writing when this fires, so
+      // no Firestore retries are spent on a terminal reject.
+      let capRejected = false;
+      try {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(hotelConfigRef);
+          const data = snap.data();
+          const currentRoomTypes = Array.isArray(data?.roomTypes) ? data.roomTypes : [];
+          const idx = currentRoomTypes.findIndex((t) => t.value === typeValue);
+          if (idx < 0) {
+            // The type was deleted between the client check
+            // and the transaction. Treat as a cap-reject
+            // path (cleanup + return false) — the user can
+            // refresh and re-pick.
+            throw new Error("Room type not found in settings document.");
+          }
+          const current = currentRoomTypes[idx];
+          const currentImageUrls = Array.isArray(current.imageUrls) ? current.imageUrls : [];
+          if (currentImageUrls.length >= MAX_ROOM_TYPE_PHOTOS) {
+            capRejected = true;
+            // Don't write — return normally so the
+            // transaction commits a no-op.
+            return;
+          }
+          const newRoomTypes = [...currentRoomTypes];
+          newRoomTypes[idx] = { ...current, imageUrls: [...currentImageUrls, url] };
+          tx.update(hotelConfigRef, {
+            roomTypes: newRoomTypes,
+            updatedAt: serverTimestamp()
+          });
+        });
+      } catch (txErr) {
+        // Non-cap-reject failure (type deleted, network,
+        // permission). Best-effort cleanup of the
+        // just-uploaded Storage object.
+        await deleteObject(fileRef).catch((cleanupErr) => {
+          console.warn(`Storage cleanup for failed upload ${path} skipped:`, cleanupErr);
+        });
+        throw txErr;
+      }
+      if (capRejected) {
+        await deleteObject(fileRef).catch((cleanupErr) => {
+          console.warn(`Storage cleanup for capped upload ${path} skipped:`, cleanupErr);
+        });
+        const error = `Maximum ${MAX_ROOM_TYPE_PHOTOS} photos per room type.`;
+        notify.warning("Photo limit reached", error);
+        return { success: false, error };
+      }
       return { success: true, url };
     } catch (error) {
       console.error("Error uploading room type photo:", error);
@@ -4945,12 +5077,38 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // best-effort delete the underlying Storage object. The list
   // update always runs even if the Storage delete fails (the file
   // becomes orphaned but the type stays consistent).
+  // Per MRB-15-11: same `runTransaction` wrap as upload — the
+  // pre-MRB-15-11 read-modify-write on the in-memory
+  // `roomTypes` cache had the same race as the upload path
+  // (the SettingsPage handler at `SettingsPage.tsx:5660`
+  // triggers this on the per-photo delete click; a
+  // concurrent reorder or upload could clobber the in-memory
+  // read).
   const removeRoomTypePhoto = async (typeValue: string, url: string): Promise<{ success: boolean; error?: string }> => {
-    const type = roomTypes.find((t) => t.value === typeValue);
-    if (!type) return { success: false, error: "Room type not found." };
     try {
-      const next = type.imageUrls.filter((u) => u !== url);
-      await updateRoomType(typeValue, { imageUrls: next });
+      const hotelConfigRef = doc(db, "settings", "hotelConfig");
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(hotelConfigRef);
+        const data = snap.data();
+        const currentRoomTypes = Array.isArray(data?.roomTypes) ? data.roomTypes : [];
+        const idx = currentRoomTypes.findIndex((t) => t.value === typeValue);
+        if (idx < 0) {
+          throw new Error("Room type not found in settings document.");
+        }
+        const current = currentRoomTypes[idx];
+        const currentImageUrls: string[] = Array.isArray(current.imageUrls) ? current.imageUrls : [];
+        const newImageUrls = currentImageUrls.filter((u: string) => u !== url);
+        const newRoomTypes = [...currentRoomTypes];
+        newRoomTypes[idx] = { ...current, imageUrls: newImageUrls };
+        tx.update(hotelConfigRef, {
+          roomTypes: newRoomTypes,
+          updatedAt: serverTimestamp()
+        });
+      });
+      // Best-effort Storage cleanup after the Firestore write
+      // commits. The list update always runs even if the
+      // Storage delete fails (the file becomes orphaned but
+      // the type stays consistent).
       try {
         const fileRef = storageRef(storage, url);
         await deleteObject(fileRef);
@@ -4967,11 +5125,31 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   };
 
   // Persist a new ordering of `imageUrls[]` for a room type.
+  // Per MRB-15-11: same `runTransaction` wrap as upload +
+  // remove — the pre-MRB-15-11 read-modify-write on the
+  // in-memory `roomTypes` cache had the same race (drag-to-
+  // reorder is a single-user action, lower race surface, but
+  // using the same pattern keeps the contract consistent and
+  // gets the same atomicity guarantee).
   const reorderRoomTypePhotos = async (typeValue: string, imageUrls: string[]): Promise<{ success: boolean; error?: string }> => {
-    const type = roomTypes.find((t) => t.value === typeValue);
-    if (!type) return { success: false, error: "Room type not found." };
     try {
-      await updateRoomType(typeValue, { imageUrls });
+      const hotelConfigRef = doc(db, "settings", "hotelConfig");
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(hotelConfigRef);
+        const data = snap.data();
+        const currentRoomTypes = Array.isArray(data?.roomTypes) ? data.roomTypes : [];
+        const idx = currentRoomTypes.findIndex((t) => t.value === typeValue);
+        if (idx < 0) {
+          throw new Error("Room type not found in settings document.");
+        }
+        const current = currentRoomTypes[idx];
+        const newRoomTypes = [...currentRoomTypes];
+        newRoomTypes[idx] = { ...current, imageUrls };
+        tx.update(hotelConfigRef, {
+          roomTypes: newRoomTypes,
+          updatedAt: serverTimestamp()
+        });
+      });
       return { success: true };
     } catch (error) {
       console.error("Error reordering room type photos:", error);

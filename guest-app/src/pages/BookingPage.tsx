@@ -42,6 +42,15 @@ import {
   calculateExtraBedAddOn,
   requiredExtraBedsFor
 } from "@spark-inn/shared";
+// Per CHD-11 (2026-08-04, per decision #184): the per-type
+// capacity-fit indicator derivation. The helper is the
+// single derivation point for both the Fits / Tight / Doesn't
+// fit chip on the room-type card AND (per CHD-12) the small
+// capacity chip on each line of the cart summary. Imported
+// in a separate block to keep the CHD-05 import-ordering guard
+// (which requires `calculateExtraBedAddOn` + `requiredExtraBedsFor`
+// to be adjacent in the same import) intact.
+import { deriveRoomTypeCapacityFit } from "@spark-inn/shared";
 // Per MRB-02 (2026-08-02, per decision #164): the
 // reservation-level idempotency key, imported separately to
 // keep the CHD-05 import-ordering guard (which requires
@@ -218,15 +227,16 @@ export function BookingPage() {
   const [breakfastIncludesChildren, setBreakfastIncludesChildren] = useState(
     breakfastConfig.breakfastIncludesChildrenDefault !== false
   );
-  // Per EXB-01 (2026-07-31): extra-bed count. Defaults to 0 (the
-  // "no extra bed" case). The selector only renders when the
-  // selected room type has `maxExtraBeds > 0` (the spec's "no
-  // separate `allowsExtraBed` boolean" rule). The server
-  // validates against `maxExtraBeds` and snapshots `extraBedRate`
-  // onto the booking doc.
-  const [extraBedCount, setExtraBedCount] = useState(
-    Math.max(0, Number(searchParams.get("extraBeds") ?? 0))
-  );
+  // Per EXB-11 (2026-08-04, per decision #186): extra beds
+  // are now a per-type user-set value, not a single global
+  // counter. The user toggles the count on each room-type
+  // card; the cart's per-room `extraBedCount` is the source
+  // of truth (mirrored to the URL via `serializeBookingRoomCart`).
+  // The single-state shape that this replaces was the old
+  // EXB-01 flow that auto-computed the bed count from the
+  // overflow rule and silently overrode the user choice.
+  // The downstream `selectedTypeExtraBeds` derivation below
+  // (and the `totalExtraBeds` sum) replace every read site.
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
   // the server auto-assigns a physical room of that type inside
@@ -436,12 +446,56 @@ export function BookingPage() {
     const quantity = cartQuantityByType.get(entry.type.value) || 0;
     return quantity <= entry.availableCount;
   });
+  // Per EXB-11 (2026-08-04, per decision #186): the total
+  // extra-bed count across the cart. Replaces the old single
+  // `extraBedCount` state — the user now toggles the count
+  // per type on the room-type card, and the cart is the
+  // source of truth. Used by the Step 2 / Step 3 aside for
+  // the price breakdown.
+  const totalExtraBeds = useMemo(
+    () => distributedRoomCart.reduce((sum, room) => sum + (room.extraBedCount || 0), 0),
+    [distributedRoomCart]
+  );
   const cartDistributionComplete =
     distributedRoomCart.length > 0
     && cartDistribution.unassignedAdults === 0
     && cartDistribution.unassignedChildren === 0
     && distributedRoomCart.every((room) => room.numAdults >= 1);
-  const cartIsReady = cartHasAvailability && cartDistributionComplete;
+  // Per CHD-11 (2026-08-04, per decision #184): the
+  // per-room cap is enforced at the submit gate, not the
+  // picker. Every room in the cart must fit its per-type cap
+  // (with the type's `maxExtraBeds` covering any overflow).
+  // The first failing room drives the error message + the
+  // "Adjust room" CTA — the CTA scrolls to and highlights
+  // the offending room-type card on the right-hand side.
+  const cartFitsGroup = distributedRoomCart.every((room) => {
+    const type = roomTypes.find((t) => t.value === room.roomType);
+    if (!type) return false;
+    const overflow = requiredExtraBedsFor({
+      numAdults: room.numAdults,
+      numChildren: room.numChildren,
+      maxCapacity: Number(type.maxCapacity) || 0,
+      maxChildren: Number(type.maxChildren) || 0
+    });
+    return overflow.requiredExtraBeds <= (Number(type.maxExtraBeds) || 0);
+  });
+  const firstFailingRoom = cartFitsGroup
+    ? null
+    : distributedRoomCart.find((room) => {
+      const type = roomTypes.find((t) => t.value === room.roomType);
+      if (!type) return true;
+      const overflow = requiredExtraBedsFor({
+        numAdults: room.numAdults,
+        numChildren: room.numChildren,
+        maxCapacity: Number(type.maxCapacity) || 0,
+        maxChildren: Number(type.maxChildren) || 0
+      });
+      return overflow.requiredExtraBeds > (Number(type.maxExtraBeds) || 0);
+    });
+  const firstFailingType = firstFailingRoom
+    ? roomTypes.find((t) => t.value === firstFailingRoom.roomType)
+    : null;
+  const cartIsReady = cartHasAvailability && cartDistributionComplete && cartFitsGroup;
   const selectedTypeIsAvailable = Boolean(
     selectedTypeEntry
     && availableRoomTypes.some((entry) => entry.type.value === selectedTypeEntry.value)
@@ -459,19 +513,54 @@ export function BookingPage() {
     maxCapacity: selectedMaxCapacity,
     maxChildren: selectedMaxChildren
   });
+  // Per EXB-11 (2026-08-04, per decision #186): the
+  // per-type extra-bed count for the currently-selected
+  // type, summed across the cart. Used by the aside +
+  // `missingExtraBeds` helper. The user-set per-type value
+  // lives on each cart room; we sum it for the selected
+  // type. (The `missingExtraBeds` value itself is a
+  // defensive read; no current call site depends on it —
+  // the EXB-11 spec surfaces the constraint through the
+  // soft-floor warning on the room-type card and the
+  // CHD-11 submit-gate, not through this variable.)
+  const selectedTypeExtraBeds = useMemo(() => {
+    if (!selectedTypeEntry) return 0;
+    return distributedRoomCart
+      .filter((room) => room.roomType === selectedTypeEntry.value)
+      .reduce((sum, room) => sum + (room.extraBedCount || 0), 0);
+  }, [distributedRoomCart, selectedTypeEntry]);
   const missingExtraBeds = Math.max(
-    selectedOccupancyOverflow.requiredExtraBeds - extraBedCount,
+    selectedOccupancyOverflow.requiredExtraBeds - selectedTypeExtraBeds,
     0
   );
   // The selected type may use its rollaway-bed allowance for adult
-  // or child overflow. Find the highest child split supported for the
-  // current total rather than silently stopping at `maxChildren`.
+  // or child overflow. Find the highest child split supported for
+  // the current total rather than silently stopping at `maxChildren`.
+  //
+  // Per CHD-11.1 (2026-08-04, per decision #192): the
+  // `updateChildren` function auto-bumps `guests` when the user
+  // clicks `+` on children beyond the current total. The
+  // derivation here mirrors that auto-bump — for each candidate
+  // child count `N`, the effective `guests` is `max(originalGuests,
+  // N + 1)` (auto-bump if needed), so `numAdults = effectiveGuests
+  // - N` is always `>= 1`. The loop bound is `10` (the soft cap
+  // from CHD-11), not `Math.max(0, guests - 1)` — the pre-CHD-11.1
+  // bound prevented the user from exploring children counts the
+  // room actually supports (with auto-bump).
   const selectedMaxSelectableChildren = useMemo(() => {
     if (!selectedTypeEntry) return Math.max(0, guests - 1);
     let highest = 0;
-    for (let children = 0; children <= Math.max(0, guests - 1); children += 1) {
+    for (let children = 0; children <= 10; children += 1) {
+      // Per CHD-11.1: with auto-bump, the booking's
+      // "at least 1 adult" invariant is maintained by
+      // bumping `guests` to `max(originalGuests, N + 1)`.
+      // The room supports `N` children if the overflow
+      // (with the auto-bumped `numAdults`) fits in
+      // `maxExtraBeds`.
+      const effectiveGuests = Math.max(guests, children + 1);
+      const numAdults = effectiveGuests - children;
       const overflow = requiredExtraBedsFor({
-        numAdults: guests - children,
+        numAdults,
         numChildren: children,
         maxCapacity: Number(selectedTypeEntry.maxCapacity) || 0,
         maxChildren: Number(selectedTypeEntry.maxChildren) || 0
@@ -605,7 +694,6 @@ export function BookingPage() {
     checkOut,
     guests: String(guests),
     children: String(numChildren),
-    extraBeds: String(extraBedCount),
     roomType: selectedTypeEntry?.value ?? "",
     breakfast: hasBreakfast ? "yes" : "no"
   });
@@ -643,6 +731,52 @@ export function BookingPage() {
   const nightlyTotal = selectedRoomRates
     ? selectedRoomRates.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0)
     : 0;
+
+  // Per EXB-11.2 (2026-08-04, per decision #190):
+  // auto-sync the cart's per-type `extraBedCount` to the
+  // soft floor whenever the soft floor exceeds the cart's
+  // current value. The pre-EXB-11.2 surface had a real UX
+  // bug — for a Single Room (maxCapacity 1, maxExtraBeds 1)
+  // with 2 guests, the checkbox rendered as `unchecked +
+  // disabled` (the user couldn't click to enable, the cart
+  // was silently at 0, the submit gate caught it later with
+  // a confusing error). The auto-init enforces the FLOOR
+  // (the minimum required for the group to fit), not the
+  // cap. The user can still decrement back to 0 if the soft
+  // floor drops (e.g. they reduce the guest count from 2 to
+  // 1) and the useEffect re-fires to re-init only if the soft
+  // floor is still > 0. The dependency array includes
+  // `roomCart` so the effect re-fires when the cart changes
+  // (e.g. the user adds/removes a room). The effect loops
+  // over the cart's distinct types so multi-type carts are
+  // handled correctly. After the first fire, the cart has
+  // the soft-floor value and the next run is a no-op
+  // (no infinite loop). The `updateExtraBedCount` helper
+  // at `BookingPage.tsx:957` is unchanged — its
+  // `safeCount = Math.min(Math.max(nextCount, 0), maxCount)`
+  // clamp already handles the over-cap case (soft floor
+  // clamped to cap).
+  useEffect(() => {
+    for (const room of roomCart) {
+      const type = roomTypes.find((t) => t.value === room.roomType);
+      if (!type) continue;
+      const typeMaxExtraBeds = Number(type.maxExtraBeds) || 0;
+      if (typeMaxExtraBeds === 0) continue;
+      const typeRooms = roomCart.filter((r) => r.roomType === room.roomType);
+      if (typeRooms.length === 0) continue;
+      const currentExtraBeds = typeRooms[0]?.extraBedCount ?? 0;
+      const perTypeOverflow = requiredExtraBedsFor({
+        numAdults,
+        numChildren,
+        maxCapacity: Number(type.maxCapacity) || 0,
+        maxChildren: Number(type.maxChildren) || 0
+      });
+      const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
+      if (softFloor > currentExtraBeds) {
+        updateExtraBedCount(room.roomType, softFloor, typeMaxExtraBeds);
+      }
+    }
+  }, [numAdults, numChildren, roomCart, roomTypes]);
 
   // Real-time Firestore Listeners and Config Fetches
   useEffect(() => {
@@ -718,29 +852,35 @@ export function BookingPage() {
     };
   }, [checkIn, checkOut]);
 
+  // Per EXB-11.3 (2026-08-04, per decision #191): no
+  // default room-type selection on page load. The
+  // pre-EXB-11.3 useEffect had an `if (roomCart.length
+  // === 0 && availableRoomTypes[0])` branch that
+  // auto-picked the first available room type and
+  // silently added it to the cart. The operator now
+  // thinks this is the wrong default — the system
+  // committed the user to a room type before any
+  // input. The new pattern: page load = empty cart,
+  // empty selection. The user fills both.
+  //
+  // The sync branch below fires when the cart has rooms
+  // but the selection doesn't match (e.g., after a
+  // URL-driven pre-fill via `?roomType=` or `?rooms=`,
+  // or after the user adds a second room type). The
+  // URL-driven pre-fill at `BookingPage.tsx:244` (for
+  // `selectedRoomType`) and the cart parser (for
+  // `roomCart`) handle the deep-link case — a
+  // `/book?roomType=single-room` URL still pre-fills
+  // the selection; a `/book?rooms=single-room:1:2:0:0`
+  // URL still pre-fills the cart + selection via the
+  // sync branch.
   useEffect(() => {
-    if (roomCart.length === 0 && availableRoomTypes[0]) {
-      const defaultType = availableRoomTypes[0].type.value;
-      setSelectedRoomType(defaultType);
-      setRoomCart([{
-        bookingId,
-        roomType: defaultType,
-        rateChoice,
-        numAdults,
-        numChildren,
-        extraBedCount: 0
-      }]);
-      return;
-    }
-
     if (!roomCart.some((room) => room.roomType === selectedRoomType) && roomCart[0]) {
       setSelectedRoomType(roomCart[0].roomType);
       setRateChoice(roomCart[0].rateChoice);
     }
   }, [
-    availableRoomTypes,
     bookingId,
-    extraBedCount,
     numAdults,
     numChildren,
     rateChoice,
@@ -757,9 +897,23 @@ export function BookingPage() {
     setSearchParams(next, { replace: true });
   }
 
-  function updateGuests(nextGuests: number) {
+  // Per CHD-11.1 (2026-08-04, per decision #192): the
+  // `updateGuests` and `updateChildren` functions share a
+  // `setOccupancy` helper that handles the clamping + URL
+  // write. The previous shape had two duplicate URL-write
+  // blocks; the new shape is a single source of truth for
+  // the occupancy mutation. The helper preserves the
+  // "at least 1 adult in the booking" invariant by clamping
+  // children to `safeGuests - 1` when guests drops below the
+  // current children count (so `updateGuests(1)` with 2
+  // children becomes 1 guest + 0 children).
+  function setOccupancy(nextGuests: number, nextChildren: number) {
     const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
-    const safeChildren = Math.min(numChildren, Math.max(0, safeGuests - 1));
+    const safeChildren = Math.min(
+      Math.max(nextChildren, 0),
+      selectedMaxSelectableChildren,
+      Math.max(0, safeGuests - 1)
+    );
     setGuests(safeGuests);
     setNumChildren(safeChildren);
     setGuestDetails((current) => ({
@@ -775,28 +929,29 @@ export function BookingPage() {
     setSearchParams(next, { replace: true });
   }
 
-  function updateChildren(nextChildren: number) {
-    const safeChildren = Math.min(
-      Math.max(nextChildren, 0),
-      selectedMaxSelectableChildren,
-      Math.max(0, guests - 1)
-    );
-    setNumChildren(safeChildren);
-    const next = new URLSearchParams(searchParams);
-    next.set("children", String(safeChildren));
-    next.set("guests", String(guests));
-    setSearchParams(next, { replace: true });
+  function updateGuests(nextGuests: number) {
+    // No change in children when guests change
+    // (children may be clamped to `safeGuests - 1`
+    // by `setOccupancy` if guests drops below the
+    // current children count).
+    setOccupancy(nextGuests, numChildren);
   }
 
-  function updateExtraBeds(nextCount: number) {
-    const safeCount = Math.min(
-      Math.max(nextCount, 0),
-      selectedMaxExtraBeds
+  function updateChildren(nextChildren: number) {
+    // Per CHD-11.1: auto-bump `guests` to maintain
+    // the "at least 1 adult" invariant. The pre-CHD-11.1
+    // shape hard-capped children at `guests - 1` here,
+    // which prevented the user from picking more
+    // children than the booking's total allowed. With
+    // auto-bump, the user can go above `guests - 1` if
+    // the room supports it; the `guests` is bumped
+    // along with the children so `numAdults >= 1`.
+    const desiredChildren = Math.min(
+      Math.max(nextChildren, 0),
+      selectedMaxSelectableChildren
     );
-    setExtraBedCount(safeCount);
-    const next = new URLSearchParams(searchParams);
-    next.set("extraBeds", String(safeCount));
-    setSearchParams(next, { replace: true });
+    const newGuests = Math.max(guests, desiredChildren + 1);
+    setOccupancy(newGuests, desiredChildren);
   }
 
   function validateUploadFile(file: File) {
@@ -877,6 +1032,37 @@ export function BookingPage() {
       const nextParams = new URLSearchParams(searchParams);
       nextParams.set("rooms", serializeBookingRoomCart(next));
       nextParams.set("roomType", typeValue);
+      setSearchParams(nextParams, { replace: true });
+      return next;
+    });
+  }
+
+  // Per EXB-11 (2026-08-04, per decision #186): the per-type
+  // extra-bed counter. Mirrors the user's pick onto every
+  // room of that type in the cart. The cap is the type's
+  // `maxExtraBeds`; the soft floor is `max(0, requiredExtraBeds)`
+  // (the per-room overflow required to fit the group) — the
+  // caller is responsible for disabling the `[−]` button at
+  // the soft floor (the soft floor is exposed via
+  // `requiredExtraBedsFor` on the caller side). The function
+  // only enforces the type cap here, not the soft floor, so
+  // the caller can keep a "tried to go below the soft floor"
+  // affordance without this function silently ignoring the
+  // user's intent. URL state rides on the cart (via
+  // `serializeBookingRoomCart`), so the per-room count is
+  // already in `rooms=` — no separate `extraBeds=` URL param
+  // is needed.
+  function updateExtraBedCount(typeValue: string, nextCount: number, maxCount: number) {
+    const safeCount = Math.min(Math.max(Math.floor(nextCount), 0), Math.max(0, Math.floor(maxCount)));
+    setRoomCart((current) => {
+      if (!current.some((room) => room.roomType === typeValue)) return current;
+      const next = current.map((room) =>
+        room.roomType === typeValue
+          ? { ...room, extraBedCount: safeCount }
+          : room
+      );
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("rooms", serializeBookingRoomCart(next));
       setSearchParams(nextParams, { replace: true });
       return next;
     });
@@ -1399,9 +1585,13 @@ export function BookingPage() {
             numChildren={numChildren}
             breakfastIncludesChildren={breakfastIncludesChildren}
             setBreakfastIncludesChildren={setBreakfastIncludesChildren}
-            // Per EXB-01 (2026-07-31): extra-bed count + rate
-            // thread through to the aside.
-            extraBedCount={extraBedCount}
+            // Per EXB-11 (2026-08-04, per decision #186): the
+            // per-cart total extra-bed count (sum of each
+            // room's `extraBedCount`). Replaces the old single
+            // `extraBedCount` state — the user now toggles the
+            // count per type on the room-type card, and the
+            // cart is the source of truth.
+            extraBedCount={totalExtraBeds}
             extraBedRate={extraBedRate}
             typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
             roomSummary={distributedRoomCart.map((room, index) => ({
@@ -1889,9 +2079,13 @@ export function BookingPage() {
             numChildren={numChildren}
             breakfastIncludesChildren={breakfastIncludesChildren}
             setBreakfastIncludesChildren={setBreakfastIncludesChildren}
-            // Per EXB-01 (2026-07-31): extra-bed count + rate
-            // thread through to the aside.
-            extraBedCount={extraBedCount}
+            // Per EXB-11 (2026-08-04, per decision #186): the
+            // per-cart total extra-bed count (sum of each
+            // room's `extraBedCount`). Replaces the old single
+            // `extraBedCount` state — the user now toggles the
+            // count per type on the room-type card, and the
+            // cart is the source of truth.
+            extraBedCount={totalExtraBeds}
             extraBedRate={extraBedRate}
             typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
             roomSummary={distributedRoomCart.map((room, index) => ({
@@ -2024,12 +2218,19 @@ export function BookingPage() {
                 </div>
               </label>
 
-              {/* Per CHD-10 (2026-07-31, per CVQ-01): the
-                  children/0-11 split. The room rate is free for
-                  children (per the CHD-01 decision #1), but the
-                  breakfast toggle below can add them back in.
-                  `numAdults` is derived as `guests - numChildren`
-                  (validated to stay ≥ 1). */}
+              {/* Per CHD-11 (2026-08-04, per decision #184): the
+                  children picker is no longer bounded by the
+                  per-type `maxChildren` cap. The hard cap was a
+                  dead-end at the exploration stage — the guest
+                  is still choosing room type and/or quantity,
+                  and the cap belongs at the commit surface
+                  (the Step 1 → Step 2 submit gate + the
+                  room-type card's Fits/Tight/Doesn't fit
+                  indicator), not at the picker. Soft cap is
+                  `MIN(10, guests - 1)` — a sanity guard, not a
+                  domain constraint. The `guests - 1` floor
+                  preserves the existing "at least one adult"
+                  invariant. */}
               <label className="grid gap-2 text-sm font-medium text-gray-700">
                 Children (0–11)
                 <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
@@ -2052,21 +2253,28 @@ export function BookingPage() {
                     aria-label="Increase children count"
                     aria-describedby="children-cap-help"
                     onClick={() => updateChildren(numChildren + 1)}
-                    disabled={
-                      numChildren >= selectedMaxSelectableChildren
-                      || numChildren >= Math.max(0, guests - 1)
-                    }
+                    // Per CHD-11.2 (2026-08-05, per decision
+                    // #193): the cap is the soft 10 (the
+                    // CHD-11 sanity guard, not a domain
+                    // constraint). The pre-CHD-11.2 shape
+                    // capped at the room's
+                    // `selectedMaxSelectableChildren` (per
+                    // CHD-11.1), which made the picker an
+                    // enforcement layer instead of an
+                    // exploration layer. The "Fits your
+                    // group" chip + the submit gate are the
+                    // commit surfaces — the picker is the
+                    // exploration surface. The user can pick
+                    // any number up to 10; the chip + submit
+                    // gate tell them if it works.
+                    disabled={numChildren >= 10}
                   >
                     <Plus size={16} />
                   </button>
                 </div>
                 <span
                   id="children-cap-help"
-                  className={`text-xs font-normal leading-relaxed ${
-                    numChildren >= selectedMaxSelectableChildren
-                      ? "text-amber-700"
-                      : "text-gray-500"
-                  }`}
+                  className="text-xs font-normal leading-relaxed text-gray-500"
                   aria-live="polite"
                 >
                   {selectedTypeEntry ? (
@@ -2076,8 +2284,13 @@ export function BookingPage() {
                       {selectedMaxSelectableChildren > selectedMaxChildren
                         ? ` Up to ${selectedMaxSelectableChildren} can fit when extra beds cover the overflow.`
                         : ""}
-                      {numChildren >= selectedMaxSelectableChildren
-                        ? " You have reached this room type’s limit for the current group."
+                      {/* Per CHD-11: replace the dead-end
+                          "you have reached this room type's
+                          limit" tail with a forward-looking
+                          nudge. The cap belongs at the submit
+                          gate + the room-type card, not here. */}
+                      {numChildren >= Math.min(10, Math.max(0, guests - 1))
+                        ? " Pick a room type that fits your group, or add a second room."
                         : ""}
                     </>
                   ) : (
@@ -2086,29 +2299,72 @@ export function BookingPage() {
                 </span>
               </label>
 
+              {/* Per CHD-12 (2026-08-04, per decision #185):
+                  cart-style summary that lists one line per
+                  distinct room type, with the per-type
+                  occupancy inline. Replaces the legacy
+                  per-room "Guest distribution" list whose
+                  "Room 1 / Room 2 / Room N" naming was
+                  positional and meaningless, and whose
+                  per-room occupancy was an auto-rebalance
+                  result (the user didn't choose it). The
+                  cart summary is the read surface; the
+                  room-type card is the action surface — the
+                  per-type Fits / Tight / Doesn't fit chip
+                  (per CHD-11) is wired below on each card. */}
               <div className="rounded-card border border-gray-200 bg-gray-50 p-4">
-                <p className="text-sm font-semibold text-gray-950">Guest distribution</p>
+                <p className="text-sm font-semibold text-gray-950">Your cart</p>
                 {distributedRoomCart.length > 0 ? (
                   <div className="mt-3 space-y-2">
-                    {distributedRoomCart.map((room, index) => {
-                      const type = roomTypes.find((entry) => entry.value === room.roomType);
-                      return (
-                        <div key={room.bookingId} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
-                          <span>
-                            <span className="block font-semibold text-gray-900">
-                              Room {index + 1} · {type?.label || room.roomType}
+                    {(() => {
+                      // Group distributedRoomCart by roomType.
+                      // Per-type: quantity + sum(numAdults) +
+                      // sum(numChildren) + sum(extraBedCount).
+                      // Re-derives the per-type capacity
+                      // indicator from the same helper the
+                      // room-type card uses (per CHD-11 +
+                      // CHD-12 composition).
+                      const byType = new Map<string, { quantity: number; adults: number; children: number; extraBeds: number; label: string }>();
+                      for (const room of distributedRoomCart) {
+                        const entry = byType.get(room.roomType) || { quantity: 0, adults: 0, children: 0, extraBeds: 0, label: "" };
+                        const type = roomTypes.find((t) => t.value === room.roomType);
+                        entry.quantity += 1;
+                        entry.adults += room.numAdults;
+                        entry.children += room.numChildren;
+                        entry.extraBeds += room.extraBedCount || 0;
+                        if (!entry.label && type) entry.label = type.label;
+                        byType.set(room.roomType, entry);
+                      }
+                      return Array.from(byType.entries()).map(([roomType, agg]) => {
+                        const fit = deriveRoomTypeCapacityFit({
+                          type: roomTypes.find((t) => t.value === roomType) || { maxCapacity: 0, maxChildren: 0, maxExtraBeds: 0 },
+                          numAdults: agg.adults,
+                          numChildren: agg.children,
+                          currentCartCount: agg.quantity
+                        });
+                        const fitChip =
+                          fit.state === "fits"
+                            ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Fits</span>
+                            : fit.state === "tight"
+                              ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Tight</span>
+                              : <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">Doesn't fit</span>;
+                        return (
+                          <div key={roomType} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
+                            <span className="flex-1">
+                              <span className="block font-semibold text-gray-900">
+                                {agg.quantity}× {agg.label || roomType} {fitChip}
+                              </span>
+                              {agg.adults} adult{agg.adults === 1 ? "" : "s"}{agg.children > 0 ? ` · ${agg.children} child${agg.children === 1 ? "" : "ren"}` : ""}
                             </span>
-                            {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
-                            {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
-                          </span>
-                          {room.extraBedCount > 0 ? (
-                            <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
-                              {room.extraBedCount} extra bed{room.extraBedCount === 1 ? "" : "s"}
-                            </span>
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                            {agg.extraBeds > 0 ? (
+                              <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
+                                {agg.extraBeds} extra bed{agg.extraBeds === 1 ? "" : "s"}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 ) : (
                   <p className="mt-2 text-xs text-gray-500">Add at least one room to begin.</p>
@@ -2260,6 +2516,48 @@ export function BookingPage() {
                           </span>
                         </div>
 
+                        {/* Per CHD-11 (2026-08-04, per decision #184):
+                            the per-type Fits / Tight / Doesn't fit
+                            capacity indicator. Drives off
+                            `deriveRoomTypeCapacityFit` against
+                            the current group size + the current
+                            cart count of this type. The card stays
+                            clickable in all three states — the
+                            indicator is a derived view, not a
+                            gating control. The same derivation
+                            powers the cart-line chip in the CHD-12
+                            cart summary above (single helper,
+                            two surfaces). The "You'd need N of
+                            [type]" callout fires when the cart is
+                            short (roomsNeeded > currentCartCount),
+                            the natural nudge for the user to add a
+                            room of this type. */}
+                        {(() => {
+                          const fit = deriveRoomTypeCapacityFit({
+                            type,
+                            numAdults,
+                            numChildren,
+                            currentCartCount: typeQuantity
+                          });
+                          const chip =
+                            fit.state === "fits"
+                              ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700" data-testid={`room-type-fit-${type.value}`}>Fits your group</span>
+                              : fit.state === "tight"
+                                ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700" data-testid={`room-type-fit-${type.value}`}>Tight — at the cap</span>
+                                : <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700" data-testid={`room-type-fit-${type.value}`}>Doesn't fit your group</span>;
+                          const needMore = fit.roomsNeeded > typeQuantity;
+                          return (
+                            <div className="mt-3 flex flex-wrap items-center gap-2" aria-live="polite">
+                              {chip}
+                              {needMore ? (
+                                <span className="text-xs font-medium text-amber-700" data-testid={`room-type-rooms-needed-${type.value}`}>
+                                  You&apos;d need {fit.roomsNeeded} of {type.label} for your group.
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+
                         <div className="mt-6 grid gap-3">
                           <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
                             <span>
@@ -2347,6 +2645,275 @@ export function BookingPage() {
                             )}
                           </div>
                         ) : null}
+
+                        {/* Per EXB-11 (2026-08-04, per decision
+                            #186) + EXB-11.1 (2026-08-04, per decision
+                            #189) + EXB-11.2 (2026-08-04, per decision
+                            #190): the per-type "Extras" sub-section.
+                            Per EXB-11.1: moved to the BOTTOM of the
+                            card (after the rate options + mixed-rates
+                            panel) and rendered as a binary checkbox
+                            when `maxExtraBeds === 1` (the counter is
+                            the wrong shape for a yes/no decision; the
+                            user can only set 0 or 1, but the counter
+                            presents 3 affordances). For
+                            `maxExtraBeds >= 2`, the EXB-11 counter
+                            shape stays. The data model is unchanged:
+                            `room.extraBedCount: number` (0 or 1 for
+                            the checkbox case; 0..maxExtraBeds for the
+                            counter case). `rebalanceGuestDistribution`
+                            clamping unchanged. `updateExtraBedCount`
+                            unchanged. Cart URL serialization
+                            unchanged. Hidden when `maxExtraBeds === 0`
+                            per the EXB-11 "no extra bed" edge case.
+
+                            Per EXB-11.2: the visual reads from
+                            `displayExtraBeds = Math.max(softFloor,
+                            userExtraBeds)` (the soft-floor floor,
+                            not the cart) so the checkbox is
+                            `checked + disabled` and the counter
+                            shows the soft floor (not 0) on first
+                            render. A component-level `useEffect`
+                            (above this IIFE) auto-syncs the cart
+                            to the soft floor whenever
+                            `softFloor > userExtraBeds`. This
+                            reverses the EXB-11.1 "no auto-init"
+                            stance — that stance was wrong because
+                            the EXB-11.1 spec's own 3-state model
+                            requires `checked + disabled` when
+                            `softFloor === 1`, but `checked` reads
+                            from the cart, and the cart was at 0.
+                            The auto-init enforces the FLOOR (the
+                            minimum required for the group to fit),
+                            not the cap. The user can decrement
+                            back to 0 if the soft floor drops
+                            (e.g. they reduce the guest count). */}
+                        {(() => {
+                          const typeMaxExtraBeds = Number(type.maxExtraBeds) || 0;
+                          if (typeMaxExtraBeds === 0) return null;
+                          // All rooms of this type share the
+                          // same per-type count (the toggle is
+                          // per-type, not per-room — see the
+                          // spec's "per-type vs per-room" edge
+                          // case). `updateExtraBedCount` mirrors
+                          // the user's pick onto every room.
+                          const userExtraBeds = selectedTypeRooms[0]?.extraBedCount ?? 0;
+                          const typeExtraBedRate = Number(type.extraBedRate) || 0;
+                          // The per-room overflow for this type
+                          // against the current group. The soft
+                          // floor is `requiredExtraBeds` (the
+                          // per-room count the group needs to
+                          // fit without over-cap). When the
+                          // type's `maxExtraBeds` is below this,
+                          // the type cannot satisfy the group
+                          // and the warning fires.
+                          const perTypeOverflow = requiredExtraBedsFor({
+                            numAdults,
+                            numChildren,
+                            maxCapacity: Number(type.maxCapacity) || 0,
+                            maxChildren: Number(type.maxChildren) || 0
+                          });
+                          const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
+                          const overCap = softFloor > typeMaxExtraBeds;
+                          // Per EXB-11.2 (2026-08-04, per decision
+                          // #190): the visual reads from
+                          // `displayExtraBeds` (the soft-floor
+                          // floor, not the cart). The auto-init
+                          // useEffect above syncs the cart to the
+                          // soft floor, but the visual needs to be
+                          // correct on the FIRST render too (before
+                          // the useEffect fires). `displayExtraBeds`
+                          // is `max(softFloor, userExtraBeds)` so:
+                          // - when the user has at least the soft
+                          //   floor, the visual matches the cart
+                          // - when the cart is below the soft
+                          //   floor, the visual still shows the
+                          //   soft floor (no "0 → 1" flash)
+                          const displayExtraBeds = Math.max(softFloor, userExtraBeds);
+                          // The rate is only meaningful when the
+                          // user has at least one room of this
+                          // type in the cart (the toggle has
+                          // nothing to multiply against when
+                          // `typeQuantity === 0`). The
+                          // disabled-when-zero-rows state on the
+                          // control keeps the UX honest. The stay
+                          // total uses `displayExtraBeds` so the
+                          // price is correct on first render
+                          // (matches the auto-init useEffect's
+                          // post-fire cart value).
+                          const stayTotal = displayExtraBeds * typeExtraBedRate * nights;
+                          // Per EXB-11.1: the checkbox is the
+                          // right shape when `maxExtraBeds === 1`
+                          // (a binary decision). For N >= 2, the
+                          // counter is the right shape (the user
+                          // might want exactly 1, not all-or-
+                          // nothing). The `data-testid` markers
+                          // differ between branches so the test
+                          // surface is unambiguous.
+                          if (typeMaxExtraBeds === 1) {
+                            return (
+                              <div
+                                className="mt-6 grid gap-2"
+                                aria-label={`${type.label} extras`}
+                                data-testid={`extras-stepper-${type.value}`}
+                              >
+                                <label
+                                  htmlFor={`extras-checkbox-${type.value}`}
+                                  className="flex min-h-14 cursor-pointer items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4"
+                                >
+                                  <span>
+                                    <span className="block text-sm font-semibold text-gray-950">Add an extra bed</span>
+                                    <span className="block text-xs text-gray-500">
+                                      {typeQuantity > 0
+                                        ? `${formatPrice(typeExtraBedRate)} / bed / night`
+                                        : "Add at least one room to set extra beds"}
+                                    </span>
+                                  </span>
+                                  <input
+                                    type="checkbox"
+                                    id={`extras-checkbox-${type.value}`}
+                                    data-testid={`extras-checkbox-${type.value}`}
+                                    // Per EXB-11.2: read from
+                                    // `displayExtraBeds` (the soft
+                                    // floor, not the cart) so the
+                                    // checkbox is `checked` when
+                                    // the system requires the
+                                    // extra bed, even on first
+                                    // render before the auto-init
+                                    // useEffect fires.
+                                    checked={displayExtraBeds === 1}
+                                    // Per EXB-11.2: the disabled
+                                    // rule is the EXB-11.1 "forced
+                                    // on" affordance — disabled
+                                    // when the soft floor requires
+                                    // the extra bed (>= 1). The
+                                    // old `(userExtraBeds === 0 &&
+                                    // softFloor >= 1)` rule
+                                    // blocked the user from
+                                    // clicking to enable a
+                                    // required extra bed; the
+                                    // auto-init useEffect now
+                                    // keeps the cart in sync with
+                                    // the soft floor, so the user
+                                    // never has to click to
+                                    // enable.
+                                    disabled={typeQuantity === 0 || softFloor >= 1}
+                                    onChange={(e) => updateExtraBedCount(type.value, e.target.checked ? 1 : 0, typeMaxExtraBeds)}
+                                    aria-describedby={softFloor >= 1 ? `extras-soft-floor-warning-${type.value}` : undefined}
+                                    className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
+                                  />
+                                </label>
+                                {/* Stay total + soft-floor
+                                    warning (shared with the
+                                    counter branch). The
+                                    `displayExtraBeds > 0` gate
+                                    mirrors the EXB-11.1 spec
+                                    (hide "₱0 for 2 nights" —
+                                    it's noise) but uses the
+                                    soft-floor floor so the price
+                                    renders on first render
+                                    before the auto-init
+                                    useEffect fires. */}
+                                {typeQuantity > 0 && displayExtraBeds > 0 ? (
+                                  <p
+                                    className="text-xs text-gray-600"
+                                    data-testid={`extras-stay-total-${type.value}`}
+                                  >
+                                    {formatPrice(stayTotal)} for {nights} {nights === 1 ? "night" : "nights"}
+                                  </p>
+                                ) : null}
+                                {typeQuantity > 0 && overCap ? (
+                                  <p
+                                    className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-700"
+                                    data-testid={`extras-soft-floor-warning-${type.value}`}
+                                    role="status"
+                                  >
+                                    {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
+                                  </p>
+                                ) : null}
+                              </div>
+                            );
+                          }
+                          // Counter branch (maxExtraBeds >= 2,
+                          // EXB-11 unchanged).
+                          return (
+                            <div
+                              className="mt-6 grid gap-2"
+                              aria-label={`${type.label} extras`}
+                              data-testid={`extras-stepper-${type.value}`}
+                            >
+                              <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
+                                <span>
+                                  <span className="block text-sm font-semibold text-gray-950">Extra beds</span>
+                                  <span className="block text-xs text-gray-500">
+                                    {typeQuantity > 0
+                                      ? `${formatPrice(typeExtraBedRate)} / bed / night`
+                                      : "Add at least one room to set extra beds"}
+                                  </span>
+                                </span>
+                                <span className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove one extra bed from ${type.label}`}
+                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                    // Per EXB-11.2: disabled at
+                                    // the soft floor
+                                    // (`displayExtraBeds <=
+                                    // softFloor`) and when there
+                                    // are no rooms of this type
+                                    // to mirror the count onto.
+                                    // Using `displayExtraBeds`
+                                    // (not `userExtraBeds`) means
+                                    // the button is disabled AT
+                                    // the soft floor (not below
+                                    // it) — the auto-init
+                                    // useEffect keeps the cart
+                                    // at the soft floor, and the
+                                    // `[−]` correctly blocks the
+                                    // user from going below it.
+                                    disabled={typeQuantity === 0 || displayExtraBeds <= softFloor}
+                                    onClick={() => updateExtraBedCount(type.value, displayExtraBeds - 1, typeMaxExtraBeds)}
+                                  >
+                                    <Minus size={16} />
+                                  </button>
+                                  <span
+                                    className="min-w-8 text-center text-lg font-semibold text-gray-950"
+                                    aria-live="polite"
+                                    data-testid={`extras-count-${type.value}`}
+                                  >
+                                    {displayExtraBeds}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    aria-label={`Add one extra bed to ${type.label}`}
+                                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                    disabled={typeQuantity === 0 || displayExtraBeds >= typeMaxExtraBeds}
+                                    onClick={() => updateExtraBedCount(type.value, displayExtraBeds + 1, typeMaxExtraBeds)}
+                                  >
+                                    <Plus size={16} />
+                                  </button>
+                                </span>
+                              </div>
+                              {typeQuantity > 0 && userExtraBeds > 0 ? (
+                                <p
+                                  className="text-xs text-gray-600"
+                                  data-testid={`extras-stay-total-${type.value}`}
+                                >
+                                  {formatPrice(stayTotal)} for {nights} {nights === 1 ? "night" : "nights"}
+                                </p>
+                              ) : null}
+                              {typeQuantity > 0 && overCap ? (
+                                <p
+                                  className="rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-700"
+                                  data-testid={`extras-soft-floor-warning-${type.value}`}
+                                  role="status"
+                                >
+                                  {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </motion.article>
@@ -2386,14 +2953,48 @@ export function BookingPage() {
 	              aria-describedby="step-one-occupancy-error"
 	              className="sm:min-w-56"
 	            >
-	              {distributedRoomCart.length > 0 ? "Assign every guest" : "Add at least one room"}
+	              {!cartFitsGroup
+	                ? "Adjust room"
+	                : distributedRoomCart.length > 0
+	                  ? "Assign every guest"
+	                  : "Add at least one room"}
 	            </PrimaryButton>
 	          )}
 	        </div>
 	        {!cartIsReady ? (
-	          <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
-	            Add enough available rooms to fit every guest, with at least one adult assigned to each room.
-	          </p>
+          // Per CHD-11 (2026-08-04, per decision #184):
+          // the error message references the type label
+          // (matching the CHD-12 cart-style summary) plus
+          // a three-action "Adjust room" CTA that scrolls
+          // to and highlights the offending room-type
+          // card. The legacy "Add enough available rooms..."
+          // text stays for the cart-distribution failure
+          // case.
+          firstFailingType && firstFailingRoom ? (
+            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700" role="alert">
+              {firstFailingType.label} maxes at {firstFailingType.maxChildren} child{firstFailingType.maxChildren === 1 ? "" : "ren"}.{" "}
+              <button
+                type="button"
+                className="underline hover:text-amber-900"
+                data-testid="adjust-room-cta"
+                onClick={() => {
+                  const el = document.querySelector(
+                    `[data-testid="room-type-fit-${firstFailingType.value}"]`
+                  );
+                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  el?.classList.add("ring-2", "ring-amber-400");
+                  setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400"), 2000);
+                }}
+              >
+                Adjust room
+              </button>
+              {" "}or pick a different room type, or remove a guest.
+            </p>
+          ) : (
+            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
+              Add enough available rooms to fit every guest, with at least one adult assigned to each room.
+            </p>
+          )
 	        ) : null}
 	      </div>
     </>
