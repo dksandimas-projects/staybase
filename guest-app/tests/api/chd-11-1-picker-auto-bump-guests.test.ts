@@ -6,23 +6,29 @@
 // booking's total allowed. With 2 guests, the user could only
 // pick 1 child — even when the room could hold 2.
 //
-// CHD-11.1 flow:
+// CHD-11.1 flow (later refined by CHD-11.3 — see notes inline):
 //   1. `setOccupancy(nextGuests, nextChildren)` is the
 //      extracted shared helper (handles clamping + URL
 //      write).
-//   2. `updateGuests` calls `setOccupancy(nextGuests,
-//      numChildren)` (no change in children behavior).
-//   3. `updateChildren` computes `desiredChildren` and
+//   2. `updateGuests` (post-CHD-11.3): symmetric auto-bump
+//      `newGuests = max(nextGuests, numChildren + 1)` then
+//      `setOccupancy(newGuests, numChildren)`. Pre-CHD-11.3
+//      just called `setOccupancy(nextGuests, numChildren)`.
+//   3. `updateChildren` (post-CHD-11.3): `desiredChildren =
+//      max(nextChildren, 0)` (per-type cap removed), then
 //      `newGuests = max(guests, desiredChildren + 1)` (the
-//      auto-bump), then calls `setOccupancy(newGuests,
-//      desiredChildren)`.
+//      auto-bump), then `setOccupancy(newGuests,
+//      desiredChildren)`. Pre-CHD-11.3 clamped
+//      `desiredChildren` with `selectedMaxSelectableChildren`.
 //   4. `selectedMaxSelectableChildren` derivation loops
 //      `N` from 0 to 10 (the soft cap), using
 //      `effectiveGuests = max(guests, N + 1)` to model the
 //      auto-bump scenario.
 //   5. The children stepper's `+` button disabled
-//      condition is `numChildren >= Math.min(10,
-//      selectedMaxSelectableChildren)`.
+//      condition is `numChildren >= 10` (CHD-11.2's
+//      refinement; CHD-11.1 had
+//      `numChildren >= Math.min(10,
+//      selectedMaxSelectableChildren)`).
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -43,22 +49,39 @@ describe("CHD-11.1 — picker auto-bumps guests to fit more children", () => {
     );
   });
 
-  it("`updateGuests` calls `setOccupancy(nextGuests, numChildren)` (no change in children behavior)", () => {
-    // The children count is passed through (may
-    // be clamped by `setOccupancy` if guests drops
-    // below the current children count).
+  it("`updateGuests` has the CHD-11.3 symmetric auto-bump (`newGuests = max(nextGuests, numChildren + 1)`)", () => {
+    // Pre-CHD-11.3: `updateGuests` called
+    // `setOccupancy(nextGuests, numChildren)`
+    // directly, which would clamp `children` down
+    // via the `Math.max(0, safeGuests - 1)`
+    // defense-in-depth clamp — the user saw
+    // "children becomes 0".
+    //
+    // Post-CHD-11.3 (per decision #194):
+    // `updateGuests` computes
+    // `newGuests = Math.max(nextGuests,
+    //  numChildren + 1)` and calls
+    // `setOccupancy(newGuests, numChildren)`. The
+    // symmetric auto-bump mirrors
+    // `updateChildren`'s.
     expect(bookingPageSrc).toMatch(
-      /function updateGuests\(nextGuests: number\) \{[\s\S]{0,200}setOccupancy\(nextGuests, numChildren\)/
+      /function updateGuests\(nextGuests: number\) \{[\s\S]{0,800}const newGuests = Math\.max\(nextGuests, numChildren \+ 1\)/
+    );
+    expect(bookingPageSrc).toMatch(
+      /setOccupancy\(newGuests, numChildren\)/
     );
   });
 
-  it("`updateChildren` computes `desiredChildren` and `newGuests = max(guests, desiredChildren + 1)` (the auto-bump)", () => {
+  it("`updateChildren` computes `desiredChildren = Math.max(nextChildren, 0)` and `newGuests = max(guests, desiredChildren + 1)` (the auto-bump, per-type cap removed in CHD-11.3)", () => {
     // The pre-CHD-11.1 shape hard-capped
     // children at `guests - 1`. The new shape
     // auto-bumps `guests` to maintain the
-    // invariant.
+    // invariant. The pre-CHD-11.3 shape clamped
+    // `desiredChildren` to
+    // `selectedMaxSelectableChildren`; CHD-11.3
+    // removed that cap.
     expect(bookingPageSrc).toMatch(
-      /const desiredChildren = Math\.min\(\s*Math\.max\(nextChildren, 0\),\s*selectedMaxSelectableChildren\s*\)/
+      /const desiredChildren = Math\.max\(nextChildren, 0\)/
     );
     expect(bookingPageSrc).toMatch(
       /const newGuests = Math\.max\(guests, desiredChildren \+ 1\)/
@@ -149,16 +172,20 @@ describe("CHD-11.1 — picker auto-bumps guests to fit more children", () => {
     );
   });
 
-  it("the `setOccupancy` helper preserves the `safeGuests - 1` floor for children (the 'at least 1 adult' invariant for `updateGuests` drops)", () => {
+  it("the `setOccupancy` helper preserves the `safeGuests - 1` floor for children (the 'at least 1 adult' invariant, kept as defense in depth per CHD-11.3)", () => {
     // When `updateGuests(1)` is called with 2
     // children, `setOccupancy(1, 2)` should
     // clamp children to `safeGuests - 1 = 0`.
     // The clamping chain in `setOccupancy`
-    // includes `Math.max(0, safeGuests - 1)`
-    // (the same `safeGuests - 1` floor from
-    // the pre-CHD-11.1 `updateGuests`).
+    // includes `Math.max(0, safeGuests - 1)` as
+    // defense in depth. The pre-CHD-11.3 chain
+    // also included `selectedMaxSelectableChildren`
+    // (the per-type cap); CHD-11.3 removed that
+    // — the picker is no longer the enforcement
+    // layer. The `Math.max(0, safeGuests - 1)`
+    // clamp stays as defense in depth.
     expect(bookingPageSrc).toMatch(
-      /const safeChildren = Math\.min\(\s*Math\.max\(nextChildren, 0\),\s*selectedMaxSelectableChildren,\s*Math\.max\(0, safeGuests - 1\)\s*\)/
+      /Math\.min\(nextChildren, safeGuests - 1\)/
     );
   });
 });

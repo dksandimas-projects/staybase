@@ -1195,4 +1195,196 @@ The behavioural test (the user clicks `+` on children past 3, sees the "Doesn't 
 
 ---
 
+## CHD-11.3 — Symmetric Auto-Bump + Remove All Per-Type Caps from the Picker
+> Proposed 2026-08-05, per decision #194 (operator feedback post-CHD-11.2 review). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:910-960` (the `setOccupancy` + `updateGuests` + `updateChildren` functions), `BookingPage.tsx:550-566` (the `selectedMaxSelectableChildren` derivation — stays for the chip hint but is no longer used as a clamp). Sibling to CHD-11 + CHD-11.1 + CHD-11.2 — same picker surface, deeper UX fix.
+
+### The problem
+
+Operator-reported 2026-08-05 (post-CHD-11.2 review): "the maximum I can have is still 3 — the max config I can have is 4 adults and 3 children, when I make it 6 guests, no more children it becomes 0. Can we not have any guards to the numbers?" The pre-CHD-11.3 surface has two residual UX issues that violate the CHD-11 "exploration-first, validation-on-commit" promise:
+
+**Issue 1: "the maximum I can have is still 3"** — the per-type cap (`selectedMaxSelectableChildren`) is still firing in `setOccupancy` and `updateChildren`. Even with CHD-11.2 (which removed the per-type cap from the `+` button's `disabled` condition), the value silently snaps back to `selectedMaxSelectableChildren` when the user clicks `+` past the cap. For a Single Room with `maxCapacity: 1`, `maxChildren: 2`, `maxExtraBeds: 0`, the cap is 3 (1 adult + 3 children fits in 0 extra beds; 4 children would need 1 extra bed, maxExtraBeds 0 → doesn't fit). The user wants to pick 4 children, but the system silently drops it back to 3.
+
+**Issue 2: "when I make it 6 guests, no more children it becomes 0"** — the `Math.max(0, safeGuests - 1)` clamp in `setOccupancy` fires when the user lowers `guests` to a value where `children + 1 > guests` (would leave 0 adults). With guests=2 and children=3, the formula says `max(0, 2-1) = 1`, so children drops from 3 to 1. The user was at 3, then adjusted guests down past the "at least 1 adult" floor, and the system silently dropped their children count instead of bumping guests up.
+
+**Root cause.** Both issues come from the same root: the client-side guards in `setOccupancy` + `updateChildren` are enforcing things the submit gate can validate. Per CHD-11's "exploration-first, validation-on-commit" promise, the picker should be a pure exploration surface — let the user pick any (guests, children) combination, and let the "Fits your group" chip + the submit gate do the validation.
+
+### The fix — symmetric auto-bump + remove all per-type caps
+
+**Three-part change to `BookingPage.tsx`:**
+
+1. **Remove the per-type cap (`selectedMaxSelectableChildren`) from `setOccupancy` + `updateChildren`.** The clamping chain in `setOccupancy`'s `safeChildren` becomes `Math.max(0, Math.min(nextChildren, safeGuests - 1))` (the "at least 1 adult" invariant only, no per-type cap). The `updateChildren`'s `desiredChildren` becomes `Math.max(nextChildren, 0)` (no per-type cap, just the floor of 0). The `selectedMaxSelectableChildren` derivation stays (used by the "Up to N can fit when extra beds cover the overflow" hint in the chip), but it's no longer a clamp.
+
+2. **Add a symmetric auto-bump to `updateGuests`.** Currently `updateGuests(nextGuests)` calls `setOccupancy(nextGuests, numChildren)` directly. If the user lowers `guests` to a value where `children + 1 > guests` (would leave 0 adults), the new behavior is to auto-bump `guests` up to `children + 1` instead of clamping `children` down to `guests - 1`. The new `updateGuests` becomes:
+   ```ts
+   function updateGuests(nextGuests: number) {
+     // Per CHD-11.3: symmetric auto-bump. If the user
+     // lowers `guests` below `children + 1` (would
+     // leave 0 adults), bump `guests` up to
+     // `children + 1` instead of clamping `children`
+     // down. This is the mirror of `updateChildren`'s
+     // auto-bump.
+     const newGuests = Math.max(nextGuests, numChildren + 1);
+     setOccupancy(newGuests, numChildren);
+   }
+   ```
+   The "at least 1 adult" invariant is maintained via auto-bump (not clamp), consistent with `updateChildren`'s auto-bump.
+
+3. **Keep the `Math.max(0, safeGuests - 1)` clamp in `setOccupancy` as defense in depth.** The server-side CHD-05 validation is the authoritative gate, but the client-side mirror is a UX safety net (e.g., if a deep-link sends `?children=99&guests=2`, the system shouldn't display 99 children with 0 adults — the clamp keeps the UI consistent with the invariant). After `updateGuests`'s auto-bump, the clamp is mostly redundant for the user-driven case, but it catches deep-links and edge cases.
+
+**Net effect on `setOccupancy`:**
+```ts
+function setOccupancy(nextGuests: number, nextChildren: number) {
+  const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
+  const safeChildren = Math.max(0, Math.min(nextChildren, safeGuests - 1));
+  setGuests(safeGuests);
+  setNumChildren(safeChildren);
+  setGuestDetails((current) => ({
+    ...current,
+    guestCount: String(safeGuests)
+  }));
+  const next = new URLSearchParams(searchParams);
+  next.set("checkIn", checkIn);
+  next.set("checkOut", checkOut);
+  next.set("guests", String(safeGuests));
+  next.set("children", String(safeChildren));
+  if (selectedRoomType) next.set("roomType", selectedRoomType);
+  setSearchParams(next, { replace: true });
+}
+```
+The `selectedMaxSelectableChildren` clamp is gone. The `Math.max(0, safeGuests - 1)` clamp stays (defense in depth).
+
+**Net effect on `updateChildren`:**
+```ts
+function updateChildren(nextChildren: number) {
+  // Per CHD-11.3: no per-type cap. The auto-bump
+  // maintains the "at least 1 adult" invariant; the
+  // `setOccupancy` clamp is the final defense.
+  const desiredChildren = Math.max(nextChildren, 0);
+  const newGuests = Math.max(guests, desiredChildren + 1);
+  setOccupancy(newGuests, desiredChildren);
+}
+```
+The `selectedMaxSelectableChildren` clamp is gone. The auto-bump (bumping `guests` to `desiredChildren + 1`) is unchanged.
+
+### What the user sees
+
+**Before CHD-11.3 (the bug):**
+- 1 Single Room (`maxCapacity: 1`, `maxChildren: 3`, `maxExtraBeds: 0`), 2 guests.
+- User clicks `+` on children past 3 (the per-type cap) → children silently snaps back to 3. The picker says "3 children" but the user clicked `+` 4 times. **Issue 1**.
+- User has guests=2, children=3. Adjusts guests to 1 → children drops to 0 (the `max(0, 1-1) = 0` clamp). The user was at 3, now they're at 0. **Issue 2**.
+
+**After CHD-11.3 (the fix):**
+- 1 Single Room, 2 guests.
+- User clicks `+` on children to 4 → `desiredChildren = 4` (no per-type cap), `newGuests = max(2, 5) = 5`, `setOccupancy(5, 4)`. Result: guests=5, children=4. The "Fits your group" chip says "Doesn't fit" (the room needs 1 extra bed for 1 adult + 4 children, but `maxExtraBeds: 0`). The submit gate blocks Step 2. The user can add a second room or pick a different room type.
+- User has guests=2, children=3. Adjusts guests to 1 → `newGuests = max(1, 3+1) = 4` (the auto-bump), `setOccupancy(4, 3)`. Result: guests=4, children=3. The "Fits your group" chip might say "Fits" or "Tight" depending on the room's capacity. The auto-bump preserves the user's children count.
+
+**The picker is now a pure exploration surface.** The user picks any (guests, children) combination; the system figures out the right total via symmetric auto-bump; the "Fits your group" chip + the submit gate do the validation. No more silent snap-backs. No more "children becomes 0" surprises.
+
+### Why the symmetric auto-bump is the right shape
+
+The pre-CHD-11.3 model was asymmetric:
+- `updateChildren`: auto-bump `guests` up to `children + 1` (so the user can pick more children than the current total).
+- `updateGuests`: clamp `children` down to `guests - 1` (so the user can lower guests without leaving 0 adults).
+
+This asymmetry is unintuitive. The user expects "I pick a number, the system figures out the right total." The fix is to make `updateGuests` symmetric: if the user picks a `guests` that would leave 0 adults, bump `guests` up to `children + 1` instead of clamping `children` down.
+
+The new model:
+- `updateChildren(N)`: `desiredChildren = N`, `newGuests = max(guests, N + 1)`. **Auto-bump guests up**.
+- `updateGuests(N)`: `newGuests = max(N, children + 1)`. **Auto-bump guests up** (symmetric).
+
+Both functions bump `guests` up; neither clamps `children` down. The "at least 1 adult" invariant is maintained via auto-bump, not clamp. The user picks a number; the system respects it.
+
+### Why the `Math.max(0, safeGuests - 1)` clamp stays as defense in depth
+
+The user-driven case is covered by the symmetric auto-bump. The clamp catches:
+- **Deep-links** — `?children=99&guests=2` shouldn't display 99 children with 0 adults. The clamp brings `children` down to `guests - 1` (e.g., 1 child with 2 guests).
+- **Race conditions** — if `updateGuests` and `updateChildren` fire in quick succession, the clamp is a safety net.
+- **Edge cases** — e.g., a future refactor that bypasses the auto-bump.
+
+The clamp is a safety net, not an enforcement layer. The enforcement layer is the submit gate (per CHD-11) + the server-side CHD-05 validation.
+
+### What this changes for the data model
+
+**Nothing.** The `guests: number` state stays. The `numChildren: number` state stays. The `numAdults = max(0, guests - numChildren)` derivation stays. The `selectedMaxSelectableChildren` derivation stays (used by the chip's hint text). The `setOccupancy` helper stays. The `updateChildren` function stays. The `updateGuests` function stays. The clamping chain in `setOccupancy` is updated (per-type cap removed).
+
+### What this changes for the related work
+
+- **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` and `numAdults >= 1`. The client-side auto-bump + clamp mirror this; the server is the authoritative gate.
+- **CHD-11 (soft-constraint picker)** — the picker is now a true exploration surface. The "Fits your group" chip + the submit gate are the commit surfaces. The CHD-11 promise is now fully realized (the picker is unconstrained; the validation layers do the work).
+- **CHD-11.1 (auto-bump guests from `updateChildren`)** — the auto-bump in `updateChildren` is unchanged. CHD-11.3 adds a symmetric auto-bump in `updateGuests`.
+- **CHD-11.2 (picker cap raised to soft 10)** — the picker cap (10) is unchanged. The per-type cap is now gone from the picker (CHD-11.2 already removed it from the `+` button; CHD-11.3 removes it from the clamping chain).
+- **CHD-12 (cart summary)** — the per-type "N extra beds" inline pill is unchanged. The data is the same shape; only the picker's clamping chain changes.
+- **EXB-11 + EXB-11.1 + EXB-11.2 (extras toggle + auto-init)** — the extras toggle uses `requiredExtraBedsFor` to compute the soft floor; the auto-init useEffect re-fires when `numAdults` or `numChildren` change. No change.
+- **Step 2/3 aside** — the extra-bed pricing updates live. No change.
+- **MRB-15-10 + MRB-15-11** — unrelated.
+- **CHD-13 (homepage search widget)** — the homepage widget's children picker is capped at 0-10 (per CHD-13). The new client-side cap is the same. The homepage widget doesn't have a per-type cap (it doesn't know the room type yet). The submit gate on `/book` catches the over-cap case. No change.
+- **EXB-11.3 (no default room-type selection)** — independent.
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+New `guest-app/tests/api/chd-11-3-symmetric-auto-bump.test.ts` (source-text guards on `BookingPage.tsx`):
+
+- The `setOccupancy` helper's `safeChildren` clamp chain is `Math.max(0, Math.min(nextChildren, safeGuests - 1))` (the "at least 1 adult" invariant only, NO `selectedMaxSelectableChildren` in the chain).
+- The pre-CHD-11.3 `setOccupancy` clamp chain `..., selectedMaxSelectableChildren, ...` is **gone**.
+- The `updateChildren` function's `desiredChildren` is `Math.max(nextChildren, 0)` (NO `selectedMaxSelectableChildren` in the chain).
+- The pre-CHD-11.3 `updateChildren` `desiredChildren = Math.min(..., selectedMaxSelectableChildren, ...)` is **gone**.
+- The `updateGuests` function computes `newGuests = Math.max(nextGuests, numChildren + 1)` (the symmetric auto-bump).
+- The pre-CHD-11.3 `updateGuests` (which called `setOccupancy(nextGuests, numChildren)` directly without auto-bump) is **gone**.
+- The `selectedMaxSelectableChildren` derivation is **still present** (used by the "Up to N can fit when extra beds cover the overflow" hint in the chip).
+- The `selectedMaxSelectableChildren` is **not** used in any clamping chain (setOccupancy, updateGuests, updateChildren).
+- The `Math.max(0, safeGuests - 1)` clamp in `setOccupancy` is **still present** (defense in depth).
+- The `+` button's `disabled` condition is `numChildren >= 10` (CHD-11.2's soft cap, unchanged).
+- The `updateChildren`'s `newGuests = Math.max(guests, desiredChildren + 1)` auto-bump is **still present** (the original CHD-11.1 auto-bump).
+- The submit gate (`cartFitsGroup` derivation) is **unchanged**.
+
+Update `chd-11-1-picker-auto-bump-guests.test.ts` to remove the `selectedMaxSelectableChildren` references (since they're gone from the clamping chain). Update `chd-05-guest-child-cap.test.ts` similarly.
+
+The behavioural test (the user picks 4 children, the system shows "Doesn't fit" + blocks Step 2; the user lowers guests to 1, the system auto-bumps to children + 1) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **Keep the per-type cap in `setOccupancy` but raise it to a higher value** (e.g., `Math.max(0, safeGuests - 1)` + the soft 10). The per-type cap is a soft constraint, not a domain rule. The chip + submit gate catch the over-cap case. The per-type cap belongs in the chip's hint text, not the clamping chain.
+- **Remove the per-type cap but keep the asymmetric auto-bump** (only `updateChildren` auto-bumps, `updateGuests` still clamps). The asymmetry is unintuitive. The user expects symmetric behavior.
+- **Remove the `Math.max(0, safeGuests - 1)` clamp entirely** (rely only on the auto-bump). The auto-bump covers the user-driven case, but deep-links and race conditions could bypass it. The clamp is a safety net.
+- **Show a warning when the user picks more children than the room supports** (e.g., a toast: "You're over the room's capacity"). The "Fits your group" chip + the submit gate are the existing surfaces for this. A toast is a friction point.
+- **Auto-add a second room when the user is over the cap** (the "you'd need 2 of [type]" callout from CHD-11). The user might not want a second room; they might want to pick a different room type. The auto-add is presumptuous. The chip + submit gate let the user decide.
+- **Move the per-type cap to the server-side validation** (let the client pick anything, the server rejects the over-cap). The server is already the authoritative gate. But the client-side mirror is a UX safety net (e.g., the submit gate catches the over-cap, but the chip should show "Doesn't fit" first to give the user a clear signal before they try to submit).
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - **`setOccupancy` (~3 lines changed):** the `safeChildren` clamp chain becomes `Math.max(0, Math.min(nextChildren, safeGuests - 1))` (remove `selectedMaxSelectableChildren` from the chain). The rest of the function is unchanged.
+  - **`updateChildren` (~3 lines changed):** the `desiredChildren` becomes `Math.max(nextChildren, 0)` (remove `selectedMaxSelectableChildren` from the chain). The auto-bump (`newGuests = Math.max(guests, desiredChildren + 1)`) is unchanged.
+  - **`updateGuests` (~3 lines changed):** add the symmetric auto-bump. The new function body becomes `const newGuests = Math.max(nextGuests, numChildren + 1); setOccupancy(newGuests, numChildren);`. The pre-CHD-11.3 direct call `setOccupancy(nextGuests, numChildren)` is gone.
+  - **`selectedMaxSelectableChildren` derivation (~0 lines changed):** the derivation stays (used by the chip's hint text). The `useMemo`'s dependency array is unchanged.
+  - **`+` button (~0 lines changed):** the `disabled` condition is `numChildren >= 10` (CHD-11.2's soft cap, unchanged).
+  - **Comments (~10 lines changed):** update the comment blocks above the three functions to document the new shape and reference the CHD-11.3 decision.
+  - **Total:** ~10 lines changed.
+
+### Gates
+
+- **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` and `numAdults >= 1`. The client-side auto-bump + clamp mirror this; the server is the authoritative gate.
+- **CHD-11 (soft-constraint picker)** — the picker is now a true exploration surface. The "Fits your group" chip + the submit gate are the commit surfaces. The CHD-11 promise is now fully realized.
+- **CHD-11.1 (auto-bump guests from `updateChildren`)** — the auto-bump in `updateChildren` is unchanged. CHD-11.3 adds a symmetric auto-bump in `updateGuests`.
+- **CHD-11.2 (picker cap raised to soft 10)** — the picker cap (10) is unchanged. The per-type cap is now gone from the picker.
+- **CHD-12 (cart summary)** — unchanged.
+- **EXB-11 + EXB-11.1 + EXB-11.2** — unchanged.
+- **Step 2/3 aside** — unchanged.
+- **MRB-15-10 + MRB-15-11** — unrelated.
+- **CHD-13 (homepage search widget)** — unchanged.
+- **EXB-11.3 (no default room-type selection)** — independent.
+
+### Phase 2 (deferred, NOT in CHD-11.3)
+
+- **Per-room-type picker cap** (e.g., a "Preschool" room type caps at 5 children, a "Family" room type caps at 8). A future work item; out of scope — the soft 10 is the right sanity guard for now.
+- **A "Room full" warning** when the user is over the cap, separate from the chip. A future UX work item; the chip + submit gate are the existing surfaces.
+- **A "Reset to 1 adult + 0 children" quick action** in the picker. A future UX work item; out of scope.
+- **Visual feedback when the auto-bump fires** (e.g., the Guests stepper briefly highlights to show "we added a guest for you"). A future UX work item; out of scope — the auto-bump is silent and the user notices the change in the stepper display.
+- **Server-side validation for the per-type cap** (mirror the client's removed per-type cap on the server). The server already validates `numAdults + numChildren === numGuests` and the per-room-capacity via `requiredExtraBedsFor`. The server-side `cartFitsGroup` check is the existing per-type-cap validator. No change needed.
+- **Move the per-type cap to the homepage widget** (let the user pick children = 0 to 10 on the homepage, but the widget fetches the room's max from the URL and caps at that). A future work item; out of scope — the widget is pre-cart (no room type known), so it can't have a per-type cap.
+
+---
+
+---
+
 ---
