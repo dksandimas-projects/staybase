@@ -1388,3 +1388,103 @@ The behavioural test (the user picks 4 children, the system shows "Doesn't fit" 
 ---
 
 ---
+
+## CHD-11.4 — Free Expression in the Picker (Submit-Gate Enforces "At Least 1 Adult")
+> Proposed 2026-08-05, per decision #195 (operator feedback post-CHD-11.3 review). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:923-977` (the `setOccupancy` + `updateGuests` + `updateChildren` functions). Sibling to CHD-11 + CHD-11.1 + CHD-11.2 + CHD-11.3 — same picker surface, deeper UX fix.
+
+### The problem
+
+Operator-reported 2026-08-05 (post-CHD-11.3 review): "but why is it that there is a gate or connection to the number of adults and children? I want the user to freely express how many people they are in all (adults and children)." The pre-CHD-11.4 surface has one residual UX issue: even with the per-type caps gone (CHD-11.3), the **"at least 1 adult" invariant** is still auto-bumping the Guests stepper when the user adds children. With 2 guests and the user clicking `+` on children, the system silently bumps Guests from 2 to 3 to maintain 1 adult. The user wants to be able to set 5 children + 0 adults (or any other free expression) without the system auto-bumping.
+
+The "at least 1 adult" is a **business rule** (per CHD-05, the server requires at least 1 guest per room; the client-side derivation of `numAdults = guests - children` makes the 1-adult-per-room a derived property). But the **auto-bump in the picker** is the wrong enforcement surface — the picker should be a free expression surface, and the **submit gate** should be the validation surface.
+
+### The fix
+
+Three-part change to `BookingPage.tsx`:
+
+**(1) Remove the auto-bump in `updateChildren`.** The pre-CHD-11.4 `updateChildren` computes `newGuests = Math.max(guests, desiredChildren + 1)` to maintain the invariant. The new shape calls `setOccupancy(guests, desiredChildren)` directly (no auto-bump). The "at least 1 adult" rule is no longer enforced via auto-bump; the submit gate catches the violation.
+
+**(2) Remove the symmetric auto-bump in `updateGuests` (reverses CHD-11.3).** The CHD-11.3 `updateGuests` computes `newGuests = Math.max(nextGuests, numChildren + 1)` to mirror `updateChildren`'s auto-bump. With `updateChildren`'s auto-bump gone, the symmetric counterpart is also gone. The new `updateGuests` calls `setOccupancy(nextGuests, numChildren)` directly (no auto-bump). The "at least 1 adult" rule is no longer enforced via auto-bump.
+
+**(3) Remove the `Math.max(0, safeGuests - 1)` clamp in `setOccupancy`'s `safeChildren` chain (reverses CHD-11.3's defense-in-depth).** The pre-CHD-11.4 chain is `Math.max(0, Math.min(nextChildren, safeGuests - 1))` — the `safeGuests - 1` floor enforces "at least 1 adult" by clamping children down. The new chain is `Math.max(0, Math.min(nextChildren, safeGuests))` — children can be up to `safeGuests` (so `numAdults = safeGuests - safeChildren` can be 0). The submit gate catches the 0-adults case (see below).
+
+### What this changes
+
+- **Picker behavior** — the user can freely set `guests` and `numChildren` to any combination where both are non-negative and `numChildren <= guests` (the new clamp). The user can have 0 adults + 5 children (e.g., for a school group trip). The `+` / `−` buttons are unchanged (CHD-11.2's soft cap of 10 stays; the per-type cap stays gone per CHD-11.3).
+- **Submit gate** — the `numAdults >= 1` check at `BookingPage.tsx:724` (in `guestErrors.guestCount`) catches the 0-adults case. The Continue button is disabled with the message "Choose enough rooms to assign every adult and child, with at least one adult in each room." The user adjusts (adds an adult, or removes a child, or removes a room) and Continue re-enables.
+- **Per-room check** — the `cartDistributionComplete` check at `BookingPage.tsx:463` (every room has `numAdults >= 1`) catches the per-room violation. The "Adjust room" CTA (per CHD-11) is the existing surface for this error.
+- **Server contract** — unchanged. The server (`bookings.ts:1062-1077`) accepts `numAdults: min(0).max(100)` + `numChildren: min(0).max(100)` with the `numAdults + numChildren >= 1` per-room check + the `numAdults + numChildren === guests` consistency check. The client's submit gate mirrors the per-room check; the consistency check is implicit (the client derives `numAdults = guests - children`).
+
+### What the user sees after the change
+
+- **0 adults + 5 children** — user sets Guests to 5, Children to 5. The picker shows 5 / 5 / 0 adults (derived). The chip says "Doesn't fit" (depending on the room's capacity). The submit button is disabled with "Choose enough rooms to assign every adult and child, with at least one adult in each room." The user adds an adult (or removes a child) and submit re-enables.
+- **Lower Guests from 3 to 1 with Children=3** — pre-CHD-11.4, this would clamp Children to 0 (the auto-bump in reverse). Post-CHD-11.4, Children stays at 3, numAdults = max(0, 1-3) = 0, submit disabled. The user can freely express the state; the validation surfaces it.
+- **Normal case (2 adults + 1 child)** — unchanged. `guests=3, children=1, numAdults=2`. Submit enabled.
+
+### What this changes for the data model
+
+Nothing. `guests` state stays, `numChildren` state stays, `numAdults = max(0, guests - numChildren)` derivation stays (line 221), `selectedMaxSelectableChildren` derivation stays (CHD-11.3 — used by the chip's hint text), `setOccupancy` helper stays (the clamp chain is updated), `updateChildren` function stays (the auto-bump is removed), `updateGuests` function stays (the symmetric auto-bump is removed). The cart URL serialization (`?guests=N&children=N`) stays; the new state shape is byte-equivalent to the old one (the user can have `numAdults = 0` in the state, but the URL still has the `guests` and `children` params).
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx:923-977` (the `setOccupancy` + `updateGuests` + `updateChildren` functions):
+  - `setOccupancy`: change `safeChildren` from `Math.max(0, Math.min(nextChildren, safeGuests - 1))` to `Math.max(0, Math.min(nextChildren, safeGuests))` (remove the `- 1`).
+  - `updateChildren`: remove the `newGuests = Math.max(guests, desiredChildren + 1)` line, change `setOccupancy(newGuests, desiredChildren)` to `setOccupancy(guests, desiredChildren)`.
+  - `updateGuests`: remove the `newGuests = Math.max(nextGuests, numChildren + 1)` line, change `setOccupancy(newGuests, numChildren)` to `setOccupancy(nextGuests, numChildren)`.
+- Update 3 source-text test files to remove the auto-bump assertions: `chd-11-1-picker-auto-bump-guests.test.ts`, `chd-11-2-picker-cap-soft-10.test.ts`, `chd-11-3-symmetric-auto-bump.test.ts`.
+- New test file `chd-11-4-picker-free-expression.test.ts` (10 source-text guards).
+
+### Tests
+
+New `chd-11-4-picker-free-expression.test.ts`:
+- `setOccupancy` `safeChildren` clamp chain is `Math.max(0, Math.min(nextChildren, safeGuests))` (no `- 1`).
+- `updateChildren` does NOT have the `newGuests = Math.max(guests, desiredChildren + 1)` auto-bump.
+- `updateChildren` calls `setOccupancy(guests, desiredChildren)` directly (no auto-bump intermediate).
+- `updateGuests` does NOT have the `newGuests = Math.max(nextGuests, numChildren + 1)` symmetric auto-bump.
+- `updateGuests` calls `setOccupancy(nextGuests, numChildren)` directly (no auto-bump intermediate).
+- The `numAdults = Math.max(0, guests - numChildren)` derivation stays (line 221).
+- The `numAdults >= 1` submit-gate check stays (line 724).
+- The `selectedMaxSelectableChildren` derivation stays (CHD-11.3).
+- The `+` button's `disabled = numChildren >= 10` stays (CHD-11.2).
+- The `cartFitsGroup` over-capacity check stays.
+
+### MDs to update
+
+- `plan/project/ROADMAP.md` (this entry, ⬜ open).
+- `plan/docs/DECISIONS-FEATURES.md #195` (this decision).
+- `plan/features/BOOKING-FLOW.md §CHD-11.4 — Free Expression in the Picker (Submit-Gate Enforces "At Least 1 Adult")` (this spec).
+- Update the 3 prior CHD-11.X test files to reflect the removed auto-bumps.
+
+### Why the submit gate is the right enforcement surface
+
+The "at least 1 adult" rule is a domain constraint (per CHD-05, the server requires at least 1 guest per room; the client mirrors this as "at least 1 adult per booking" since the picker only has 1 room at a time before the cart). The submit gate is the existing surface for domain constraints — it catches over-capacity (CHD-11), the per-room cap, and the breakfast-occupancy mismatch. The auto-bump in the picker was a UX shortcut that **prevented the user from exploring the invalid state** — but the user benefits from being able to see the state (the picker shows "0 adults") and being told by the submit gate why the state is invalid ("Choose enough rooms to assign every adult and child, with at least one adult in each room."). The auto-bump hid the problem; the submit gate surfaces it.
+
+### Rejected alternatives
+
+- **Remove the "at least 1 adult" rule entirely** — would relax the server contract. The "at least 1 guest per room" is a real domain rule (per CHD-05), and the per-room adult constraint is a derived property of "1 room has at least 1 adult." Relaxing the rule would allow bookings like "0 adults + 5 children in 1 room" (no adult responsible for the children) which is not a real use case at a 14-room hotel. The user explicitly said "let's not drop at least 1 adult" in the operator feedback.
+- **Add a separate "Adults" stepper** — would make the picker more direct (the user picks adults and children independently) but adds a third stepper to the UI. The current "Guests" + "Children" pair with `numAdults = guests - children` derived is sufficient for the free-expression use case (the user can set 0 adults by setting `guests = children`). The "Adults" stepper is a future UX work item.
+- **Keep the auto-bump but add a "You can have 0 adults" toggle** — splits the picker into two modes (auto-bump on / auto-bump off), which is more UI than a free-expression picker. The submit gate is the simpler surface.
+- **Auto-bump with a toast notification** — surfaces the auto-bump but doesn't give the user the freedom to explore. The submit gate is the right surface for the "at least 1 adult" rule.
+- **Disable the Continue button when `numAdults = 0` AND the auto-bump is removed** — this is what the new spec does. The Continue button is disabled via the `numAdults >= 1` check at line 724; the error message at line 727 already mentions "at least one adult in each room" which is the right surface.
+
+### Gates
+
+- **CHD-05** (server contract) — the `numAdults: min(0).max(100)` + `numAdults + numChildren >= 1` per-room check + `numAdults + numChildren === guests` consistency check is unchanged. The client's submit gate mirrors the per-room check.
+- **CHD-11** (the picker is an exploration surface) — the new spec fully realizes the CHD-11 promise. The chip + submit gate are the only validation surfaces; the picker is free.
+- **CHD-11.1** (auto-bump in `updateChildren`) — **reversed by CHD-11.4**. The auto-bump is removed; the submit gate catches the violation.
+- **CHD-11.2** (soft cap of 10) — unchanged. The `+` button's `disabled = numChildren >= 10` stays.
+- **CHD-11.3** (symmetric auto-bump + per-type cap removed) — **the symmetric auto-bump is reversed by CHD-11.4; the per-type cap removal stays**. The submit gate catches the 0-adults case.
+- **CHD-12** (cart summary) — unchanged. The per-type "N adults + M children" inline pill stays the same shape.
+- **EXB-11** + **EXB-11.1** + **EXB-11.2** (extra-bed toggle) — unchanged. The extras toggle re-fires when `numAdults` or `numChildren` change.
+- **Step 2/3 aside** (extra-bed pricing) — unchanged. The pricing uses `room.numAdults` + `room.numChildren` from the cart distribution.
+- **MRB-15-10** + **MRB-15-11** (admin CRUD + photo gallery) — unrelated.
+- **CHD-13** (homepage search widget) — unrelated. The homepage widget already has separate Adults + Children steppers (per CHD-13); the /book picker's free expression is a separate concern.
+- **EXB-11.3** (no default room-type selection) — independent. The room-type card selection is unchanged.
+
+### Phase 2 (deferred, NOT in CHD-11.4)
+
+- **Add a separate "Adults" stepper to the /book picker** — the current "Guests" + "Children" pair with `numAdults = guests - children` derived is sufficient for the free-expression use case. A future UX work item if the operator wants the more direct shape.
+- **A "0 adults + N children" preset button** (e.g., "School trip" / "Family with teens") — a future UX work item; out of scope — the free-expression picker is sufficient.
+- **Visual feedback when the submit button is disabled due to 0 adults** (e.g., a red ring on the Guests stepper) — a future UX work item; the error message at line 727 is sufficient for now.
+- **Server-side allow `numAdults: 0` per-room** (relax CHD-05) — out of scope; the per-room "at least 1 guest" is a real domain rule.
+- **A "Reset to 1 adult + 0 children" quick action** — a future UX work item; out of scope.
