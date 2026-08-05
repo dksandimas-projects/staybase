@@ -82,11 +82,12 @@ describe("CHD-11.2 — picker cap raised to soft 10 (no per-type cap on the + bu
     expect(bookingPageSrc).toMatch(
       /const selectedMaxSelectableChildren = useMemo\(\(\) => \{/
     );
-    // The new formula (per CHD-11.1): the
+    // The new formula (per CHD-11.5): the
     // loop bound is 10, and the derivation
-    // uses `effectiveGuests = max(guests, N + 1)`.
+    // uses the user's `adults` directly (no
+    // auto-bump).
     expect(bookingPageSrc).toMatch(
-      /effectiveGuests = Math\.max\(guests, children \+ 1\)/
+      /numAdults: adults,/
     );
   });
 
@@ -96,11 +97,12 @@ describe("CHD-11.2 — picker cap raised to soft 10 (no per-type cap on the + bu
     expect(bookingPageSrc).toMatch(/disabled=\{numChildren <= 0\}/);
   });
 
-  it("the `updateChildren` function (post-CHD-11.4: no auto-bump) is intact (per-type cap removed in CHD-11.3, auto-bump removed in CHD-11.4)", () => {
+  it("the `updateChildren` function (post-CHD-11.5: no auto-bump, uses `adults` state) is intact (per-type cap removed in CHD-11.3, auto-bump removed in CHD-11.4, state renamed in CHD-11.5)", () => {
     // The function is intact: per-type cap
     // removed in CHD-11.3, auto-bump removed
-    // in CHD-11.4. The new shape is
-    // `setOccupancy(guests, desiredChildren)`
+    // in CHD-11.4, state renamed in CHD-11.5.
+    // The new shape is
+    // `setOccupancy(adults, desiredChildren)`
     // directly — no `newGuests` intermediate.
     expect(bookingPageSrc).toMatch(
       /function updateChildren\(nextChildren: number\)/
@@ -116,21 +118,23 @@ describe("CHD-11.2 — picker cap raised to soft 10 (no per-type cap on the + bu
     );
   });
 
-  it("the `setOccupancy` helper (post-CHD-11.4: no `safeGuests - 1` floor) is intact (per-type cap removed in CHD-11.3, `- 1` floor removed in CHD-11.4)", () => {
+  it("the `setOccupancy` helper (post-CHD-11.5: uses `safeAdults`) is intact (per-type cap removed in CHD-11.3, `- 1` floor removed in CHD-11.4, renamed in CHD-11.5)", () => {
     // The helper stays. The `safeGuests - 1`
     // floor for children is removed in
     // CHD-11.4 — the "at least 1 adult" rule
-    // is enforced at the submit gate, not in
-    // the picker. CHD-11.3 already removed the
-    // per-type cap (`selectedMaxSelectableChildren`)
+    // is enforced at the Adults stepper's min
+    // (1) in CHD-11.5, not in the picker.
+    // CHD-11.3 already removed the per-type
+    // cap (`selectedMaxSelectableChildren`)
     // from the `safeChildren` clamp chain.
-    // The new chain is
-    // `Math.max(0, Math.min(nextChildren, safeGuests))`.
+    // CHD-11.5 renamed `safeGuests` to
+    // `safeAdults`. The new chain is
+    // `Math.max(0, Math.min(nextChildren, safeAdults))`.
     expect(bookingPageSrc).toMatch(
-      /function setOccupancy\(nextGuests: number, nextChildren: number\)/
+      /function setOccupancy\(nextAdults: number, nextChildren: number\)/
     );
     expect(bookingPageSrc).toMatch(
-      /const safeChildren = Math\.max\(\s*0,\s*Math\.min\(nextChildren, safeGuests\)\s*\)/
+      /const safeChildren = Math\.max\(\s*0,\s*Math\.min\(nextChildren, safeAdults\)\s*\)/
     );
     // The pre-CHD-11.4 chain (with the `- 1` floor) is gone.
     expect(bookingPageSrc).not.toMatch(

@@ -75,12 +75,16 @@ describe("CHD-13 — the flat 1-6 guest `<select>` is gone from the homepage", (
   it("the single `guests` `useState` is replaced with two `adults` + `children` states", () => {
     // The pre-CHD-13 state was `const [guests, setGuests] = useState(2)`.
     // The CHD-13 state is two `useState<number>` calls —
-    // `adults` (default 2) + `children` (default 0). The
-    // `total` is derived as `adults + children`.
+    // `adults` (default 2) + `children` (default 0).
+    // Per CHD-11.5 (decision #196): the `total` is
+    // no longer derived in HomePage (the URL writes
+    // `?adults=N&children=N` directly, not
+    // `?guests=N&children=N`). The `total` derivation
+    // is removed (it was only used by the URL writer).
     expect(homePageSrc).not.toMatch(/const \[guests, setGuests\] = useState\(2\)/);
     expect(homePageSrc).toMatch(/const \[adults, setAdults\] = useState\(2\)/);
     expect(homePageSrc).toMatch(/const \[children, setChildren\] = useState\(0\)/);
-    expect(homePageSrc).toMatch(/const total = adults \+ children/);
+    expect(homePageSrc).not.toMatch(/const total = adults \+ children/);
   });
 });
 
@@ -207,19 +211,26 @@ describe("CHD-13 — the popover dismisses on outside click + Escape (mirrors th
   });
 });
 
-describe("CHD-13 — the Search button URL contract carries `children`", () => {
-  it("`searchAvailability` includes `children: String(children)` in the URL params", () => {
-    // The URL contract gains `children` so the
-    // `/book` page can pre-fill its own `numChildren`
-    // state at `BookingPage.tsx:220` from
-    // `searchParams.get("children")`. The `guests`
-    // param is updated to `total` (`adults +
-    // children`).
+describe("CHD-13 — the Search button URL contract carries `children` (updated for CHD-11.5)", () => {
+  it("`searchAvailability` includes `adults: String(adults)` + `children: String(children)` in the URL params", () => {
+    // The URL contract carries both `adults`
+    // and `children` (per CHD-13 + CHD-11.5).
+    // The pre-CHD-11.5 contract was
+    // `guests: String(total)` + `children: String(children)`
+    // (the total). The CHD-11.5 contract is
+    // `adults: String(adults)` + `children: String(children)`
+    // (the split). The /book URL reader accepts
+    // both shapes (reads `?adults=N` first, falls
+    // back to `?guests=N`).
     expect(homePageSrc).toMatch(
-      /guests: String\(total\)/
+      /adults: String\(adults\)/
     );
     expect(homePageSrc).toMatch(
       /children: String\(children\)/
+    );
+    // The pre-CHD-11.5 `guests: String(total)` is gone.
+    expect(homePageSrc).not.toMatch(
+      /guests: String\(total\)/
     );
   });
 
