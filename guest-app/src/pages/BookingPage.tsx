@@ -907,24 +907,28 @@ export function BookingPage() {
   // Per CHD-11.3 (2026-08-05, per decision #194): the
   // per-type cap (`selectedMaxSelectableChildren`) is
   // removed from both `setOccupancy` and `updateChildren`.
-  // The `safeChildren` clamp chain in `setOccupancy` is
-  // now just the "at least 1 adult" invariant
-  // (`Math.max(0, safeGuests - 1)`), with the
-  // `Math.max(0, nextChildren)` floor. The per-type cap
-  // is enforced by the "Fits your group" chip + the submit
-  // gate, not the picker. The `selectedMaxSelectableChildren`
-  // derivation stays (used by the chip's hint text).
+  // The per-type cap is enforced by the "Fits your group"
+  // chip + the submit gate, not the picker. The
+  // `selectedMaxSelectableChildren` derivation stays (used
+  // by the chip's hint text).
   //
-  // The `Math.max(0, safeGuests - 1)` clamp stays as
-  // defense in depth — the user-driven case is covered by
-  // the symmetric auto-bump in `updateGuests` (added in
-  // CHD-11.3), but deep-links and race conditions could
-  // bypass the auto-bump. The clamp is a safety net.
+  // Per CHD-11.4 (2026-08-05, per decision #195): the
+  // "at least 1 adult" auto-bump + clamp is removed. The
+  // picker is a free expression surface; the submit gate
+  // (the `numAdults >= 1` check at line 724 + the per-room
+  // `cartDistributionComplete` check) enforces the rule.
+  // The `safeChildren` clamp chain is now
+  // `Math.max(0, Math.min(nextChildren, safeGuests))` —
+  // children can be up to `safeGuests` (so `numAdults =
+  // safeGuests - safeChildren` can be 0). The "at least 1
+  // adult" rule is a domain rule (per CHD-05, the server
+  // requires at least 1 guest per room); the client
+  // enforces it at the submit gate, not in the picker.
   function setOccupancy(nextGuests: number, nextChildren: number) {
     const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
     const safeChildren = Math.max(
       0,
-      Math.min(nextChildren, safeGuests - 1)
+      Math.min(nextChildren, safeGuests)
     );
     setGuests(safeGuests);
     setNumChildren(safeChildren);
@@ -942,38 +946,35 @@ export function BookingPage() {
   }
 
   function updateGuests(nextGuests: number) {
-    // Per CHD-11.3: symmetric auto-bump. If the user
-    // lowers `guests` below `children + 1` (would leave
-    // 0 adults), bump `guests` up to `children + 1`
-    // instead of clamping `children` down. This is the
-    // mirror of `updateChildren`'s auto-bump — the
-    // user picks a number, the system figures out
-    // the right total. The pre-CHD-11.3 shape called
-    // `setOccupancy(nextGuests, numChildren)` directly,
-    // which would clamp `children` down via the
-    // `Math.max(0, safeGuests - 1)` defense-in-depth
-    // clamp — the user saw "children becomes 0".
-    const newGuests = Math.max(nextGuests, numChildren + 1);
-    setOccupancy(newGuests, numChildren);
+    // Per CHD-11.4: no auto-bump. The picker is a free
+    // expression surface. The pre-CHD-11.3 shape called
+    // `setOccupancy(nextGuests, numChildren)` directly
+    // (the "no change in children" behavior). The
+    // CHD-11.3 shape added a symmetric auto-bump to
+    // mirror `updateChildren`'s auto-bump. CHD-11.4
+    // removes both auto-bumps — the "at least 1 adult"
+    // rule is enforced at the submit gate, not in the
+    // picker. If `guests < numChildren`, the user can
+    // see the state (`numAdults = max(0, guests - children)
+    // = 0`) and the submit gate surfaces the violation.
+    setOccupancy(nextGuests, numChildren);
   }
 
   function updateChildren(nextChildren: number) {
-    // Per CHD-11.1: auto-bump `guests` to maintain
-    // the "at least 1 adult" invariant. The user can
-    // pick any number of children up to the soft 10
-    // (per CHD-11.2); the auto-bump bumps `guests` to
-    // `children + 1` if needed.
-    //
-    // Per CHD-11.3: the per-type cap is removed
-    // from `desiredChildren`. The user can pick any
-    // number of children; the chip + submit gate
-    // catch the over-cap case. `desiredChildren` is
-    // now just `Math.max(nextChildren, 0)` (the floor
-    // of 0; the upper bound is the soft 10 on the
-    // `+` button).
+    // Per CHD-11.4: no auto-bump. The picker is a free
+    // expression surface. The CHD-11.1 auto-bump and
+    // the CHD-11.3 per-type cap removal both stay
+    // conceptually — but the auto-bump is removed. The
+    // `desiredChildren` is just `Math.max(nextChildren,
+    // 0)` (the floor of 0; the upper bound is the soft 10
+    // on the `+` button). The "at least 1 adult" rule is
+    // enforced at the submit gate, not in the picker. If
+    // `numChildren > guests`, the `safeGuests` floor in
+    // `setOccupancy` clamps children down to `guests`
+    // (so `numAdults = 0`), and the submit gate catches
+    // the violation.
     const desiredChildren = Math.max(nextChildren, 0);
-    const newGuests = Math.max(guests, desiredChildren + 1);
-    setOccupancy(newGuests, desiredChildren);
+    setOccupancy(guests, desiredChildren);
   }
 
   function validateUploadFile(file: File) {
