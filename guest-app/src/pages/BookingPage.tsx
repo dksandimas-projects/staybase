@@ -2253,18 +2253,21 @@ export function BookingPage() {
                     aria-label="Increase children count"
                     aria-describedby="children-cap-help"
                     onClick={() => updateChildren(numChildren + 1)}
-                    // Per CHD-11.1: the cap is the room's
-                    // `selectedMaxSelectableChildren` (with
-                    // auto-bump) bounded by the soft cap of
-                    // 10. The pre-CHD-11.1 shape capped at
-                    // `Math.min(10, Math.max(0, guests - 1))`
-                    // (the booking's "at least 1 adult"
-                    // invariant), which prevented the user
-                    // from picking children counts the room
-                    // actually supports. The auto-bump in
-                    // `updateChildren` maintains the invariant
-                    // without hard-capping the children count.
-                    disabled={numChildren >= Math.min(10, selectedMaxSelectableChildren)}
+                    // Per CHD-11.2 (2026-08-05, per decision
+                    // #193): the cap is the soft 10 (the
+                    // CHD-11 sanity guard, not a domain
+                    // constraint). The pre-CHD-11.2 shape
+                    // capped at the room's
+                    // `selectedMaxSelectableChildren` (per
+                    // CHD-11.1), which made the picker an
+                    // enforcement layer instead of an
+                    // exploration layer. The "Fits your
+                    // group" chip + the submit gate are the
+                    // commit surfaces — the picker is the
+                    // exploration surface. The user can pick
+                    // any number up to 10; the chip + submit
+                    // gate tell them if it works.
+                    disabled={numChildren >= 10}
                   >
                     <Plus size={16} />
                   </button>
