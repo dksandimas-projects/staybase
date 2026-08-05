@@ -8,7 +8,7 @@
 // though the system can validate the over-cap case via the
 // "Fits your group" chip + the submit gate.
 //
-// CHD-11.2 flow:
+// CHD-11.2 flow (later refined by CHD-11.3 — see notes inline):
 //   1. The children stepper's `+` button's `disabled`
 //      condition is `numChildren >= 10` (the CHD-11 soft
 //      cap, not the room's capacity).
@@ -19,9 +19,17 @@
 //      stays (still used by the "Fits your group" chip +
 //      the CHD-11 capacity indicator).
 //   4. The `−` button's `disabled` condition is unchanged.
-//   5. The `updateChildren` function (with the CHD-11.1
-//      auto-bump) is unchanged.
-//   6. The `setOccupancy` helper is unchanged.
+//   5. The `updateChildren` function (post-CHD-11.3):
+//      `desiredChildren = Math.max(nextChildren, 0)` (the
+//      per-type cap `selectedMaxSelectableChildren` was
+//      removed in CHD-11.3) and the CHD-11.1 auto-bump
+//      `newGuests = max(guests, desiredChildren + 1)` is
+//      unchanged.
+//   6. The `setOccupancy` helper (post-CHD-11.3): the
+//      per-type cap is removed from the `safeChildren`
+//      clamp chain; the `Math.max(0, safeGuests - 1)`
+//      floor stays as defense in depth. The new chain is
+//      `Math.max(0, Math.min(nextChildren, safeGuests - 1))`.
 //   7. The submit gate is unchanged.
 
 import { describe, expect, it } from "vitest";
@@ -77,32 +85,41 @@ describe("CHD-11.2 — picker cap raised to soft 10 (no per-type cap on the + bu
     expect(bookingPageSrc).toMatch(/disabled=\{numChildren <= 0\}/);
   });
 
-  it("the `updateChildren` function (with the CHD-11.1 auto-bump) is unchanged", () => {
+  it("the `updateChildren` function (with the CHD-11.1 auto-bump, per-type cap removed in CHD-11.3) is intact", () => {
     // The auto-bump in `updateChildren` is
-    // unchanged. The new cap doesn't affect
-    // the auto-bump logic.
+    // unchanged from CHD-11.1. The new cap
+    // doesn't affect the auto-bump logic.
+    // CHD-11.3 removed the per-type cap from
+    // `desiredChildren`; the function is
+    // still intact and the auto-bump still
+    // runs.
     expect(bookingPageSrc).toMatch(
       /function updateChildren\(nextChildren: number\)/
     );
     expect(bookingPageSrc).toMatch(
-      /const desiredChildren = Math\.min\(\s*Math\.max\(nextChildren, 0\),\s*selectedMaxSelectableChildren\s*\)/
+      /const desiredChildren = Math\.max\(nextChildren, 0\)/
     );
     expect(bookingPageSrc).toMatch(
       /const newGuests = Math\.max\(guests, desiredChildren \+ 1\)/
     );
   });
 
-  it("the `setOccupancy` helper (with the `safeGuests - 1` floor for children) is unchanged", () => {
+  it("the `setOccupancy` helper (with the `safeGuests - 1` floor for children) is intact (per-type cap removed in CHD-11.3)", () => {
     // The helper that the auto-bump uses
     // stays — it handles the clamping + URL
     // write. The `safeGuests - 1` floor for
     // children is preserved (so `updateGuests(1)`
-    // still clamps children to 0).
+    // still clamps children to 0 as defense in
+    // depth). CHD-11.3 removed the per-type cap
+    // (`selectedMaxSelectableChildren`) from the
+    // `safeChildren` clamp chain; the new chain
+    // is `Math.max(0, Math.min(nextChildren,
+    // safeGuests - 1))`.
     expect(bookingPageSrc).toMatch(
       /function setOccupancy\(nextGuests: number, nextChildren: number\)/
     );
     expect(bookingPageSrc).toMatch(
-      /const safeChildren = Math\.min\(\s*Math\.max\(nextChildren, 0\),\s*selectedMaxSelectableChildren,\s*Math\.max\(0, safeGuests - 1\)\s*\)/
+      /const safeChildren = Math\.max\(\s*0,\s*Math\.min\(nextChildren, safeGuests - 1\)\s*\)/
     );
   });
 

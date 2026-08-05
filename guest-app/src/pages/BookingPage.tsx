@@ -902,17 +902,29 @@ export function BookingPage() {
   // `setOccupancy` helper that handles the clamping + URL
   // write. The previous shape had two duplicate URL-write
   // blocks; the new shape is a single source of truth for
-  // the occupancy mutation. The helper preserves the
-  // "at least 1 adult in the booking" invariant by clamping
-  // children to `safeGuests - 1` when guests drops below the
-  // current children count (so `updateGuests(1)` with 2
-  // children becomes 1 guest + 0 children).
+  // the occupancy mutation.
+  //
+  // Per CHD-11.3 (2026-08-05, per decision #194): the
+  // per-type cap (`selectedMaxSelectableChildren`) is
+  // removed from both `setOccupancy` and `updateChildren`.
+  // The `safeChildren` clamp chain in `setOccupancy` is
+  // now just the "at least 1 adult" invariant
+  // (`Math.max(0, safeGuests - 1)`), with the
+  // `Math.max(0, nextChildren)` floor. The per-type cap
+  // is enforced by the "Fits your group" chip + the submit
+  // gate, not the picker. The `selectedMaxSelectableChildren`
+  // derivation stays (used by the chip's hint text).
+  //
+  // The `Math.max(0, safeGuests - 1)` clamp stays as
+  // defense in depth — the user-driven case is covered by
+  // the symmetric auto-bump in `updateGuests` (added in
+  // CHD-11.3), but deep-links and race conditions could
+  // bypass the auto-bump. The clamp is a safety net.
   function setOccupancy(nextGuests: number, nextChildren: number) {
     const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
-    const safeChildren = Math.min(
-      Math.max(nextChildren, 0),
-      selectedMaxSelectableChildren,
-      Math.max(0, safeGuests - 1)
+    const safeChildren = Math.max(
+      0,
+      Math.min(nextChildren, safeGuests - 1)
     );
     setGuests(safeGuests);
     setNumChildren(safeChildren);
@@ -930,26 +942,36 @@ export function BookingPage() {
   }
 
   function updateGuests(nextGuests: number) {
-    // No change in children when guests change
-    // (children may be clamped to `safeGuests - 1`
-    // by `setOccupancy` if guests drops below the
-    // current children count).
-    setOccupancy(nextGuests, numChildren);
+    // Per CHD-11.3: symmetric auto-bump. If the user
+    // lowers `guests` below `children + 1` (would leave
+    // 0 adults), bump `guests` up to `children + 1`
+    // instead of clamping `children` down. This is the
+    // mirror of `updateChildren`'s auto-bump — the
+    // user picks a number, the system figures out
+    // the right total. The pre-CHD-11.3 shape called
+    // `setOccupancy(nextGuests, numChildren)` directly,
+    // which would clamp `children` down via the
+    // `Math.max(0, safeGuests - 1)` defense-in-depth
+    // clamp — the user saw "children becomes 0".
+    const newGuests = Math.max(nextGuests, numChildren + 1);
+    setOccupancy(newGuests, numChildren);
   }
 
   function updateChildren(nextChildren: number) {
     // Per CHD-11.1: auto-bump `guests` to maintain
-    // the "at least 1 adult" invariant. The pre-CHD-11.1
-    // shape hard-capped children at `guests - 1` here,
-    // which prevented the user from picking more
-    // children than the booking's total allowed. With
-    // auto-bump, the user can go above `guests - 1` if
-    // the room supports it; the `guests` is bumped
-    // along with the children so `numAdults >= 1`.
-    const desiredChildren = Math.min(
-      Math.max(nextChildren, 0),
-      selectedMaxSelectableChildren
-    );
+    // the "at least 1 adult" invariant. The user can
+    // pick any number of children up to the soft 10
+    // (per CHD-11.2); the auto-bump bumps `guests` to
+    // `children + 1` if needed.
+    //
+    // Per CHD-11.3: the per-type cap is removed
+    // from `desiredChildren`. The user can pick any
+    // number of children; the chip + submit gate
+    // catch the over-cap case. `desiredChildren` is
+    // now just `Math.max(nextChildren, 0)` (the floor
+    // of 0; the upper bound is the soft 10 on the
+    // `+` button).
+    const desiredChildren = Math.max(nextChildren, 0);
     const newGuests = Math.max(guests, desiredChildren + 1);
     setOccupancy(newGuests, desiredChildren);
   }
