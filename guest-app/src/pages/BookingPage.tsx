@@ -986,31 +986,65 @@ export function BookingPage() {
     });
   }
 
+  // Per EXB-11.5 (2026-08-06, per decision #198): the rate
+  // option is a per-type toggle. Click to add 1 of that type
+  // to the cart (with the chosen rate); click the same rate
+  // again to remove all rooms of that type from the cart;
+  // click a different rate to switch the rate in place. The
+  // user is in full control of the room-type selection, same
+  // shape as the extra-bed toggle in EXB-11.4. The
+  // `selectedRoomType` / `rateChoice` state sync is skipped
+  // on the untick path — the `useEffect` at `BookingPage.tsx:865`
+  // picks another type (or clears) when the current selection
+  // is no longer in the cart. The `setSearchParams` call
+  // stays inside the `setRoomCart` callback to match the
+  // existing pattern (idempotent in React 18 StrictMode).
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
-    setSelectedRoomType(typeValue);
-    setRateChoice(nextRateChoice);
+    let shouldSyncSelection = false;
     setRoomCart((current) => {
-      const hasType = current.some((room) => room.roomType === typeValue);
-      const next = hasType
-        ? current.map((room) => room.roomType === typeValue
+      const existingRoom = current.find((room) => room.roomType === typeValue);
+      let next;
+      if (!existingRoom) {
+        // Type not in cart: add 1 room with the chosen rate.
+        shouldSyncSelection = true;
+        next = [
+          ...current,
+          {
+            bookingId: doc(collection(db, "bookings")).id,
+            roomType: typeValue,
+            rateChoice: nextRateChoice,
+            numAdults: 0,
+            numChildren: 0,
+            extraBedCount: 0
+          }
+        ];
+      } else if (existingRoom.rateChoice === nextRateChoice) {
+        // Type in cart with the same rate: untick (per-type
+        // toggle) — remove ALL rooms of this type. Don't
+        // sync `selectedRoomType` / `rateChoice` here; the
+        // useEffect at `BookingPage.tsx:865` will pick
+        // another type (or clear) when the current selection
+        // is no longer in the cart.
+        next = current.filter((room) => room.roomType !== typeValue);
+      } else {
+        // Type in cart with a different rate: switch the
+        // rate in place (update every room of this type).
+        shouldSyncSelection = true;
+        next = current.map((room) =>
+          room.roomType === typeValue
             ? { ...room, rateChoice: nextRateChoice }
-            : room)
-        : [
-            ...current,
-            {
-              bookingId: doc(collection(db, "bookings")).id,
-              roomType: typeValue,
-              rateChoice: nextRateChoice,
-              numAdults: 0,
-              numChildren: 0,
-              extraBedCount: 0
-            }
-          ];
+            : room
+        );
+      }
       const nextParams = new URLSearchParams(searchParams);
       nextParams.set("rooms", serializeBookingRoomCart(next));
       setSearchParams(nextParams, { replace: true });
       return next;
     });
+    if (shouldSyncSelection) {
+      setSelectedRoomType(typeValue);
+      setRateChoice(nextRateChoice);
+    }
   }
 
   function updateRoomQuantity(typeValue: string, nextQuantity: number, maxQuantity: number) {
@@ -2378,7 +2412,7 @@ export function BookingPage() {
             <p className="font-semibold text-gray-950">
               {availableRoomTypes.length} {availableRoomTypes.length === 1 ? "room type" : "room types"} available
             </p>
-            <p className="text-sm text-gray-600">Select Room Only or Room + Breakfast to lock the Step 1 summary.</p>
+            <p className="text-sm text-gray-600">Click a rate to add a room. Click the same rate again to remove it.</p>
           </div>
 
           {availableRoomTypes.length > 0 ? (
