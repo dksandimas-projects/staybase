@@ -308,7 +308,7 @@ export function HomePage() {
                   role="dialog"
                   aria-labelledby="guests-popover-title"
                   data-testid="guests-popover"
-                  className="absolute left-0 right-0 top-full z-30 mt-2 rounded-card-lg bg-white p-4 shadow-xl ring-1 ring-gray-200"
+                  className="absolute left-0 top-full z-30 mt-2 w-72 rounded-card-lg bg-white p-4 shadow-xl ring-1 ring-gray-200 sm:w-80"
                 >
                   <div className="space-y-3">
                     <div
