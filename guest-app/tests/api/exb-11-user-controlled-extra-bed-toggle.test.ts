@@ -119,15 +119,16 @@ describe("EXB-11 — per-type user-controlled extra-bed toggle on /book", () => 
     expect(extrasSlice).toMatch(
       /selectedTypeRooms\[0\]\?\.extraBedCount\s*\?\?\s*0/
     );
-    // Per EXB-11.2: the `[−]` disabled condition is
-    // `displayExtraBeds <= softFloor`, the `[+]` disabled
-    // condition is `displayExtraBeds >= typeMaxExtraBeds`.
-    // The display reads from the soft-floor floor
-    // (`Math.max(softFloor, userExtraBeds)`) so the `[−]`
-    // is disabled AT the floor (not below it) — the
-    // auto-init useEffect keeps the cart at the floor.
-    expect(extrasSlice).toMatch(/displayExtraBeds <= softFloor/);
-    expect(extrasSlice).toMatch(/displayExtraBeds >= typeMaxExtraBeds/);
+    // Per EXB-11.4 (reverses EXB-11.2): the `[+]` disabled
+    // condition is `userExtraBeds >= typeMaxExtraBeds` (the
+    // cap). The `[−]` is disabled only when `typeQuantity === 0`
+    // (no room to mirror the count onto) — the user can go
+    // below the soft floor freely. The display reads from
+    // `userExtraBeds` directly (no `displayExtraBeds`
+    // derivation, no auto-init useEffect).
+    expect(extrasSlice).toMatch(
+      /disabled=\{typeQuantity === 0 \|\| userExtraBeds >= typeMaxExtraBeds\}/
+    );
   });
 
   it("shows the per-bed-per-night rate inline at the point of decision (no Step 3 surprise)", () => {
@@ -197,29 +198,32 @@ describe("EXB-11 — per-type user-controlled extra-bed toggle on /book", () => 
     // room to write the count to, so the counter is inert
     // (both buttons disabled). The user has to add a room
     // first.
-    // Per EXB-11.2: the disabled conditions use
-    // `displayExtraBeds` (not `userExtraBeds`) so the
-    // buttons are disabled at the soft-floor floor
-    // (not below it) — the auto-init useEffect keeps the
-    // cart at the floor.
-    expect(extrasSlice).toMatch(/typeQuantity === 0 \|\| displayExtraBeds <= softFloor/);
-    expect(extrasSlice).toMatch(/typeQuantity === 0 \|\| displayExtraBeds >= typeMaxExtraBeds/);
+    // Per EXB-11.4: both buttons disable on `typeQuantity === 0`
+    // only. The `[+]` additionally disables at the cap
+    // (`userExtraBeds >= typeMaxExtraBeds`). The `[−]` no
+    // longer disables at the soft floor — the user is in full
+    // control and can go below the floor (the submit gate
+    // catches the under-floor case).
+    expect(extrasSlice).toMatch(
+      /disabled=\{typeQuantity === 0 \|\| userExtraBeds >= typeMaxExtraBeds\}/
+    );
     // The helper-text message guides the user: "Add at least
     // one room to set extra beds" — instead of showing the
     // rate when there's no room to apply it to.
     expect(extrasSlice).toMatch(/Add at least one room to set extra beds/);
   });
 
-  it("disables the `[−]` at the soft floor (per-room overflow is a hard lower bound)", () => {
-    // The spec: "The `[−]` is disabled at the soft floor
-    // (clamped at `max(0, requiredExtraBeds)`). The user
-    // can't go below the per-room overflow the group needs."
-    // The implementation's disabled condition is
-    // `displayExtraBeds <= softFloor` — i.e., the button
-    // is disabled exactly when the counter is at the
-    // floor (per EXB-11.2: not below it, because the
-    // auto-init useEffect keeps the cart at the floor).
-    expect(extrasSlice).toMatch(/disabled=\{typeQuantity === 0 \|\| displayExtraBeds <= softFloor\}/);
+  it("the `[−]` is NOT disabled at the soft floor (EXB-11.4: user is in full control)", () => {
+    // Per EXB-11.4 (reverses EXB-11.2 + EXB-11.1): the
+    // `[−]` is disabled only when `typeQuantity === 0`
+    // (no room to mirror the count onto). The pre-EXB-11.4
+    // rule `userExtraBeds <= softFloor` (or
+    // `displayExtraBeds <= softFloor` in EXB-11.2) blocked
+    // the user from going below the soft floor; the user
+    // is now in full control. The submit gate catches the
+    // under-floor case at Step 1 → Step 2 with the
+    // "Adjust room" CTA.
+    expect(extrasSlice).toMatch(/disabled=\{typeQuantity === 0\}/);
   });
 });
 
@@ -283,13 +287,12 @@ describe("EXB-11 — single extra-bed state is gone, cart is the source of truth
     expect(bookingPageSrc).toMatch(
       /room\.roomType === typeValue[\s\S]{0,200}\{ \.\.\.room, extraBedCount: safeCount \}/
     );
-    // Per EXB-11.2: the onClick handlers in the counter
-    // branch use `displayExtraBeds` (the soft-floor
-    // floor) instead of `userExtraBeds` (the cart) so
-    // the auto-init useEffect's post-fire cart value
-    // matches what the user sees in the counter.
+    // Per EXB-11.4: the onClick handlers in the counter
+    // branch use `userExtraBeds` (the cart value) — the
+    // same value the user sees in the counter display.
+    // No `displayExtraBeds` derivation, no auto-init.
     expect(bookingPageSrc).toMatch(
-      /updateExtraBedCount\([\s\S]{0,40}displayExtraBeds \+ 1, typeMaxExtraBeds/
+      /updateExtraBedCount\([\s\S]{0,40}userExtraBeds \+ 1, typeMaxExtraBeds/
     );
   });
 
@@ -390,58 +393,46 @@ describe("EXB-11.1 — bottom-of-card placement + checkbox for `maxExtraBeds ===
     expect(extrasSlice).toMatch(/Add an extra bed/);
   });
 
-  it("the checkbox's `checked` is `displayExtraBeds === 1` and the `onChange` writes 0 or 1 via `updateExtraBedCount`", () => {
-    // Per EXB-11.2: the checkbox's `checked` reads
-    // from `displayExtraBeds` (the soft-floor floor,
-    // not the cart) so the checkbox is `checked` when
-    // the system requires the extra bed, even on first
-    // render before the auto-init useEffect fires.
+  it("the checkbox's `checked` is `userExtraBeds === 1` and the `onChange` writes 0 or 1 via `updateExtraBedCount`", () => {
+    // Per EXB-11.4 (reverses EXB-11.2): the checkbox's
+    // `checked` reads from `userExtraBeds` (the cart
+    // value) — the checkbox is `checked` when the user
+    // has ticked it, `unchecked` when they haven't. No
+    // auto-init, no soft-floor forcing.
     // The `onChange` writes 0 or 1 to the cart via
-    // the same `updateExtraBedCount` helper the
-    // counter uses — no new mutation path. The
-    // auto-init useEffect re-syncs the cart to the
-    // soft floor if the user tries to uncheck
-    // (the checkbox is `disabled` when `softFloor >= 1`,
-    // so the user can't actually uncheck in that state).
-    expect(extrasSlice).toMatch(/checked=\{displayExtraBeds === 1\}/);
+    // the same `updateExtraBedCount` helper the counter
+    // uses — no new mutation path.
+    expect(extrasSlice).toMatch(/checked=\{userExtraBeds === 1\}/);
     expect(extrasSlice).toMatch(
       /onChange=\{\(e\) => updateExtraBedCount\(type\.value, e\.target\.checked \? 1 : 0, typeMaxExtraBeds\)\}/
     );
   });
 
-  it("the checkbox's `disabled` is `typeQuantity === 0 || softFloor >= 1` (the EXB-11.1 'forced on' affordance, fixed by EXB-11.2)", () => {
-    // Per EXB-11.2: the checkbox's `disabled` rule
-    // is the EXB-11.1 "forced on" affordance — the
-    // checkbox is disabled when the soft floor
-    // requires the extra bed (>= 1). The pre-EXB-11.2
-    // rule `(userExtraBeds === 0 && softFloor >= 1)`
-    // blocked the user from clicking to enable a
-    // required extra bed; the auto-init useEffect now
-    // keeps the cart in sync with the soft floor, so
-    // the user never has to click to enable. The new
-    // rule is `softFloor >= 1` (not the old
-    // `userExtraBeds === 0 && softFloor >= 1`).
-    expect(extrasSlice).toMatch(
-      /disabled=\{typeQuantity === 0 \|\| softFloor >= 1\}/
-    );
-    // The counter's `[−]` rule still exists in the
-    // counter branch and is updated to use
-    // `displayExtraBeds` (per EXB-11.2).
-    expect(extrasSlice).toMatch(
-      /disabled=\{typeQuantity === 0 \|\| displayExtraBeds <= softFloor\}/
-    );
+  it("the checkbox's `disabled` is just `typeQuantity === 0` (EXB-11.4: user can tick/untick freely)", () => {
+    // Per EXB-11.4 (reverses EXB-11.2 + EXB-11.1): the
+    // checkbox's `disabled` rule is just
+    // `typeQuantity === 0` (no room to mirror the count
+    // onto). The pre-EXB-11.4 `|| softFloor >= 1` rule
+    // (EXB-11.2) forced the checkbox on and blocked the
+    // user from unchecking it; the user is now in full
+    // control. The submit gate (`cartFitsGroup`) catches
+    // the under-floor case at Step 1 → Step 2 with the
+    // "Adjust room" CTA.
+    expect(extrasSlice).toMatch(/disabled=\{typeQuantity === 0\}/);
   });
 
-  it("the checkbox's `aria-describedby` is wired to the soft-floor warning when the group needs the extra bed", () => {
-    // The `aria-describedby` is conditional: it
-    // only points to the soft-floor warning when
-    // `softFloor >= 1` (i.e., the group needs the
-    // extra bed and the warning is on screen).
-    // Screen readers should announce the warning
-    // when the user tabs onto the checkbox in
-    // that state.
+  it("the checkbox's `aria-describedby` is wired to the soft-floor warning only when the warning is on screen (over-cap)", () => {
+    // Per EXB-11.4: the `aria-describedby` points to the
+    // soft-floor warning only when the warning is on
+    // screen, i.e., `overCap = softFloor > typeMaxExtraBeds`.
+    // The pre-EXB-11.4 `softFloor >= 1` condition pointed
+    // to a non-existent element in the common case
+    // (soft floor = 1, not over-cap). The fix aligns
+    // `aria-describedby` with the warning's actual render
+    // condition so screen readers don't announce a
+    // non-existent element.
     expect(extrasSlice).toMatch(
-      /aria-describedby=\{softFloor >= 1 \? `extras-soft-floor-warning-\$\{type\.value\}` : undefined\}/
+      /aria-describedby=\{overCap \? `extras-soft-floor-warning-\$\{type\.value\}` : undefined\}/
     );
   });
 
@@ -462,128 +453,103 @@ describe("EXB-11.1 — bottom-of-card placement + checkbox for `maxExtraBeds ===
     expect(extrasSlice).toMatch(/Extra beds/);
   });
 
-  it("the data model and helpers are unchanged from EXB-11 (the EXB-11.2 auto-init does not add new state)", () => {
+  it("the data model and helpers are unchanged from EXB-11 (EXB-11.4 removes the auto-init, does not add new state)", () => {
     // Per the spec: "The data model is
     // unchanged: `room.extraBedCount: number`
     // (0 or 1 for the checkbox case; 0..maxExtraBeds
     // for the counter case). `rebalanceGuestDistribution`
     // clamping unchanged. `updateExtraBedCount`
     // unchanged. Cart URL serialization unchanged."
-    // Per EXB-11.2: the auto-init is a `useEffect`
-    // that calls the existing `updateExtraBedCount`
-    // helper — no new state, no new helper, no new
-    // URL param. The cart stays as the source of
-    // truth; the `useEffect` just keeps it in sync
-    // with the soft floor.
+    // Per EXB-11.4: the auto-init useEffect is REMOVED
+    // (reverses EXB-11.2). No new state, no new helper,
+    // no new URL param. The cart is the source of truth;
+    // the user is in full control.
     expect(bookingPageSrc).not.toMatch(/setExtraBedCount/);
     expect(bookingPageSrc).not.toMatch(/function updateExtraBeds\b/);
     expect(bookingPageSrc).toMatch(/function updateExtraBedCount\(/);
   });
 });
 
-describe("EXB-11.2 — auto-init extra bed count to soft floor (the unchecked+disabled UX bug fix)", () => {
-  it("the IIFE defines a derived `displayExtraBeds = Math.max(softFloor, userExtraBeds)` (NOT `userExtraBeds` directly)", () => {
-    // The visual reads from `displayExtraBeds` (the
-    // soft-floor floor, not the cart). The auto-init
-    // useEffect syncs the cart to the soft floor, but
-    // the visual needs to be correct on the FIRST
-    // render too (before the useEffect fires).
-    // `displayExtraBeds = Math.max(softFloor, userExtraBeds)`
-    // means: when the cart is at or above the floor,
-    // the visual matches the cart; when the cart is
-    // below the floor, the visual still shows the
-    // floor (no "0 → 1" flash).
-    expect(extrasSlice).toMatch(
+describe("EXB-11.4 — user is in full control of the extra-bed count (no auto-init, free tick/untick)", () => {
+  it("the IIFE does NOT define a `displayExtraBeds` derivation (reverses EXB-11.2)", () => {
+    // Per EXB-11.4: the visual reads directly from
+    // `userExtraBeds` (the cart value). No
+    // `displayExtraBeds = Math.max(softFloor,
+    // userExtraBeds)` derivation — the auto-init
+    // useEffect is gone, and the user is in full
+    // control. The soft floor is still computed
+    // above (for the over-cap warning text + the
+    // submit gate) but no longer feeds the visual.
+    expect(extrasSlice).not.toMatch(
       /const displayExtraBeds = Math\.max\(softFloor, userExtraBeds\)/
     );
+    expect(extrasSlice).not.toMatch(/displayExtraBeds/);
   });
 
-  it("the stay total uses `displayExtraBeds` (NOT `userExtraBeds`) so the price is correct on first render", () => {
-    // The stay total (`extraBedCount * rate * nights`)
-    // reads from `displayExtraBeds` so the price
-    // renders correctly on first render — before the
-    // auto-init useEffect fires, the cart might be
-    // below the soft floor, but the visual should
-    // still show the correct price for the soft-floor
-    // value.
-    expect(extrasSlice).toMatch(/const stayTotal = displayExtraBeds \* typeExtraBedRate \* nights/);
+  it("the stay total reads from `userExtraBeds` (NOT `displayExtraBeds`)", () => {
+    // Per EXB-11.4: the stay total
+    // (`extraBedCount * rate * nights`) reads
+    // from `userExtraBeds` — the same value the
+    // user sees in the counter / checkbox. No
+    // derived value, no off-by-one between the
+    // visual and the price.
+    expect(extrasSlice).toMatch(
+      /const stayTotal = userExtraBeds \* typeExtraBedRate \* nights/
+    );
   });
 
-  it("the stay-total render gate uses `displayExtraBeds > 0` (NOT `userExtraBeds > 0`)", () => {
-    // The stay total hides when the count is 0 (per
-    // the EXB-11.1 spec — "don't show '₱0 for 2
-    // nights'"). Per EXB-11.2: the gate is
-    // `displayExtraBeds > 0` (not `userExtraBeds > 0`)
-    // so the price renders when the soft floor is 1
-    // (even if the cart is at 0 on first render).
-    expect(extrasSlice).toMatch(/typeQuantity > 0 && displayExtraBeds > 0/);
+  it("the stay-total render gate uses `userExtraBeds > 0` (reverts to EXB-11.1 spec)", () => {
+    // Per EXB-11.1: "Stay total — hidden when
+    // `extraBedCount === 0` (don't show '₱0 for
+    // 2 nights' — it's noise)." The gate is
+    // `typeQuantity > 0 && userExtraBeds > 0`.
+    // Per EXB-11.2: the gate was `displayExtraBeds > 0`
+    // (so the price rendered when the soft floor
+    // was 1 even if the cart was at 0 on first
+    // render). Per EXB-11.4: the gate reverts to
+    // `userExtraBeds > 0` (the EXB-11.1 spec).
+    expect(extrasSlice).toMatch(/typeQuantity > 0 && userExtraBeds > 0/);
   });
 
-  it("a component-level `useEffect` auto-syncs the cart to the soft floor (lives ABOVE the IIFE, not inside)", () => {
-    // The auto-init is a component-level `useEffect`
-    // (NOT inside the IIFE — IIFEs can't run effects).
-    // The effect loops over `roomCart`, finds the
-    // matching type, computes the soft floor via
-    // `requiredExtraBedsFor`, and calls
+  it("there is NO component-level `useEffect` that auto-syncs the cart to the soft floor", () => {
+    // Per EXB-11.4 (reverses EXB-11.2): the
+    // auto-init useEffect is REMOVED. The cart
+    // starts at 0 and stays at 0 until the user
+    // explicitly ticks the checkbox or increments
+    // the counter. The over-cap case is still
+    // caught by the soft-floor warning text +
+    // the submit gate's `cartFitsGroup` check.
+    // The pre-EXB-11.4 useEffect's signature
+    // (loops over `roomCart`, computes soft floor
+    // via `requiredExtraBedsFor`, calls
     // `updateExtraBedCount(type.value, softFloor,
-    // typeMaxExtraBeds)` when `softFloor > currentExtraBeds
-    // && softFloor <= typeMaxExtraBeds`. The second
-    // condition is the over-cap guard (hotfix 2026-08-06):
-    // when the soft floor exceeds the cap, the cart can
-    // only be set to the cap (clamped inside
-    // `updateExtraBedCount`); without the guard, the
-    // effect would loop. The over-cap case is caught
-    // by the submit gate's `cartFitsGroup` check.
-    expect(bookingPageSrc).toMatch(
-      /useEffect\(\(\) => \{[\s\S]*?for \(const room of roomCart\)[\s\S]*?if \(softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds\)[\s\S]*?updateExtraBedCount\(/
+    // typeMaxExtraBeds)` when
+    // `softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds`)
+    // is gone.
+    expect(bookingPageSrc).not.toMatch(
+      /for \(const room of roomCart\)[\s\S]{0,200}if \(softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds\)[\s\S]{0,100}updateExtraBedCount\(/
     );
   });
 
-  it("the auto-init useEffect's dependency array includes `numAdults`, `numChildren`, `roomCart`, and `roomTypes`", () => {
-    // The effect re-fires when the guest count, the
-    // cart, or the room types change. The dependency
-    // array is the right size to cover the cases that
-    // affect the soft floor (guest count) and the
-    // cart's per-type count (cart + types).
-    expect(bookingPageSrc).toMatch(
-      /\}, \[numAdults, numChildren, roomCart, roomTypes\]\);/
-    );
+  it("the IIFE comment block documents the EXB-11.4 reversal of the EXB-11.2 auto-init", () => {
+    // The pre-EXB-11.4 spec (EXB-11.2) auto-init
+    // the cart to the soft floor. The EXB-11.4
+    // spec reverses that stance — the user is in
+    // full control. The comment block at the top
+    // of the IIFE documents the new behavior.
+    expect(extrasSlice).toMatch(/Per EXB-11\.4:/);
+    expect(extrasSlice).toMatch(/reverses the EXB-11\.2 auto-init|no auto-init useEffect/);
   });
 
-  it("the IIFE comment block now documents the EXB-11.2 reversal of the EXB-11.1 'no auto-init' stance", () => {
-    // The pre-EXB-11.2 spec explicitly rejected
-    // auto-init ("the CHD-11 submit gate catches
-    // the over-cap; simpler than the auto-init
-    // path"). The post-EXB-11.2 spec reverses that
-    // stance — the comment block at the top of the
-    // IIFE documents the new behavior.
-    expect(extrasSlice).toMatch(/Per EXB-11\.2:/);
-    expect(extrasSlice).toMatch(/reverses the EXB-11\.1 "no auto-init"/);
-  });
-
-  it("the auto-init useEffect has the soft-floor <= cap guard (prevents infinite loop on over-cap state, hotfix 2026-08-06)", () => {
-    // Per hotfix 2026-08-06: the auto-init useEffect
-    // at `BookingPage.tsx:778-808` had a latent
-    // infinite-loop bug. When the soft floor
-    // exceeds the type's `maxExtraBeds` cap, the
-    // cart can only be set to the cap (clamped
-    // inside `updateExtraBedCount`); the next
-    // iteration would still see `softFloor >
-    // currentExtraBeds` (since `softFloor >
-    // typeMaxExtraBeds`) and re-call
-    // `updateExtraBedCount` in an infinite loop.
-    //
-    // With the new CHD-11.5 direct Adults picker,
-    // the user can easily hit this case (e.g.,
-    // 9 adults + 8 children with a Single Room
-    // = soft floor 14, cap 1). The hotfix adds
-    // the `softFloor <= typeMaxExtraBeds` guard:
-    // only auto-init when the soft floor is
-    // reachable. The over-cap case is caught by
-    // the submit gate's `cartFitsGroup` check
-    // + the soft-floor warning text.
-    expect(bookingPageSrc).toMatch(
-      /if \(softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds\)/
-    );
+  it("the IIFE comment block explicitly notes the user-explicit 'no auto-init' stance", () => {
+    // Per EXB-11.4: the comment block must
+    // explicitly state that the user is in full
+    // control and the system never silently sets
+    // the extra-bed count. This is the spec's
+    // "the user is in control of the cart, not
+    // the system" promise from EXB-11, restored
+    // after the EXB-11.2 auto-init reversal.
+    expect(extrasSlice).toMatch(/user is in full control|the user is in full control/);
+    expect(extrasSlice).toMatch(/cart starts at 0/);
   });
 });
