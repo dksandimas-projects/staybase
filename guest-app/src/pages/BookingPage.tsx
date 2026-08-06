@@ -791,7 +791,18 @@ export function BookingPage() {
         maxChildren: Number(type.maxChildren) || 0
       });
       const softFloor = Math.max(0, perTypeOverflow.requiredExtraBeds);
-      if (softFloor > currentExtraBeds) {
+      // Only auto-init when the soft floor is reachable
+      // (i.e., <= the type's `maxExtraBeds` cap). When the
+      // soft floor exceeds the cap, the cart can only be
+      // set to the cap; the next iteration would still see
+      // `softFloor > currentExtraBeds` (since `softFloor >
+      // typeMaxExtraBeds`) and re-call `updateExtraBedCount`
+      // in an infinite loop. The over-cap case is caught
+      // by the submit gate's `cartFitsGroup` check
+      // (line 471) + the soft-floor warning text — the
+      // user sees "you need N extra beds, you can have up
+      // to M" + a disabled Continue button.
+      if (softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds) {
         updateExtraBedCount(room.roomType, softFloor, typeMaxExtraBeds);
       }
     }
