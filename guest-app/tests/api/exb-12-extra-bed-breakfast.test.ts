@@ -231,3 +231,45 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     expect(rebuildMatches?.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+// Per v0.264.9 test-discipline retrofit (2026-08-06): one
+// runtime assertion that exercises the actual helper math
+// behind the EXB-12 toggle. The source-text guards above pin
+// the *contract shape* (the helper is called from the right
+// places with the right variable names); this test pins the
+// *math* (the helper's `extraBedBreakfast` gate actually
+// affects the breakfast total). A future refactor that swaps
+// the helper for a different implementation, or changes the
+// gate's location, would still pass the regex guards but
+// would fail this test if the math changed. Catches the
+// "logic moved but contract preserved" class of bug.
+describe("EXB-12 — RUNTIME — calculateBreakfastAddOn gate behavior", () => {
+  it("the helper's `extraBedBreakfast` gate honors the opt-in toggle", async () => {
+    // Dynamic import to keep the test hermetic — the
+    // shared package's exports are already configured
+    // for vitest's ESM resolution.
+    const { calculateBreakfastAddOn } = await import("@spark-inn/shared");
+    const baseline = calculateBreakfastAddOn({
+      hasBreakfast: true,
+      breakfastRate: 250,
+      numGuests: 2,
+      numNights: 3,
+      breakfastIncludesChildren: true
+    });
+    const withToggle = calculateBreakfastAddOn({
+      hasBreakfast: true,
+      breakfastRate: 250,
+      numGuests: 2,
+      numNights: 3,
+      breakfastIncludesChildren: true,
+      extraBedCount: 1,
+      extraBedBreakfast: true
+    });
+    // The toggle MUST increase the total by `rate × 1 × 3` = 750.
+    // If the helper's gate is removed (or moved to the call
+    // site), this delta becomes 0 and the test fails. If the
+    // helper multiplies the wrong way (e.g. by numGuests), the
+    // total would be 3000 (a 33% overcharge) and the test fails.
+    expect(withToggle - baseline).toBe(750);
+  });
+});

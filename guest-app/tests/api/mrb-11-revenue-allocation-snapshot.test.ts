@@ -170,4 +170,63 @@ describe("MRB-11 — server-side revenue allocation snapshot (PR2 wiring)", () =
     expect(matches, "expected at least 6 call sites in bookings.ts").toBeTruthy();
     expect(matches!.length).toBeGreaterThanOrEqual(6);
   });
+
+  // Per v0.264.9 test-discipline retrofit: one runtime
+  // assertion that exercises the actual helper behavior
+  // behind the per-stream revenue allocation. The
+  // source-text guards above pin the *call-site contract*
+  // (the helper is wired into the right transaction
+  // sites); this test pins the *helper contract* (a valid
+  // allocation round-trips through the invariant check,
+  // an invariant-violating allocation throws). A future
+  // refactor that changes the helper's tolerance,
+  // rounding, or invariant formula would pass the regex
+  // guards but would fail this test if the contract
+  // drifted.
+  describe("RUNTIME — assertBookingRevenueAllocationInvariant", () => {
+    it("accepts a valid allocation whose sum equals the totalPrice", async () => {
+      const { assertBookingRevenueAllocationInvariant } = await import(
+        "@spark-inn/shared"
+      );
+      // A 1-night Deluxe Queen @ 2000 + 1 breakfast @ 250 + 0
+      // extra bed - 0 deduction = 2250. The invariant holds
+      // by construction.
+      const allocation = {
+        roomNet: 2000,
+        breakfastNet: 250,
+        addOnNet: 0,
+        deductionNet: 0,
+        totalNet: 2250
+      };
+      // The helper returns the same allocation on success
+      // (the inline-chaining contract — see the JSDoc on
+      // `assertBookingRevenueAllocationInvariant`).
+      const result = assertBookingRevenueAllocationInvariant(allocation, 2250);
+      expect(result).toEqual(allocation);
+    });
+
+    it("throws when the per-stream sum disagrees with the totalPrice (off by 1 unit)", async () => {
+      const { assertBookingRevenueAllocationInvariant } = await import(
+        "@spark-inn/shared"
+      );
+      // A 1-night Deluxe Queen @ 2000 + 1 breakfast @ 250 + 0
+      // extra bed - 0 deduction = 2250, but the totalPrice
+      // is 2251 (off by 1 — the helper's 0.05 tolerance
+      // would still catch it). The helper must throw with
+      // the `[MRB-11]` prefix so the server can catch +
+      // re-throw as a 500. A future refactor that widens
+      // the tolerance to 1.00 would silently pass this
+      // off-by-one case (a real miscalculation).
+      const allocation = {
+        roomNet: 2000,
+        breakfastNet: 250,
+        addOnNet: 0,
+        deductionNet: 0,
+        totalNet: 2250
+      };
+      expect(() =>
+        assertBookingRevenueAllocationInvariant(allocation, 2251)
+      ).toThrow(/\[MRB-11\]/);
+    });
+  });
 });

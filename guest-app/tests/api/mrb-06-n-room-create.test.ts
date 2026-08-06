@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+// Per v0.264.9 test-discipline retrofit: stub the
+// firebase-admin module BEFORE importing the handler so
+// the schemas can be loaded without a live Firebase
+// project. The schemas are pure Zod and never touch
+// `adminDb` / `adminAuth` at parse time, but the handler
+// file imports them at module load.
+vi.mock("../../server/lib/firebase-admin", () => ({
+  adminAuth: { verifyIdToken: () => Promise.resolve({ uid: "test" }) },
+  adminDb: new Proxy({}, { get: () => () => ({ get: () => ({ then: () => null }) }) })
+}));
 
 const handlers = readFileSync(
   resolve(__dirname, "../../server/handlers/bookings.ts"),
@@ -22,6 +33,67 @@ describe("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment + head
       expect(handlers).toMatch(
         /roomCount: z\.coerce\.number\(\)\.int\(\)\.min\(1\)\.max\(50\)\.optional\(\)\.default\(1\)/
       );
+    });
+  });
+
+  // Per v0.264.9 test-discipline retrofit: one runtime
+  // assertion that exercises the N>1 schema shape the
+  // client actually sends. The source-text guards above
+  // pin the *contract shape* (the field is declared with
+  // the right name + bounds); this test pins the *wire
+  // contract* (a representative N>1 body parses without
+  // a `ZodError`). A future refactor that adds a new
+  // field to the create body (and the server's strict
+  // schema is not updated, the v0.264.5 class of bug)
+  // would fail this test in <100ms.
+  describe("RUNTIME — createBookingSchema.safeParse on an N>1 body", () => {
+    it("accepts the representative N=2 body shape (2 rooms, mixed occupancy)", async () => {
+      const { createBookingSchema } = await import("../../server/handlers/bookings");
+      const result = createBookingSchema.safeParse({
+        bookingId: "abc123def456ghi789",
+        reservationId: "12345678-90ab-4cde-9f01-23456789abcd",
+        roomType: "Deluxe Queen",
+        roomCount: 2,
+        roomSelections: [
+          {
+            bookingId: "abc123def456ghi789",
+            roomType: "Deluxe Queen",
+            numAdults: 2,
+            numChildren: 0,
+            extraBedCount: 0,
+            hasBreakfast: false
+          },
+          {
+            roomType: "Deluxe Queen",
+            numAdults: 1,
+            numChildren: 1,
+            extraBedCount: 0,
+            hasBreakfast: false
+          }
+        ],
+        checkIn: "2099-01-01",
+        checkOut: "2099-01-03",
+        guests: 4,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Maria",
+          lastName: "Santos",
+          email: "maria@example.com",
+          phone: "+639171234567",
+          requests: "",
+          consent: true
+        },
+        discountType: "",
+        paymentMethod: "bank-transfer"
+      });
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        // Fail loud with the Zod issue list so a future
+        // regression isn't silently masked.
+        throw new Error(
+          `createBookingSchema rejected the N=2 body: ${JSON.stringify(result.error.issues, null, 2)}`
+        );
+      }
     });
   });
 
