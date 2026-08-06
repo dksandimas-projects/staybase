@@ -789,6 +789,109 @@ The behavioural test (the user adds a room + changes the guest count, the counte
 
 ---
 
+## EXB-11.4 — Revert Auto-Initiate Extra Bed Count; User Is in Full Control
+> Proposed 2026-08-06, per decision #197 (operator feedback post-EXB-11.2 shipped surface). Files: `guest-app/src/pages/BookingPage.tsx:754-809` (the auto-init `useEffect` — removed) + the Extras IIFE (the `displayExtraBeds` derivation — removed; the checkbox + counter `[−]` disabled conditions — relaxed; the `aria-describedby` — aligned with the warning's actual render condition). Sibling to EXB-11 + EXB-11.1 + EXB-11.2 — same Extras sub-section on `/book`, different enforcement surface for the soft floor.
+
+### The problem
+
+The post-EXB-11.2 surface (current `main` as of 2026-08-06) has a UX anti-pattern that violates the EXB-11 "the user is in control of the cart, not the system" promise. The auto-init `useEffect` at `BookingPage.tsx:778-808` silently bumps the cart's per-type `extraBedCount` to the soft floor (the per-room overflow derived from `requiredExtraBedsFor`) whenever the soft floor exceeds the cart value. Combined with the EXB-11.2 checkbox `disabled = typeQuantity === 0 || softFloor >= 1` rule, the extra-bed checkbox renders as `checked + disabled` when the group needs the bed — and the user can't uncheck it. The counter case has the same issue (the auto-init bumps it to the soft floor too, so the counter starts at the soft-floor value instead of 0; the counter's `[−]` is also disabled at the soft floor, so the user can't go below).
+
+Two specific symptoms the operator reported 2026-08-06:
+
+1. **"It is ticked by default"** — for a Single Room (`maxExtraBeds: 1`) with 2 guests, the checkbox is `checked` even on first render, before the user has done anything. The user didn't choose to check it; the auto-init did.
+2. **"I am unable to tick the extra bed"** — the user can't uncheck the checkbox (it's `disabled`), and can't increment/decrement the counter below the soft floor (the `[−]` is disabled at the soft floor). The user is stuck in a state they didn't choose.
+
+**Root cause.** The EXB-11.2 design chose the wrong enforcement surface for the soft floor. The soft floor is a *constraint* (the group needs at least N extra beds to fit), but the EXB-11.2 surface turned it into a *choice* (the system silently sets the count to N). Three specific design choices from EXB-11.2 that violated the EXB-11 promise:
+
+- **(a) The auto-init `useEffect`** — silently mutated the cart on every render where `softFloor > userExtraBeds`, without any user input. The effect ran on `[numAdults, numChildren, roomCart, roomTypes]` changes, so it would re-fire and re-bump the cart every time the user changed the guest count, the room count, or the room type. The user couldn't escape the auto-init by interacting with the toggle.
+- **(b) The `displayExtraBeds` derivation** — decoupled the visual from the cart (the visual showed the soft floor, the cart was bumped to match), creating a derived state that hid the user's actual choice. The visual said "checked" (or "1" on the counter), the cart said "1", but neither reflected a user action.
+- **(c) The `disabled = ... || softFloor >= 1` rule on the checkbox + the `disabled = ... || userExtraBeds <= softFloor` rule on the counter `[−]`** — enforced the soft floor at the UI layer, blocking the user from reaching a valid state they wanted to be in. The user who unticks the extra bed (or decrements the counter to 0) when the group needs it would be blocked by the `disabled` attribute.
+
+The user is the one paying for the extra bed; the user should be the one choosing it. The EXB-11 spec's "the user is in control of the cart, not the system" promise was the right shape — EXB-11.2 reversed it; EXB-11.4 restores it.
+
+### The fix — three-part revert + one a11y fix
+
+**1. Delete the auto-init `useEffect` (lines 754-809).** The cart starts at 0 and stays at 0 until the user explicitly ticks the checkbox or increments the counter. The soft floor is still computed (for the over-cap warning text + the submit gate's `cartFitsGroup` check) but no longer feeds the cart. The `requiredExtraBedsFor` helper (used to derive the soft floor) is unchanged. The `updateExtraBedCount` helper (used to write the count to the cart) is unchanged — the user just no longer has the system calling it on their behalf.
+
+**2. Drop the `displayExtraBeds` derivation.** The visual reads directly from `userExtraBeds` (the cart value) — no derived floor, no off-by-one between the visual and the price. The stay total reverts to `userExtraBeds * extraBedRate * nights` and the stay-total render gate reverts to `userExtraBeds > 0` (the EXB-11.1 spec). The counter display reverts to `userExtraBeds`. The checkbox `checked` reverts to `userExtraBeds === 1`. The counter onClick handlers revert from `displayExtraBeds ± 1` to `userExtraBeds ± 1`.
+
+**3. Relax the checkbox + counter `[−]` disabled conditions.** The checkbox `disabled` reverts from `typeQuantity === 0 || softFloor >= 1` (the EXB-11.2 "forced on" affordance) to just `typeQuantity === 0` (the EXB-11.1 "no room to mirror the count onto" affordance). The counter `[−]` reverts from `typeQuantity === 0 || userExtraBeds <= softFloor` (the EXB-11.1 spec's soft-floor enforcement) to just `typeQuantity === 0` — the user can go below the soft floor freely. The counter `[+]` keeps the cap enforcement (`typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds`).
+
+**4. Fix the `aria-describedby` (a11y fix).** The pre-EXB-11.4 checkbox `aria-describedby` was wired to `softFloor >= 1` (the soft-floor condition), but the warning text only renders on `overCap` (soft floor > cap). The `aria-describedby` now points to the warning only when the warning is on screen (`overCap`), so screen readers don't announce a non-existent element. This is a pre-existing bug from EXB-11.2 that EXB-11.4 fixes as part of the visual revert.
+
+### What the user sees now
+
+- **Single Room (`maxExtraBeds: 1`), 2 guests** — soft floor 1, cap 1, not over-cap. Cart starts at 0. Checkbox renders `unchecked + enabled` (was `checked + disabled`). The user can tick the box to add the bed (cart = 1), or leave it unticked and hit Continue → "Adjust room" CTA. The soft-floor warning does NOT fire (soft floor = 1, not over-cap; the cap matches the floor).
+- **Family Room (`maxExtraBeds: 2`), 5 adults** — soft floor 1, cap 2, not over-cap. Cart starts at 0. Counter shows 0 (was 1). Both buttons enabled (the `[−]` was disabled at the soft floor pre-EXB-11.4; now enabled). The user can go from 0 → 1 → 2 freely.
+- **3 adults in a Single Room (`maxExtraBeds: 1`)** — soft floor 2, cap 1, `overCap = true`. Cart starts at 0. Checkbox renders `unchecked + enabled`. The soft-floor warning fires: "Single Room needs 2 extra beds to fit your group. You can add up to 1 here." The user can tick the box (cart = 1) but the submit gate still blocks them (the group needs 2 beds, the cap is 1). The "Adjust room" CTA guides them to add a second room.
+- **Family Room (`maxExtraBeds: 2`), 4 adults** — soft floor 0, cap 2, not over-cap. Cart starts at 0. Counter shows 0, both buttons enabled. No auto-init, no warning. The user adds a bed if they want; the system doesn't push them.
+
+### Why this is the right shape
+
+- **(1) Honest UI** — the checkbox's `checked` reads from the cart, the counter's display reads from the cart, the stay total reads from the cart. No derived state, no off-by-one between the visual and the price. The user sees exactly what they're going to pay for.
+- **(2) User agency** — the user can tick/untick freely, increment/decrement freely, go to 0 even if the group needs the bed. The system doesn't make the choice; the user does.
+- **(3) Submit gate as the validation surface** — per CHD-11's "exploration-first, validation-on-commit" pattern, the under-floor case is caught at Step 1 → Step 2 by the `cartFitsGroup` check (the Continue button is disabled with the "Adjust room" CTA). The user who unticks the extra bed and tries to continue sees the gate fire with a clear next-step.
+- **(4) Over-cap warning still fires** — when `softFloor > typeMaxExtraBeds` (the group physically can't fit in the type's bed capacity), the soft-floor warning text renders below the toggle ("Room needs N extra beds to fit your group. You can add up to M here."). This is the case where the user's free choice is bounded by a real physical constraint, not a UI policy. The user can still tick the box (cart = cap) but the submit gate catches the over-cap case.
+- **(5) A11y fix bundled in** — the `aria-describedby` is now aligned with the warning's actual render condition. Screen readers announce the warning when it's on screen, not when the soft floor condition fires (which was the pre-EXB-11.4 bug).
+
+### What this changes for the data model
+
+Nothing. `room.extraBedCount: number` stays. `updateExtraBedCount` helper is unchanged (still clamps to `[0, typeMaxExtraBeds]`). Cart URL serialization (`rooms=`) is unchanged. Per-type cart summary pill is unchanged (reads from the cart, which now starts at 0; the pill shows "0 extra beds" for the under-floor case, which is the honest signal). Step 2/3 aside aggregation is unchanged (`totalExtraBeds` still sums the per-room `extraBedCount`). Server-side validation is unchanged (the server still validates against `maxExtraBeds` and snapshots `extraBedRate`). The over-cap soft-floor warning text is unchanged. The submit gate's `cartFitsGroup` check is unchanged.
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - **Remove the auto-init `useEffect` (lines 754-809).** The effect's body (loop over `roomCart`, compute soft floor per type via `requiredExtraBedsFor`, call `updateExtraBedCount(type.value, softFloor, typeMaxExtraBeds)` when `softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds`) is gone. The soft-floor `<= cap` infinite-loop guard added in the 2026-08-06 hotfix is moot.
+  - **In the Extras IIFE**: drop the `displayExtraBeds = Math.max(softFloor, userExtraBeds)` derivation. The visual reads directly from `userExtraBeds`. The stay total becomes `userExtraBeds * typeExtraBedRate * nights`. The stay-total render gate becomes `typeQuantity > 0 && userExtraBeds > 0`.
+  - **Checkbox branch**: `checked` reverts from `displayExtraBeds === 1` to `userExtraBeds === 1`. `disabled` reverts from `typeQuantity === 0 || softFloor >= 1` to just `typeQuantity === 0`. `aria-describedby` reverts from `softFloor >= 1 ? ... : undefined` to `overCap ? ... : undefined`.
+  - **Counter branch**: display reverts from `displayExtraBeds` to `userExtraBeds`. `[−]` `disabled` reverts from `typeQuantity === 0 || displayExtraBeds <= softFloor` to just `typeQuantity === 0`. `[+]` `disabled` reverts from `typeQuantity === 0 || displayExtraBeds >= typeMaxExtraBeds` to `typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds`. The onClick handlers revert from `displayExtraBeds ± 1` to `userExtraBeds ± 1`.
+  - **Update the IIFE comment block** at the top of the IIFE to document the new behavior (EXB-11.4 reverses the EXB-11.2 auto-init stance; the user is in full control; the soft floor is still computed for the over-cap warning + the submit gate).
+- No changes to the data model, the URL contract, the server-side validation, the Step 2/3 aside, the per-type cart summary pill, or the `requiredExtraBedsFor` / `updateExtraBedCount` helpers.
+
+### Gates
+
+- **EXB-11** — the underlying contract is unchanged. The toggle is still per-type, the soft floor is still derived from `requiredExtraBedsFor`, the per-type mirror via `updateExtraBedCount` is unchanged.
+- **EXB-11.1** — the placement + checkbox-for-`maxExtraBeds === 1` shape is unchanged. Only the auto-init is removed.
+- **EXB-11.2** — the auto-init `useEffect` + `displayExtraBeds` derivation are removed. The soft-floor `<= cap` infinite-loop guard added in the 2026-08-06 hotfix is moot.
+- **CHD-11** — the capacity chip is at the top of the card and is unchanged. The Extras move doesn't touch the chip.
+- **CHD-12** — the per-type cart summary's "N extra beds" inline pill is unchanged. It reads from the cart, which now starts at 0; the pill shows "0 extra beds" for the under-floor case, which is the honest signal.
+- **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room `extraBedCount`; the server still validates against `maxExtraBeds` and snapshots `extraBedRate`.
+- **Step 2/3 aside** — unchanged. Reads from the cart's `totalExtraBeds`.
+- **MRB-15-10** — the admin surface for editing `maxExtraBeds` and `extraBedRate` is the input side. EXB-11.4 only changes the *client-side selection surface*.
+- **MRB-15-11** — unrelated (photo gallery, not extras toggle).
+- **CHD-13** — unrelated (homepage search widget).
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+Extend `guest-app/tests/api/exb-11-user-controlled-extra-bed-toggle.test.ts`:
+
+- **Updated existing tests** (use `userExtraBeds` instead of `displayExtraBeds`): the counter's `[+]` disabled condition (`typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds`); the counter's `[−]` disabled condition (now just `typeQuantity === 0` — the user can go below the soft floor); the checkbox `checked` (`userExtraBeds === 1`); the checkbox `disabled` (now just `typeQuantity === 0` — the user can tick/untick freely); the `aria-describedby` (now `overCap ? ... : undefined`); the `updateExtraBedCount` onClick handlers (`userExtraBeds + 1`); the IIFE does NOT define `displayExtraBeds`.
+- **Removed EXB-11.2 describe block**: the auto-init useEffect tests, the `displayExtraBeds` derivation tests, the soft-floor `<= cap` infinite-loop guard tests.
+- **New EXB-11.4 describe block** (~6 source-text guards): the IIFE does NOT define `displayExtraBeds`; the stay total reads from `userExtraBeds`; the stay-total gate is `userExtraBeds > 0`; there is NO auto-init useEffect (the pre-EXB-11.4 useEffect's signature is gone); the IIFE comment block documents the EXB-11.4 reversal of the EXB-11.2 auto-init; the IIFE comment block explicitly notes the user-explicit "no auto-init" stance ("user is in full control" + "cart starts at 0").
+
+The behavioural emulator test (the user ticks/unticks the checkbox on a real room type, sees the per-night price + stay total update; the user increments/decrements the counter below the soft floor; the user can submit with 0 extra beds and sees the "Adjust room" CTA) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **Keep the auto-init, just un-disable the checkbox** — the user explicitly said "do not make choices for the user". The auto-init IS the choice; removing the `disabled` doesn't fix the root cause. The user would still see a checked checkbox they didn't choose, and the counter would still start at the soft floor. The user's complaint is about the auto-tick, not just the inability to untick.
+- **Keep the auto-init but only enforce it on the visual (not the cart — i.e., the `displayExtraBeds` derivation stays, the cart stays at 0)** — same root cause. The visual says "checked" but the cart says 0; the per-type cart summary pill in CHD-12 would show "0 extra beds" when the system requires 1, creating a display/cart mismatch the user can see. The price breakdown at Step 3 would show "0 extra beds" while the visual at Step 1 says "checked". The user would notice the mismatch and ask the same question.
+- **Keep the `[−]` disabled at the soft floor** — the user explicitly said "do not make choices for the user". The `[−]` enforcement IS a choice; the submit gate is the right surface for the under-floor case. The user who wants 0 extra beds can go to 0, hit Continue, and see the "Adjust room" CTA — a clear, honest path. Keeping the `[−]` disabled is a softer version of the same anti-pattern.
+- **Keep the `aria-describedby` at `softFloor >= 1`** — the pre-EXB-11.4 condition points to a non-existent element in the common case (soft floor = 1, not over-cap). The fix aligns the `aria-describedby` with the warning's actual render condition so screen readers don't announce a non-existent element. This is a pre-existing bug from EXB-11.2 that EXB-11.4 fixes as part of the visual revert.
+- **Show a "we added an extra bed for your group" toast notification on auto-init** — a notification is patronizing. EXB-11.4 removes the auto-init entirely, so the toast is moot.
+- **Add a "we recommend N extra beds" hint next to the checkbox** — a hint is a soft push, not a choice. But the user wants no system guidance at all. The over-cap warning text stays for the case where the group physically can't fit, and the submit gate catches the under-floor case. A recommendation hint is a softer version of the same anti-pattern.
+- **Revert the soft-floor floor on the `[−]` only (keep the checkbox relaxed)** — inconsistent UX. The user would have full control on the checkbox case (`maxExtraBeds === 1`) but constrained control on the counter case (`maxExtraBeds >= 2`). The user explicitly asked for full control on both.
+- **Auto-init as a hidden `?autoInitExtraBeds=true` URL param for A/B testing** — a future testing work item. Out of scope — the operator's ask is "no auto-init", and a hidden URL param is a different shape.
+
+### Phase 2 (deferred, NOT in EXB-11.4)
+
+- **Auto-init as a hidden `?autoInitExtraBeds=true` URL param for A/B testing** — a future testing work item. Out of scope — the operator's ask is "no auto-init", and a hidden URL param is a different shape.
+- **A "Recommended: N extra beds" badge on the card** — a label, not a fix. The user wants no system guidance.
+- **A "We added this for you" toast on auto-init** — moot. Auto-init is removed.
+- **Per-room individual extra-bed toggles** — let the user add an extra bed to one Single but not the other. Carried over from EXB-11's Phase 2 list.
+- **A "Reset to 0 extra beds" quick action** — out of scope. The counter's `[−]` is now freely clickable; the user can reset to 0 manually.
+
+---
+
 ## EXB-11.3 — No Default Room-Type Selection on `/book` Page Load
 > Proposed 2026-08-04, per decision #191 (operator feedback post-EXB-11.2 shipped surface). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:836-863` (the auto-select useEffect). Sibling to EXB-11 + EXB-11.1 + EXB-11.2 — same `/book` surface, different UX refinement.
 
