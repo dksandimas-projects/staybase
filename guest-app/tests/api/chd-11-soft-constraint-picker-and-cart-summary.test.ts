@@ -35,14 +35,15 @@ const bookingPageSrc = readFileSync(
 );
 
 // Slice the children stepper — from the "Children (0–11)"
-// label to the end of the helper-text span (the `<span
-// id="children-cap-help" ...>` block).
+// label to the end of the `<label>` block (per
+// operator request 2026-08-06: the helper text is
+// removed; the slice anchor is the `</label>` close
+// of the children stepper's `<label>` block).
 const childrenStepperStart = bookingPageSrc.indexOf("Children (0–11)");
-// Find the END of the children-cap-help span (the matching
-// `</span>`). A simple `+200` is fragile; use a balanced
-// find for the close of the helper span.
-const childrenHelpStart = bookingPageSrc.indexOf("id=\"children-cap-help\"", childrenStepperStart);
-const childrenHelpEnd = bookingPageSrc.indexOf("</span>", childrenHelpStart) + "</span>".length;
+// The end of the children stepper's label block is
+// the `</label>` close. We find the first `</label>`
+// after the children stepper's start.
+const childrenHelpEnd = bookingPageSrc.indexOf("</label>", childrenStepperStart) + "</label>".length;
 const childrenStepperSlice =
   childrenStepperStart >= 0 && childrenHelpEnd > childrenStepperStart
     ? bookingPageSrc.slice(childrenStepperStart, childrenHelpEnd)
@@ -100,45 +101,56 @@ describe("CHD-11 — soft-constraint children picker on /book", () => {
     );
   });
 
-  it("drops the dead-end tail — the new tail is a forward-looking nudge", () => {
+  it("drops the dead-end tail — the new tail is a forward-looking nudge (then both are removed per operator request 2026-08-06)", () => {
     // The pre-CHD-11 helper text included "You have reached
     // this room type's limit for the current group." as a
-    // dead-end tail. The CHD-11 tail is a forward-looking
+    // dead-end tail. The CHD-11 tail was a forward-looking
     // nudge: "Pick a room type that fits your group, or add
-    // a second room."
+    // a second room." Per operator request (2026-08-06):
+    // the picker helper text is removed entirely. The
+    // chip + submit gate remain the validation surfaces.
     expect(childrenStepperSlice).not.toMatch(
       /You have reached this room type.s limit for the current group/
     );
-    expect(childrenStepperSlice).toMatch(
+    expect(childrenStepperSlice).not.toMatch(
       /Pick a room type that fits your group, or add a second room\./
     );
   });
 
-  it("keeps the existing 'extra beds cover the overflow' hint", () => {
-    // The hint is a real and useful pointer to the extra-bed
-    // escape hatch (per CHD-05 + EXB-01). It stays accurate
-    // with the cap removed — it now describes a soft limit
-    // (a per-type "up to N can fit" guidance), not a hard one.
-    expect(childrenStepperSlice).toMatch(
+  it("drops the 'extra beds cover the overflow' hint (per operator request 2026-08-06)", () => {
+    // Per operator request (2026-08-06): the helper text
+    // is removed entirely. The hint about "Up to N can
+    // fit when extra beds cover the overflow" is gone.
+    // The capacity chip (Fits / Tight / Doesn't fit)
+    // on the room-type card is the read surface.
+    expect(childrenStepperSlice).not.toMatch(
       /Up to \$\{selectedMaxSelectableChildren\} can fit when extra beds cover the overflow/
     );
   });
 
-  it("keeps the 'at least one adult' invariant (numChildren < guests)", () => {
-    // The `Math.max(0, guests - 1)` half of the soft cap is
-    // the existing invariant — children cannot exceed
-    // (guests - 1) because at least one adult is required
-    // per the /book invariant. Preserved from the pre-CHD-11
-    // shape.
-    expect(childrenStepperSlice).toMatch(/Math\.max\(0, guests - 1\)/);
+  it("the 'at least one adult' invariant stays (defense in depth — picker enforces it via Adults min 1)", () => {
+    // The `Math.max(0, guests - 1)` half of the soft cap
+    // was the historical invariant — children couldn't
+    // exceed (guests - 1) because at least one adult
+    // was required. Per CHD-11.5 (decision #196): the
+    // picker is now Adults + Children directly; the
+    // Adults stepper min 1 enforces the invariant at
+    // the picker. The `Math.max(0, guests - 1)` formula
+    // is gone (the picker can't go past `adults`).
+    // The submit gate's `numAdults >= 1` check stays as
+    // defense in depth.
+    expect(childrenStepperSlice).not.toMatch(/Math\.max\(0, guests - 1\)/);
   });
 
-  it("preserves the live status text via `aria-live=\"polite\"`", () => {
-    // The picker is a live region; the helper text announces
-    // capacity changes to screen readers.
-    expect(childrenStepperSlice).toMatch(/aria-live="polite"/);
-    expect(childrenStepperSlice).toMatch(/id="children-cap-help"/);
-    expect(childrenStepperSlice).toMatch(/aria-describedby="children-cap-help"/);
+  it("the children stepper has NO helper text (removed per operator request 2026-08-06)", () => {
+    // Per operator request (2026-08-06): the picker
+    // helper text is removed entirely. The
+    // `id="children-cap-help"` + `aria-describedby="..."`
+    // are gone. The picker is the exploration surface;
+    // the chip + submit gate are the validation surfaces.
+    expect(childrenStepperSlice).not.toMatch(/aria-live="polite"/);
+    expect(childrenStepperSlice).not.toMatch(/id="children-cap-help"/);
+    expect(childrenStepperSlice).not.toMatch(/aria-describedby="children-cap-help"/);
   });
 });
 
