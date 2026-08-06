@@ -1059,14 +1059,32 @@ const storageUrlRefiner = (val: string | null) => {
   return val.startsWith(storageBucketUrl);
 };
 
-const publicRoomSelectionSchema = z.object({
+// Exported for the EXB-12 strict-schema regression test
+// (see `tests/api/exb-12-strict-schema-acceptance.test.ts`).
+// The schema is a pure Zod object — no Firebase dependency at
+// parse time — so importing it from a unit test is safe and
+// catches the entire class of "client sends a new field but
+// the strict server schema rejects it" regressions that the
+// regex-only test surface would miss.
+export const publicRoomSelectionSchema = z.object({
   bookingId: z.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX).optional(),
   roomType: z.string().trim().min(1).max(120),
   numAdults: z.coerce.number().int().min(0).max(100),
   numChildren: z.coerce.number().int().min(0).max(100),
   extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
   hasBreakfast: z.boolean(),
-  breakfastIncludesChildren: z.boolean().optional()
+  breakfastIncludesChildren: z.boolean().optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // per-room opt-in for breakfast on the extra-bed
+  // occupant(s). The client sends this from the
+  // per-type toggle in the Extras sub-section (or
+  // always, even when false — the strict schema
+  // would otherwise reject every booking because
+  // EXB-12's body always includes the field).
+  // The server enforces the invariant
+  // `extraBedBreakfast implies extraBedCount > 0`
+  // in the `validatedRoomStays` loop below.
+  extraBedBreakfast: z.boolean().optional()
 }).strict().superRefine((selection, ctx) => {
   if (selection.numAdults + selection.numChildren < 1) {
     ctx.addIssue({
@@ -1093,7 +1111,14 @@ function allocateRoundedAmount(total: number, weights: number[]): number[] {
   return allocations;
 }
 
-const createBookingSchema = z.object({
+// Exported for the EXB-12 strict-schema regression test
+// (see `tests/api/exb-12-strict-schema-acceptance.test.ts`).
+// The schema is a pure Zod object — no Firebase dependency at
+// parse time — so importing it from a unit test is safe and
+// catches the entire class of "client sends a new field but
+// the strict server schema rejects it" regressions that the
+// regex-only test surface would miss.
+export const createBookingSchema = z.object({
   bookingId: z.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
   roomType: z.string().trim().min(1).max(120),
   checkIn: z.string().trim().min(1).max(40),
@@ -1124,6 +1149,17 @@ const createBookingSchema = z.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // top-level extra-bed breakfast toggle. The client
+  // always sends it (defaults to `false` from
+  // `bookingRoomCart.ts:63`), so the strict schema
+  // must accept the field. The server-side
+  // authoritative value lives on each
+  // `roomSelections[i].extraBedBreakfast` (per-room
+  // pricing + invariant enforcement); this top-level
+  // field is accepted for wire back-compat with the
+  // EXB-12 client shape and otherwise unused.
+  extraBedBreakfast: z.boolean().optional(),
   guestDetails: guestDetailsSchema,
   discountType: z.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side

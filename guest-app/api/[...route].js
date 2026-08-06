@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.2";
+    VERSION2 = "0.264.6";
   }
 });
 
@@ -221528,7 +221528,13 @@ var init_booking = __esm({
       roomId: external_exports.string().trim().min(1).max(64),
       numAdults: external_exports.coerce.number().int().min(0).max(100),
       numChildren: external_exports.coerce.number().int().min(0).max(100),
-      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0)
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
+      // Per EXB-12 (2026-08-06, per decision #199): whether the
+      // walk-in guest wants breakfast for the extra-bed occupant(s).
+      // Optional — when absent, the server treats it as `false`.
+      // The server validates the invariant: `extraBedBreakfast`
+      // can only be `true` when `extraBedCount > 0`.
+      extraBedBreakfast: external_exports.boolean().optional()
     }).strict();
     WalkinBookingSchema = external_exports.object({
       bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
@@ -221569,6 +221575,14 @@ var init_booking = __esm({
       // server snapshots the room type's `extraBedRate` onto the
       // booking doc alongside this field.
       extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
+      // Per EXB-12 (2026-08-06, per decision #199): whether the
+      // guest wants breakfast for the extra-bed occupant(s). When
+      // `true`, all `extraBedCount` beds in this room are counted
+      // toward the breakfast total. Optional — when absent, the
+      // server treats it as `false` (no breakfast for extra beds).
+      // The server validates the invariant: `extraBedBreakfast`
+      // can only be `true` when `extraBedCount > 0`.
+      extraBedBreakfast: external_exports.boolean().optional(),
       guestDetails: WalkinGuestDetailsSchema,
       paymentMethod: external_exports.string().trim().min(1).max(80),
       // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
@@ -222245,6 +222259,10 @@ function calculateBreakfastAddOn(input) {
     effectiveOccupancy = numAdults + (includesChildren ? numChildren : 0);
   } else {
     effectiveOccupancy = Number(input.numGuests) || 0;
+  }
+  if (input.extraBedBreakfast) {
+    const extraBedCount = Number(input.extraBedCount) || 0;
+    effectiveOccupancy += extraBedCount;
   }
   if (effectiveOccupancy === 0) return 0;
   return rate * effectiveOccupancy * nights;
@@ -227085,7 +227103,14 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
       hasBreakfast: booking.hasBreakfast,
       breakfastRate: booking.breakfastRate,
       numGuests: booking.numGuests,
-      numNights: nights
+      numNights: nights,
+      // Per EXB-12 (2026-08-06, per decision #199):
+      // pass the extra-bed breakfast fields from
+      // the booking doc so the rebuild matches the
+      // create-time total. Nullish → no extra-bed
+      // breakfast (back-compat with older docs).
+      extraBedCount: booking.extraBedCount,
+      extraBedBreakfast: booking.extraBedBreakfast === true
     })
   }] : [];
   const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
@@ -227095,7 +227120,10 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
       hasBreakfast: booking.hasBreakfast,
       breakfastRate: booking.breakfastRate,
       numGuests: booking.numGuests,
-      numNights: originalNights
+      numNights: originalNights,
+      // Per EXB-12: same as above.
+      extraBedCount: booking.extraBedCount,
+      extraBedBreakfast: booking.extraBedBreakfast === true
     })
   }] : []);
   const originalPricing = composeRateBreakdown({
@@ -227561,7 +227589,18 @@ var publicRoomSelectionSchema = external_exports.object({
   numChildren: external_exports.coerce.number().int().min(0).max(100),
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
   hasBreakfast: external_exports.boolean(),
-  breakfastIncludesChildren: external_exports.boolean().optional()
+  breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // per-room opt-in for breakfast on the extra-bed
+  // occupant(s). The client sends this from the
+  // per-type toggle in the Extras sub-section (or
+  // always, even when false — the strict schema
+  // would otherwise reject every booking because
+  // EXB-12's body always includes the field).
+  // The server enforces the invariant
+  // `extraBedBreakfast implies extraBedCount > 0`
+  // in the `validatedRoomStays` loop below.
+  extraBedBreakfast: external_exports.boolean().optional()
 }).strict().superRefine((selection, ctx) => {
   if (selection.numAdults + selection.numChildren < 1) {
     ctx.addIssue({
@@ -227617,6 +227656,17 @@ var createBookingSchema = external_exports.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // top-level extra-bed breakfast toggle. The client
+  // always sends it (defaults to `false` from
+  // `bookingRoomCart.ts:63`), so the strict schema
+  // must accept the field. The server-side
+  // authoritative value lives on each
+  // `roomSelections[i].extraBedBreakfast` (per-room
+  // pricing + invariant enforcement); this top-level
+  // field is accepted for wire back-compat with the
+  // EXB-12 client shape and otherwise unused.
+  extraBedBreakfast: external_exports.boolean().optional(),
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -228143,6 +228193,7 @@ async function handleCreateBooking(req, res) {
             requestedRoomSelections?.length ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra bed(s), but only ${extraBedCount2} selected.` : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount2} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
+        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount2 > 0;
         return {
           ...assignedRoom,
           numAdults: numAdults2,
@@ -228150,6 +228201,11 @@ async function handleCreateBooking(req, res) {
           numGuests: numAdults2 + numChildren2,
           extraBedCount: extraBedCount2,
           extraBedRate: extraBedCount2 > 0 ? Math.max(0, Number(selectionType.extraBedRate) || 0) : 0,
+          // Per EXB-12: snapshot the breakfast-for-extra-beds
+          // toggle onto the validated stay. The pricing loop
+          // reads this to count the extra beds toward the
+          // breakfast total (same rate as adult breakfast).
+          extraBedBreakfast,
           breakfastIncludesChildren: selection.breakfastIncludesChildren !== void 0 ? selection.breakfastIncludesChildren : breakfastIncludesChildrenDefault
         };
       });
@@ -228277,7 +228333,18 @@ async function handleCreateBooking(req, res) {
           numAdults: stay.numAdults,
           numChildren: stay.numChildren,
           numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren
+          breakfastIncludesChildren: stay.breakfastIncludesChildren,
+          // Per EXB-12 (2026-08-06, per decision #199):
+          // when the guest opts in to breakfast for the
+          // extra-bed occupant(s), the helper counts
+          // `extraBedCount` toward the breakfast total
+          // (priced as `breakfastRate × extraBedCount ×
+          // numNights`). The toggle is per-type, snapshotted
+          // onto the validated stay above. The invariant
+          // `extraBedBreakfast implies extraBedCount > 0`
+          // is enforced above.
+          extraBedCount: stay.extraBedCount,
+          extraBedBreakfast: stay.extraBedBreakfast === true
         });
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
@@ -228792,6 +228859,14 @@ async function handleCreateBooking(req, res) {
             breakfastIncludesChildren: pricingForRoom.finalHasBreakfast ? pricingForRoom.breakfastIncludesChildren : false,
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
+            // Per EXB-12 (2026-08-06, per decision #199):
+            // snapshot the extra-bed breakfast toggle onto
+            // the booking doc. The invariant
+            // `extraBedBreakfast implies extraBedCount > 0`
+            // is enforced in the validatedRoomStays loop
+            // above. Absent → `false` (no breakfast for extra
+            // beds) for back-compat with older booking docs.
+            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
