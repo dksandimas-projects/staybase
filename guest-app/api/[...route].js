@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.6";
+    VERSION2 = "0.264.7";
   }
 });
 
@@ -222782,6 +222782,21 @@ var init_paymentReference = __esm({
   }
 });
 
+// ../shared/utils/paymentVerification.ts
+function isPaymentVerified(booking) {
+  if (!booking) return false;
+  if (booking.status === "payment-confirmed") return true;
+  const stamp = booking.paymentConfirmedAt;
+  if (stamp === null || stamp === void 0) return false;
+  if (typeof stamp === "string") return stamp.trim().length > 0;
+  if (stamp instanceof Date) return !Number.isNaN(stamp.getTime());
+  return false;
+}
+var init_paymentVerification = __esm({
+  "../shared/utils/paymentVerification.ts"() {
+  }
+});
+
 // ../shared/utils/pricing.ts
 function calculateBookingTotal(input) {
   const roomTotal = input.roomTotal ?? input.ratePerNight * input.numNights;
@@ -223866,6 +223881,7 @@ __export(shared_exports, {
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
+  isPaymentVerified: () => isPaymentVerified,
   isValidBookingRef: () => isValidBookingRef,
   isValidLookupToken: () => isValidLookupToken,
   isValidReservationId: () => isValidReservationId,
@@ -223925,6 +223941,7 @@ var init_shared = __esm({
     init_images();
     init_points();
     init_paymentReference();
+    init_paymentVerification();
     init_pricing();
     init_publicSiteCache();
     init_references();

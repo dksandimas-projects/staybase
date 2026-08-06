@@ -259,6 +259,15 @@ export interface Booking {
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: string | null;
   paymentRejectedBy?: string | null;
+  // Per FOL-01 (2026-08-06, decision #197): the durable
+  // "payment was verified" signal. ISO string (the
+  // `parseDateTimeString` convention) — server writes a `Date`,
+  // the admin mapper hydrates it to ISO. See the shared
+  // `Booking.paymentConfirmedAt` doc for the full contract.
+  // The shared `isPaymentVerified()` helper is the only
+  // authoritative read; per-render `status === "payment-confirmed"`
+  // checks are the bug this field fixes.
+  paymentConfirmedAt?: string | null;
   rescheduleHistory?: any[];
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
@@ -1360,6 +1369,25 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // canonical "absent" is `null`, not `""`.
             paymentProofUrl: data.paymentProofUrl || null,
             paymentProofPath: data.paymentProofPath || null,
+            // Per FOL-01 (2026-08-06, decision #197): the
+            // durable "payment was verified" signal. Hydrate
+            // from the Firestore doc (server writes a `Date`;
+            // admin convention is ISO string via
+            // `parseDateTimeString`). `null` for legacy
+            // bookings and any booking whose payment has not
+            // been staff-verified. The shared
+            // `isPaymentVerified()` helper is the only
+            // authoritative read; the per-render `status ===
+            // "payment-confirmed"` checks at BookingsPage.tsx
+            // 4803-4811 + 5195-5208 are the bug this hydration
+            // (and the helper) fixes. The other two rejection
+            // fields (`paymentRejectionReason` / `paymentRejectedAt`)
+            // are not hydrated here — they're populated via
+            // the explicit reject-payment flow only and are
+            // not needed for the verified-state read.
+            paymentConfirmedAt: data.paymentConfirmedAt
+              ? parseDateTimeString(data.paymentConfirmedAt)
+              : null,
             // Per H2 (hardening batch 2026-06-26): the
             // server generates this on create. The admin
             // app just hydrates the field for display /
