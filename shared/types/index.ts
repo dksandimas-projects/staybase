@@ -659,6 +659,25 @@ export interface Booking {
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: Date | null;
   paymentRejectedBy?: string | null;
+  // Per FOL-01 (2026-08-06, off-roadmap bug fix, decision #197):
+  // the durable "payment was verified" signal. Stamped by
+  // `handleVerifyAndRecordPayment` (and `handleMarkPaymentConfirmed`
+  // / `handleConfirmBookingWithBalance`) on the full-payment
+  // transition, then NEVER cleared by any other lifecycle handler.
+  // Differs from `status === "payment-confirmed"` in that
+  // `paymentConfirmedAt` survives the subsequent transitions to
+  // `confirmed` / `checked-in` / `checked-out` — so a confirmed
+  // booking whose payment was verified at some earlier point
+  // still reads as "verified" in the admin UI. The admin
+  // `isPaymentVerified()` helper in
+  // `shared/utils/paymentVerification.ts` is the single source of
+  // truth for that read; the per-render inline checks against
+  // `status === "payment-confirmed"` are the bug this field
+  // fixes. `null` for legacy bookings and any booking whose
+  // payment has not been staff-verified yet. The server writes
+  // it as a `Date`; the admin mapper hydrates it as an ISO string
+  // (the `parseDateTimeString` convention).
+  paymentConfirmedAt?: Date | null;
   // Per PEX-01 (2026-08-01, per CVQ-12 + decision #147): the
   // snapshotted deadline at which a `pending` booking's hold on
   // the room expires. Written by `handleCreateBooking` (and the

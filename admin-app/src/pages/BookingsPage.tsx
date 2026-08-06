@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, isPaymentVerified, requiredExtraBedsFor } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -4800,10 +4800,31 @@ export function BookingsPage() {
                 <div className="flex items-center gap-2 text-xs">
                   <CreditCard size={14} className="text-gray-400" />
                   <span className="text-gray-700">{selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "Online payment"}</span>
-                  {selectedBooking.status === "payment-uploaded" && (
+                  {/* Per FOL-01 (2026-08-06, decision #197): the
+                      "Pending" / "Verified" badge is derived
+                      through the shared `isPaymentVerified()`
+                      helper, not the transient
+                      `status === "payment-confirmed"` check.
+                      Pre-FOL-01, a `confirmed` booking whose
+                      payment was verified earlier (the common
+                      case after Verify & Record Payment →
+                      Confirm Booking) rendered NO badge at
+                      all in the Overview — the staff had to
+                      click into the Folio section to see the
+                      proof. The helper ORs the durable
+                      `paymentConfirmedAt` timestamp with the
+                      transient status, so a `confirmed` booking
+                      with a stamped timestamp now shows
+                      "Verified" in the Overview too. The
+                      `payment-uploaded` branch (no
+                      verification yet, proof on file) and the
+                      `paymentRejectionReason` branch (staff
+                      rejected the proof) are unchanged —
+                      different axes. */}
+                  {selectedBooking.status === "payment-uploaded" && !isPaymentVerified(selectedBooking) && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
                   )}
-                  {selectedBooking.status === "payment-confirmed" && (
+                  {isPaymentVerified(selectedBooking) && (
                     <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">Verified</span>
                   )}
                   {selectedBooking.paymentRejectionReason && (
@@ -5192,14 +5213,31 @@ export function BookingsPage() {
                     <CreditCard size={14} className="text-primary" />
                     Payment Proof
                   </h3>
-                  {selectedBooking.status === "payment-confirmed" || selectedBooking.status === "confirmed" || selectedBooking.paymentRejectionReason ? (
+                  {/* Per FOL-01 (2026-08-06, decision #197): the
+                      payment-state read in the Folio block is
+                      derived through the shared
+                      `isPaymentVerified()` helper, not the
+                      transient `status === "payment-confirmed"`
+                      check. Pre-FOL-01, the inner ternary
+                      `status === "payment-confirmed" ? "Verified"
+                      : ... : "Pending"` silently showed "Pending"
+                      on a booking the staff had already confirmed
+                      (status moved to "confirmed" but the
+                      verification never went away). The helper
+                      ORs the durable `paymentConfirmedAt`
+                      timestamp with the transient status, so
+                      both shapes render "Verified". The
+                      `paymentRejectionReason` branch is
+                      unchanged — it's a different axis (the
+                      staff explicitly rejected the proof). */}
+                  {isPaymentVerified(selectedBooking) || selectedBooking.status === "confirmed" || selectedBooking.paymentRejectionReason ? (
                     <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
                       <div className="space-y-0.5 text-xs">
                         <p className="font-semibold text-gray-800">
                           {selectedBooking.paymentMethod} · {getLatestPaymentReference(selectedBooking) || "No reference"}
                         </p>
                         <p className="text-[10px] text-gray-400">
-                          {selectedBooking.status === "payment-confirmed" ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
+                          {isPaymentVerified(selectedBooking) ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
                         </p>
                       </div>
                       <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50">
