@@ -739,6 +739,17 @@ export interface Booking {
   extraBedCount?: number;
   extraBedRate?: number;
   /**
+   * Per EXB-12 (2026-08-06, per decision #199): whether the
+   * guest opted in to breakfast for the extra-bed occupant(s).
+   * When `true`, all `extraBedCount` beds in this room are
+   * counted toward the breakfast total (priced as
+   * `breakfastRate × extraBedCount × nights`). Snapshotted
+   * from the cart at booking time. The server validates that
+   * `extraBedBreakfast` can only be `true` when `extraBedCount > 0`.
+   * Defaults to `false` (no breakfast for extra beds).
+   */
+  extraBedBreakfast?: boolean;
+  /**
    * Per DSC-01..05 (2026-08-01, per CVQ-06): the admin's
    * per-class discount scope at the moment this booking was
    * created. Snapshotted from `settings/hotelConfig.discountScope`

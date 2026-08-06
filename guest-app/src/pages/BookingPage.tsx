@@ -615,7 +615,15 @@ export function BookingPage() {
     numAdults: room.numAdults,
     numChildren: room.numChildren,
     numNights: nights,
-    breakfastIncludesChildren
+    breakfastIncludesChildren,
+    // Per EXB-12 (2026-08-06, per decision #199): when the
+    // guest opts in to breakfast for the extra-bed
+    // occupant(s), the helper counts `extraBedCount` toward
+    // the breakfast total. The user opts in via the toggle
+    // on the Extras sub-section. The server validates the
+    // invariant `extraBedBreakfast implies extraBedCount > 0`.
+    extraBedCount: room.extraBedCount,
+    extraBedBreakfast: room.extraBedBreakfast === true
   }), 0);
   // Per CHD-10: the effective breakfast occupancy, exposed for
   // the rate-card per-night label. When the toggle is on, this
@@ -1015,7 +1023,11 @@ export function BookingPage() {
             rateChoice: nextRateChoice,
             numAdults: 0,
             numChildren: 0,
-            extraBedCount: 0
+            extraBedCount: 0,
+            // Per EXB-12: default to `false` — the guest opts
+            // in to breakfast for extra beds via the toggle
+            // on the Extras sub-section.
+            extraBedBreakfast: false
           }
         ];
       } else if (existingRoom.rateChoice === nextRateChoice) {
@@ -1054,6 +1066,11 @@ export function BookingPage() {
       const matching = current.filter((room) => room.roomType === typeValue);
       const other = current.filter((room) => room.roomType !== typeValue);
       const templateChoice = matching[0]?.rateChoice ?? rateChoice;
+      // Per EXB-12: preserve the extra-bed breakfast toggle
+      // from the first matching room (the user's pick applies
+      // to every room of this type — same per-type mirror
+      // pattern as `extraBedCount` and `rateChoice`).
+      const templateExtraBedBreakfast = matching[0]?.extraBedBreakfast === true;
       const resized = Array.from({ length: safeQuantity }, (_, index) =>
         matching[index] ?? {
           bookingId: doc(collection(db, "bookings")).id,
@@ -1061,7 +1078,8 @@ export function BookingPage() {
           rateChoice: templateChoice,
           numAdults: 0,
           numChildren: 0,
-          extraBedCount: 0
+          extraBedCount: 0,
+          extraBedBreakfast: templateExtraBedBreakfast
         }
       );
       const next = [...other, ...resized];
@@ -1097,6 +1115,36 @@ export function BookingPage() {
           ? { ...room, extraBedCount: safeCount }
           : room
       );
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("rooms", serializeBookingRoomCart(next));
+      setSearchParams(nextParams, { replace: true });
+      return next;
+    });
+  }
+
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // extra-bed breakfast toggle. The user opts in to
+  // breakfast for the extra-bed occupant(s) — all
+  // `extraBedCount` beds in the room are then counted toward
+  // the breakfast total. The toggle is per-type (mirrored
+  // onto every room of the type, same pattern as the extra-
+  // bed count + rate choice). When the extra-bed count drops
+  // to 0, the toggle is forced off (no breakfast for
+  // extra beds when there are no extra beds). The user can
+  // also explicitly turn it off; both paths set
+  // `extraBedBreakfast = false`.
+  function updateExtraBedBreakfast(typeValue: string, nextEnabled: boolean) {
+    setRoomCart((current) => {
+      if (!current.some((room) => room.roomType === typeValue)) return current;
+      const next = current.map((room) => {
+        if (room.roomType !== typeValue) return room;
+        // Per EXB-12: if the extra-bed count is 0, force the
+        // toggle off. No extra beds = no extra-bed breakfast.
+        // Same invariant the server validates: `extraBedBreakfast
+        // implies extraBedCount > 0`.
+        const safeEnabled = nextEnabled && (room.extraBedCount || 0) > 0;
+        return { ...room, extraBedBreakfast: safeEnabled };
+      });
       const nextParams = new URLSearchParams(searchParams);
       nextParams.set("rooms", serializeBookingRoomCart(next));
       setSearchParams(nextParams, { replace: true });
@@ -1309,6 +1357,12 @@ export function BookingPage() {
             numAdults: room.numAdults,
             numChildren: room.numChildren,
             extraBedCount: room.extraBedCount,
+            // Per EXB-12 (2026-08-06, per decision #199):
+            // whether the guest wants breakfast for the
+            // extra-bed occupant(s). The server validates
+            // the invariant `extraBedBreakfast implies
+            // extraBedCount > 0`.
+            extraBedBreakfast: room.extraBedBreakfast === true,
             hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
             breakfastIncludesChildren
           })),
@@ -1344,6 +1398,14 @@ export function BookingPage() {
           // validates against the room type's `maxExtraBeds` and
           // snapshots the rate onto the booking doc.
           extraBedCount: firstRoomSelection.extraBedCount,
+          // Per EXB-12 (2026-08-06, per decision #199): whether
+          // the guest wants breakfast for the extra-bed
+          // occupant(s). The server validates the invariant
+          // `extraBedBreakfast implies extraBedCount > 0` and
+          // counts the extra beds toward the breakfast total
+          // when truthy. Optional — when absent, the server
+          // treats it as `false` (no breakfast for extra beds).
+          extraBedBreakfast: firstRoomSelection.extraBedBreakfast === true,
           guestDetails: {
             firstName: guestDetails.firstName,
             lastName: guestDetails.lastName,
@@ -2828,6 +2890,48 @@ export function BookingPage() {
                                     className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                                   />
                                 </label>
+                                {/* Per EXB-12 (2026-08-06, per
+                                    decision #199): the extra-bed
+                                    breakfast toggle. When the
+                                    guest opts in, all
+                                    `extraBedCount` beds in the
+                                    room are counted toward the
+                                    breakfast total. The toggle
+                                    is disabled when there are no
+                                    extra beds (the invariant
+                                    `extraBedBreakfast implies
+                                    extraBedCount > 0`). The
+                                    price hint (+ ₱X / bed /
+                                    night) is shown only when the
+                                    toggle is meaningful (extra
+                                    beds present + breakfast
+                                    config enabled). The toggle
+                                    only renders when the
+                                    breakfast config is enabled
+                                    (no point offering breakfast
+                                    for extra beds when
+                                    breakfast is globally off). */}
+                                {typeQuantity > 0 && breakfastConfig.isEnabled ? (
+                                  <label
+                                    className="flex items-center gap-2 text-xs text-gray-700"
+                                    data-testid={`extras-breakfast-toggle-${type.value}`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={userExtraBeds > 0 && selectedTypeRooms[0]?.extraBedBreakfast === true}
+                                      disabled={userExtraBeds === 0}
+                                      onChange={(e) => updateExtraBedBreakfast(type.value, e.target.checked)}
+                                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                    />
+                                    <span>Include breakfast for the extra bed{userExtraBeds === 1 ? "" : "s"}</span>
+                                    {userExtraBeds > 0 && typeExtraBedRate > 0 ? null : null}
+                                    {userExtraBeds > 0 && breakfastRate > 0 ? (
+                                      <span className="text-gray-500">
+                                        + {formatPrice(breakfastRate)} / bed / night
+                                      </span>
+                                    ) : null}
+                                  </label>
+                                ) : null}
                                 {/* Stay total + soft-floor
                                     warning (shared with the
                                     counter branch). The
@@ -2913,6 +3017,38 @@ export function BookingPage() {
                                   </button>
                                 </span>
                               </div>
+                              {/* Per EXB-12 (2026-08-06, per
+                                  decision #199): the extra-bed
+                                  breakfast toggle (counter
+                                  branch). Same shape as the
+                                  checkbox branch above. The
+                                  toggle is disabled when there
+                                  are no extra beds; the price
+                                  hint (+ ₱X / bed / night) is
+                                  shown only when the toggle is
+                                  meaningful. The toggle only
+                                  renders when the breakfast
+                                  config is enabled. */}
+                              {typeQuantity > 0 && breakfastConfig.isEnabled ? (
+                                <label
+                                  className="flex items-center gap-2 text-xs text-gray-700"
+                                  data-testid={`extras-breakfast-toggle-${type.value}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={userExtraBeds > 0 && selectedTypeRooms[0]?.extraBedBreakfast === true}
+                                    disabled={userExtraBeds === 0}
+                                    onChange={(e) => updateExtraBedBreakfast(type.value, e.target.checked)}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                  />
+                                  <span>Include breakfast for the extra bed{userExtraBeds === 1 ? "" : "s"}</span>
+                                  {userExtraBeds > 0 && breakfastRate > 0 ? (
+                                    <span className="text-gray-500">
+                                      + {formatPrice(breakfastRate)} / bed / night
+                                    </span>
+                                  ) : null}
+                                </label>
+                              ) : null}
                               {typeQuantity > 0 && userExtraBeds > 0 ? (
                                 <p
                                   className="text-xs text-gray-600"

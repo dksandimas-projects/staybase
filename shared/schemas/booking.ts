@@ -82,7 +82,13 @@ export const WalkinRoomLineSchema = z.object({
   roomId: z.string().trim().min(1).max(64),
   numAdults: z.coerce.number().int().min(0).max(100),
   numChildren: z.coerce.number().int().min(0).max(100),
-  extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0)
+  extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
+  // Per EXB-12 (2026-08-06, per decision #199): whether the
+  // walk-in guest wants breakfast for the extra-bed occupant(s).
+  // Optional — when absent, the server treats it as `false`.
+  // The server validates the invariant: `extraBedBreakfast`
+  // can only be `true` when `extraBedCount > 0`.
+  extraBedBreakfast: z.boolean().optional()
 }).strict();
 
 export const WalkinBookingSchema = z.object({
@@ -124,6 +130,14 @@ export const WalkinBookingSchema = z.object({
   // server snapshots the room type's `extraBedRate` onto the
   // booking doc alongside this field.
   extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): whether the
+  // guest wants breakfast for the extra-bed occupant(s). When
+  // `true`, all `extraBedCount` beds in this room are counted
+  // toward the breakfast total. Optional — when absent, the
+  // server treats it as `false` (no breakfast for extra beds).
+  // The server validates the invariant: `extraBedBreakfast`
+  // can only be `true` when `extraBedCount > 0`.
+  extraBedBreakfast: z.boolean().optional(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: z.string().trim().min(1).max(80),
   // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
