@@ -2019,6 +2019,15 @@ export async function handleCreateBooking(req: any, res: any) {
             : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
+        // Per EXB-12 (2026-08-06, per decision #199): the
+        // extra-bed breakfast toggle. The user opts in to
+        // breakfast for the extra-bed occupant(s). The server
+        // validates the invariant: `extraBedBreakfast`
+        // can only be `true` when `extraBedCount > 0`. A
+        // `true` toggle with 0 extra beds is a client bug
+        // (or a stale URL); we force it off here so the
+        // breakfast total isn't inflated by phantom beds.
+        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount > 0;
         return {
           ...assignedRoom,
           numAdults,
@@ -2028,6 +2037,11 @@ export async function handleCreateBooking(req: any, res: any) {
           extraBedRate: extraBedCount > 0
             ? Math.max(0, Number(selectionType.extraBedRate) || 0)
             : 0,
+          // Per EXB-12: snapshot the breakfast-for-extra-beds
+          // toggle onto the validated stay. The pricing loop
+          // reads this to count the extra beds toward the
+          // breakfast total (same rate as adult breakfast).
+          extraBedBreakfast,
           breakfastIncludesChildren: selection.breakfastIncludesChildren !== undefined
             ? selection.breakfastIncludesChildren
             : breakfastIncludesChildrenDefault
@@ -2307,7 +2321,18 @@ export async function handleCreateBooking(req: any, res: any) {
           numAdults: stay.numAdults,
           numChildren: stay.numChildren,
           numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren
+          breakfastIncludesChildren: stay.breakfastIncludesChildren,
+          // Per EXB-12 (2026-08-06, per decision #199):
+          // when the guest opts in to breakfast for the
+          // extra-bed occupant(s), the helper counts
+          // `extraBedCount` toward the breakfast total
+          // (priced as `breakfastRate × extraBedCount ×
+          // numNights`). The toggle is per-type, snapshotted
+          // onto the validated stay above. The invariant
+          // `extraBedBreakfast implies extraBedCount > 0`
+          // is enforced above.
+          extraBedCount: stay.extraBedCount,
+          extraBedBreakfast: stay.extraBedBreakfast === true
         });
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
@@ -3033,6 +3058,14 @@ export async function handleCreateBooking(req: any, res: any) {
               : false,
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
+            // Per EXB-12 (2026-08-06, per decision #199):
+            // snapshot the extra-bed breakfast toggle onto
+            // the booking doc. The invariant
+            // `extraBedBreakfast implies extraBedCount > 0`
+            // is enforced in the validatedRoomStays loop
+            // above. Absent → `false` (no breakfast for extra
+            // beds) for back-compat with older booking docs.
+            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
