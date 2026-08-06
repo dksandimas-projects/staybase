@@ -892,6 +892,108 @@ The behavioural emulator test (the user ticks/unticks the checkbox on a real roo
 
 ---
 
+## EXB-11.5 — Rate Option Toggle on `/book` Step 1 (User Can Untick Room Only / Room + Breakfast)
+> Proposed 2026-08-06, per decision #198 (operator feedback post-EXB-11.4 shipped surface). Files: `guest-app/src/pages/BookingPage.tsx:989-1014` (the `selectRoomType` function — refactored to a per-type toggle) + the hint text at `BookingPage.tsx:2415` (updated to teach the toggle). Sibling to EXB-11.3 + EXB-11.4 — same `/book` Step 1 surface, different control.
+
+### The problem
+
+The post-EXB-11.3 surface (current `main` as of 2026-08-06, post-EXB-11.4) has a one-way rate-option click: clicking a rate option (`Room Only` or `Room + Breakfast`) on a card adds the room (or updates the rate if the type is already in the cart), but clicking the same rate again is a no-op — the user has no way to "untick" the room via the rate option itself. The only way to remove a room is via the "Rooms" stepper (decrement to 0), which is a per-quantity control, not a per-type toggle. The rate option is a per-type control (one button per type, not per room); it should be toggleable. Same "user is in full control" pattern as EXB-11.4 (extra-bed toggle), different surface.
+
+**Root cause.** The pre-EXB-11.5 `selectRoomType` function at `BookingPage.tsx:989-1014` had a single ternary: `hasType ? updateRate : addRoom`. The "type in cart" branch only updated the rate; it never removed the type. The user could add a room and switch between Room Only / Room + Breakfast, but they couldn't deselect the room via the rate option. The `RateOption` component is a `<button>` (per `BookingPage.tsx:3425`), and the `onSelect` handler always adds or updates — never removes.
+
+**Three reasons this was the wrong shape:**
+
+1. **Inconsistent with the per-type toggle pattern** — the rate option is a per-type control, and the natural mental model is "click to add, click again to remove" (the same pattern as the extra-bed checkbox added in EXB-11.4). The "Rooms" stepper is the per-quantity control; the rate option is the per-type control. Mixing the two shapes (one is a toggle, the other is a one-way click) is inconsistent.
+2. **Hidden state mutation** — the user adds a room via the rate option, then has to find the "Rooms" stepper to remove it. The rate option's "active" state (the checkmark) shows the room is in the cart, but the only way to change that state is via a different control. The user has to scan the card for the "Rooms" stepper, which is below the rate options and the Extras sub-section.
+3. **Asymmetric with the extra-bed toggle** — the extra-bed checkbox (EXB-11.4) is a toggle (tick/untick), but the rate option is a one-way click. The user expects toggles to be toggles. If one toggle on the card is toggleable and the other isn't, the user has to learn a different mental model for each.
+
+### The fix — three-part change
+
+**1. Split the "type in cart" branch into two.** The new `selectRoomType` function has three cases:
+
+- **(a) Type not in cart** → add 1 room with the chosen rate (Room Only or Room + Breakfast). The pre-EXB-11.5 function had this in the `false` branch of the ternary.
+- **(b) Type in cart with the same rate** → untick (per-type toggle) — remove all rooms of this type from the cart. The pre-EXB-11.5 function had this case missing entirely; the "type in cart" branch only updated the rate, never removed the type.
+- **(c) Type in cart with a different rate** → update the rate in place for every room of that type. The pre-EXB-11.5 function had this in the `true` branch of the ternary.
+
+**2. Guard the `setSelectedRoomType` + `setRateChoice` calls with a `shouldSyncSelection` flag.** The pre-EXB-11.5 function always called these setters regardless of which branch fired. The EXB-11.5 function sets the flag to `true` only on the add and switch-rate paths (cases a and c). The untick path (case b) skips the sync — the `useEffect` at `BookingPage.tsx:865` handles the selection sync when the current selection is no longer in the cart (it picks `roomCart[0]` as the new selection, or clears if the cart is empty).
+
+**3. Update the hint text on `/book` Step 1.** The pre-EXB-11.5 hint said "Select Room Only or Room + Breakfast to lock the Step 1 summary" — a one-way instruction. The EXB-11.5 hint says "Click a rate to add a room. Click the same rate again to remove it." — a two-way instruction that teaches the toggle.
+
+### What the user sees now
+
+- **Empty cart → click "Room Only" on Single Room** → 1 Single Room added to the cart with rate "room-only". The "Room Only" rate option shows the checkmark (`active = true`). The "Rooms" stepper shows 1. The Step 1 summary is now active.
+- **1 Single Room (rate "room-only") → click "Room Only" again** → Single Room removed from the cart. The "Room Only" rate option no longer shows the checkmark (`active = false`). The "Rooms" stepper is hidden (no rooms of this type). The selection sync useEffect picks another type (or clears if the cart is empty). The bottom bar shows the "Add at least one room" CTA.
+- **1 Single Room (rate "room-only") → click "Room + Breakfast"** → the rate is updated in place to "room-breakfast" (same as the pre-EXB-11.5 behavior). The "Room + Breakfast" rate option shows the checkmark; the "Room Only" rate option does not. The "Rooms" stepper still shows 1.
+- **2 Single Rooms (rate "room-only") → click "Room Only" again** → both rooms removed (per-type toggle, not per-room). The "Rooms" stepper is hidden.
+- **1 Single Room + 1 Family Room → click "Room Only" on Single Room** → Single Room removed; Family Room stays. The selection sync useEffect picks the Family Room as the new selection. The Step 2/3 aside updates to show the Family Room.
+
+### Why this is the right shape
+
+- **(1) Consistent with the per-type toggle pattern** — the rate option is a per-type control, and the toggle is the natural shape. Same pattern as the extra-bed checkbox (EXB-11.4). The "Rooms" stepper is the per-quantity control; the rate option is the per-type control. No mixing of shapes.
+- **(2) Discoverable** — the rate option's "active" state (the checkmark) shows the room is in the cart, and clicking the same option removes it. No need to find a different control to change the state. The hint text teaches the toggle.
+- **(3) Symmetric with the extra-bed toggle** — both toggles on the card are toggleable. The user has a consistent mental model: "click to add, click again to remove."
+- **(4) Per-type toggle, not per-room** — the rate option removes ALL rooms of that type, not just 1. This matches the per-type shape of the rate option (one button per type, not per room). The "Rooms" stepper is the per-quantity control for fine-grained adjustments.
+
+### What this changes for the data model
+
+Nothing. `roomCart` shape is unchanged. `roomType`, `rateChoice`, `numAdults`, `numChildren`, `extraBedCount`, `bookingId` are all unchanged. The `serializeBookingRoomCart` / `parseBookingRoomCart` helpers are unchanged. Cart URL serialization (`rooms=`) is unchanged. Server-side validation is unchanged.
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - **Refactor `selectRoomType` (lines 989-1014).** Replace the one-way ternary with a three-branch if/else: (a) type not in cart → add 1 room with the chosen rate; (b) type in cart with the same rate → untick (remove all rooms of that type); (c) type in cart with a different rate → update the rate in place. Guard the `setSelectedRoomType` + `setRateChoice` calls with a `shouldSyncSelection` flag (only set to `true` on paths a and c). The `setSearchParams` call stays inside the `setRoomCart` callback (matches the existing pattern; idempotent in React 18 StrictMode).
+  - **Update the hint text at line 2415.** Change "Select Room Only or Room + Breakfast to lock the Step 1 summary." to "Click a rate to add a room. Click the same rate again to remove it."
+- No changes to the data model, the URL contract, the server-side validation, the `RateOption` component (the toggle logic lives in the parent), the `updateRoomQuantity` function (it's the per-quantity control), the `useEffect` at `BookingPage.tsx:865` (it already handles the "selection no longer in cart" case), the `selectedRoomType` + `rateChoice` state, or the `serializeBookingRoomCart` / `parseBookingRoomCart` helpers.
+
+### Gates
+
+- **EXB-11** — the underlying contract is unchanged. The toggle is a refinement of the user-explicit path.
+- **EXB-11.1** — the Extras sub-section placement + checkbox-for-`maxExtraBeds === 1` shape is unchanged. The EXB-11.5 fix is on the rate options, not the Extras sub-section.
+- **EXB-11.2** — the auto-init useEffect is still removed per EXB-11.4. EXB-11.5 doesn't reintroduce it.
+- **EXB-11.3** — the "no default room-type on page load" invariant is preserved. The function still has the user-explicit add path; the toggle is a refinement, not a replacement.
+- **EXB-11.4** — the extra-bed toggle is unchanged. The rate-option toggle is a parallel pattern on the same card.
+- **CHD-11** — the capacity chip is unchanged.
+- **CHD-12** — the per-type cart summary is unchanged. It reads from the cart, which the toggle now mutates more often.
+- **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room data.
+- **Step 2/3 aside** — unchanged. Reads from `selectedTypeEntry` and the cart.
+- **MRB-15-10** — the admin surface for editing room types is the input side. EXB-11.5 only changes the *client-side selection surface*.
+- **MRB-15-11** — unrelated (photo gallery, not extras toggle).
+- **CHD-13** — unrelated (homepage search widget).
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+New `guest-app/tests/api/exb-11-5-rate-option-toggle.test.ts` (~8 source-text guards):
+
+- The `selectRoomType` function declares the toggle with three branches (add / untick / switch rate).
+- The untick branch removes ALL rooms of the type (per-type toggle, not per-room).
+- The add branch stays (type not in cart → add 1 room with the chosen rate).
+- The switch-rate branch stays (type in cart with different rate → update rate in place).
+- The `setSelectedRoomType` + `setRateChoice` calls are guarded by `shouldSyncSelection` (skipped on the untick path).
+- The comment block documents the per-type toggle (add / untick / switch) and references EXB-11.5 + decision #198.
+- The hint text on `/book` Step 1 is updated to "Click a rate to add a room. Click the same rate again to remove it." (and the pre-EXB-11.5 hint is gone).
+- The `selectRoomType` function is still wired to the rate-option `onSelect` handlers (sanity check).
+
+The existing `exb-11-3-no-default-room-type-on-load.test.ts` tests still pass (the function still has the user-explicit add path). The behavioural emulator test (the user clicks a rate option on a real room type, sees the room added; clicks the same rate again, sees the room removed; clicks a different rate, sees the rate updated) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **Keep the one-way click + add a separate "Remove" button next to each rate option** — friction point. Adds a new control; the toggle is the natural shape. The "Rooms" stepper already provides a way to remove rooms (decrement to 0); the toggle is a more discoverable alternative.
+- **Decrement by 1 instead of remove all** — per-room toggle, inconsistent with the per-type shape of the rate option. The "Rooms" stepper is the per-quantity control; the rate option should be the per-type toggle.
+- **Add a confirmation dialog ("Are you sure you want to remove this room?")** — friction point. The toggle is a clear, explicit action; the user clicked the same rate again, they know what they're doing. A confirmation dialog adds noise.
+- **Show a "Room removed" toast notification** — patronizing. The checkmark disappearing is enough signal; a toast notification adds noise.
+- **Add a separate "Clear cart" button** — different scope. Clears the entire cart, not just one type. A future UX work item; out of scope for EXB-11.5.
+- **Auto-clear the `selectedRoomType` when the type is removed from the cart** — handled by the existing useEffect at `BookingPage.tsx:865`. It picks `roomCart[0]` as the new selection; auto-clearing would be a third option in the useEffect, but the existing behavior is correct.
+- **Keep the pre-EXB-11.5 hint text and let the user discover the toggle** — worse discoverability. The hint text teaches the toggle explicitly, which is the right shape for a user-facing control.
+
+### Phase 2 (deferred, NOT in EXB-11.5)
+
+- **Per-room individual rate toggles** — let the user pick Room Only for one Single and Room + Breakfast for another. Out of scope — the rate is per-type, and the per-room shape would require a bigger data model change. Carried over from EXB-11's Phase 2 list.
+- **A "Clear cart" button** — a future UX work item. Clears the entire cart, not just one type.
+- **A "Remove all rooms of this type" button next to the "Rooms" stepper** — a more discoverable alternative to the rate-option toggle. Out of scope — the toggle is the natural shape, and the button would be redundant.
+- **Keyboard shortcut for the toggle** (e.g., Escape to remove the currently-active rate) — a future accessibility work item.
+
+---
+
 ## EXB-11.3 — No Default Room-Type Selection on `/book` Page Load
 > Proposed 2026-08-04, per decision #191 (operator feedback post-EXB-11.2 shipped surface). Spec-only — no code yet. Files: `guest-app/src/pages/BookingPage.tsx:836-863` (the auto-select useEffect). Sibling to EXB-11 + EXB-11.1 + EXB-11.2 — same `/book` surface, different UX refinement.
 
