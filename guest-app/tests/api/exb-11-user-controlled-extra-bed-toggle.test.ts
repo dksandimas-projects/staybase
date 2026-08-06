@@ -526,11 +526,16 @@ describe("EXB-11.2 — auto-init extra bed count to soft floor (the unchecked+di
     // matching type, computes the soft floor via
     // `requiredExtraBedsFor`, and calls
     // `updateExtraBedCount(type.value, softFloor,
-    // typeMaxExtraBeds)` when `softFloor > currentExtraBeds`.
-    // After the first fire, the cart has the soft-floor
-    // value and the next run is a no-op.
+    // typeMaxExtraBeds)` when `softFloor > currentExtraBeds
+    // && softFloor <= typeMaxExtraBeds`. The second
+    // condition is the over-cap guard (hotfix 2026-08-06):
+    // when the soft floor exceeds the cap, the cart can
+    // only be set to the cap (clamped inside
+    // `updateExtraBedCount`); without the guard, the
+    // effect would loop. The over-cap case is caught
+    // by the submit gate's `cartFitsGroup` check.
     expect(bookingPageSrc).toMatch(
-      /useEffect\(\(\) => \{[\s\S]*?for \(const room of roomCart\)[\s\S]*?if \(softFloor > currentExtraBeds\)[\s\S]*?updateExtraBedCount\(/
+      /useEffect\(\(\) => \{[\s\S]*?for \(const room of roomCart\)[\s\S]*?if \(softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds\)[\s\S]*?updateExtraBedCount\(/
     );
   });
 
@@ -554,5 +559,31 @@ describe("EXB-11.2 — auto-init extra bed count to soft floor (the unchecked+di
     // IIFE documents the new behavior.
     expect(extrasSlice).toMatch(/Per EXB-11\.2:/);
     expect(extrasSlice).toMatch(/reverses the EXB-11\.1 "no auto-init"/);
+  });
+
+  it("the auto-init useEffect has the soft-floor <= cap guard (prevents infinite loop on over-cap state, hotfix 2026-08-06)", () => {
+    // Per hotfix 2026-08-06: the auto-init useEffect
+    // at `BookingPage.tsx:778-808` had a latent
+    // infinite-loop bug. When the soft floor
+    // exceeds the type's `maxExtraBeds` cap, the
+    // cart can only be set to the cap (clamped
+    // inside `updateExtraBedCount`); the next
+    // iteration would still see `softFloor >
+    // currentExtraBeds` (since `softFloor >
+    // typeMaxExtraBeds`) and re-call
+    // `updateExtraBedCount` in an infinite loop.
+    //
+    // With the new CHD-11.5 direct Adults picker,
+    // the user can easily hit this case (e.g.,
+    // 9 adults + 8 children with a Single Room
+    // = soft floor 14, cap 1). The hotfix adds
+    // the `softFloor <= typeMaxExtraBeds` guard:
+    // only auto-init when the soft floor is
+    // reachable. The over-cap case is caught by
+    // the submit gate's `cartFitsGroup` check
+    // + the soft-floor warning text.
+    expect(bookingPageSrc).toMatch(
+      /if \(softFloor > currentExtraBeds && softFloor <= typeMaxExtraBeds\)/
+    );
   });
 });
