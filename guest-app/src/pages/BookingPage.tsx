@@ -2292,13 +2292,11 @@ export function BookingPage() {
                   </button>
                   <span className="flex items-center gap-2 text-sm text-gray-700">
                     {numChildren} {numChildren === 1 ? "child" : "children"}
-                    <span className="text-xs text-gray-500">({numAdults} adult{numAdults === 1 ? "" : "s"})</span>
                   </span>
                   <button
                     className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
                     type="button"
                     aria-label="Increase children count"
-                    aria-describedby="children-cap-help"
                     onClick={() => updateChildren(numChildren + 1)}
                     // Per CHD-11.2 (2026-08-05, per decision
                     // #193): the cap is the soft 10 (the
@@ -2319,40 +2317,6 @@ export function BookingPage() {
                     <Plus size={16} />
                   </button>
                 </div>
-                <span
-                  id="children-cap-help"
-                  className="text-xs font-normal leading-relaxed text-gray-500"
-                  aria-live="polite"
-                >
-                  {selectedTypeEntry ? (
-                    <>
-                      This room includes space for {selectedMaxChildren} child{selectedMaxChildren === 1 ? "" : "ren"}.
-                      {" "}Children stay free of the room charge.
-                      {selectedMaxSelectableChildren > selectedMaxChildren
-                        ? ` Up to ${selectedMaxSelectableChildren} can fit when extra beds cover the overflow.`
-                        : ""}
-                      {/* Per CHD-11: replace the dead-end
-                          "you have reached this room type's
-                          limit" tail with a forward-looking
-                          nudge. The cap belongs at the submit
-                          gate + the room-type card, not here.
-                          Per CHD-11.5: the historical
-                          `Math.max(0, guests - 1)` floor is
-                          gone — the Adults stepper's min 1
-                          enforces the "at least 1 adult" rule.
-                          The new floor is `Math.min(10, 0)` =
-                          0 (effectively just `0`), but the
-                          `+` button's `disabled` is
-                          `numChildren >= 10` so the nudge
-                          fires only at the soft cap. */}
-                      {numChildren >= 10
-                        ? " Pick a room type that fits your group, or add a second room."
-                        : ""}
-                    </>
-                  ) : (
-                    <>Choose a room type to see its child limit. Children stay free of the room charge.</>
-                  )}
-                </span>
               </label>
 
               {/* Per CHD-12 (2026-08-04, per decision #185):

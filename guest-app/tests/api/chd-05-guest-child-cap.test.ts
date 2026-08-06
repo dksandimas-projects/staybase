@@ -112,24 +112,39 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
     );
     // The pre-CHD-11 per-type cap is no longer enforced at
     // the picker. The per-type `selectedMaxSelectableChildren`
-    // useMemo is still used (for the "Up to N can fit when
-    // extra beds cover the overflow" hint + the capacity
-    // chip) but does NOT gate the picker.
+    // useMemo is still used (for the capacity chip) but
+    // does NOT gate the picker.
     expect(bookingPageSrc).not.toMatch(
       /numChildren >= selectedMaxSelectableChildren\s*\|\|/
     );
-    expect(bookingPageSrc).toMatch(/id="children-cap-help"/);
-    expect(bookingPageSrc).toMatch(/aria-describedby="children-cap-help"/);
+    // Per operator request (2026-08-06): the helper text
+    // under the children stepper is gone. The
+    // `id="children-cap-help"` + `aria-describedby="..."` are
+    // removed. The "Up to N can fit when extra beds..."
+    // hint + the "Children stay free of the room charge"
+    // line + the "Pick a room type that fits your group"
+    // nudge are all removed. The picker is the exploration
+    // surface; the chip + submit gate are the commit
+    // surfaces; the helper text was duplicating that info.
+    expect(bookingPageSrc).not.toMatch(/id="children-cap-help"/);
+    expect(bookingPageSrc).not.toMatch(/aria-describedby="children-cap-help"/);
+    expect(bookingPageSrc).not.toMatch(/Children stay free of the room charge/);
+    expect(bookingPageSrc).not.toMatch(/extra beds cover the overflow/);
+    expect(bookingPageSrc).not.toMatch(/Pick a room type that fits your group/);
     // The dead-end "You have reached this room type's limit"
-    // message is gone; replaced with a forward-looking
-    // "Pick a room type that fits your group, or add a
-    // second room." nudge.
+    // message is gone (was replaced by the nudge; the
+    // nudge is now also removed).
     expect(bookingPageSrc).not.toMatch(/You have reached this room type.s limit for the current group/);
-    expect(bookingPageSrc).toMatch(/Pick a room type that fits your group, or add a second room\./);
   });
 
-  it("states that children are free of the room charge in the picker and price summary", () => {
-    expect(bookingPageSrc).toMatch(/Children stay free of the room charge/);
+  it("states that children are free of the room charge in the price summary (the picker helper text is gone)", () => {
+    // Per operator request (2026-08-06): the picker
+    // helper text "Children stay free of the room charge"
+    // is removed. The price summary still shows the
+    // "Children's room charge" line + "Included at no
+    // extra room cost" — that's the post-pick surface
+    // for the same info.
+    expect(bookingPageSrc).not.toMatch(/Children stay free of the room charge/);
     expect(bookingPageSrc).toMatch(/Children’s room charge/);
     expect(bookingPageSrc).toMatch(/Included at no extra room cost/);
     expect(bookingPageSrc).toMatch(
@@ -179,9 +194,14 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
   });
 
   it("keeps every touched occupancy control at least 44px", () => {
+    // Slice the children stepper block — anchor on
+    // the label `Children (0–11)` and slice 500 chars
+    // (the helper text is gone, so the block is
+    // shorter than before). Verify 2 `h-11 w-11` buttons
+    // (`[−]` + `[+]`).
     const childrenBlock = bookingPageSrc.slice(
       bookingPageSrc.indexOf("Children (0–11)"),
-      bookingPageSrc.indexOf("children-cap-help") + 100
+      bookingPageSrc.indexOf("Children (0–11)") + 1500
     );
     expect(childrenBlock.match(/h-11 w-11/g)).toHaveLength(2);
 
