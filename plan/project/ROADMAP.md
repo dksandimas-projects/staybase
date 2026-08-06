@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 6, 2026 (FOL-01 booking-drawer payment-verified fix shipped on `fix/fol-payment-verified-after-confirm`; v0.264.7 → v0.264.8).
+> Last updated: August 6, 2026 (booking-flow audit + 4-patch hotfix shipped on `fix/booking-flow-audit-resync`; v0.264.8 → v0.264.9).
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---

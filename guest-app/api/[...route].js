@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.7";
+    VERSION2 = "0.264.8";
   }
 });
 
@@ -232754,12 +232754,15 @@ async function handleRescheduleBooking(req, res) {
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
+      const preservedExtraBedBreakfast = booking.extraBedBreakfast === true;
       const breakfastTotal = manualNightlyRate === null ? calculateBreakfastAddOn({
         hasBreakfast: booking.hasBreakfast,
         breakfastRate,
         numGuests: booking.numGuests,
         numNights,
-        breakfastIncludesChildren: booking.breakfastIncludesChildren
+        breakfastIncludesChildren: booking.breakfastIncludesChildren,
+        extraBedCount: preservedExtraBedCount,
+        extraBedBreakfast: preservedExtraBedBreakfast
       }) : 0;
       const extraBedTotal = manualNightlyRate === null ? calculateExtraBedAddOn({
         extraBedCount: preservedExtraBedCount,
@@ -232816,6 +232819,21 @@ async function handleRescheduleBooking(req, res) {
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the addOns array must include the "Extra bed
+        // add-on" line on reschedule so the receipt PDF
+        // + email + admin drawer surfaces render the
+        // term. Pre-v0.264.8 the reschedule dropped these
+        // three fields, leaving the addOns array with
+        // only the breakfast line — the extra bed was
+        // invisible on every downstream surface even
+        // though the `extraBedTotal` was correctly
+        // computed by `calculateExtraBedAddOn` two
+        // blocks above. Same shape as the create +
+        // walkin + add-room `buildRateBreakdown` calls.
+        extraBedTotal,
+        extraBedCount: preservedExtraBedCount,
+        extraBedRate: preservedExtraBedRate,
         discountType: booking.discountType || "",
         discountPct,
         voucherDiscount,
@@ -233204,6 +233222,25 @@ async function handleAddRoomToReservation(req, res) {
       }
       const typeBaseRate = Number(targetTypeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(targetTypeEntry.weekendRate) || typeBaseRate;
+      if (extraBedCount > 0) {
+        const addRoomExtraBedOverlapQuery = adminDb.collection("bookings").where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const addRoomExtraBedOverlapSnapshot = await transaction.get(addRoomExtraBedOverlapQuery);
+        const addRoomExtraBedInUse = countExtraBedsInUse(
+          addRoomExtraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          headerCheckIn,
+          headerCheckOut
+        );
+        const addRoomInventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          addRoomExtraBedInUse,
+          extraBedCount
+        );
+        if (!addRoomInventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${addRoomExtraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${addRoomExtraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
+      }
       const isCorporateReservation = Boolean(reservation.isCorporate);
       const corporateCode = String(reservation.corporateCode || "").trim().toUpperCase();
       const perRoomTypeCorporateRate = (() => {
@@ -233329,6 +233366,33 @@ async function handleAddRoomToReservation(req, res) {
         extraBedCount,
         extraBedRate,
         extraBedTotal,
+        // Per CHD-10 (2026-07-31, per CVQ-01): the
+        // snapshotted `breakfastIncludesChildren`
+        // value the new child inherits from the
+        // header (the per-room override is out of
+        // scope for MRB-14 v1). `true` is the safe
+        // default for legacy reservations that
+        // pre-date the CHD-10 snapshot — matches the
+        // historical "children pay the full rate"
+        // math. The create + walkin paths write the
+        // same field; the add-room path pre-v0.264.8
+        // silently dropped it (silent data loss for
+        // any future read site that checks
+        // `booking.breakfastIncludesChildren === true`).
+        breakfastIncludesChildren: Boolean(reservation.breakfastIncludesChildren ?? true),
+        // Per EXB-12 (2026-08-06, per decision #199):
+        // the snapshotted `extraBedBreakfast` toggle
+        // the new child inherits. The current
+        // add-room admin UI doesn't expose the
+        // toggle yet (consistent with the walkin
+        // admin surface per the EXB-12 spec — a
+        // future UX work item), so the value is
+        // `false` for every new child created via
+        // add-room until the UI is updated. The
+        // create + walkin paths write the same
+        // field; the add-room path pre-v0.264.8
+        // silently dropped it.
+        extraBedBreakfast: false,
         checkIn: Timestamp.fromDate(headerCheckIn),
         checkOut: Timestamp.fromDate(headerCheckOut),
         numNights: headerNumNights,
