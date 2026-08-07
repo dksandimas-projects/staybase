@@ -15,10 +15,24 @@ describe("Dashboard pending-payment actions", () => {
   });
 
   it("uses a compact responsive action bar with a clear primary action", () => {
+    // Per FOL-05 (2026-08-07, per decision #201): the
+    // Reject + Verify tooltips are now dynamic
+    // (`title={rejectTooltip}` + `title={verifyTooltip}`),
+    // toggled between the per-room and the
+    // reservation-scope wording depending on
+    // `item.isReservation`. The literal title strings
+    // are still present (defined as local consts
+    // inside the card's `pendingPayments.map`
+    // closure), so the test can match against them.
     expect(dashboardSrc).toMatch(/grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end/);
     expect(dashboardSrc).toMatch(/col-span-2 inline-flex min-h-\[44px\].*sm:col-auto/);
-    expect(dashboardSrc).toMatch(/title="View payment proof"/);
-    expect(dashboardSrc).toMatch(/title="Reject payment proof"/);
-    expect(dashboardSrc).toMatch(/title="Verify and record payment"/);
+    expect(dashboardSrc).toMatch(/View payment proof/);
+    expect(dashboardSrc).toMatch(/Reject payment proof/);
+    expect(dashboardSrc).toMatch(/Verify and record payment/);
+    // The reservation-scope variants are also
+    // declared so the per-room / reservation toggle
+    // can swap the tooltip.
+    expect(dashboardSrc).toMatch(/Verify and record payment \(covers all rooms covered by the amount\)/);
+    expect(dashboardSrc).toMatch(/Reject payment proof \(rejects all rooms in the reservation\)/);
   });
 });

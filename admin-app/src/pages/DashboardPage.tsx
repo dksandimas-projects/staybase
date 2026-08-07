@@ -66,9 +66,51 @@ export function selectOverdueCheckouts(bookings: Booking[], todayKey: string, cu
   ));
 }
 
+// Per FOL-05 (2026-08-07, per decision #201): the
+// reservation-grouped pending-payments shape. One
+// `PendingPaymentItem` per (a) reservation (N>=1
+// children in `payment-uploaded`) or (b) legacy
+// single-row booking (no `reservationId`). The
+// `isReservation` flag is the discriminator the
+// dashboard card + the verify modal use to switch
+// between the per-room and the reservation-scope
+// render paths. The `rooms[]` array is the per-room
+// breakdown the verify modal renders as the
+// "coverage preview" — the staff sees which rooms the
+// amount they're about to verify will clear before
+// they hit submit.
+type PendingPaymentRoom = {
+  bookingId: string;
+  roomNumber: string;
+  roomType: string;
+  totalPrice: number;
+  status: string;
+};
+type PendingPaymentItem = {
+  /** `reservationId` for grouped items, `bookingId` for legacy single-row items. */
+  id: string;
+  /** Public-facing label: `R-YYYYMMDD-NNNNN` for grouped, `SI-XXXXX` for legacy. */
+  publicRef: string;
+  /** Whether this is a reservation group (N>=1 children sharing a `reservationId`). */
+  isReservation: boolean;
+  /** The lead child (or the legacy booking) — used as the verify / reject target. */
+  leadBooking: Booking;
+  guestName: string;
+  checkIn: string;
+  checkOut: string;
+  paymentMethod: string;
+  paymentProofUrl: string | null;
+  paymentProofPath: string | null;
+  latestReference: string | null;
+  totalPrice: number;
+  paidAmount: number;
+  dueAmount: number;
+  rooms: PendingPaymentRoom[];
+};
+
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, reservations, reservationPaidAmount } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
@@ -91,6 +133,18 @@ export function DashboardPage() {
   // the first loaded render uses the same hook order as the skeleton.
   const toast = useToast();
   const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
+  // Per FOL-05 (2026-08-07, per decision #201): the
+  // reservation-scope context for the verify modal.
+  // `null` for the pre-FOL-05 single-row case (N=1
+  // legacy or N=1 reservation). When set, the modal
+  // shows the reservation-scope amount / coverage
+  // preview; the submission still passes
+  // `verifyTarget.id` (the lead booking) to the verify
+  // handler, which uses the booking's `reservationId`
+  // to find the canonical subcollection path
+  // server-side. Mirrors the BookingsPage reservation
+  // row's approach.
+  const [verifyScope, setVerifyScope] = useState<PendingPaymentItem | null>(null);
   const verifySubmissionIdRef = useRef<string | null>(null);
   const [verifyAmount, setVerifyAmount] = useState("");
   const [verifyMethod, setVerifyMethod] = useState("gcash");
@@ -220,7 +274,163 @@ export function DashboardPage() {
   const bookingsHelpText = "Bookings counts reservations created during the current month, based on each booking's createdAt month.";
   const revenueHelpText = "Revenue is the sum of totalPrice for bookings checking in this month with payment-confirmed, confirmed, checked-in, or checked-out status. It is booking value, not cash collected.";
   const corporateHelpText = "This alert only shows corporate inquiries still marked new, so fresh leads stay visible until staff moves them forward in the pipeline.";
-  const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
+  // Per FOL-05 (2026-08-07, per decision #201):
+  // reservation-grouped pending payments. The pre-FOL-05
+  // list was `bookings.filter(b => b.status ===
+  // "payment-uploaded")` — one card per child booking,
+  // which meant a 2-room reservation with one shared
+  // payment proof rendered TWO identical cards (the
+  // "verify once per room" bug the operator reported).
+  // The post-FOL-05 list groups the children of a
+  // `reservationId` into a single `PendingPaymentItem`
+  // with reservation-scope total/paid/due + a per-room
+  // breakdown for the verify modal's coverage preview.
+  // Legacy null-`reservationId` bookings (pre-MRB-01) stay
+  // as single-row items. The `reservations` listener +
+  // the `collectionGroup("payments")` aggregate
+  // (`reservationPaidAmount`, hydrated by MRB-12) are the
+  // data source — exactly the same wire the BookingsPage
+  // reservation row reads, so the dashboard can never
+  // drift from the table.
+  const pendingPaymentItems: PendingPaymentItem[] = useMemo(() => {
+    const uploaded = bookings.filter((b) => b.status === "payment-uploaded");
+    if (uploaded.length === 0) return [];
+
+    // Group by `reservationId`. Legacy bookings (no
+    // `reservationId`) become one-row items keyed by
+    // the booking id. We sort within each group by
+    // `reservationPosition` (the FOL-05 lead is the
+    // first child = lowest position) so the "verify"
+    // target is deterministic.
+    const groups = new Map<string, Booking[]>();
+    for (const booking of uploaded) {
+      const key = String(booking.reservationId || "").trim() || `legacy:${booking.id}`;
+      const existing = groups.get(key);
+      if (existing) existing.push(booking);
+      else groups.set(key, [booking]);
+    }
+
+    const items: PendingPaymentItem[] = [];
+    for (const [key, children] of groups.entries()) {
+      // Skip the legacy-prefixed keys that don't have a
+      // real reservation; the loop below handles those
+      // (each is a single-row group, no group math).
+      if (key.startsWith("legacy:")) {
+        // Should not happen — `bookings` already filtered
+        // for `payment-uploaded` and the key construction
+        // always prefixes "legacy:" when no `reservationId`.
+        // Keep the guard for type narrowing.
+        continue;
+      }
+      const isReservationGroup = children.some((c) => c.reservationId);
+      if (!isReservationGroup || children.length === 1) {
+        // Legacy single-row OR a single child of a
+        // reservation (treated as a flat item for the
+        // dashboard — the dashboard only shows the
+        // reservation group when 2+ children are
+        // currently in the alert state). N=1 reservations
+        // are byte-equivalent to the pre-FOL-05 surface.
+        const booking = children[0];
+        const paid = (booking.onsitePayments || []).reduce(
+          (sum, p) => sum + Number(p.amount || 0),
+          0
+        );
+        items.push({
+          id: booking.id,
+          publicRef: booking.bookingRef,
+          isReservation: false,
+          leadBooking: booking,
+          guestName: booking.guestName,
+          checkIn: booking.checkIn,
+          checkOut: booking.checkOut,
+          paymentMethod: booking.paymentMethod,
+          paymentProofUrl: booking.paymentProofUrl || null,
+          paymentProofPath: booking.paymentProofPath || null,
+          latestReference: getLatestPaymentReference(booking),
+          totalPrice: Number(booking.totalPrice || 0),
+          paidAmount: paid,
+          dueAmount: Math.max(0, Number(booking.totalPrice || 0) - paid),
+          rooms: [
+            {
+              bookingId: booking.id,
+              roomNumber: booking.roomNumber || "TBD",
+              roomType: booking.roomType,
+              totalPrice: Number(booking.totalPrice || 0),
+              status: booking.status
+            }
+          ]
+        });
+        continue;
+      }
+
+      // N>=1 children of a reservation. Sort by
+      // `reservationPosition` (the FOL-05 lead is the
+      // first child). For a child-less `reservationId`
+      // (a reservation that exists but whose children
+      // are all in a different status), skip — nothing
+      // to surface.
+      const sorted = [...children].sort(
+        (a, b) => (a.reservationPosition || 0) - (b.reservationPosition || 0)
+      );
+      const lead = sorted[0];
+      const totalPrice = sorted.reduce((sum, c) => sum + Number(c.totalPrice || 0), 0);
+      const reservationHeader = reservations.find((r) => r.id === key);
+      const headerTotalPrice = reservationHeader ? Number(reservationHeader.totalPrice || 0) : 0;
+      const scopedTotal = headerTotalPrice > 0 ? headerTotalPrice : totalPrice;
+      // The paid amount comes from the
+      // `collectionGroup("payments")` aggregate
+      // (`reservationPaidAmount`, populated by the
+      // MRB-12 listener) so the dashboard matches the
+      // BookingsPage's reservation row balance. Falls
+      // back to the sum of in-memory `onsitePayments`
+      // for legacy readings where the listener hasn't
+      // hydrated yet.
+      const aggregatePaid = reservationPaidAmount[key] || 0;
+      const fallbackPaid = sorted.reduce(
+        (sum, c) =>
+          sum +
+          (c.onsitePayments || []).reduce((pSum, p) => pSum + Number(p.amount || 0), 0),
+        0
+      );
+      const paidAmount = aggregatePaid > 0 ? aggregatePaid : fallbackPaid;
+
+      items.push({
+        id: key,
+        publicRef: reservationHeader?.reservationRef || lead.bookingRef,
+        isReservation: true,
+        leadBooking: lead,
+        guestName: lead.guestName,
+        checkIn: lead.checkIn,
+        checkOut: lead.checkOut,
+        paymentMethod: lead.paymentMethod,
+        // The proof lives on the reservation header
+        // (per the FOL-04 surface); the child booking's
+        // `paymentProofUrl` is the denormalized
+        // snapshot. Prefer the lead child's read so the
+        // proof preview is current.
+        paymentProofUrl: lead.paymentProofUrl || null,
+        paymentProofPath: lead.paymentProofPath || null,
+        latestReference: sorted
+          .map((c) => getLatestPaymentReference(c))
+          .filter(Boolean)[0] || null,
+        totalPrice: scopedTotal,
+        paidAmount,
+        dueAmount: Math.max(0, scopedTotal - paidAmount),
+        rooms: sorted.map((c) => ({
+          bookingId: c.id,
+          roomNumber: c.roomNumber || "TBD",
+          roomType: c.roomType,
+          totalPrice: Number(c.totalPrice || 0),
+          status: c.status
+        }))
+      });
+    }
+
+    // Sort newest first (matching the pre-FOL-05 surface).
+    items.sort((a, b) => (b.leadBooking.createdAt || "").localeCompare(a.leadBooking.createdAt || ""));
+    return items;
+  }, [bookings, reservations, reservationPaidAmount]);
+  const pendingPayments = pendingPaymentItems;
   const newCorporateInquiries = corporateInquiries.filter(inquiry => inquiry.status === "new");
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const overdueCheckouts = selectOverdueCheckouts(bookings, todayKey, currentManilaMinutes, configuredCheckOutTime);
@@ -376,15 +586,42 @@ export function DashboardPage() {
     navigate(`/bookings?bookingId=${encodeURIComponent(bookingId)}`);
   };
 
-  // Per PRC-13: verify-and-record replaces the old status-only
-  // confirmPayment. Opens a focused modal that shows the proof,
-  // defaults amount/method/reference, and atomically creates a
-  // ledger entry + transitions status in one transaction.
-  const openVerifyForm = (booking: Booking) => {
-    verifySubmissionIdRef.current = doc(collection(db, "bookings", booking.id, "payments")).id;
-    setVerifyTarget(booking);
-    setVerifyAmount(String(booking.totalPrice - (booking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)));
-    setVerifyMethod(booking.paymentMethod || "gcash");
+  // Per PRC-13 + FOL-05 (2026-08-07, per decision #201):
+  // verify-and-record replaces the old status-only
+  // confirmPayment. Opens a focused modal that shows the
+  // proof, defaults amount/method/reference, and
+  // atomically creates a ledger entry + transitions
+  // status in one transaction. FOL-05 changes the
+  // pre-fill: the per-item `dueAmount` is the
+  // reservation-scope outstanding (not the lead
+  // booking's `totalPrice - onsitePayments` sum, which
+  // is per-room). The server's sibling-flip pass
+  // (fol-05 sibling-flip) then takes care of clearing
+  // every covered child in one transaction. The
+  // pre-allocated `paymentId` is keyed to the LEAD
+  // booking's payments subcollection path for the
+  // legacy-N=1 surface; the new reservations path
+  // uses `reservations/{id}/payments` server-side
+  // regardless of the `paymentId` origin (the
+  // verify-and-record handler reads the `reservationId`
+  // from the booking doc, not the paymentId).
+  const openVerifyForm = (item: PendingPaymentItem) => {
+    // Pre-allocate a unique paymentId. The exact parent
+    // path of the id is irrelevant — the server's
+    // `handleVerifyAndRecordPayment` derives the
+    // canonical `paymentsRef` from the booking's
+    // `reservationId` (post-MRB-01 → reservation
+    // subcollection; pre-MRB-01 / legacy → booking
+    // subcollection), not from the client-supplied id
+    // path. The id only needs to be unique; `doc().id`
+    // guarantees that.
+    verifySubmissionIdRef.current = item.isReservation
+      ? doc(collection(db, "reservations", item.id, "payments")).id
+      : doc(collection(db, "bookings", item.leadBooking.id, "payments")).id;
+    setVerifyTarget(item.leadBooking);
+    setVerifyScope(item);
+    setVerifyAmount(String(item.dueAmount));
+    setVerifyMethod(item.paymentMethod || "gcash");
     // Per 2026-07-24 (refactor/unify-payment-reference-fields):
     // the top-level `Booking.paymentReferenceNumber` was retired;
     // staff types the ref from the GCash/bank app into the
@@ -398,6 +635,7 @@ export function DashboardPage() {
   const cancelVerifyForm = () => {
     verifySubmissionIdRef.current = null;
     setVerifyTarget(null);
+    setVerifyScope(null);
     setVerifyAmount("");
     setVerifyMethod("gcash");
     setVerifyReference("");
@@ -423,6 +661,7 @@ export function DashboardPage() {
       setConfirmingBookingFromSuccess(false);
       setVerifySuccess(null);
       setVerifyTarget(null);
+      setVerifyScope(null);
     }
   };
 
@@ -439,6 +678,7 @@ export function DashboardPage() {
     });
     setVerifySuccess(null);
     setVerifyTarget(null);
+    setVerifyScope(null);
   };
 
   const submitVerification = async () => {
@@ -467,24 +707,46 @@ export function DashboardPage() {
       return;
     }
 
-    // Per feat/payment-success-modal: close the loop with
-    // a confirmation modal. The server transitions to
+    // Per feat/payment-success-modal + FOL-05 (2026-08-07,
+    // per decision #201): close the loop with a
+    // confirmation modal. The server transitions to
     // `payment-confirmed` iff the cumulative onsite total
     // reaches `totalPrice`; we compute that client-side
     // because the response only returns `{ success: true }`.
     // The existing onsitePayments snapshot is pre-action
     // (the onSnapshot listener will catch up on the next
     // tick), so the math is correct.
-    const existingPaid = verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0;
-    const cumulativeAfter = existingPaid + amount;
-    const isFullPayment = cumulativeAfter >= verifyTarget.totalPrice && verifyTarget.totalPrice > 0;
+    //
+    // FOL-05 changes the math source. The pre-FOL-05
+    // surface used `verifyTarget.onsitePayments?.reduce(...)`
+    // — the LEAD booking's onsite array, which is
+    // per-room and stale for N>1 reservations (the
+    // verified payment lives on `reservations/{id}/payments`
+    // post-MRB-04, not on the booking's denormalized
+    // array). The post-FOL-05 surface uses
+    // `verifyScope.paidAmount` (the
+    // `collectionGroup("payments")` aggregate from the
+    // MRB-12 listener) so the success modal's
+    // `isFullPayment` + `remainingBalance` reflect the
+    // RESERVATION-scope math, not the lead's per-room
+    // math. Falls back to the lead's onsite sum for
+    // legacy null-`reservationId` bookings (N=1 path,
+    // byte-equivalent to pre-FOL-05).
+    const scopeExistingPaid = verifyScope
+      ? verifyScope.paidAmount
+      : (verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0);
+    const scopeTotal = verifyScope
+      ? verifyScope.totalPrice
+      : Number(verifyTarget.totalPrice || 0);
+    const cumulativeAfter = scopeExistingPaid + amount;
+    const isFullPayment = cumulativeAfter >= scopeTotal && scopeTotal > 0;
     setVerifySuccess({
       booking: verifyTarget,
       amount,
       method: verifyMethod,
       methodLabel: verifyMethodLabels[verifyMethod] || verifyMethod,
       isFullPayment,
-      remainingBalance: Math.max(0, verifyTarget.totalPrice - cumulativeAfter)
+      remainingBalance: Math.max(0, scopeTotal - cumulativeAfter)
     });
     // Reset the verify-form fields so the next open is
     // fresh, but keep verifyTarget alive — the success
@@ -586,77 +848,105 @@ export function DashboardPage() {
               </span>
             </div>
             <div className="space-y-3">
-              {pendingPayments.length > 0 ? pendingPayments.map((booking) => (
-                <div key={booking.id} className="grid gap-3 rounded-lg border border-amber-200 bg-white/85 p-3 shadow-sm sm:grid-cols-[72px_1fr_auto] sm:items-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (booking.paymentProofUrl) {
-                        setImagePreview({ title: `Payment proof for ${booking.bookingRef}`, url: booking.paymentProofUrl });
-                      }
-                    }}
-                    disabled={!booking.paymentProofUrl}
-                    className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-amber-200 bg-white disabled:cursor-not-allowed sm:w-16"
-                    aria-label={booking.paymentProofUrl ? `Preview payment proof for ${booking.bookingRef}` : `No payment proof for ${booking.bookingRef}`}
-                  >
-                    {booking.paymentProofUrl ? (
-                      <img src={booking.paymentProofUrl} alt={`Payment proof for ${booking.bookingRef}`} className="h-full w-full object-cover" />
-                    ) : (
-                      <CreditCard size={18} className="text-gray-400" />
-                    )}
-                  </button>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-bold text-gray-900">{booking.bookingRef}</p>
-                      <StatusBadge label="payment uploaded" status="payment-uploaded" />
+              {pendingPayments.length > 0 ? pendingPayments.map((item) => {
+                // Per FOL-05 (2026-08-07, per decision #201):
+                // the card renders one row per
+                // `PendingPaymentItem`. For grouped
+                // reservations the row shows the
+                // `R-YYYYMMDD-NNNNN` reservation ref +
+                // the `{N} rooms` chip; for legacy
+                // single-row items the row shows the
+                // `SI-XXXXX` booking ref + a single
+                // room label. The total/paid/due line
+                // is reservation-scope (the grouped
+                // case) or per-room (the legacy case,
+                // byte-equivalent to pre-FOL-05).
+                const roomChip = item.isReservation
+                  ? `${item.rooms.length} rooms`
+                  : `Room ${item.rooms[0]?.roomNumber || "TBD"}`;
+                const totalLabel = item.isReservation ? "Reservation total" : "Booking total";
+                const dueLabel = item.isReservation ? "Reservation due" : "Outstanding";
+                const verifyTooltip = item.isReservation
+                  ? "Verify and record payment (covers all rooms covered by the amount)"
+                  : "Verify and record payment";
+                const rejectTooltip = item.isReservation
+                  ? "Reject payment proof (rejects all rooms in the reservation)"
+                  : "Reject payment proof";
+                return (
+                  <div key={item.id} className="grid gap-3 rounded-lg border border-amber-200 bg-white/85 p-3 shadow-sm sm:grid-cols-[72px_1fr_auto] sm:items-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (item.paymentProofUrl) {
+                          setImagePreview({ title: `Payment proof for ${item.publicRef}`, url: item.paymentProofUrl });
+                        }
+                      }}
+                      disabled={!item.paymentProofUrl}
+                      className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-amber-200 bg-white disabled:cursor-not-allowed sm:w-16"
+                      aria-label={item.paymentProofUrl ? `Preview payment proof for ${item.publicRef}` : `No payment proof for ${item.publicRef}`}
+                    >
+                      {item.paymentProofUrl ? (
+                        <img src={item.paymentProofUrl} alt={`Payment proof for ${item.publicRef}`} className="h-full w-full object-cover" />
+                      ) : (
+                        <CreditCard size={18} className="text-gray-400" />
+                      )}
+                    </button>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-bold text-gray-900">{item.publicRef}</p>
+                        <StatusBadge label="payment uploaded" status="payment-uploaded" />
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800">
+                          {roomChip}
+                        </span>
+                      </div>
+                      <p className="truncate text-xs text-gray-600">{item.guestName} · {roomChip}</p>
+                      <p className="text-[10px] font-semibold text-gray-400">{item.checkIn} to {item.checkOut} · {formatPrice(item.totalPrice)} total · {formatPrice(item.dueAmount)} due</p>
+                      {item.latestReference && (
+                        <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-800">
+                          Ref: {item.latestReference}
+                        </p>
+                      )}
                     </div>
-                    <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
-                    <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
-                    {getLatestPaymentReference(booking) && (
-                      <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-800">
-                        Ref: {getLatestPaymentReference(booking)}
-                      </p>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
-                    {booking.paymentProofUrl && (
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+                      {item.paymentProofUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setImagePreview({ title: `Payment proof for ${item.publicRef}`, url: item.paymentProofUrl ?? "" })}
+                          className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          title="View payment proof"
+                        >
+                          <Eye size={14} />
+                          Proof
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => setImagePreview({ title: `Payment proof for ${booking.bookingRef}`, url: booking.paymentProofUrl ?? "" })}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30"
-                        title="View payment proof"
+                        onClick={() => {
+                          cancelRejectForm();
+                          openRejectForm(item.leadBooking);
+                        }}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
+                        title={rejectTooltip}
                       >
-                        <Eye size={14} />
-                        Proof
+                        <XCircle size={14} />
+                        Reject
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        cancelRejectForm();
-                        openRejectForm(booking);
-                      }}
-                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
-                      title="Reject payment proof"
-                    >
-                      <XCircle size={14} />
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        cancelRejectForm();
-                        openVerifyForm(booking);
-                      }}
-                      className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 sm:col-auto"
-                      title="Verify and record payment"
-                    >
-                      <Check size={14} />
-                      Verify & Record
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          cancelRejectForm();
+                          openVerifyForm(item);
+                        }}
+                        className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 sm:col-auto"
+                        title={verifyTooltip}
+                      >
+                        <Check size={14} />
+                        Verify & Record
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )) : (
+                );
+              }) : (
                 <p className="rounded-lg border border-dashed border-gray-250 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500">
                   No payment proofs are waiting for review.
                 </p>
@@ -1135,9 +1425,19 @@ export function DashboardPage() {
         {rejectionTarget && (
           <div className="space-y-4">
             <p className="text-xs text-gray-600">
-              The booking will be bounced back to <span className="font-semibold text-gray-900">pending</span>.
+              {/* Per FOL-05 (2026-08-07, per decision #201): the
+                  rejection text is now reservation-scope. A
+                  rejection of a lead room with a `reservationId`
+                  bounces EVERY `payment-uploaded` sibling room
+                  back to `pending` in one transaction
+                  (`handleRejectPayment`'s sibling-rejection
+                  pass). The single-room case is the
+                  pre-FOL-05 contract; only the wording
+                  changes. */}
+              The booking will be bounced back to <span className="font-semibold text-gray-900">pending</span>
+              {rejectionTarget.reservationId ? " (along with every other room in this reservation)" : ""}.
               The guest will receive an email with the reason and be asked to re-upload a corrected proof.
-              The room remains <span className="font-semibold text-gray-900">held</span> — it is not freed.
+              The room{rejectionTarget.reservationId ? "s" : ""} remain <span className="font-semibold text-gray-900">held</span> — they are not freed.
             </p>
             {getLatestPaymentReference(rejectionTarget) && (
               <div className="rounded-lg bg-gray-50 px-3 py-2">
@@ -1208,7 +1508,7 @@ export function DashboardPage() {
         )}
       </Modal>
       <Modal
-        title={verifyTarget ? `Verify payment — ${verifyTarget.bookingRef}` : "Verify payment"}
+        title={verifyTarget ? `Verify payment — ${verifyScope?.publicRef || verifyTarget.bookingRef}` : "Verify payment"}
         open={!!verifyTarget}
         onClose={cancelVerifyForm}
         className="max-w-lg"
@@ -1217,14 +1517,14 @@ export function DashboardPage() {
           <div className="space-y-4">
             <p className="text-xs text-gray-600">
               Review the uploaded proof and confirm the collection. This atomically creates a payment ledger entry
-              and transitions the booking status.
+              and transitions the booking status{verifyScope?.isReservation ? " (and clears every covered room in one click)." : "."}
             </p>
 
             {verifyTarget.paymentProofUrl && (
               <div className="rounded-lg border border-gray-200 bg-white p-3">
                 <button
                   type="button"
-                  onClick={() => setImagePreview({ title: `Payment proof for ${verifyTarget.bookingRef}`, url: verifyTarget.paymentProofUrl ?? "" })}
+                  onClick={() => setImagePreview({ title: `Payment proof for ${verifyScope?.publicRef || verifyTarget.bookingRef}`, url: verifyTarget.paymentProofUrl ?? "" })}
                   className="block w-full overflow-hidden rounded-lg border border-gray-200"
                 >
                   <img src={verifyTarget.paymentProofUrl} alt="Payment proof" className="max-h-48 w-full object-contain" />
@@ -1234,16 +1534,87 @@ export function DashboardPage() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg bg-gray-50 px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Booking total</p>
-                <p className="text-sm font-bold text-gray-900">{formatPrice(verifyTarget.totalPrice)}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  {verifyScope?.isReservation ? "Reservation total" : "Booking total"}
+                </p>
+                <p className="text-sm font-bold text-gray-900">
+                  {formatPrice(verifyScope?.totalPrice ?? verifyTarget.totalPrice)}
+                </p>
               </div>
               <div className="rounded-lg bg-gray-50 px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Outstanding</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  {verifyScope?.isReservation ? "Reservation due" : "Outstanding"}
+                </p>
                 <p className="text-sm font-bold text-gray-900">
-                  {formatPrice(verifyTarget.totalPrice - (verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))}
+                  {formatPrice(verifyScope?.dueAmount ?? (verifyTarget.totalPrice - (verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)))}
                 </p>
               </div>
             </div>
+
+            {/* Per FOL-05 (2026-08-07, per decision #201): the
+                per-room coverage preview. Shows which rooms
+                the currently-entered amount will cover, and
+                which rooms will still have a balance. Updates
+                live as the staff edits the amount. Hidden for
+                the N=1 legacy case (one row, no preview
+                needed). The preview is a CLIENT-SIDE
+                approximation; the server's
+                `handleVerifyAndRecordPayment` is the source
+                of truth and may differ if payments have
+                arrived between the modal open and the submit
+                (a fresh `runTransaction` reads the live
+                state). */}
+            {verifyScope?.isReservation && verifyScope.rooms.length > 1 && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  Coverage preview
+                </p>
+                <ul className="mt-1.5 space-y-1">
+                  {(() => {
+                    const verifyAmountNum = parseFloat(verifyAmount);
+                    const safeAmount = Number.isFinite(verifyAmountNum) && verifyAmountNum > 0
+                      ? verifyAmountNum
+                      : 0;
+                    let runningCumulative = verifyScope.paidAmount;
+                    return verifyScope.rooms.map((room) => {
+                      const roomDue = Math.max(0, room.totalPrice - (verifyScope.paidAmount));
+                      const willBeCleared = runningCumulative + safeAmount >= room.totalPrice;
+                      const willStillOwe = !willBeCleared && room.status === "payment-uploaded";
+                      // Track the running cumulative for the
+                      // NEXT room. The first cleared room
+                      // consumes its totalPrice from the
+                      // amount; the rest see the remaining
+                      // amount. (Simplified — the server is
+                      // the source of truth, this is a
+                      // UX preview only.)
+                      if (willBeCleared) {
+                        runningCumulative = Math.max(runningCumulative, room.totalPrice);
+                      }
+                      return (
+                        <li key={room.bookingId} className="flex items-center justify-between text-[11px]">
+                          <span className="truncate text-gray-700">
+                            Room {room.roomNumber}
+                          </span>
+                          <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                            willBeCleared
+                              ? "bg-green-100 text-green-800"
+                              : willStillOwe
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-gray-100 text-gray-500"
+                          }`}>
+                            {willBeCleared
+                              ? "Cleared"
+                              : willStillOwe
+                                ? `${formatPrice(Math.max(0, room.totalPrice - (verifyScope.paidAmount + safeAmount)))} still owed`
+                                : "Pending"}
+                          </span>
+                        </li>
+                      );
+                    });
+                  })()}
+                </ul>
+              </div>
+            )}
 
             <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
               Verified amount
@@ -1334,10 +1705,17 @@ export function DashboardPage() {
           payment is recorded. The dashboard surface uses
           "View booking" as the secondary CTA (navigates to
           the bookings page) instead of "Later" — the staff
-          may want to do follow-up work on the booking. */}
+          may want to do follow-up work on the booking. Per
+          FOL-05 (2026-08-07, per decision #201): the
+          success modal's "isFullPayment" +
+          "remainingBalance" now reflect the
+          reservation-scope math (via
+          `verifyScope.paidAmount` + `verifyScope.totalPrice`),
+          not the lead's per-room math. For N=1 legacy
+          bookings the math is byte-equivalent to pre-FOL-05. */}
       <PaymentSuccessModal
         open={verifySuccess !== null}
-        onClose={() => { if (!confirmingBookingFromSuccess) { setVerifySuccess(null); setVerifyTarget(null); } }}
+        onClose={() => { if (!confirmingBookingFromSuccess) { setVerifySuccess(null); setVerifyTarget(null); setVerifyScope(null); } }}
         surface="dashboard"
         bookingRef={verifySuccess?.booking.bookingRef ?? ""}
         guestName={verifySuccess?.booking.guestName ?? ""}
@@ -1355,6 +1733,7 @@ export function DashboardPage() {
           const targetId = verifySuccess.booking.id;
           setVerifySuccess(null);
           setVerifyTarget(null);
+          setVerifyScope(null);
           openBooking(targetId);
         }}
         onConfirmWithBalance={openConfirmWithBalanceFromSuccess}

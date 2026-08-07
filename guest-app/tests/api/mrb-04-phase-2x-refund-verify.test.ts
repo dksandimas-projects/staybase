@@ -308,7 +308,7 @@ describe("MRB-04 Phase 2.x — handleVerifyAndRecordPayment writes to reservatio
   });
 
   describe("Status transitions on the booking doc — unchanged for both paths", () => {
-    it("updates the booking doc to payment-confirmed when fully paid (single transaction)", () => {
+    it("updates the booking doc to payment-confirmed when the target's post-update status differs from its pre-update status", () => {
       // The status transition stays on the
       // booking doc regardless of which
       // subcollection holds the verified
@@ -319,9 +319,18 @@ describe("MRB-04 Phase 2.x — handleVerifyAndRecordPayment writes to reservatio
       // the money source. For new reservations
       // the reservation header also gets the
       // `paymentStatus` update in MRB-04 Phase 3
-      // (a follow-up).
+      // (a follow-up). The pre-FOL-05 `if
+      // (fullyPaid)` gating was replaced by the
+      // FOL-05 sibling-flip pass's `if
+      // (targetPostStatus !== data.status)`
+      // guard — same observable behavior for the
+      // N=1 case (a single child either flips or
+      // it doesn't), richer behavior for the
+      // N>1 case (the target's gate is computed
+      // from the post-update child array, not
+      // from a single boolean).
       expect(handleVerifyBody).toMatch(
-        /if \(fullyPaid\) \{\s*\n\s*bookingUpdates\.status = "payment-confirmed";\s*\n\s*bookingUpdates\.handledBy = staffUid;\s*\n\s*bookingUpdates\.paymentConfirmedAt = (?:new Date\(\)|now);/
+        /if \(targetPostStatus !== data\.status\) \{\s*\n\s*bookingUpdates\.status = targetPostStatus;\s*\n\s*bookingUpdates\.handledBy = staffUid;\s*\n\s*bookingUpdates\.paymentConfirmedAt = now;/
       );
     });
   });

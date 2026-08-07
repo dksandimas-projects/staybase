@@ -581,8 +581,8 @@ export interface AdminContextType {
   // booking back to `pending` (room stays held), emails
   // the guest with the reason, and writes a `payment`
   // notification for the bell.
-  verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string }>;
-  rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string; siblingFlippedCount?: number }>;
+  rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; siblingRejectedCount?: number }>;
   // Per CWB (decision #122, 2026-07-23): staff-triggered
   // transition from `payment-uploaded` to `confirmed` when
   // a positive balance will be collected at check-in. Server
@@ -2306,7 +2306,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     method: string,
     transactionReference?: string,
     note?: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; siblingFlippedCount?: number }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/verify-and-record-payment`, {
@@ -2321,14 +2321,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || "Failed to verify and record payment." };
       }
-      return { success: true };
+      // Per FOL-05 (2026-08-07, per decision #201): surface
+      // the server-computed sibling-flip count to the admin
+      // UI so the dashboard's per-room coverage preview can
+      // mirror what the server actually cleared. Falls back
+      // to 0 when the server is pre-FOL-05 (no field) so the
+      // admin app stays forward-compatible.
+      const siblingFlippedCount = typeof data?.data?.siblingFlippedCount === "number"
+        ? data.data.siblingFlippedCount
+        : 0;
+      return { success: true, siblingFlippedCount };
     } catch (err: any) {
       console.error("Error verifying and recording payment:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
 
-  const rejectPayment = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string }> => {
+  const rejectPayment = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string; siblingRejectedCount?: number }> => {
     const safeReason = String(reason || "").trim().slice(0, 500);
     if (!safeReason) {
       return { success: false, error: "A rejection reason is required so the guest can fix the issue." };
@@ -2347,7 +2356,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || "Failed to reject payment." };
       }
-      return { success: true };
+      // Per FOL-05 (2026-08-07, per decision #201): surface
+      // the server-computed sibling-rejection count to the
+      // admin UI for symmetry with the verify path. Falls
+      // back to 0 when the server is pre-FOL-05 (no field).
+      const siblingRejectedCount = typeof data?.data?.siblingRejectedCount === "number"
+        ? data.data.siblingRejectedCount
+        : 0;
+      return { success: true, siblingRejectedCount };
     } catch (err: any) {
       console.error("Error rejecting payment:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
