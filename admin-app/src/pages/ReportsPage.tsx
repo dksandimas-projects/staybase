@@ -2070,6 +2070,7 @@ export function ReportsPage() {
           vatSummary={vatSummary}
           loyaltyLiability={loyaltyLiability}
           rewardsConfig={rewardsConfig}
+          staffNameMap={staffNameMap}
         />
       )}
 
@@ -2485,6 +2486,13 @@ function SalesTab(props: {
     liability: number;
   };
   rewardsConfig?: any;
+  // Per RPT-03 (2026-08-07): the Sales bookings table now
+  // resolves the staff display name via the same map the
+  // Daily Close ledger uses, so staff show up as their
+  // configured `fullName` rather than their Firebase Auth
+  // UID. The map is built in the parent (`ReportsPage`)
+  // from the `staff` slice of the admin context.
+  staffNameMap: Map<string, string>;
 }) {
   const {
     deltas,
@@ -2500,7 +2508,8 @@ function SalesTab(props: {
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
     toDate, chartColors, isMobile,
     discountsSummary, vatSummary, loyaltyLiability,
-    rewardsConfig
+    rewardsConfig,
+    staffNameMap
   } = props;
 
   const breakfastEnabled = breakfastConfig?.isEnabled;
@@ -2672,7 +2681,7 @@ function SalesTab(props: {
                   <td className={`px-3 py-2 font-semibold capitalize ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{payment.type}</td>
                   <td className="px-3 py-2 text-gray-600">{PAYMENT_LABELS[payment.method] || payment.method}</td>
                   <td className="px-3 py-2 text-gray-500">{(payment as any).transactionReference || "—"}</td>
-                  <td className="px-3 py-2 text-gray-600">{payment.recordedBy}</td>
+                  <td className="px-3 py-2 text-gray-600">{staffNameMap.get(payment.recordedBy) || payment.recordedBy}</td>
                   <td className={`px-3 py-2 text-right font-bold ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{formatPrice(payment.amount)}</td>
                 </tr>
               ))}
@@ -4024,7 +4033,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
               <table className="min-w-full text-xs">
                 <thead className="bg-gray-50 text-left">
                   <tr>
-                    {["Ref", "Guest / Room", "Type", "Method", "Staff", "Amount"].map((heading) => (
+                    {["Booking", "Guest / Room", "Type", "Method", "Transaction Ref", "Staff", "Amount"].map((heading) => (
                       <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                         {heading}
                       </th>
@@ -4036,12 +4045,13 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
                     <tr key={p.id}>
                       <td className="px-3 py-2 font-semibold text-gray-900">{p.bookingRef}</td>
                       <td className="px-3 py-2 text-gray-600">
-                        {p.guestName} · Room {p.roomNumber}
+                        {p.guestName || "—"} · Room {p.roomNumber || "—"}
                       </td>
                       <td className={`px-3 py-2 font-semibold capitalize ${p.type === "refund" ? "text-red-655" : "text-emerald-705"}`}>
                         {p.type}
                       </td>
                       <td className="px-3 py-2 text-gray-600 uppercase">{PAYMENT_LABELS[p.method] || p.method}</td>
+                      <td className="px-3 py-2 text-gray-600 font-mono">{p.transactionReference || "—"}</td>
                       <td className="px-3 py-2 text-gray-600">{staffNameMap.get(p.recordedBy) || p.recordedBy}</td>
                       <td className={`px-3 py-2 font-mono font-bold text-right ${p.type === "refund" ? "text-red-650" : "text-emerald-750"}`}>
                         {p.type === "refund" ? "-" : ""}{formatPrice(p.amount)}
@@ -4050,7 +4060,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
                   ))}
                   {dayPayments.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-gray-400">
+                      <td colSpan={7} className="p-6 text-center text-gray-400">
                         No transactions recorded on this date.
                       </td>
                     </tr>

@@ -463,5 +463,18 @@ service cloud.firestore {
       allow read: if isStaff();
       allow update, delete: if false;
     }
+
+    // Per RPT-03 (2026-08-07): the `refunds` collectionGroup
+    // (read by `LiabilityTab` to project each liability's
+    // live `processedAmount`). The nested per-doc rule on
+    // `reservations/{id}/refunds/{id}` only covers direct path
+    // reads — Firestore requires an explicit collectionGroup
+    // rule for cross-document `collectionGroup(db, "refunds")`
+    // queries. Without this, staff got "Missing or insufficient
+    // permissions" the moment the Liability tab mounted.
+    match /{path=**}/refunds/{refundId} {
+      allow read: if isStaff();
+      allow update, delete: if false;
+    }
   }
 }
