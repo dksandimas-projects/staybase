@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { buildGoogleCalendarUrl, buildIcsContent, downloadIcsFile, scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
+import { buildGoogleCalendarUrl, buildIcsContent, downloadIcsFile, resolvePaymentMethodLabel, scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
@@ -64,51 +64,53 @@ export function BookingConfirmPage() {
   // The payment-method label shown to the guest is now sourced
   // from `settings/hotelConfig.paymentMethods[].label` (admin-
   // editable) so the confirm page never hardcodes "Digital Wallet"
-  // / "Bank Transfer" / "Pay at Hotel". The previous `paymentLabels`
-  // object literal is kept as a last-resort fallback for an
-  // unmount before Firestore resolves or for legacy methods
-  // (e.g. `paypal`) the admin hasn't surfaced on this deployment.
-  const [dynamicPaymentMethodLabel, setDynamicPaymentMethodLabel] = useState<string | null>(null);
+  // / "Bank Transfer" / "Pay at Hotel". The dynamic label is
+  // resolved through the shared `resolvePaymentMethodLabel`
+  // helper (decision #200, 2026-08-07) so the confirm page + the
+  // my-booking single card + the my-booking reservation card all
+  // read through the same legacy-fallback logic.
+  const [dynamicPaymentMethods, setDynamicPaymentMethods] = useState<
+    ReadonlyArray<{ method: string; label: string }> | null
+  >(null);
   useEffect(() => {
     let cancelled = false;
-    const rawPaymentMethodForLabel = searchParams.get("paymentMethod") ?? "";
     (async () => {
       try {
         const snap = await getDoc(doc(db, "settings", "hotelConfig"));
         if (cancelled) return;
-        const methods = snap.exists() ? (snap.data() as { paymentMethods?: Array<{ method: string; label: string }> }).paymentMethods : null;
-        const match = Array.isArray(methods) ? methods.find((m) => m.method === rawPaymentMethodForLabel) : null;
-        if (match) {
-          setDynamicPaymentMethodLabel(match.label);
-        } else {
-          // Last-resort fallback for legacy methods (e.g. "paypal")
-          // the admin hasn't surfaced in `paymentMethods[]` yet.
-          const legacy: Record<string, string> = {
-            gcash: "Digital Wallet (GCash/Maya)",
-            bank: "Bank Transfer (Direct Deposit)",
-            "pay-at-hotel": "Pay at Hotel"
-          };
-          setDynamicPaymentMethodLabel(legacy[rawPaymentMethodForLabel] ?? rawPaymentMethodForLabel);
-        }
+        const raw = snap.exists()
+          ? (snap.data() as { paymentMethods?: unknown }).paymentMethods
+          : null;
+        const safe: ReadonlyArray<{ method: string; label: string }> = Array.isArray(raw)
+          ? (raw as Array<{ method?: unknown; label?: unknown }>)
+              .filter(
+                (m): m is { method: string; label: string } =>
+                  !!m &&
+                  typeof m === "object" &&
+                  typeof (m as { method?: unknown }).method === "string" &&
+                  typeof (m as { label?: unknown }).label === "string"
+              )
+              .map((m) => ({ method: m.method, label: m.label }))
+          : [];
+        if (!cancelled) setDynamicPaymentMethods(safe);
       } catch {
-        if (cancelled) return;
-        setDynamicPaymentMethodLabel(null);
+        if (!cancelled) setDynamicPaymentMethods(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [searchParams]);
-  const fallbackPaymentMethodLabel = (() => {
-    const raw = searchParams.get("paymentMethod") ?? "gcash";
-    const legacy: Record<string, string> = {
-      gcash: "Digital Wallet (GCash/Maya)",
-      bank: "Bank Transfer (Direct Deposit)",
-      "pay-at-hotel": "Pay at Hotel"
-    };
-    return legacy[raw] ?? raw;
-  })();
-  const resolvedPaymentMethodLabel = dynamicPaymentMethodLabel ?? fallbackPaymentMethodLabel;
+  }, []);
+  const rawPaymentMethod = searchParams.get("paymentMethod") ?? "gcash";
+  // `dynamicPaymentMethods` is the admin-editable config. While
+  // Firestore is still resolving the page renders the raw key
+  // (or the legacy map, for the common cases) — the helper
+  // handles every shape of input so the user never sees a
+  // blank label.
+  const resolvedPaymentMethodLabel =
+    dynamicPaymentMethods !== null
+      ? resolvePaymentMethodLabel(rawPaymentMethod, dynamicPaymentMethods)
+      : resolvePaymentMethodLabel(rawPaymentMethod, null);
 
   // Read query params from URL
   // Per BF-27 (booking-flow audit 2026-06-26): the previous
@@ -133,7 +135,6 @@ export function BookingConfirmPage() {
   const roomSummaryLabel = confirmedRooms.length > 1
     ? `${confirmedRooms.length} rooms`
     : roomDisplayLabel;
-  const rawPaymentMethod = searchParams.get("paymentMethod") ?? "gcash";
   const total = Number(searchParams.get("total") ?? 0);
   const rateBreakdown = parseRateBreakdown(searchParams.get("rateBreakdown"));
   const hasAllParams = !!(bookingRef && checkIn && checkOut && guests > 0);

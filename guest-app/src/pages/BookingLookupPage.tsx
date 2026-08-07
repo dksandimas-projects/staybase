@@ -2,9 +2,11 @@ import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { GUEST_CANCELLABLE_STATUSES, scaleIn } from "@spark-inn/shared";
+import { doc, getDoc } from "firebase/firestore";
+import { GUEST_CANCELLABLE_STATUSES, resolvePaymentMethodLabel, scaleIn } from "@spark-inn/shared";
 import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
 import config from "@config";
+import { db } from "../firebase/config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
@@ -212,6 +214,20 @@ export function BookingLookupPage() {
   const [lookupAuthMode, setLookupAuthMode] = useState<"email" | "token" | null>(null);
   const [activeLookupToken, setActiveLookupToken] = useState<string>("");
 
+  // Per 2026-08-07 (decision #200): the payment-method label
+  // shown on the result card is now sourced from the admin's
+  // `settings/hotelConfig.paymentMethods[].label` so a renamed
+  // or custom method on the admin side never drifts from what
+  // the guest sees here. The legacy map (decision #200) is the
+  // last-resort fallback for keys the admin has not surfaced
+  // yet (e.g. `paypal`). The single-booking card + the
+  // reservation-scope card both render through this state. The
+  // fetch is gated on a successful lookup so an empty search
+  // form does not pay the Firestore read.
+  const [paymentMethodConfigs, setPaymentMethodConfigs] = useState<
+    ReadonlyArray<{ method: string; label: string }> | null
+  >(null);
+
   // Action state
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -335,6 +351,58 @@ export function BookingLookupPage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [resendCooldownUntil]);
+
+  // Per 2026-08-07 (decision #200): the dynamic label
+  // fetch. The page only needs the small `paymentMethods[]`
+  // array from `settings/hotelConfig`, not the whole
+  // websiteContent / roomTypes / etc. bundle. The effect
+  // fires when a result card becomes visible (either the
+  // single-booking or the reservation-scope view) and is
+  // a no-op otherwise — the search form alone never pays
+  // the Firestore read. The fetch is best-effort: a
+  // permission error, offline mode, or a missing document
+  // keeps the page rendering through the legacy map (the
+  // card's label is `resolvePaymentMethodLabel(...)` which
+  // is defensive about the input shape).
+  useEffect(() => {
+    const needsConfig = Boolean(activeBooking || activeReservation);
+    if (!needsConfig) {
+      setPaymentMethodConfigs(null);
+      return;
+    }
+    if (paymentMethodConfigs !== null) return; // already loaded
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "hotelConfig"));
+        if (cancelled) return;
+        const data = snap.exists() ? snap.data() : null;
+        const raw = data && Array.isArray((data as { paymentMethods?: unknown }).paymentMethods)
+          ? (data as { paymentMethods: Array<{ method?: unknown; label?: unknown }> }).paymentMethods
+          : null;
+        const safe: ReadonlyArray<{ method: string; label: string }> = raw
+          ? raw
+              .filter(
+                (m): m is { method: string; label: string } =>
+                  !!m &&
+                  typeof m === "object" &&
+                  typeof (m as { method?: unknown }).method === "string" &&
+                  typeof (m as { label?: unknown }).label === "string"
+              )
+              .map((m) => ({ method: m.method, label: m.label }))
+          : [];
+        if (!cancelled) setPaymentMethodConfigs(safe);
+      } catch {
+        // Best-effort: leave the state null and let the
+        // legacy map carry the render. The card still
+        // shows a label.
+        if (!cancelled) setPaymentMethodConfigs(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBooking, activeReservation, paymentMethodConfigs]);
 
   // Per H2 (hardening batch 2026-06-26): `performLookup`
   // takes an optional token; when present, the email
@@ -828,12 +896,18 @@ export function BookingLookupPage() {
     }
   };
 
-  const paymentLabels: Record<string, string> = {
-    gcash: "Digital Wallet (GCash/Maya)",
-    "pay-at-hotel": "Pay at Hotel",
-    paypal: "PayPal",
-    bank: "Bank Transfer"
-  };
+  // Per 2026-08-07 (decision #200): the payment-method label
+  // for the result card is resolved through the shared
+  // `resolvePaymentMethodLabel` helper. The admin's
+  // `hotelConfig.paymentMethods[]` (fetched above) is the
+  // canonical source, the `LEGACY_PAYMENT_METHOD_LABELS` map
+  // is the last-resort fallback for keys the admin has not
+  // surfaced yet, and the raw `paymentMethod` key is the
+  // final fallback. The single-booking + reservation-scope
+  // cards both render through the same helper so the two
+  // surfaces can never drift apart.
+  const resolveLabel = (methodKey: string | undefined | null) =>
+    resolvePaymentMethodLabel(methodKey, paymentMethodConfigs);
 
   const timelineSteps = [
     { label: "Submitted", statusKey: "pending", description: "Booking received" },
@@ -1283,7 +1357,10 @@ export function BookingLookupPage() {
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Payment Method</span>
                       <span className="font-semibold text-gray-900">
-                        {paymentLabels[activeBooking.paymentMethod] ?? activeBooking.paymentMethod}
+                        {/* Per decision #200 (2026-08-07): resolves through the
+                            admin's `paymentMethods[].label` with the shared
+                            legacy map as fallback. */}
+                        {resolveLabel(activeBooking.paymentMethod)}
                       </span>
                     </div>
 
@@ -1427,7 +1504,13 @@ export function BookingLookupPage() {
                       {formatPrice(activeReservation.totalPrice)}
                     </p>
                     {activeReservation.paymentMethod && (
-                      <p className="text-xs text-gray-500">{activeReservation.paymentMethod}</p>
+                      // Per decision #200 (2026-08-07): the
+                      // reservation-scope card used to dump the raw
+                      // `paymentMethod` key directly. Resolves through
+                      // the admin's `paymentMethods[].label` with the
+                      // shared legacy map as fallback (same helper the
+                      // single-booking card uses).
+                      <p className="text-xs text-gray-500">{resolveLabel(activeReservation.paymentMethod)}</p>
                     )}
                   </div>
                 </div>

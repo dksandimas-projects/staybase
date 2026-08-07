@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.14";
+    VERSION2 = "0.264.16";
   }
 });
 
@@ -222767,6 +222767,35 @@ var init_points = __esm({
   }
 });
 
+// ../shared/utils/paymentMethodLabel.ts
+function resolvePaymentMethodLabel(methodKey, paymentMethods) {
+  if (typeof methodKey !== "string" || methodKey.length === 0) {
+    return "";
+  }
+  if (Array.isArray(paymentMethods)) {
+    const match = paymentMethods.find(
+      (m2) => m2 && typeof m2.method === "string" && m2.method === methodKey
+    );
+    if (match && typeof match.label === "string" && match.label.length > 0) {
+      return match.label;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(LEGACY_PAYMENT_METHOD_LABELS, methodKey)) {
+    return LEGACY_PAYMENT_METHOD_LABELS[methodKey];
+  }
+  return methodKey;
+}
+var LEGACY_PAYMENT_METHOD_LABELS;
+var init_paymentMethodLabel = __esm({
+  "../shared/utils/paymentMethodLabel.ts"() {
+    LEGACY_PAYMENT_METHOD_LABELS = {
+      gcash: "Digital Wallet (GCash/Maya)",
+      bank: "Bank Transfer (Direct Deposit)",
+      "pay-at-hotel": "Pay at Hotel"
+    };
+  }
+});
+
 // ../shared/utils/paymentReference.ts
 function getLatestPaymentReference(booking) {
   const payments = booking?.onsitePayments;
@@ -223779,6 +223808,7 @@ __export(shared_exports, {
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
   KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
+  LEGACY_PAYMENT_METHOD_LABELS: () => LEGACY_PAYMENT_METHOD_LABELS,
   LegacyPaymentMethodConfigSchema: () => LegacyPaymentMethodConfigSchema,
   MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
   MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
@@ -223899,6 +223929,7 @@ __export(shared_exports, {
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
   recordSweepResult: () => recordSweepResult,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
+  resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   runBackfill: () => runBackfill,
   scaleIn: () => scaleIn,
   slideInBottom: () => slideInBottom,
@@ -223940,6 +223971,7 @@ var init_shared = __esm({
     init_dates();
     init_images();
     init_points();
+    init_paymentMethodLabel();
     init_paymentReference();
     init_paymentVerification();
     init_pricing();
