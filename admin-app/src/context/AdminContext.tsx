@@ -1388,6 +1388,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             paymentConfirmedAt: data.paymentConfirmedAt
               ? parseDateTimeString(data.paymentConfirmedAt)
               : null,
+            // Per Phase 12 — Dashboard Payment Rejection & Reference
+            // Verification (2026-07-15): the reject-payment handler
+            // stamps these three fields on the booking doc. The
+            // admin `Booking` type already declares them but the
+            // pre-FOL-02 mapper silently dropped all three on every
+            // snapshot echo — same shape of bug as MRB-15-10 and
+            // FOL-01 (the type declares a field, the mapper forgets
+            // to read it from the snapshot). The dashboard's
+            // reject-payment card reads `paymentRejectionReason`
+            // from this hydrated field; the Folio's "Rejected"
+            // badge reads the same field. `paymentRejectedAt` /
+            // `paymentRejectedBy` are audit metadata for the
+            // rejected-proof trail. Default to `null` / `""` so a
+            // legacy booking without these fields reads as
+            // "no rejection happened" (the type already declares
+            // them nullable).
+            paymentRejectionReason: data.paymentRejectionReason || null,
+            paymentRejectedAt: data.paymentRejectedAt
+              ? parseDateTimeString(data.paymentRejectedAt)
+              : null,
+            paymentRejectedBy: data.paymentRejectedBy || null,
             // Per H2 (hardening batch 2026-06-26): the
             // server generates this on create. The admin
             // app just hydrates the field for display /
@@ -1433,6 +1454,117 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // as `null` (the type already declares it
             // nullable).
             cancellationLiability: data.cancellationLiability || null,
+            // Per MRB-01 (2026-08-02, per decision #159): the
+            // reservation header linkage. The pre-FOL-02 mapper
+            // silently dropped all four fields on every snapshot
+            // echo — same shape of bug as MRB-15-10 and FOL-01
+            // (the type declares a field, the mapper forgets
+            // to read it from the snapshot). The downstream
+            // consequences are visible in two places:
+            //   1. The booking drawer's payments listener at
+            //      `BookingsPage.tsx:1164-1224` gates on
+            //      `selectedBooking.reservationId` to decide
+            //      whether to subscribe to the post-MRB-01
+            //      canonical path `reservations/{id}/payments/`
+            //      OR the legacy `bookings/{id}/payments/`. With
+            //      the field dropped, every booking fell through
+            //      to the legacy path — so a verified payment
+            //      written to the canonical subcollection was
+            //      invisible to the Folio's "Payment history",
+            //      and the "Collect <balance>" CTA stayed on
+            //      screen even after the staff verified the
+            //      full amount. The Folio summary read
+            //      `paymentsTotal = 0` and "balance = grandTotal"
+            //      even though `paymentConfirmedAt` was set and
+            //      the verified record existed in the
+            //      subcollection.
+            //   2. The booking drawer's reservation strip, the
+            //      Bookings table's group-row collapse, the
+            //      MRB-12 reservation-scope payment-status pill,
+            //      and the deep-link `?reservationId=` resolution
+            //      all read these four fields. With the fields
+            //      dropped, those surfaces silently fell through
+            //      to the legacy null-reservationId shape.
+            // Hydrating from the snapshot (with `String().trim()`
+            // for the id / ref and `Number()` for the position /
+            // count) matches the post-MRB-01 contract. Legacy
+            // null-`reservationId` bookings have all four as
+            // `null` (no migration; pre-live TEST DATA is reset,
+            // not migrated).
+            reservationId: data.reservationId ? String(data.reservationId).trim() || null : null,
+            reservationRef: data.reservationRef ? String(data.reservationRef).trim() || null : null,
+            reservationPosition: Number.isFinite(Number(data.reservationPosition))
+              ? Number(data.reservationPosition)
+              : null,
+            reservationRoomCount: Number.isFinite(Number(data.reservationRoomCount))
+              ? Number(data.reservationRoomCount)
+              : null,
+            // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+            // the canonical payment reference lives on each entry
+            // in the booking's `onsitePayments[]` ledger as
+            // `transactionReference`. The previous top-level
+            // `Booking.paymentReferenceNumber` is retired. The
+            // shared `getLatestPaymentReference()` reads from
+            // this array; the Folio summary + the booking
+            // table's "PAID" pill + the report exports + the
+            // dashboard's pending-payment card all consume it.
+            //
+            // The pre-FOL-02 mapper declared the field on the
+            // admin `Booking` type but never read it from the
+            // snapshot, so the array was always `undefined` in
+            // React state. The downstream consequences:
+            //   1. The header's "Reference" line
+            //      (`BookingDrawerWorkspace.tsx:170`) renders
+            //      "Pending verification" forever for every
+            //      booking — the helper returns `null` because
+            //      the array is empty, and the staff sees
+            //      "Pending verification" even after a verified
+            //      payment. The fix is the same as FOL-01's
+            //      paymentConfirmedAt: hydrate from the
+            //      snapshot. (A complementary fix wires the
+            //      live listener's results into the reference
+            //      read at the call site — see the
+            //      `getSelectedBookingLatestReference` helper
+            //      below + the `BookingDrawerWorkspaceHeader`
+            //      `latestPaymentReference` prop.)
+            //   2. The Folio's "gcash · <reference>" line on
+            //      the proof card shows "No reference" for the
+            //      same reason.
+            //   3. The Bookings table's "PAID" pill computes
+            //      paid = `(row.onsitePayments ?? []).reduce(...)`
+            //      (line 2074) — every row reads as ₱0 paid.
+            //   4. The advanced filter's "Reference" search
+            //      (line 1759) matches against the empty
+            //      array — staff can't filter by reference.
+            //
+            // Defensive default: the field is always present
+            // on the Firestore doc (server writes an empty
+            // array on create), but legacy bookings from
+            // before 2026-07-24 may have no `onsitePayments`
+            // field at all — fall back to `[]` so the read is
+            // never undefined.
+            onsitePayments: Array.isArray(data.onsitePayments)
+              ? data.onsitePayments.map((p: any) => ({
+                  id: String(p.id || ""),
+                  type: p.type === "refund" ? "refund" : "payment",
+                  amount: Number(p.amount || 0),
+                  method: String(p.method || ""),
+                  note: String(p.note || ""),
+                  transactionReference: p.transactionReference
+                    ? String(p.transactionReference)
+                    : null,
+                  reason: p.reason ? String(p.reason) : null,
+                  approvedBy: p.approvedBy ? String(p.approvedBy) : null,
+                  recordedBy: String(p.recordedBy || "staff"),
+                  recordedAt: p.recordedAt
+                    ? (typeof p.recordedAt.toDate === "function"
+                        ? p.recordedAt.toDate().toISOString()
+                        : (p.recordedAt instanceof Date
+                            ? p.recordedAt.toISOString()
+                            : String(p.recordedAt)))
+                    : ""
+                }))
+              : [],
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
             breakfastSelections: data.breakfastSelections || {},
