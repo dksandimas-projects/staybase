@@ -90,42 +90,70 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
   });
 
   describe("handleAddPayment — the in-transaction mirror write", () => {
-    it("imports the helper into scope", () => {
-      // The handler body must reference the helper name
-      // directly (not via a re-import inside the try
-      // block). Pinned by the function-scope import in
-      // the Phase 3 PR.
-      expect(addPayment).toMatch(/mapBookingStatusToReservationPaymentStatus\(/);
+    // Per FOL-05 (2026-08-07, per decision #201): the
+    // add-payment mirror is now aggregate-sourced (the
+    // post-update child statuses, fed through
+    // `computeReservationAggregatePaymentStatus`), not
+    // the pre-FOL-05 N=1
+    // `mapBookingStatusToReservationPaymentStatus(bookingDataSnapshot.status)`
+    // mapping. The pre-FOL-05 `transitionedToPaymentConfirmed`
+    // gate was removed because a partial add-payment
+    // that flips zero siblings still leaves the header's
+    // aggregate unchanged, and a partial add-payment
+    // that flips N siblings correctly surfaces the new
+    // aggregate. The contract is now:
+    //   `if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) { ... }`
+    it("imports the aggregate helper into scope", () => {
+      // The handler body must reference the aggregate
+      // helper name directly. Pinned by the
+      // sibling-flip pass's per-handler call site.
+      expect(addPayment).toMatch(/computeReservationAggregatePaymentStatus\(/);
     });
 
-    it("derives the mirror value from the helper (NOT a hardcoded string)", () => {
-      // The mirror is `mapBookingStatusToReservationPaymentStatus(bookingDataSnapshot.status)`,
-      // not a hardcoded `"awaiting-payment"` or
-      // `"payment-confirmed"`. The helper owns the
-      // mapping; the handler delegates.
+    it("derives the mirror value from the aggregate (NOT a hardcoded string or the N=1 mapper)", () => {
+      // The mirror is
+      // `paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses)`,
+      // not the pre-FOL-05 single-child mapper.
+      // FOL-05's whole point: a single verify / add
+      // can flip N siblings, and the header must read
+      // the post-update AGGREGATE, not a single mapped
+      // status. The pre-update child array is
+      // pre-read inside the transaction (per FOL-03)
+      // and the per-child status replacement is
+      // computed before any write.
       expect(addPayment).toMatch(
-        /paymentStatus: mapBookingStatusToReservationPaymentStatus\(bookingDataSnapshot\.status\)/
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
     it("writes the mirror inside the same runTransaction as the booking update", () => {
-      // The `transaction.update(reservationRef, ...)` call
-      // is inside the `await adminDb.runTransaction(...)`
-      // block (NOT in a separate transaction). The mirror
-      // is atomic with the booking update.
+      // The `transaction.update(reservationRef, ...)`
+      // call is inside the
+      // `await adminDb.runTransaction(...)` block
+      // (NOT in a separate transaction). The mirror
+      // is atomic with the booking update + every
+      // sibling flip.
       expect(addPayment).toMatch(
-        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: mapBookingStatusToReservationPaymentStatus\(bookingDataSnapshot\.status\)/
+        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
-    it("gates the mirror on `transitionedToPaymentConfirmed && bookingReservationId.length > 0` (legacy skip)", () => {
-      // The mirror fires only when the booking just
-      // transitioned (idempotent replays don't touch the
-      // header) AND for new reservations (legacy
-      // null-`reservationId` bookings skip the write —
-      // byte-equivalent to pre-Phase 3).
+    it("gates the mirror on `bookingReservationId.length > 0 && siblingChildBookings.length > 0` (FOL-05 legacy skip)", () => {
+      // The pre-FOL-05 `transitionedToPaymentConfirmed`
+      // guard was removed. The post-FOL-05 guard is
+      // the reservation-id check + the pre-read
+      // children count (a legacy null-`reservationId`
+      // booking skips BOTH branches because
+      // `siblingChildBookings` is `[]` when
+      // `bookingReservationId.length === 0`).
+      // byte-equivalent to pre-Phase 3 behavior for
+      // legacy records; the N=1 case is
+      // byte-equivalent to the pre-FOL-05 mirror
+      // (one-element array → aggregate =
+      // `mapBookingStatusToReservationPaymentStatus` of
+      // the single element).
       expect(addPayment).toMatch(
-        /if \(transitionedToPaymentConfirmed && bookingReservationId\.length > 0\) \{[\s\S]{0,300}?transaction\.update\(reservationRef, \{/
+        /if \(bookingReservationId\.length > 0 && siblingChildBookings\.length > 0\) \{[\s\S]{0,300}?transaction\.update\(reservationRef, \{/
       );
     });
 
@@ -137,11 +165,6 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
       // (shorthand). Both reference the same value.
       // The `now` is captured ONCE at the top of the try
       // block, stable across transaction retries.
-      // Proof of single-`now`: the handler body has
-      // exactly 1 `const now = new Date();` declaration
-      // + 1 `const updatedAt = now;` alias + 1
-      // `updatedAt: now` literal in the mirror block.
-      // No `new Date()` calls inside the runTransaction.
       expect(addPayment).toMatch(/const now = new Date\(\);/);
       expect(addPayment).toMatch(/const updatedAt = now;/);
       expect(addPayment).toMatch(/updatedAt: now\s*\n\s*\}\);/);  // mirror block
@@ -149,33 +172,43 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
   });
 
   describe("handleVerifyAndRecordPayment — the in-transaction mirror write", () => {
-    it("imports the helper into scope", () => {
-      expect(verifyAndRecord).toMatch(/mapBookingStatusToReservationPaymentStatus\(/);
+    // Per FOL-05 (2026-08-07, per decision #201): the
+    // verify mirror is also aggregate-sourced now, with
+    // the pre-FOL-05 `fullyPaid` gate removed. The
+    // contract is now:
+    //   `if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) { ... }`
+    // with `paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses)`.
+    it("imports the aggregate helper into scope", () => {
+      expect(verifyAndRecord).toMatch(/computeReservationAggregatePaymentStatus\(/);
     });
 
-    it("derives the mirror value from bookingUpdates.status (NOT a hardcoded string)", () => {
-      // The verify path mirrors `bookingUpdates.status`
-      // (the new status just stamped on the booking —
-      // always `"payment-confirmed"` when `fullyPaid`).
-      // Same helper call shape as `handleAddPayment`,
-      // different source value.
+    it("derives the mirror value from the aggregate (NOT the pre-FOL-05 N=1 mapper)", () => {
+      // The verify path's mirror is now aggregate-sourced
+      // — same helper call shape as `handleAddPayment`,
+      // different sibling-pre-read result. FOL-05's
+      // sibling-flip pass means a single verify can flip
+      // N siblings, and the header must read the
+      // post-update AGGREGATE.
       expect(verifyAndRecord).toMatch(
-        /paymentStatus: mapBookingStatusToReservationPaymentStatus\(bookingUpdates\.status\)/
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
     it("writes the mirror inside the same runTransaction as the booking update", () => {
       expect(verifyAndRecord).toMatch(
-        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: mapBookingStatusToReservationPaymentStatus\(bookingUpdates\.status\)/
+        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
-    it("gates the mirror on `fullyPaid && bookingReservationId.length > 0` (legacy skip)", () => {
-      // The verify path's mirror fires only when the
-      // booking just transitioned to `payment-confirmed`
-      // (partial verifications don't change the status).
+    it("gates the mirror on `bookingReservationId.length > 0 && siblingChildBookings.length > 0` (FOL-05 legacy skip)", () => {
+      // The pre-FOL-05 `fullyPaid` guard was removed.
+      // The post-FOL-05 guard is the reservation-id
+      // check + the pre-read children count.
+      // byte-equivalent to pre-Phase 3 for legacy
+      // records; the N=1 case is byte-equivalent to
+      // the pre-FOL-05 mirror.
       expect(verifyAndRecord).toMatch(
-        /if \(fullyPaid && bookingReservationId\.length > 0\) \{[\s\S]{0,300}?transaction\.update\(reservationRef, \{/
+        /if \(bookingReservationId\.length > 0 && siblingChildBookings\.length > 0\) \{[\s\S]{0,300}?transaction\.update\(reservationRef, \{/
       );
     });
 
@@ -184,11 +217,8 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
       // is reused for `bookingUpdates.updatedAt`,
       // `bookingUpdates.paymentConfirmedAt` (assigned
       // via property assignment, not object literal —
-      // see source), AND the reservation header's
-      // `updatedAt`. The handler body has 2
-      // `updatedAt: now` occurrences (one in
-      // `bookingUpdates`, one in the mirror block) +
-      // 1 `paymentConfirmedAt = now` (conditional). No
+      // see source), the per-sibling `update` writes,
+      // AND the reservation header's `updatedAt`. No
       // `new Date()` allocation inside the transaction.
       expect(verifyAndRecord).toMatch(/const now = new Date\(\);/);
       expect(verifyAndRecord).toMatch(/updatedAt: now\s*\n\s*\};/);  // bookingUpdates
@@ -198,8 +228,16 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
   });
 
   describe("handleRejectPayment — the in-transaction mirror write (PEX path)", () => {
-    it("imports the helper into scope", () => {
-      expect(rejectPayment).toMatch(/mapBookingStatusToReservationPaymentStatus\(/);
+    // Per FOL-05 (2026-08-07, per decision #201): the
+    // reject mirror is now aggregate-sourced (every
+    // rejectable child flips, so the post-update
+    // aggregate is the new "everything in the
+    // reservation is `pending`" or "mixed" state).
+    // The pre-FOL-05 single-child mapper call is gone
+    // — the aggregate is the right shape for N>1
+    // sibling rejection.
+    it("imports the aggregate helper into scope", () => {
+      expect(rejectPayment).toMatch(/computeReservationAggregatePaymentStatus\(/);
     });
 
     it("derives `bookingReservationId` from `data.reservationId` (the canonical MRB-01 linkage)", () => {
@@ -215,17 +253,23 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
       );
     });
 
-    it("derives the mirror value from the new status (the hardcoded `\"pending\"` post-rejection)", () => {
-      // The reject path always transitions to `"pending"`
-      // (the status check at the top of the transaction
-      // throws for any other status). The mirror value
-      // is `mapBookingStatusToReservationPaymentStatus("pending")`
-      // = `"awaiting-payment"`. The literal `"pending"`
-      // is intentional — it's the only possible new
-      // status here, and the helper still owns the
-      // relabel-to-`"awaiting-payment"` mapping.
+    it("derives the mirror value from the post-update child statuses (FOL-05 aggregate, NOT the pre-FOL-05 single-child mapper)", () => {
+      // FOL-05: the reject path's mirror value
+      // comes from the per-child post-update
+      // statuses — every rejectable child
+      // transitioned to `"pending"`, the rest keep
+      // their pre-update status. The aggregate
+      // reader computes the new header value (e.g.
+      // all-siblings-`payment-uploaded`-flipped →
+      // `"awaiting-payment"`, or a mix
+      // → `"payment-uploaded"` / `"confirmed"` /
+      // whatever the remaining children's statuses
+      // are). The pre-FOL-05 hardcoded
+      // `mapBookingStatusToReservationPaymentStatus("pending")`
+      // was correct for N=1 but wrong for N>1 (a
+      // partial reject needs the aggregate).
       expect(rejectPayment).toMatch(
-        /paymentStatus: mapBookingStatusToReservationPaymentStatus\("pending"\)/
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
@@ -233,20 +277,27 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
       // The booking update at `status: "pending"` is
       // followed by the mirror write inside the same
       // transaction (atomic with the PEX-04 fresh-deadline
-      // stamping).
+      // stamping + the FOL-05 sibling-rejection
+      // `transaction.update` calls).
       expect(rejectPayment).toMatch(
-        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: mapBookingStatusToReservationPaymentStatus\("pending"\)/
+        /transaction\.update\(reservationRef, \{[\s\S]{0,200}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
-    it("gates the mirror on `bookingReservationId.length > 0` (legacy skip)", () => {
-      // The reject path's gate is just the
-      // reservationId check (no `fullyPaid` /
-      // `transitionedToPaymentConfirmed` because the
-      // handler is unconditional — every reject
-      // transitions to `"pending"`).
+    it("gates the mirror on `bookingReservationId.length > 0 && siblingChildBookings.length > 0` (FOL-05 legacy skip)", () => {
+      // Same gate as the verify + add-payment paths.
+      // The pre-FOL-05 `bookingReservationId.length > 0`
+      // guard (no `siblingChildBookings.length > 0`
+      // companion because pre-FOL-05 didn't pre-read
+      // children) was sufficient for the N=1 case
+      // (a legacy booking has no `reservationId` so
+      // `bookingReservationId.length === 0`); the
+      // post-FOL-05 guard adds the explicit
+      // `siblingChildBookings.length > 0` check to
+      // document the "we have children to
+      // aggregate over" pre-condition.
       expect(rejectPayment).toMatch(
-        /if \(bookingReservationId\.length > 0\) \{[\s\S]{0,300}?transaction\.update\(reservationRef, \{/
+        /if \(bookingReservationId\.length > 0 && siblingChildBookings\.length > 0\) \{[\s\S]{0,300}?transaction\.update\(reservationRef, \{/
       );
     });
 
@@ -256,17 +307,8 @@ describe("MRB-04 Phase 3 — reservation paymentStatus mirror (PR #2 of 2)", () 
       // `Date` that the booking update + the PEX-04
       // `paymentRejectedAt` use). The mirror reuses the
       // same binding — no second `new Date()` allocation.
-      // The handler body has 1 `const updatedAt = new Date();`
-      // at the top of the try block + 2 shorthand
-      // `updatedAt` references inside the transaction
-      // (booking update at `status: "pending", ..., updatedAt`
-      // and the mirror at `paymentStatus: ..., updatedAt`),
-      // both binding to the same Date. The two shorthand
-      // occurrences are about 50 lines apart (the PEX-04
-      // `paymentRejectedAt` + the new mirror block), so
-      // the regex uses a generous `{0,5000}` distance.
       expect(rejectPayment).toMatch(/const updatedAt = new Date\(\);/);
-      expect(rejectPayment).toMatch(/updatedAt\s*\n\s*\}\);[\s\S]{0,5000}?if \(bookingReservationId\.length > 0\)[\s\S]{0,5000}?updatedAt\s*\n\s*\}\);/);
+      expect(rejectPayment).toMatch(/updatedAt\s*\n\s*\}\);[\s\S]{0,5000}?if \(bookingReservationId\.length > 0 && siblingChildBookings\.length > 0\)[\s\S]{0,5000}?updatedAt\s*\n\s*\}\);/);
     });
   });
 
