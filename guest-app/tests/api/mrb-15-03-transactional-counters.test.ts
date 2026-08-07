@@ -2,6 +2,17 @@
 // counter write site must be inside a `runTransaction`
 // that reads the source of truth (the children via
 // `where("reservationId", "==", id)`) BEFORE writing.
+// Per FOL-03 (2026-08-07, decision #199): the children
+// read happens BEFORE the writes in the same
+// `runTransaction` (Firestore requires all reads to
+// complete before all writes inside a transaction). The
+// pre-FOL-03 handler did the read AFTER the writes — a
+// transaction violation. The post-FOL-03 pattern reads
+// the children first, then REPLACES the current
+// booking's status with the post-update value
+// (`"checked-in"` / `"checked-out"`) in the resulting
+// `postUpdateChildStatuses` array before computing the
+// count + the aggregate.
 // The counter is "denormalized for fast UI; recomputed
 // transactionally in MRB-04 / MRB-13" per the JSDoc
 // on `Reservation` in `shared/types/index.ts` — so the
@@ -78,14 +89,19 @@ describe("MRB-15-03 — Check-in handler recomputes `checkedInRoomCount` from ch
 
   it("the check-in transaction writes `checkedInRoomCount` to the reservation header", () => {
     // The count is computed from the children's
-    // statuses (filter for `status === "checked-in"`)
+    // post-update statuses (filter for `status === "checked-in"`)
     // and written in the same `transaction.update`
-    // as the existing `paymentStatus` mirror.
+    // as the existing `paymentStatus` mirror. Per
+    // FOL-03, the count reads from the
+    // `postUpdateChildStatuses` array (the
+    // pre-update read + the just-checked-in
+    // booking's status replaced with `"checked-in"`),
+    // not the raw pre-update read.
     expect(checkinHandlerSrc).toMatch(
       /checkedInRoomCount: newCheckedInCount/
     );
     expect(checkinHandlerSrc).toMatch(
-      /paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
+      /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
     );
   });
 
@@ -123,7 +139,7 @@ describe("MRB-15-03 — Check-out handler recomputes `checkedInRoomCount` (decre
       /checkedInRoomCount: newCheckedInCount,\s*\n\s*checkedOutRoomCount: newCheckedOutCount/
     );
     expect(checkoutHandlerSrc).toMatch(
-      /paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
+      /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
     );
   });
 });

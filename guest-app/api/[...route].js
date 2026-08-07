@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.8";
+    VERSION2 = "0.264.11";
   }
 });
 
@@ -231939,6 +231939,15 @@ async function handleCheckinBooking(req, res) {
         throw new Error("Assigned room is already occupied by another checked-in booking.");
       }
       const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
+      let postUpdateChildStatuses = [];
+      if (bookingReservationId2.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map(
+          (d) => d.id === bookingId ? "checked-in" : String(d.data()?.status || "")
+        );
+      }
       transaction.update(bookingRef, {
         status: "checked-in",
         checkedInAt: now,
@@ -231951,14 +231960,10 @@ async function handleCheckinBooking(req, res) {
       });
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
-        );
-        const childStatuses = childrenForCount.docs.map((d) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s4) => s4 === "checked-in").length;
+        const newCheckedInCount = postUpdateChildStatuses.filter((s4) => s4 === "checked-in").length;
         transaction.update(reservationRef, {
           checkedInRoomCount: newCheckedInCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
+          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -232106,6 +232111,15 @@ async function handleCheckoutBooking(req, res) {
         pointsAwardedAt: awardNow ? now : null
       });
       const bookingReservationId2 = String(freshBookingData.reservationId || "").trim();
+      let postUpdateChildStatuses = [];
+      if (bookingReservationId2.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map(
+          (d) => d.id === bookingId ? "checked-out" : String(d.data()?.status || "")
+        );
+      }
       transaction.update(bookingRef, bookingUpdate);
       if (bookingData2.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
@@ -232126,16 +232140,12 @@ async function handleCheckoutBooking(req, res) {
       }
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
-        );
-        const childStatuses = childrenForCount.docs.map((d) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s4) => s4 === "checked-in").length;
-        const newCheckedOutCount = childStatuses.filter((s4) => s4 === "checked-out").length;
+        const newCheckedInCount = postUpdateChildStatuses.filter((s4) => s4 === "checked-in").length;
+        const newCheckedOutCount = postUpdateChildStatuses.filter((s4) => s4 === "checked-out").length;
         transaction.update(reservationRef, {
           checkedInRoomCount: newCheckedInCount,
           checkedOutRoomCount: newCheckedOutCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
+          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
