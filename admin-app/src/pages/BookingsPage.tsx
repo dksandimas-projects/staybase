@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, isPaymentVerified, requiredExtraBedsFor } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, CHECK_IN_ELIGIBLE_STATUSES, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, isPaymentVerified, requiredExtraBedsFor } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -4881,7 +4881,18 @@ export function BookingsPage() {
 
             {/* Check-in registration workstation */}
             <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection} primary>
-            {selectedBookingCheckInReadiness && (
+            {/*
+              The check-in gate is only meaningful before the booking
+              has been checked in. Once status leaves
+              CHECK_IN_ELIGIBLE_STATUSES (checked-in, checked-out,
+              cancelled, etc.) the same helper would otherwise flip
+              into a permanent "1 missing: Booking status must be
+              confirmed or payment-confirmed" amber state — the gate
+              is irrelevant past the transition, so the card hides.
+              See `admin-app/src/__tests__/checkin-gate.test.ts`.
+            */}
+            {selectedBookingCheckInReadiness &&
+              CHECK_IN_ELIGIBLE_STATUSES.includes(selectedBooking.status as (typeof CHECK_IN_ELIGIBLE_STATUSES)[number]) && (
               <BookingCheckInReadiness
                 ready={selectedBookingCheckInReadiness.ready}
                 missingItems={selectedBookingCheckInReadiness.missingItems}
