@@ -140,7 +140,7 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       // is `"payment-confirmed"` (the aggregate of
       // `["checked-in", "payment-confirmed"]`).
       expect(handlers).toMatch(
-        /paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
@@ -153,7 +153,7 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       // recomputed `checkedInRoomCount`). All 3
       // share the same `now`.
       expect(handlers).toMatch(
-        /transaction\.update\(reservationRef, \{[\s\S]{0,400}?paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
+        /transaction\.update\(reservationRef, \{[\s\S]{0,400}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
@@ -183,7 +183,7 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       // `"in-house"` — the aggregate of
       // `["checked-out", "checked-in"]`).
       expect(handlers).toMatch(
-        /paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
@@ -198,7 +198,7 @@ describe("MRB-05 — aggregate helper + 5 lifecycle handler mirrors (PR #1 of 2)
       // `checkedOutRoomCount`). All 4 share the
       // same `now`.
       expect(handlers).toMatch(
-        /transaction\.update\(reservationRef, \{[\s\S]{0,400}?paymentStatus: computeReservationAggregatePaymentStatus\(childStatuses\)/
+        /transaction\.update\(reservationRef, \{[\s\S]{0,400}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 

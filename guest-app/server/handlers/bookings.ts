@@ -8266,6 +8266,60 @@ export async function handleCheckinBooking(req: any, res: any) {
       // handlers.
       const bookingReservationId = String((bookingData as any).reservationId || "").trim();
 
+      // Per FOL-03 (2026-08-07, per decision #199):
+      // Firestore `runTransaction` requires all `get()`
+      // calls to complete BEFORE any `update()` /
+      // `set()` / `create()` calls — the SDK throws
+      // "Firestore transactions require all reads to
+      // be executed before all writes" if the contract
+      // is violated. The pre-FOL-03 handler did the
+      // childrenForCount `get()` AFTER the booking +
+      // room `update()` calls (a leftover from the
+      // MRB-15-03 work that recomputed
+      // `checkedInRoomCount` from the post-update
+      // child statuses). The read-after-write pattern
+      // surfaces in production as a 500 from
+      // `/api/bookings/checkin` for any booking with a
+      // `reservationId` — the listener throws before
+      // the `transaction.update(reservationRef, ...)`
+      // call ever runs, so the reservation header's
+      // mirror is never written either.
+      //
+      // The fix: do ALL reads first (booking doc + room
+      // doc + active-checkin query + children query),
+      // then do ALL writes. To preserve the MRB-15-03
+      // semantic ("the count includes the
+      // just-checked-in booking"), we pre-read the
+      // children statuses and then REPLACE the
+      // current booking's status in the array with the
+      // post-update value (`"checked-in"`) before
+      // computing the count + the aggregate. The
+      // resulting `childStatuses` array is what every
+      // child's status WILL be after the writes
+      // commit, so the count and the aggregate are
+      // correct for the post-update state.
+      //
+      // The pattern is the same as
+      // `handleCheckoutBooking`'s (per FOL-03) and is
+      // the standard Firestore "all reads before all
+      // writes" idiom — see the
+      // `plan/docs/GOTCHAS.md` "Firestore transaction"
+      // entry for the broader pattern.
+      let postUpdateChildStatuses: string[] = [];
+      if (bookingReservationId.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map((d: any) =>
+          d.id === bookingId
+            ? "checked-in" // post-update status for the just-checked-in booking
+            : String(d.data()?.status || "")
+        );
+      }
+
+      // ALL WRITES BELOW — no `transaction.get()` calls
+      // from this point forward. Per FOL-03.
+
       transaction.update(bookingRef, {
         status: "checked-in",
         checkedInAt: now,
@@ -8297,31 +8351,30 @@ export async function handleCheckinBooking(req: any, res: any) {
       // Per MRB-15-03 (2026-08-03): the same
       // transaction also recomputes
       // `checkedInRoomCount` from every child's
-      // status (the just-checked-in booking is now
-      // `status: "checked-in"`, so the count
-      // includes it). The header's
-      // `activeRoomCount` / `cancelledRoomCount` /
-      // `roomCount` are NOT touched here — those are
-      // owned by the create / add-room / cancel paths
-      // only (per the JSDoc on `Reservation` in
-      // `shared/types/index.ts`). The
-      // `paymentStatus` aggregate reads every child's
-      // status (not just `["checked-in"]`) so the
-      // N>1 case is correct: a 2-room reservation
-      // where 1 room is checked-in and 1 is still
-      // pending reports the aggregate of `["checked-in",
+      // status. Per FOL-03, the count reads from the
+      // pre-computed `postUpdateChildStatuses` (the
+      // pre-update read + the just-checked-in booking's
+      // status replaced with `"checked-in"`) so the
+      // `get()` happens BEFORE the writes. The
+      // header's `activeRoomCount` /
+      // `cancelledRoomCount` / `roomCount` are NOT
+      // touched here — those are owned by the create
+      // / add-room / cancel paths only (per the JSDoc
+      // on `Reservation` in `shared/types/index.ts`).
+      // The `paymentStatus` aggregate reads every
+      // child's post-update status (not just
+      // `["checked-in"]`) so the N>1 case is correct:
+      // a 2-room reservation where 1 room is
+      // checked-in and 1 is still pending reports the
+      // aggregate of `["checked-in",
       // "payment-confirmed"]` — not a synthetic
       // `["checked-in"]`.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
-        );
-        const childStatuses = childrenForCount.docs.map((d: any) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s) => s === "checked-in").length;
+        const newCheckedInCount = postUpdateChildStatuses.filter((s) => s === "checked-in").length;
         transaction.update(reservationRef, {
           checkedInRoomCount: newCheckedInCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
+          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -8564,6 +8617,38 @@ export async function handleCheckoutBooking(req: any, res: any) {
       // handlers.
       const bookingReservationId = String((freshBookingData as any).reservationId || "").trim();
 
+      // Per FOL-03 (2026-08-07, per decision #199):
+      // pre-compute the post-update child statuses
+      // BEFORE the writes. Same read-before-writes
+      // contract as `handleCheckinBooking` (per
+      // FOL-03) — Firestore `runTransaction` requires
+      // all `get()` calls to complete before any
+      // `update()` / `set()` / `create()` calls.
+      // The pre-update `get()` of the children lets us
+      // know every child's current status; we then
+      // REPLACE the current booking's status with
+      // `"checked-out"` (the post-update value) so
+      // the count + aggregate match the post-update
+      // state. The pre-FOL-03 handler did the
+      // childrenForCount `get()` AFTER the booking +
+      // room + intercom updates — a Firestore
+      // transaction violation that surfaces as a
+      // 500 for any checkout with a `reservationId`.
+      let postUpdateChildStatuses: string[] = [];
+      if (bookingReservationId.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map((d: any) =>
+          d.id === bookingId
+            ? "checked-out" // post-update status for the just-checked-out booking
+            : String(d.data()?.status || "")
+        );
+      }
+
+      // ALL WRITES BELOW — no `transaction.get()` calls
+      // from this point forward. Per FOL-03.
+
       transaction.update(bookingRef, bookingUpdate);
 
       if (bookingData.roomId) {
@@ -8612,29 +8697,28 @@ export async function handleCheckoutBooking(req: any, res: any) {
       // transaction also recomputes
       // `checkedInRoomCount` (decrement) +
       // `checkedOutRoomCount` (increment) from every
-      // child's status. The just-checked-out booking
-      // is now `status: "checked-out"`, so the counts
-      // include it. The header's
+      // child's status. Per FOL-03, the counts read
+      // from the pre-computed
+      // `postUpdateChildStatuses` (the pre-update
+      // read + the just-checked-out booking's status
+      // replaced with `"checked-out"`) so the `get()`
+      // happens BEFORE the writes. The header's
       // `activeRoomCount` / `cancelledRoomCount` /
       // `roomCount` are NOT touched here — those are
       // owned by the create / add-room / cancel paths
       // only (per the JSDoc on `Reservation` in
       // `shared/types/index.ts`). The
-      // `paymentStatus` aggregate reads every child's
-      // status (not just `["checked-out"]`) so the
-      // N>1 case is correct.
+      // `paymentStatus` aggregate reads every
+      // child's post-update status (not just
+      // `["checked-out"]`) so the N>1 case is correct.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
-        );
-        const childStatuses = childrenForCount.docs.map((d: any) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s) => s === "checked-in").length;
-        const newCheckedOutCount = childStatuses.filter((s) => s === "checked-out").length;
+        const newCheckedInCount = postUpdateChildStatuses.filter((s) => s === "checked-in").length;
+        const newCheckedOutCount = postUpdateChildStatuses.filter((s) => s === "checked-out").length;
         transaction.update(reservationRef, {
           checkedInRoomCount: newCheckedInCount,
           checkedOutRoomCount: newCheckedOutCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
+          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
