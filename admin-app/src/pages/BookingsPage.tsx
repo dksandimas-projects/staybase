@@ -4012,6 +4012,31 @@ export function BookingsPage() {
 
   const selectedBookingFolio = selectedBooking ? getBookingFolio(selectedBooking) : null;
 
+  // Per FOL-02 (2026-08-06, decision #198): the latest
+  // payment reference for the selected booking. The
+  // pre-FOL-02 header read `getLatestPaymentReference(booking)`
+  // directly, which returned `null` for new bookings
+  // because the denormalized `onsitePayments[]` array on
+  // the booking doc is empty for new payments (the server's
+  // verify / add-payment handlers write to the
+  // subcollection, not the array — the array is a
+  // pre-MRB-04 relic that was never wired to the new write
+  // path). The post-FOL-02 read prefers the live
+  // `selectedBookingPayments` state (the subcollection
+  // listener's results — the canonical source) and falls
+  // back to the booking's persisted array. Pattern matches
+  // the `getBookingFolio` helper above (live state when
+  // selected, persisted when not). Cheap computation (one
+  // linear scan from the end of a small array); no
+  // `useMemo` needed but kept for clarity + readability.
+  const selectedBookingLatestReference = useMemo(() => {
+    if (!selectedBooking) return null;
+    if (selectedBookingPayments.length > 0) {
+      return getLatestPaymentReference({ onsitePayments: selectedBookingPayments });
+    }
+    return getLatestPaymentReference(selectedBooking);
+  }, [selectedBooking, selectedBookingPayments]);
+
   const openRecordPaymentForBalance = (balance: number) => {
     setShowRecordPaymentModal(true);
     setPaymentAmount(String(Math.max(0, balance)));
@@ -4791,6 +4816,15 @@ export function BookingsPage() {
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
               paymentMethodLabel={selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : ""}
+              // Per FOL-02 (2026-08-06, decision #198): the
+              // computed reference uses the live subcollection
+              // listener's state (the canonical source) with a
+              // fallback to the booking's denormalized array.
+              // Pre-FOL-02, the header read the persisted array
+              // directly and rendered "Pending verification"
+              // for new bookings — see the
+              // `selectedBookingLatestReference` memo above.
+              latestPaymentReference={selectedBookingLatestReference}
             />
             </div>
 
@@ -5234,7 +5268,20 @@ export function BookingsPage() {
                     <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
                       <div className="space-y-0.5 text-xs">
                         <p className="font-semibold text-gray-800">
-                          {selectedBooking.paymentMethod} · {getLatestPaymentReference(selectedBooking) || "No reference"}
+                          {/* Per FOL-02 (2026-08-06, decision #198):
+                              the Folio's proof card also routes
+                              through the computed reference
+                              (live subcollection listener +
+                              persisted array fallback) so a
+                              new booking's verified reference
+                              doesn't show as "No reference"
+                              forever. Same helper as the
+                              header — `selectedBookingLatestReference`
+                              memo above. The fallback to
+                              "No reference" stays for the
+                              pre-payment-uploaded case (no
+                              proof yet, no record). */}
+                          {selectedBooking.paymentMethod} · {selectedBookingLatestReference || "No reference"}
                         </p>
                         <p className="text-[10px] text-gray-400">
                           {isPaymentVerified(selectedBooking) ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
