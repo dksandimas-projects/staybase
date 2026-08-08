@@ -128,7 +128,7 @@ Load only the bundle for your task type — do not read all MDs.
 
 ### plan/features/ — Cross-cutting
 - `plan/features/SEO-OPENGRAPH.md` — Search indexability (Google/Bing/Yahoo) + link-preview cards (Facebook/Messenger/WhatsApp/Viber/X): robots, sitemap, OG image, per-route meta, JSON-LD
-- `plan/features/BOOKING-UNIFIED.md` — BAR-01 booking data-model refactor (rooms denormalized into the booking doc) — deferred spec; tasks in `plan/project/ROADMAP.md §BAR` · BAR-02 (derive counters) shipped 2026-08-08; see `plan/docs/DECISIONS-FEATURES.md #203`
+- `plan/features/BOOKING-UNIFIED.md` — BAR-01 booking data-model refactor (rooms denormalized into the booking doc) — deferred spec; tasks in `plan/project/ROADMAP.md §BAR` · BAR-02 (derive counters) + BAR-03 (FOL-05 sibling-flip helper) shipped 2026-08-08; see `plan/docs/DECISIONS-FEATURES.md #203` + `#204`
 - `plan/features/AVAILABILITY-LOCKING.md` — Double-booking prevention, Firestore transactions
 - `plan/features/EMAIL-PDF-STORAGE.md` — Resend email flows, jsPDF receipts, Storage uploads
 - `plan/features/EMAIL-AUDIT-EXTENSIONS.md` — The 8 W4.4 email templates added by the 2026-06 audit

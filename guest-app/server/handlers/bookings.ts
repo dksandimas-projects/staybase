@@ -153,6 +153,18 @@ import {
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
+// Per BAR-03 (2026-08-08, per decision #204): the
+// shared FOL-05 sibling-flip helper. The pre-BAR-03
+// `handleVerifyAndRecordPayment` + `handleAddPayment`
+// + `handleRejectPayment` each open-coded the same
+// sibling-flip pass. The helper collapses the three
+// copies into one; each handler passes a per-handler
+// `rule.decide` callback + the shared `now`.
+import {
+  preReadSiblingChildren,
+  applyReservationScopePaymentTransition,
+  type SiblingFlipDecision
+} from "./reservationScopeTransition";
 // Per MRB-11 (2026-08-03, per decision #177): the
 // optional revenue allocation input. Per the 2026-08-03
 // design call, the server always recomputes this before
@@ -5207,22 +5219,28 @@ export async function handleRejectPayment(req: any, res: any) {
       const isTargetInPaymentUploaded = data.status === "payment-uploaded";
       const bookingReservationId = String((data as any).reservationId || "").trim();
 
-      // Pre-read sibling children for the sibling-flip
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // pre-read sibling children for the sibling-flip
       // pass. Same pattern as
       // `handleVerifyAndRecordPayment` + `handleAddPayment`.
-      // Legacy null-`reservationId` bookings skip the
-      // pre-read (the pre-FOL-05 single-child-only path
-      // stays byte-equivalent).
-      let siblingChildBookings: Array<{ id: string; status: string }> = [];
-      if (bookingReservationId.length > 0) {
-        const childrenForReject = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
-        );
-        siblingChildBookings = childrenForReject.docs.map((d: any) => ({
+      //
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the pre-read is the shared
+      // `preReadSiblingChildren` helper. The
+      // `bookingReservationId.length === 0` guard
+      // (inside the helper) skips the pre-read for
+      // legacy null-`reservationId` bookings — the
+      // pre-FOL-05 single-child-only path stays
+      // byte-equivalent.
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId,
+        (d) => ({
           id: d.id,
           status: String((d.data() || {}).status || "")
-        }));
-      }
+        })
+      );
       const hasRejectableSiblings = siblingChildBookings.some(
         (c) => c.id !== bookingId && c.status === "payment-uploaded"
       );
@@ -5253,22 +5271,46 @@ export async function handleRejectPayment(req: any, res: any) {
       // compute the post-update child statuses. Every
       // child currently in `payment-uploaded` flips to
       // `pending` (the lead + every rejectable sibling).
-      // The aggregate feeds the reservation header's
-      // `paymentStatus` mirror (N>1 path). For legacy
-      // N=1 the array has one element (the target) and
-      // the rule is byte-equivalent to the pre-FOL-05
-      // single-child update.
-      const postUpdateChildStatuses: string[] = [];
-      const rejectableChildIds: string[] = [];
-      for (const child of siblingChildBookings) {
-        if (child.status === "payment-uploaded") {
-          postUpdateChildStatuses.push("pending");
-          rejectableChildIds.push(child.id);
-        } else {
-          postUpdateChildStatuses.push(child.status);
-        }
-      }
-      siblingRejectedCount = rejectableChildIds.filter((id) => id !== bookingId).length;
+      // For legacy N=1 the array has one element (the
+      // target) and the rule is byte-equivalent to the
+      // pre-FOL-05 single-child update.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204): the
+      // sibling-flip pass is the shared
+      // `applyReservationScopePaymentTransition` helper.
+      // The handler passes a per-handler `rule.decide`
+      // callback (the per-child rejection rule + the
+      // write payload); the helper handles the
+      // per-sibling `transaction.update` + the
+      // post-update statuses array + the reservation
+      // header heartbeat.
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingRejectedCount } =
+        applyReservationScopePaymentTransition(
+          transaction,
+          adminDb,
+          bookingReservationId,
+          bookingId,
+          siblingChildBookings,
+          (child) => {
+            if (child.status === "payment-uploaded") {
+              const decision: SiblingFlipDecision = {
+                write: {
+                  status: "pending",
+                  paymentRejectionReason: safeReason,
+                  paymentRejectedAt: updatedAt,
+                  paymentRejectedBy,
+                  holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+                  updatedAt
+                },
+                newStatus: "pending"
+              };
+              return decision;
+            }
+            return null;
+          },
+          updatedAt
+        );
+      siblingRejectedCount = helperSiblingRejectedCount;
 
       // ---- WRITES — all writes after every `get()`, per FOL-03 ----
 
@@ -5295,51 +5337,13 @@ export async function handleRejectPayment(req: any, res: any) {
         });
       }
 
-      // 2. Per FOL-05 (2026-08-07, per decision #201):
-      // flip each rejectable sibling. Each flip is a
-      // `pending` transition with the same
-      // `paymentRejectionReason` + `paymentRejectedAt`
-      // + `paymentRejectedBy` + `holdExpiresAt` +
-      // `updatedAt` stamps the target booking gets.
-      // Sibling-id-keyed `transaction.update` calls —
-      // each row's individual Firestore timestamps
-      // land in the same transaction, so the snapshot
-      // listener sees a consistent "all children
-      // rejected at the same time" view.
-      for (const sibId of rejectableChildIds) {
-        if (sibId === bookingId) continue; // target handled above
-        transaction.update(adminDb.collection("bookings").doc(sibId), {
-          status: "pending",
-          paymentRejectionReason: safeReason,
-          paymentRejectedAt: updatedAt,
-          paymentRejectedBy,
-          holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
-          updatedAt
-        });
-      }
-
-      // 3. Per FOL-05 (2026-08-07, per decision #201):
-      // the reservation header's `paymentStatus` mirror
-      // is now aggregate-sourced (the N>1 path that the
-      // pre-FOL-05 single-child helper couldn't express).
-      // Fires on EVERY reject for new reservations —
-      // the pre-FOL-05 `isTargetInPaymentUploaded` guard
-      // is removed because a reservation-scope reject
-      // Per BAR-02 (2026-08-08, per decision #203):
-      // the `paymentStatus` mirror is no longer
-      // written to the reservation header on payment
-      // rejection. Consumers derive it at read time.
-      // The per-child status flip (the
-      // `transaction.update` of the lead + the FOL-05
-      // sibling-flip pass) is unchanged — that is the
-      // real state mutation. The same `updatedAt` is
-      // used for every write — no clock skew.
-      if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        transaction.update(reservationRef, {
-          updatedAt
-        });
-      }
+      // 2. Per BAR-03 (2026-08-08, per decision #204):
+      // the per-sibling `transaction.update` calls + the
+      // reservation header heartbeat are queued by the
+      // shared `applyReservationScopePaymentTransition`
+      // helper above (called from the post-update status
+      // computation step). The target's own status
+      // update was already queued at step 1.
     });
 
     return res.status(200).json({
@@ -6712,30 +6716,35 @@ export async function handleAddPayment(req: any, res: any) {
       totalPaid = existingPaid + numericAmount;
 
       // Per FOL-05 (2026-08-07, per decision #201): the
+      // Per FOL-05 (2026-08-07, per decision #201):
       // sibling-flip pre-read. Same pattern as
       // `handleVerifyAndRecordPayment` — pre-read every
       // child of the reservation BEFORE any writes
       // (FOL-03 "reads before writes") so the
       // sibling-flip pass can compute the post-update
       // child statuses in a single deterministic array.
-      // The `bookingReservationId.length === 0` guard
-      // skips the pre-read for legacy null-`reservationId`
-      // bookings (pre-MRB-01) — the pre-FOL-05
-      // single-child-only path stays byte-equivalent.
-      let siblingChildBookings: Array<{ id: string; status: string; totalPrice: number }> = [];
-      if (bookingReservationId.length > 0) {
-        const childrenForFlip = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
-        );
-        siblingChildBookings = childrenForFlip.docs.map((d: any) => {
+      //
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the pre-read is the shared
+      // `preReadSiblingChildren` helper. The
+      // `bookingReservationId.length === 0` guard
+      // (inside the helper) skips the pre-read for
+      // legacy null-`reservationId` bookings — the
+      // pre-FOL-05 single-child-only path stays
+      // byte-equivalent.
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId,
+        (d) => {
           const childData = d.data() || {};
           return {
             id: d.id,
             status: String(childData.status || ""),
             totalPrice: Number(childData.totalPrice || 0)
           };
-        });
-      }
+        }
+      );
 
       totalPrice = Number(bookingData.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
@@ -6752,25 +6761,46 @@ export async function handleAddPayment(req: any, res: any) {
       // reservation payments cover that child's
       // `totalPrice` AND the child's current status is
       // `pending` or `payment-uploaded`. Otherwise no
-      // change. The array feeds the per-sibling
-      // `transaction.update` writes AND the reservation
-      // header's `paymentStatus` aggregate. For legacy
-      // N=1 the array has one element and the rule is
-      // byte-equivalent to the pre-FOL-05 `fullyPaid`
-      // flag.
-      const postUpdateChildStatuses: string[] = [];
-      const childFlips: Array<{ id: string }> = [];
-      for (const child of siblingChildBookings) {
-        const coversChild = child.totalPrice > 0 && totalPaid >= child.totalPrice;
-        const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
-        const postStatus = isFlippableStatus && coversChild ? "payment-confirmed" : child.status;
-        postUpdateChildStatuses.push(postStatus);
-        if (postStatus !== child.status) {
-          childFlips.push({ id: child.id });
-        }
-      }
-      const siblingFlips = childFlips.filter((f) => f.id !== bookingId);
-      siblingFlippedCount = siblingFlips.length;
+      // change. For legacy N=1 the array has one
+      // element and the rule is byte-equivalent to the
+      // pre-FOL-05 `fullyPaid` flag.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204): the
+      // sibling-flip pass is the shared
+      // `applyReservationScopePaymentTransition` helper.
+      // The handler passes a per-handler `rule.decide`
+      // callback (the per-child coverage check + the
+      // write payload); the helper handles the
+      // per-sibling `transaction.update` + the
+      // post-update statuses array + the reservation
+      // header heartbeat.
+      const { siblingFlippedCount: helperSiblingFlippedCount } =
+        applyReservationScopePaymentTransition(
+          transaction,
+          adminDb,
+          bookingReservationId,
+          bookingId,
+          siblingChildBookings,
+          (child) => {
+            const coversChild = child.totalPrice > 0 && totalPaid >= child.totalPrice;
+            const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+            if (isFlippableStatus && coversChild) {
+              const decision: SiblingFlipDecision = {
+                write: {
+                  status: "payment-confirmed",
+                  paymentConfirmedAt: now,
+                  handledBy: staffUid,
+                  updatedAt: now
+                },
+                newStatus: "payment-confirmed"
+              };
+              return decision;
+            }
+            return null;
+          },
+          now
+        );
+      siblingFlippedCount = helperSiblingFlippedCount;
 
       const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
       const settlesCheckedOutFolio = bookingData.status === "checked-out"
@@ -6849,50 +6879,14 @@ export async function handleAddPayment(req: any, res: any) {
         transaction.update(bookingRef, bookingUpdates);
       }
 
-      // Per FOL-05 (2026-08-07, per decision #201):
-      // flip each sibling whose post-update status
-      // differs from its pre-update status. Each flip
-      // is a `payment-confirmed` transition with the
-      // same `paymentConfirmedAt` + `handledBy` +
-      // `updatedAt` stamps the target booking gets.
-      // Sibling-id-keyed `transaction.update` calls —
-      // each row's individual Firestore timestamps
-      // land in the same transaction, so the snapshot
-      // listener sees a consistent "all children
-      // flipped at the same time" view.
-      for (const flip of siblingFlips) {
-        transaction.update(adminDb.collection("bookings").doc(flip.id), {
-          status: "payment-confirmed",
-          paymentConfirmedAt: now,
-          handledBy: staffUid,
-          updatedAt: now
-        });
-      }
-
-      // Per FOL-05 (2026-08-07, per decision #201):
-      // the reservation header's `paymentStatus` mirror
-      // is now aggregate-sourced (the N>1 path that the
-      // pre-FOL-05 single-child helper couldn't express).
-      // Fires on EVERY add-payment for new reservations
-      // — the pre-FOL-05 `transitionedToPaymentConfirmed`
-      // Per BAR-02 (2026-08-08, per decision #203):
-      // the `paymentStatus` mirror is no longer
-      // written to the reservation header on
-      // add-payment. Consumers derive it at read time.
-      // The per-child status flip (the FOL-05
-      // sibling-flip pass) is unchanged — that is
-      // the real state mutation. The
-      // `bookingReservationId.length > 0` guard skips
-      // the write for legacy null-`reservationId`
-      // bookings — byte-equivalent to pre-Phase 3
-      // behavior. The same `now` is used for every
-      // write — no clock skew.
-      if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        transaction.update(reservationRef, {
-          updatedAt: now
-        });
-      }
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the per-sibling `transaction.update` calls + the
+      // reservation header heartbeat are queued by the
+      // shared `applyReservationScopePaymentTransition`
+      // helper above (called from the post-update status
+      // computation step). The target's own status
+      // update was already queued by the
+      // `transitionedToPaymentConfirmed` block above.
 
       // Append the payment record inside the transaction after
       // all reads have completed. Per MRB-04 Phase 2: for
@@ -7837,28 +7831,32 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       // we pre-read every child of the reservation BEFORE any
       // writes (FOL-03 "reads before writes" rule) so the
       // sibling-flip pass can compute the post-update child
-      // statuses in a single deterministic array. The
-      // `bookingReservationId.length === 0` guard skips the
-      // pre-read for legacy null-`reservationId` bookings
-      // (pre-MRB-01) — the pre-FOL-05 single-child-only path
-      // stays byte-equivalent. The `paymentConfirmedAt`
-      // `handledBy` `updatedAt` stamps on each flipped sibling
-      // are queued below as `transaction.update` writes, all
-      // placed after every `get()` in this transaction.
-      let siblingChildBookings: Array<{ id: string; status: string; totalPrice: number }> = [];
-      if (bookingReservationId.length > 0) {
-        const childrenForFlip = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
-        );
-        siblingChildBookings = childrenForFlip.docs.map((d: any) => {
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // pre-read every child of the reservation BEFORE
+      // any writes (FOL-03 "reads before writes") so the
+      // sibling-flip pass can compute the post-update
+      // child statuses in a single deterministic array.
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the pre-read is the shared
+      // `preReadSiblingChildren` helper. The
+      // `bookingReservationId.length === 0` guard
+      // (inside the helper) skips the pre-read for
+      // legacy null-`reservationId` bookings — the
+      // pre-FOL-05 single-child-only path stays
+      // byte-equivalent.
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId,
+        (d) => {
           const childData = d.data() || {};
           return {
             id: d.id,
             status: String(childData.status || ""),
             totalPrice: Number(childData.totalPrice || 0)
           };
-        });
-      }
+        }
+      );
 
       // The client-preallocated document ID is the idempotency key. Matching
       // cash installments remain distinct when they intentionally use
@@ -7937,23 +7935,46 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       // `payment-confirmed` if the new cumulative reservation
       // payments cover that child's `totalPrice` AND the
       // child's current status is `pending` or
-      // `payment-uploaded`. Otherwise no change. The same
-      // array feeds the per-sibling `transaction.update` writes
-      // AND the reservation header's `paymentStatus` aggregate
-      // (N>1 path). For legacy N=1 the array has one element
-      // (the target) and the rule is byte-equivalent to the
-      // pre-FOL-05 `fullyPaid` flag.
-      const postUpdateChildStatuses: string[] = [];
-      const childFlips: Array<{ id: string; fromStatus: string }> = [];
-      for (const child of siblingChildBookings) {
-        const coversChild = child.totalPrice > 0 && totalCollected >= child.totalPrice;
-        const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
-        const postStatus = isFlippableStatus && coversChild ? "payment-confirmed" : child.status;
-        postUpdateChildStatuses.push(postStatus);
-        if (postStatus !== child.status) {
-          childFlips.push({ id: child.id, fromStatus: child.status });
-        }
-      }
+      // `payment-uploaded`. Otherwise no change. For legacy
+      // N=1 the array has one element (the target) and the
+      // rule is byte-equivalent to the pre-FOL-05 `fullyPaid`
+      // flag.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204): the
+      // sibling-flip pass is the shared
+      // `applyReservationScopePaymentTransition` helper. The
+      // handler passes a per-handler `rule.decide` callback
+      // (the per-child coverage check + the write payload);
+      // the helper handles the per-sibling
+      // `transaction.update` + the post-update statuses
+      // array + the reservation header heartbeat.
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingFlippedCount } =
+        applyReservationScopePaymentTransition(
+          transaction,
+          adminDb,
+          bookingReservationId,
+          bookingId,
+          siblingChildBookings,
+          (child) => {
+            const coversChild = child.totalPrice > 0 && totalCollected >= child.totalPrice;
+            const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+            if (isFlippableStatus && coversChild) {
+              const decision: SiblingFlipDecision = {
+                write: {
+                  status: "payment-confirmed",
+                  paymentConfirmedAt: now,
+                  handledBy: staffUid,
+                  updatedAt: now
+                },
+                newStatus: "payment-confirmed"
+              };
+              return decision;
+            }
+            return null;
+          },
+          now
+        );
+      siblingFlippedCount = helperSiblingFlippedCount;
       // The target booking's "fullyPaid" flag = its own
       // post-update status is `payment-confirmed`. Used for
       // the PRC-13 email + the bell notification's "full"
@@ -7965,8 +7986,6 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         ? postUpdateChildStatuses[siblingChildBookings.findIndex((c) => c.id === bookingId)]
         : (totalCollected >= totalPrice && totalPrice > 0 ? "payment-confirmed" : data.status);
       fullyPaid = targetPostStatus === "payment-confirmed" && !targetAlreadyPastMoneyGate;
-      const siblingFlips = childFlips.filter((f) => f.id !== bookingId);
-      siblingFlippedCount = siblingFlips.length;
 
       const paymentRecord: Record<string, any> = {
         type: "payment",
@@ -8018,48 +8037,13 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       }
       bookingData = { ...data, ...bookingUpdates };
 
-      // 3. Per FOL-05 (2026-08-07, per decision #201):
-      // flip each sibling whose post-update status differs
-      // from its pre-update status. Each flip is a
-      // `payment-confirmed` transition with the same
-      // `paymentConfirmedAt` + `handledBy` + `updatedAt`
-      // stamps the target booking gets. The writes are
-      // sibling-id-keyed `transaction.update` calls (NOT a
-      // bulk-write helper) so each row's individual
-      // Firestore timestamps land in the same transaction
-      // — the snapshot listener sees a consistent "all
-      // children flipped at the same time" view.
-      for (const flip of siblingFlips) {
-        transaction.update(adminDb.collection("bookings").doc(flip.id), {
-          status: "payment-confirmed",
-          paymentConfirmedAt: now,
-          handledBy: staffUid,
-          updatedAt: now
-        });
-      }
-
-      // 4. Per FOL-05 (2026-08-07, per decision #201):
-      // the reservation header's `paymentStatus` mirror is
-      // Per BAR-02 (2026-08-08, per decision #203):
-      // the `paymentStatus` mirror is no longer
-      // written to the reservation header on
-      // verify-payment. Consumers derive it at read
-      // time. The per-child status flip (the FOL-05
-      // sibling-flip pass) is unchanged — that is
-      // the real state mutation. The
-      // `bookingReservationId.length > 0` guard skips
-      // the write for legacy null-`reservationId`
-      // bookings — byte-equivalent to pre-Phase 3
-      // behavior. The same `now` is used for every
-      // write — no clock skew between the booking
-      // update, the sibling flips, and the header
-      // touch.
-      if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        transaction.update(reservationRef, {
-          updatedAt: now
-        });
-      }
+      // 3. Per BAR-03 (2026-08-08, per decision #204):
+      // the per-sibling `transaction.update` calls + the
+      // reservation header heartbeat are queued by the
+      // shared `applyReservationScopePaymentTransition`
+      // helper above (called from the post-update status
+      // computation step). The target's own status
+      // update was already queued at step 2.
     });
 
     if (idempotentReplay) {

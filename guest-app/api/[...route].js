@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.18";
+    VERSION2 = "0.264.19";
   }
 });
 
@@ -227052,6 +227052,37 @@ init_notifications();
 init_shared();
 init_shared();
 init_shared();
+
+// server/handlers/reservationScopeTransition.ts
+async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId2, map2) {
+  if (bookingReservationId2.length === 0) return [];
+  const childrenForFlip = await transaction.get(
+    adminDb2.collection("bookings").where("reservationId", "==", bookingReservationId2)
+  );
+  return childrenForFlip.docs.map(map2);
+}
+function applyReservationScopePaymentTransition(transaction, adminDb2, bookingReservationId2, targetBookingId, children, rule, updatedAt) {
+  const postUpdateChildStatuses = [];
+  const siblingFlips = [];
+  for (const child of children) {
+    const decision = rule(child);
+    const newStatus = decision ? decision.newStatus : child.status;
+    postUpdateChildStatuses.push(newStatus);
+    if (decision && child.id !== targetBookingId) {
+      siblingFlips.push({ id: child.id, fromStatus: child.status, toStatus: newStatus });
+      transaction.update(adminDb2.collection("bookings").doc(child.id), decision.write);
+    }
+  }
+  if (bookingReservationId2.length > 0 && children.length > 0) {
+    transaction.update(adminDb2.collection("reservations").doc(bookingReservationId2), { updatedAt });
+  }
+  return {
+    siblingFlippedCount: siblingFlips.length,
+    postUpdateChildStatuses
+  };
+}
+
+// server/handlers/bookings.ts
 init_booking();
 init_shared();
 init_zod();
@@ -230365,16 +230396,15 @@ async function handleRejectPayment(req, res) {
       const data = bookingDoc.data();
       const isTargetInPaymentUploaded = data.status === "payment-uploaded";
       const bookingReservationId2 = String(data.reservationId || "").trim();
-      let siblingChildBookings = [];
-      if (bookingReservationId2.length > 0) {
-        const childrenForReject = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
-        );
-        siblingChildBookings = childrenForReject.docs.map((d) => ({
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        (d) => ({
           id: d.id,
           status: String((d.data() || {}).status || "")
-        }));
-      }
+        })
+      );
       const hasRejectableSiblings = siblingChildBookings.some(
         (c2) => c2.id !== bookingId && c2.status === "payment-uploaded"
       );
@@ -230392,17 +230422,32 @@ async function handleRejectPayment(req, res) {
       paymentRejectedAt = updatedAt;
       paymentRejectedBy2 = paymentRejectedBy2;
       freshHoldExpiresAt = newDeadline;
-      const postUpdateChildStatuses = [];
-      const rejectableChildIds = [];
-      for (const child of siblingChildBookings) {
-        if (child.status === "payment-uploaded") {
-          postUpdateChildStatuses.push("pending");
-          rejectableChildIds.push(child.id);
-        } else {
-          postUpdateChildStatuses.push(child.status);
-        }
-      }
-      siblingRejectedCount = rejectableChildIds.filter((id) => id !== bookingId).length;
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingRejectedCount } = applyReservationScopePaymentTransition(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        bookingId,
+        siblingChildBookings,
+        (child) => {
+          if (child.status === "payment-uploaded") {
+            const decision = {
+              write: {
+                status: "pending",
+                paymentRejectionReason: safeReason,
+                paymentRejectedAt: updatedAt,
+                paymentRejectedBy: paymentRejectedBy2,
+                holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+                updatedAt
+              },
+              newStatus: "pending"
+            };
+            return decision;
+          }
+          return null;
+        },
+        updatedAt
+      );
+      siblingRejectedCount = helperSiblingRejectedCount;
       if (isTargetInPaymentUploaded) {
         transaction.update(bookingRef, {
           status: "pending",
@@ -230420,23 +230465,6 @@ async function handleRejectPayment(req, res) {
           // Per the implementation plan: stale proof state is
           // kept for audit. The re-upload is guest-driven via
           // the existing `pending` UI on the lookup page.
-          updatedAt
-        });
-      }
-      for (const sibId of rejectableChildIds) {
-        if (sibId === bookingId) continue;
-        transaction.update(adminDb.collection("bookings").doc(sibId), {
-          status: "pending",
-          paymentRejectionReason: safeReason,
-          paymentRejectedAt: updatedAt,
-          paymentRejectedBy: paymentRejectedBy2,
-          holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
-          updatedAt
-        });
-      }
-      if (bookingReservationId2.length > 0 && siblingChildBookings.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        transaction.update(reservationRef, {
           updatedAt
         });
       }
@@ -231128,38 +231156,50 @@ async function handleAddPayment(req, res) {
         return;
       }
       totalPaid = existingPaid + numericAmount;
-      let siblingChildBookings = [];
-      if (bookingReservationId2.length > 0) {
-        const childrenForFlip = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
-        );
-        siblingChildBookings = childrenForFlip.docs.map((d) => {
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        (d) => {
           const childData = d.data() || {};
           return {
             id: d.id,
             status: String(childData.status || ""),
             totalPrice: Number(childData.totalPrice || 0)
           };
-        });
-      }
+        }
+      );
       totalPrice = Number(bookingData2.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
       isConfirmableStatus = bookingData2.status === "pending" || bookingData2.status === "payment-uploaded";
       hadPaymentProof = !!(bookingData2.paymentProofPath || bookingData2.paymentProofUrl);
       staffPaymentMarkerMissing = !bookingData2.emailNotificationsSent?.staffNewPayment;
-      const postUpdateChildStatuses = [];
-      const childFlips = [];
-      for (const child of siblingChildBookings) {
-        const coversChild = child.totalPrice > 0 && totalPaid >= child.totalPrice;
-        const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
-        const postStatus = isFlippableStatus && coversChild ? "payment-confirmed" : child.status;
-        postUpdateChildStatuses.push(postStatus);
-        if (postStatus !== child.status) {
-          childFlips.push({ id: child.id });
-        }
-      }
-      const siblingFlips = childFlips.filter((f5) => f5.id !== bookingId);
-      siblingFlippedCount = siblingFlips.length;
+      const { siblingFlippedCount: helperSiblingFlippedCount } = applyReservationScopePaymentTransition(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        bookingId,
+        siblingChildBookings,
+        (child) => {
+          const coversChild = child.totalPrice > 0 && totalPaid >= child.totalPrice;
+          const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+          if (isFlippableStatus && coversChild) {
+            const decision = {
+              write: {
+                status: "payment-confirmed",
+                paymentConfirmedAt: now,
+                handledBy: staffUid,
+                updatedAt: now
+              },
+              newStatus: "payment-confirmed"
+            };
+            return decision;
+          }
+          return null;
+        },
+        now
+      );
+      siblingFlippedCount = helperSiblingFlippedCount;
       const pendingLoyaltyPoints = Math.max(Number(bookingData2.pendingLoyaltyPoints || 0), 0);
       const settlesCheckedOutFolio = bookingData2.status === "checked-out" && bookingData2.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData2.checkedOutFolioTotal || 0);
       const loyaltyMemberRef = settlesCheckedOutFolio && bookingData2.memberId ? adminDb.collection("members").doc(String(bookingData2.memberId)) : null;
@@ -231209,20 +231249,6 @@ async function handleAddPayment(req, res) {
       }
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
-      }
-      for (const flip of siblingFlips) {
-        transaction.update(adminDb.collection("bookings").doc(flip.id), {
-          status: "payment-confirmed",
-          paymentConfirmedAt: now,
-          handledBy: staffUid,
-          updatedAt: now
-        });
-      }
-      if (bookingReservationId2.length > 0 && siblingChildBookings.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        transaction.update(reservationRef, {
-          updatedAt: now
-        });
       }
       const newPaymentRef = paymentsRef.doc(paymentId);
       const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
@@ -231713,20 +231739,19 @@ async function handleVerifyAndRecordPayment(req, res) {
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         return sum + Number(docSnap.data().amount || 0);
       }, 0);
-      let siblingChildBookings = [];
-      if (bookingReservationId2.length > 0) {
-        const childrenForFlip = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
-        );
-        siblingChildBookings = childrenForFlip.docs.map((d) => {
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        (d) => {
           const childData = d.data() || {};
           return {
             id: d.id,
             status: String(childData.status || ""),
             totalPrice: Number(childData.totalPrice || 0)
           };
-        });
-      }
+        }
+      );
       const existingPayment = paymentsSnapshot.docs.find((docSnap) => docSnap.id === paymentId);
       if (existingPayment) {
         const existingData = existingPayment.data();
@@ -231760,21 +231785,34 @@ async function handleVerifyAndRecordPayment(req, res) {
       }
       totalPrice = Number(data.totalPrice || 0);
       totalCollected = existingPaid + numericAmount;
-      const postUpdateChildStatuses = [];
-      const childFlips = [];
-      for (const child of siblingChildBookings) {
-        const coversChild = child.totalPrice > 0 && totalCollected >= child.totalPrice;
-        const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
-        const postStatus = isFlippableStatus && coversChild ? "payment-confirmed" : child.status;
-        postUpdateChildStatuses.push(postStatus);
-        if (postStatus !== child.status) {
-          childFlips.push({ id: child.id, fromStatus: child.status });
-        }
-      }
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingFlippedCount } = applyReservationScopePaymentTransition(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        bookingId,
+        siblingChildBookings,
+        (child) => {
+          const coversChild = child.totalPrice > 0 && totalCollected >= child.totalPrice;
+          const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+          if (isFlippableStatus && coversChild) {
+            const decision = {
+              write: {
+                status: "payment-confirmed",
+                paymentConfirmedAt: now,
+                handledBy: staffUid,
+                updatedAt: now
+              },
+              newStatus: "payment-confirmed"
+            };
+            return decision;
+          }
+          return null;
+        },
+        now
+      );
+      siblingFlippedCount = helperSiblingFlippedCount;
       const targetPostStatus = siblingChildBookings.length > 0 ? postUpdateChildStatuses[siblingChildBookings.findIndex((c2) => c2.id === bookingId)] : totalCollected >= totalPrice && totalPrice > 0 ? "payment-confirmed" : data.status;
       fullyPaid = targetPostStatus === "payment-confirmed" && !targetAlreadyPastMoneyGate;
-      const siblingFlips = childFlips.filter((f5) => f5.id !== bookingId);
-      siblingFlippedCount = siblingFlips.length;
       const paymentRecord = {
         type: "payment",
         amount: numericAmount,
@@ -231801,20 +231839,6 @@ async function handleVerifyAndRecordPayment(req, res) {
         transaction.update(bookingRef, bookingUpdates);
       }
       bookingData2 = { ...data, ...bookingUpdates };
-      for (const flip of siblingFlips) {
-        transaction.update(adminDb.collection("bookings").doc(flip.id), {
-          status: "payment-confirmed",
-          paymentConfirmedAt: now,
-          handledBy: staffUid,
-          updatedAt: now
-        });
-      }
-      if (bookingReservationId2.length > 0 && siblingChildBookings.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        transaction.update(reservationRef, {
-          updatedAt: now
-        });
-      }
     });
     if (idempotentReplay) {
       return res.status(200).json({
