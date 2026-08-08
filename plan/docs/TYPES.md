@@ -171,7 +171,7 @@ Reservation {
   voucherCode: string                     // flat voucher applies once (per MRB-09)
   memberDiscountPct: number
 
-  paymentStatus: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled"
+  paymentStatus?: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled"   // Per BAR-02 (#203, 2026-08-08): derived at read time via `computeReservationAggregatePaymentStatus(children.map(c => c.status))`; no longer written to the reservation header. Optional for back-compat reads of pre-BAR-02 reservations.
   paymentMethod: PaymentMethod
   paymentProofUrl: string | null          // canonical "no payment proof" is null
   paymentProofPath: string | null
@@ -183,11 +183,19 @@ Reservation {
   privacyAcceptedAt: Date | null
   privacyVersion: string
 
-  roomCount: number                       // aggregate counters, denormalized for fast UI
-  activeRoomCount: number
-  cancelledRoomCount: number
-  checkedInRoomCount: number
-  checkedOutRoomCount: number
+  // Per BAR-02 (#203, 2026-08-08): the 5 aggregate
+  // counter fields are derived at read time via
+  // `deriveReservationCounters(children)` in
+  // `shared/utils/bookingFolio.ts`. No handler
+  // writes them. The fields are retained as
+  // optional `?` for back-compat reads of pre-BAR-02
+  // reservations that still carry them in
+  // Firestore (harmless dead data).
+  roomCount?: number
+  activeRoomCount?: number
+  cancelledRoomCount?: number
+  checkedInRoomCount?: number
+  checkedOutRoomCount?: number
 
   holdExpiresAt: Date | null              // unified PEX hold (no separate large-group timer, per MRB-08)
 
