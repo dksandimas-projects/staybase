@@ -80,6 +80,10 @@ const bookingsHandlerSrc = readFileSync(
   resolve(__dirname, "../../server/handlers/bookings.ts"),
   "utf8"
 );
+const helperSrc = readFileSync(
+  resolve(__dirname, "../../server/handlers/reservationScopeTransition.ts"),
+  "utf8"
+);
 
 // Slice the source by handler function. The next
 // `^export async function` (or `^export function` for
@@ -227,7 +231,7 @@ describe("MRB-15-08 — `handleCheckinBooking` + `handleCheckoutBooking` skip th
 });
 
 describe("MRB-15-08 — `handleVerifyAndRecordPayment` + `handleMarkPaymentConfirmed` skip the header mirror for legacy bookings", () => {
-  it("the verify-payment handler's header touch is gated on `bookingReservationId.length > 0` (FOL-05 legacy = skip)", () => {
+  it("the verify-payment handler's header touch is gated on `bookingReservationId.length > 0` (FOL-05 legacy = skip) — owned by the BAR-03 helper", () => {
     // Per FOL-05 (2026-08-07, per decision #201):
     // the reservation-scope payment status
     // mirror is gated on `bookingReservationId.length > 0`
@@ -236,15 +240,16 @@ describe("MRB-15-08 — `handleVerifyAndRecordPayment` + `handleMarkPaymentConfi
     // BAR-02 (2026-08-08, per decision #203): the
     // mirror write itself is gone — the `paymentStatus`
     // field is no longer written to the reservation
-    // header. The conditional `transaction.update(reservationRef, { updatedAt })`
-    // is the only header touch (a heartbeat) for
-    // post-BAR-02 reservations. The `updatedAt` is
-    // required for the AdminContext listener's snapshot
-    // ordering — the post-BAR-02 reservation row may
-    // still want to know "when did the last payment
-    // happen" even without the counter mirror.
-    expect(bookingsHandlerSrc).toMatch(
-      /handleVerifyAndRecordPayment[\s\S]{0,30000}?bookingReservationId\.length > 0 && siblingChildBookings\.length > 0[\s\S]{0,200}?transaction\.update\(reservationRef,\s*\{[\s\S]{0,200}?updatedAt/
+    // header. Per BAR-03 (2026-08-08, per decision
+    // #204): the conditional `transaction.update(reservationRef, { updatedAt })`
+    // heartbeat is now inside the shared
+    // `applyReservationScopePaymentTransition`
+    // helper, gated on the same
+    // `bookingReservationId.length > 0` check. The
+    // helper call's guard is the contract — the
+    // legacy-skip behavior is preserved.
+    expect(helperSrc).toMatch(
+      /if \(bookingReservationId\.length > 0 && children\.length > 0\) \{[\s\S]{0,200}?transaction\.update\(adminDb\.collection\("reservations"\)\.doc\(bookingReservationId\), \{ updatedAt \}\);/
     );
   });
 
