@@ -22,6 +22,21 @@ The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 
 ---
 
+## New Booking Modal (Walk-in Create) — NBS-2026-08-08 fixes
+
+The New Booking modal + the Calendar's "Book dates" modal are the staff walk-in create paths. Both post to `POST /api/bookings/create-walkin` via the shared `addWalkinBooking` helper in `admin-app/src/context/AdminContext.tsx`. The 2026-08-08 booking-flow audit closed 6 findings in one batch on `fix/new-booking-audit-2026-08-08` (decision #206):
+
+- **Preallocation contract (F1):** the modal preallocates `bookingId` + `reservationId` in a `useState` lazy init. The same pair is reused across retries inside the modal session, so a retry-after-uncertain-response hits the server's idempotency replay path (MRB-02 / decision #164) instead of creating a duplicate booking. The pair rotates when the modal opens and after a successful submit, so a second booking in the same page session gets a fresh pair. The Calendar create modal has the same pattern.
+- **Required email + phone (F4):** the previous walk-in path wrote `walkin-${Date.now()}@example.invalid` + the literal string `"n/a"` to Firestore when the desk left the email/phone fields blank. The fake email then occupied the match-by-email field for every later Spark Rewards link / /my-booking lookup / contact-inquiry reply. The fix requires both fields at submit time (toast warning + early return) and stores the desk-entered values. The "we'll get the real one at check-in" rationale is gone — the brief was wrong; the fake email did real harm.
+- **Adult/child + extra bed steppers (F8, Calendar only):** the Calendar create path now collects the adult/child split + extra bed count the same way the New Booking modal does. The pre-F8 path only collected `guestCount` (the total), so a 3-guest booking in a 2-adult room silently defaulted to "all adults, no extra beds" — bypassing the EXB-03 overflow check. The form distributes `numAdults = guestCount, numChildren = 0` on a quick-set via the `Guests` field, and the split steppers override when the desk knows the actual mix. The server derives `numGuests = numAdults + numChildren` (CHD-04) and applies the EXB-03 overflow rule against the selected room type's `maxExtraBeds`.
+- **Walk-in reset on success (F9):** the post-success reset no longer seeds the next stay with `roomTypes[0]?.value || ""` while the room type catalog was still hydrating (the previous shape produced a permanent empty dropdown for the desk's next booking). The fix seeds with `""` and lets the existing effect re-sync to the first loaded type on the next paint.
+- **Walkin `isSubmitting` reset (F13):** the `finally` block always clears the submitting flag; the previous shape left the flag set on a successful submit + blocked the next attempt if the navigation was blocked.
+- **Turnstile skipped by design (decision #205):** the walk-in endpoint does NOT call `verifyTurnstile` on the way in. Staff sessions are already gated by the Firebase Auth staff login + the admin role-claim check at the API route (`authenticateStaff`); both are stronger than Turnstile. A leaked staff token is the same blast radius as a leaked staff account (revocation = staff-side credential rotation). The walk-in endpoint shares the `bookings-reschedule:30/min/IP` rate-limit bucket with the reschedule + add-room paths.
+
+**Test coverage** — `admin-app/src/__tests__/nbs-2026-08-08-walkin-preallocation.test.ts` + `nbs-2026-08-08-walkin-required-fields.test.ts` + `nbs-2026-08-08-walkin-reset-room-type.test.ts` + `nbs-2026-08-08-calendar-adult-child-extrabed.test.ts` pin the contracts at the source-text level (per the existing MRB-15-10 / FOL-02 / audit pattern).
+
+---
+
 ## Multi-Room Reservations (MRB-07)
 
 The New Booking modal creates a reservation covering one **or more** rooms — walk-in groups, phone bookings, and OTA entry all book blocks.

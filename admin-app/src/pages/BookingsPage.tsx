@@ -1,7 +1,37 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, CHECK_IN_ELIGIBLE_STATUSES, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, computeReservationAggregatePaymentStatus, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, isPaymentVerified, requiredExtraBedsFor } from "@spark-inn/shared";
+// Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08): the New
+// Booking modal preallocates the `reservationId` so a
+// retry-after-uncertain-response inside the same modal
+// session reuses the same id. Same pattern as the public
+// `/book` flow (MRB-02, decision #164).
+import {
+  calculateSeasonalAwareRoomTotal,
+  compressImageFile,
+  CHECK_IN_ELIGIBLE_STATUSES,
+  getCheckInReadiness,
+  getLatestPaymentReference,
+  getManilaDateInfo,
+  getLockedManualNightlyRate,
+  type BookingRateBreakdown,
+  type BookingSourceConfig,
+  type CancellationPreview,
+  type PaymentMethodConfig,
+  type Reservation,
+  calculateSeasonalAwareRoomBreakdown,
+  calculateVoucherDiscount,
+  calculatePercentDiscount,
+  calculateVoucherBase,
+  calculateVatBreakdown,
+  computeBookingFolio,
+  computeReservationAggregatePaymentStatus,
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  getBookingVatBreakdown,
+  isPaymentVerified,
+  requiredExtraBedsFor,
+  generateReservationId
+} from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -959,6 +989,47 @@ export function BookingsPage() {
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+  // the modal-session preallocations of the `bookingId`
+  // and `reservationId` for the New Booking walk-in create.
+  // The pair is recomputed via `useMemo` when
+  // `walkinPreallocKey` changes — the lazy `useState`
+  // init would only run once on mount, so a rotation key
+  // is the React-idiomatic way to re-derive on demand
+  // (modal open + post-success rotation). The pair is
+  // stable across other re-renders so a retry-after-
+  // uncertain-response inside the same modal session
+  // reuses the same ids — the server's transaction reads
+  // the reservation header first and either replays the
+  // original commit (same `reservationId` + same
+  // `requestFingerprint`) or returns a 409 (different
+  // `requestFingerprint`). Without preallocation, each
+  // retry races the server's auto-mint and produces a
+  // duplicate booking.
+  const [walkinPreallocKey, setWalkinPreallocKey] = useState(0);
+  const walkinPreallocatedIds = useMemo(() => ({
+    bookingId: doc(collection(db, "bookings")).id,
+    reservationId: generateReservationId()
+  }), [walkinPreallocKey]);
+  const walkinPreallocatedBookingId = walkinPreallocatedIds.bookingId;
+  const walkinPreallocatedReservationId = walkinPreallocatedIds.reservationId;
+  // The preallocations rotate when the modal opens so a
+  // second booking inside the same page session doesn't
+  // collide with a previous one's id. The rotation is
+  // idempotent: opening the modal twice in a row still
+  // produces exactly one new pair (the second open sees
+  // `isModalOpen` already true and the effect bails via
+  // the `key` no-op check below).
+  const wasModalOpenRef = useRef(false);
+  useEffect(() => {
+    if (isModalOpen && !wasModalOpenRef.current) {
+      wasModalOpenRef.current = true;
+      setWalkinPreallocKey((key) => key + 1);
+    } else if (!isModalOpen) {
+      wasModalOpenRef.current = false;
+    }
+  }, [isModalOpen]);
 
   // Walk-in Form States
   // Per fix/walkin-split-name (2026-07-25): the walk-in modal
@@ -3915,10 +3986,40 @@ export function BookingsPage() {
     e.preventDefault();
     const trimmedFirst = walkinFirstName.trim();
     const trimmedLast = walkinLastName.trim();
+    const trimmedEmail = guestEmail.trim();
+    const trimmedPhone = guestPhone.trim();
     if (!trimmedFirst || !trimmedLast || !roomNumber) {
       toast.warning(
         "Missing details",
         "Please fill in the guest's first and last name and select an available room."
+      );
+      return;
+    }
+    // Per NBS-2026-08-08 (F4, booking-flow audit 2026-08-08):
+    // the previous walkin path wrote syntactically-valid
+    // placeholder values to Firestore when the desk left
+    // the email/phone fields blank
+    // (`walkin-${Date.now()}@example.invalid` + the literal
+    // string `"n/a"`). The fake email then occupied the
+    // field that a later Spark Rewards link / /my-booking
+    // lookup / contact-inquiry reply match by email, and
+    // a real email entered at check-in never overrode the
+    // stored placeholder. Require both fields at submit
+    // time so the stored contact is always a real one.
+    // The brief is "we'll get the real one at check-in"
+    // — the field stays blank, the form refuses to submit
+    // until the desk fills it.
+    if (!trimmedEmail) {
+      toast.warning(
+        "Email required",
+        "Please enter a valid email for the guest — it's required for the booking confirmation and receipt."
+      );
+      return;
+    }
+    if (!trimmedPhone) {
+      toast.warning(
+        "Phone required",
+        "Please enter a phone number for the guest — it's required for check-in coordination."
       );
       return;
     }
@@ -3937,6 +4038,15 @@ export function BookingsPage() {
     setIsWalkinSubmitting(true);
     try {
       const result = await addWalkinBooking({
+        // Per NBS-2026-08-08 (F1): the modal-session preallocations
+        // of the `bookingId` and `reservationId`. The pair
+        // is generated in a `useState` lazy init and reused
+        // across retries inside the same modal session, so
+        // a retry-after-uncertain-response hits the server's
+        // idempotency replay path (same id + same fingerprint
+        // → 200 replay) instead of creating a duplicate.
+        preallocatedBookingId: walkinPreallocatedBookingId,
+        preallocatedReservationId: walkinPreallocatedReservationId,
         roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
         roomNumber,
         roomType,
@@ -3955,8 +4065,13 @@ export function BookingsPage() {
         firstName: trimmedFirst,
         lastName: trimmedLast,
         reminderSentAt: null,
-        guestEmail: guestEmail || `walkin-${Date.now()}@example.invalid`,
-        guestPhone: guestPhone || "n/a",
+        // Per NBS-2026-08-08 (F4): the trimmed values are
+        // sent as-collected. The empty-string gate above
+        // already returned early for the desk who left
+        // the field blank, so we never reach this point
+        // with a synthetic placeholder.
+        guestEmail: trimmedEmail,
+        guestPhone: trimmedPhone,
         numGuests,
         // Per EXB-07 (2026-08-01, per decision #155): the
         // walk-in modal now carries the adult/child split
@@ -4031,11 +4146,32 @@ export function BookingsPage() {
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
         setWalkinTestRunId("");
-        // Per EXB-07 + MRB-07: reset back to a single empty room stay
-        // at the 1-adult / 0-children / 0-extra-bed default, so the
-        // next booking starts from the common single-room state
-        // rather than inheriting the previous group's room list.
-        setWalkinRoomStays([createWalkinRoomStay(roomTypes[0]?.value || "")]);
+        // Per NBS-2026-08-08 (F9, booking-flow audit
+        // 2026-08-08): the previous reset read
+        // `roomTypes[0]?.value || ""` while the room type
+        // catalog was still hydrating, which seeded the
+        // next stay with `roomType: ""`. The next submit
+        // then failed the "Choose an available room" gate
+        // with a blank dropdown and no clear next step. The
+        // fix mirrors the existing effect at the top of
+        // this modal: if the catalog hasn't loaded yet,
+        // seed the stay with an empty `roomType` and let
+        // the `useEffect` below re-sync it to the first
+        // loaded type. The desk sees a blank dropdown that
+        // populates on the next paint instead of a
+        // permanent empty value.
+        setWalkinRoomStays([createWalkinRoomStay("")]);
+        // Per NBS-2026-08-08 (F1): rotate the preallocation
+        // key so the next modal open generates a fresh
+        // `bookingId` + `reservationId` pair. The current
+        // pair is bound to the just-committed reservation
+        // — reusing it for the next booking would (a)
+        // collide with the existing reservation header on
+        // the server, and (b) cause a non-idempotent replay
+        // to land a second booking under the same id. The
+        // rotation is what makes the "book another guest"
+        // path safe.
+        setWalkinPreallocKey((key) => key + 1);
         setIsModalOpen(false);
         toast.success(
           submittedRoomStays.length > 1 ? "Reservation created" : "Walk-in booking created",

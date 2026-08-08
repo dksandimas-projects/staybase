@@ -26,6 +26,19 @@ import {
   StoreConfig,
   bustPublicSiteContentCache,
   compressImageFile,
+  // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+  // the optional client-preallocated `reservationId` for
+  // walk-in create requests. When the call site supplies
+  // one, the server's transactional create replays the
+  // original commit on a retry-after-uncertain-response
+  // (same `reservationId` + same `requestFingerprint` →
+  // idempotent replay; different `requestFingerprint` →
+  // 409). When absent (the historical default), the server
+  // auto-mints a UUIDv4 — same pattern as the public
+  // `/api/bookings/create` path. Walk-in callers should
+  // always preallocate so a double-click on Confirm
+  // doesn't create a duplicate booking.
+  generateReservationId,
   normalizeDiscountScope,
   normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverrides,
@@ -573,6 +586,12 @@ export interface AdminContextType {
         numChildren: number;
         extraBedCount: number;
       }>;
+      // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+      // the optional client-preallocated `bookingId` +
+      // `reservationId`. See the implementation JSDoc for
+      // the retry-after-uncertain-response contract.
+      preallocatedBookingId?: string;
+      preallocatedReservationId?: string;
     }
   ) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
@@ -2210,11 +2229,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         numChildren: number;
         extraBedCount: number;
       }>;
+      // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+      // the optional client-preallocated `bookingId` and
+      // `reservationId`. The historical auto-mint path
+      // (both fields freshly generated on every submit)
+      // silently created a duplicate booking on a
+      // retry-after-uncertain-response — the user clicks
+      // Confirm, the request times out, the user clicks
+      // again, the server's auto-mint gives each call a
+      // new id, and the second submit lands as a separate
+      // booking against the same guest. The preallocation
+      // contract matches the public `/api/bookings/create`
+      // path (MRB-02): the call site preallocates both
+      // ids in a `useState` lazy init, reuses them across
+      // retries inside the same modal session, and resets
+      // them after the success toast. When absent, the
+      // server auto-mints (back-compat with the existing
+      // caller that does not preallocate).
+      preallocatedBookingId?: string;
+      preallocatedReservationId?: string;
     }
   ): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const bookingId = doc(collection(db, "bookings")).id;
+      // Per NBS-2026-08-08 (F1): the call site may preallocate
+      // both ids; when absent, we auto-mint (legacy behavior).
+      // The preallocation is what makes a retry-after-uncertain-
+      // response safe — the server's transaction reads the
+      // reservation header first and either replays the
+      // original commit (same `reservationId` + same
+      // `requestFingerprint`) or returns a 409 (different
+      // `requestFingerprint`). Without preallocation each
+      // retry races the auto-mint and produces a duplicate.
+      const bookingId = input.preallocatedBookingId || doc(collection(db, "bookings")).id;
+      const reservationId = input.preallocatedReservationId || generateReservationId();
 
       // Per fix/walkin-split-name (2026-07-25): the walk-in
       // modal now collects `firstName` + `lastName` separately
@@ -2240,6 +2288,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         },
         body: JSON.stringify({
           bookingId,
+          // Per NBS-2026-08-08 (F1): the optional
+          // client-preallocated `reservationId` for
+          // reservation-level idempotency. The server's
+          // `WalkinBookingSchema` already accepts the
+          // field (decision #164 / MRB-02.x); the
+          // auto-mint path stays as the back-compat
+          // default for any caller that does not
+          // preallocate.
+          ...(reservationId ? { reservationId } : {}),
           roomId: input.roomId,
           // Per MRB-07 (2026-08-02, per decision #159): the New Booking
           // modal can create a reservation covering N rooms. When
