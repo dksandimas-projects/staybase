@@ -1,0 +1,1119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spark Inn — Booking flow with BAR-01 (rooms denormalized into the booking doc)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --surface: #ffffff;
+    --line: #e9e3d6;
+    --line-soft: #f0eadb;
+    --ink: #14171e;
+    --ink-2: #3a4256;
+    --ink-3: #7c7a72;
+    --primary: #2f6f5e;
+    --primary-soft: rgba(47, 111, 94, 0.08);
+    --primary-2: #c97b3f;
+    --warn: #b06367;
+    --warn-soft: rgba(176, 99, 103, 0.08);
+    --amber: #c97b3f;
+    --amber-soft: rgba(201, 123, 63, 0.08);
+    --blue: #3a6b8a;
+    --blue-soft: rgba(58, 107, 138, 0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Outfit', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(800px 600px at 0% 0%, rgba(47, 111, 94, 0.04), transparent),
+                radial-gradient(700px 500px at 100% 100%, rgba(201, 123, 63, 0.04), transparent);
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 56px 24px 80px; }
+
+  /* Hero */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--primary);
+    background: var(--primary-soft);
+    padding: 6px 12px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    font-weight: 400;
+    font-size: 40px;
+    line-height: 1.1;
+    letter-spacing: -0.005em;
+    margin: 0 0 16px;
+    color: var(--ink);
+  }
+  h1 em { font-style: italic; color: var(--primary); }
+  .lede {
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 640px;
+    margin: 0 0 12px;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 28px;
+    padding: 18px 0 24px;
+    margin-bottom: 32px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--ink-3);
+  }
+  .meta-row strong { color: var(--ink-2); font-weight: 600; }
+
+  /* Section */
+  section { margin: 64px 0; }
+  .section-head { margin-bottom: 28px; }
+  .section-eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    font-weight: 400;
+    font-size: 30px;
+    line-height: 1.15;
+    letter-spacing: -0.005em;
+    margin: 0 0 8px;
+    color: var(--ink);
+  }
+  .section-blurb {
+    color: var(--ink-2);
+    font-size: 15px;
+    margin: 0;
+    max-width: 640px;
+  }
+
+  /* Two-column step layout */
+  .step {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 24px 0;
+    border-top: 1px solid var(--line-soft);
+  }
+  @media (min-width: 720px) {
+    .step { grid-template-columns: 220px 1fr; gap: 32px; padding: 28px 0; }
+  }
+  .step-num {
+    font-family: 'DM Serif Display', Georgia, serif;
+    font-size: 36px;
+    color: var(--primary);
+    line-height: 1;
+  }
+  .step-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-top: 6px;
+  }
+  .step-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 4px 0 8px;
+  }
+  .step-body {
+    color: var(--ink-2);
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  .step-body p { margin: 0 0 10px; }
+  .step-body p:last-child { margin-bottom: 0; }
+  .step-aside { font-size: 13px; color: var(--ink-3); margin-top: 8px; }
+
+  /* Mock UI cards */
+  .mock {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    margin: 14px 0;
+  }
+  .mock-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    background: #fbf9f4;
+  }
+  .mock-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .mock-dot.r { background: #e88282; }
+  .mock-dot.y { background: #e8c66e; }
+  .mock-dot.g { background: #82c8a4; }
+  .mock-url {
+    margin-left: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    flex: 1;
+  }
+  .mock-body { padding: 18px 20px; }
+  .mock-h {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 12px;
+  }
+
+  /* Form elements */
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field label { font-size: 11px; font-weight: 600; color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase; }
+  .field .ipt {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 14px;
+    background: #fcfbf7;
+    font-family: inherit;
+    color: var(--ink);
+  }
+  .field .ipt:focus { outline: none; border-color: var(--primary); background: #fff; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+  /* Room cards on /book */
+  .room-pick {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .room-pick.sel { border-color: var(--primary); background: var(--primary-soft); }
+  .room-pick h4 { margin: 0; font-size: 14px; font-weight: 600; }
+  .room-pick .meta { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+  .room-pick .price { font-weight: 700; color: var(--ink); }
+
+  /* Picker chip */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .chip.green { background: var(--primary-soft); color: var(--primary); }
+  .chip.amber { background: var(--amber-soft); color: var(--amber); }
+  .chip.blue { background: var(--blue-soft); color: var(--blue); }
+  .chip.red { background: var(--warn-soft); color: var(--warn); }
+
+  /* Sum row */
+  .sumrow {
+    display: grid; grid-template-columns: 1fr auto; gap: 8px;
+    padding: 6px 0; font-size: 13px; color: var(--ink-2);
+    border-bottom: 1px dashed var(--line);
+  }
+  .sumrow.total { font-weight: 700; color: var(--ink); border-bottom: 0; padding-top: 10px; font-size: 15px; }
+
+  /* CTA */
+  .cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 18px; border-radius: 10px; font-weight: 600; font-size: 14px;
+    background: var(--primary); color: white; border: 0; cursor: pointer;
+    margin-top: 8px;
+  }
+  .cta.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--line); }
+  .cta.amber { background: var(--amber); }
+  .cta.danger { background: var(--warn); }
+  .cta-block { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+  /* Guest counter */
+  .ctr { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .ctr button { width: 32px; height: 32px; background: white; border: 0; cursor: pointer; font-size: 16px; color: var(--ink-2); }
+  .ctr button:hover { background: #f5f0e3; }
+  .ctr .val { min-width: 32px; text-align: center; font-weight: 600; font-size: 14px; }
+
+  /* Dashboard pending card */
+  .card-pending {
+    background: white; border: 1px solid #f4d790; border-radius: 12px; padding: 16px;
+    display: grid; grid-template-columns: 64px 1fr auto; gap: 16px; align-items: center;
+  }
+  .card-pending .proof {
+    width: 64px; height: 64px; border-radius: 8px; background: #f0eadb;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card-pending h4 { margin: 0; font-size: 14px; font-weight: 700; }
+  .card-pending .sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .card-pending .ref { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--amber); background: var(--amber-soft); padding: 2px 8px; border-radius: 4px; display: inline-block; margin-top: 4px; }
+  .card-pending .btncol { display: flex; flex-direction: column; gap: 6px; }
+  .card-pending .btncol .cta { padding: 7px 14px; font-size: 12px; margin: 0; width: 100%; justify-content: center; }
+
+  /* Verify modal */
+  .modal {
+    background: white; border-radius: 14px; border: 1px solid var(--line); overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    max-width: 520px;
+  }
+  .modal-h {
+    padding: 16px 20px; border-bottom: 1px solid var(--line-soft);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-h h3 { margin: 0; font-size: 16px; font-weight: 600; }
+  .modal-body { padding: 18px 20px; }
+
+  /* Coverage preview rows */
+  .cov-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0; font-size: 13px; border-bottom: 1px dashed var(--line);
+  }
+  .cov-row:last-child { border-bottom: 0; }
+  .cov-row .room { color: var(--ink); font-weight: 500; }
+
+  /* Booking detail */
+  .detail-h {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--line-soft);
+  }
+  .detail-h h3 { margin: 0; font-size: 18px; font-weight: 600; }
+  .rooms-list { padding: 0; margin: 0; list-style: none; }
+  .rooms-list li {
+    display: grid; grid-template-columns: 28px 1fr auto auto; gap: 12px;
+    align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--line-soft);
+    font-size: 13px;
+  }
+  .rooms-list li:last-child { border-bottom: 0; }
+  .rooms-list .pos { font-family: 'JetBrains Mono', monospace; color: var(--ink-3); font-size: 11px; }
+  .rooms-list .num { font-weight: 600; }
+  .rooms-list .type { color: var(--ink-2); }
+
+  /* Email */
+  .email {
+    background: white; border: 1px solid var(--line); border-radius: 12px; padding: 0; overflow: hidden;
+  }
+  .email-h {
+    padding: 12px 16px; background: #fbf9f4; border-bottom: 1px solid var(--line-soft);
+    font-size: 12px; color: var(--ink-3);
+  }
+  .email-h strong { color: var(--ink-2); }
+  .email-body { padding: 20px 22px; }
+  .email-body h4 { font-family: 'DM Serif Display', Georgia, serif; font-size: 20px; margin: 0 0 4px; font-weight: 400; }
+  .email-body .subj { font-size: 12px; color: var(--ink-3); margin-bottom: 16px; }
+  .email-body p { font-size: 14px; color: var(--ink-2); margin: 0 0 12px; }
+
+  /* Annotations */
+  .annot {
+    background: rgba(47, 111, 94, 0.05);
+    border-left: 3px solid var(--primary);
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+    font-size: 13px;
+    color: var(--ink-2);
+    margin: 10px 0 0;
+  }
+  .annot strong { color: var(--primary); }
+
+  /* Sidebar / aside */
+  .grid2 { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  @media (min-width: 720px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+
+  /* Diff card */
+  .diff {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    margin: 14px 0;
+  }
+  .diff .col { background: var(--surface); padding: 14px 16px; }
+  .diff .col h5 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .diff .col.before h5 { color: var(--ink-3); }
+  .diff .col.after h5 { color: var(--primary); }
+  .diff p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+
+  /* Status pill */
+  .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .pill.green { background: var(--primary-soft); color: var(--primary); }
+  .pill.amber { background: var(--amber-soft); color: var(--amber); }
+  .pill.red { background: var(--warn-soft); color: var(--warn); }
+  .pill.gray { background: #ece9e0; color: var(--ink-3); }
+
+  /* Stats row */
+  .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin: 16px 0; }
+  .stat { background: white; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .lbl { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .stat .val { font-size: 22px; font-weight: 700; margin-top: 4px; }
+  .stat .val.small { font-size: 16px; }
+
+  /* Footer */
+  footer { margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 13px; }
+
+  /* Mermaid / flow arrows */
+  .flow-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+  .flow-row .node {
+    background: white; border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 12px; font-size: 13px; font-weight: 500;
+  }
+  .flow-row .arrow { color: var(--ink-3); font-size: 16px; }
+
+  /* Mobile */
+  @media (max-width: 600px) {
+    .page { padding: 32px 18px 60px; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 24px; }
+    .diff { grid-template-columns: 1fr; }
+    .row3, .field-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <span class="eyebrow">BAR-01 · Booking flow tour · post-refactor</span>
+  <h1>One booking, one lifecycle, <em>N rooms</em>.</h1>
+  <p class="lede">A guest books 2 rooms. The system creates <strong>one</strong> booking doc, not two. The admin sees <strong>one</strong> dashboard card, not two. The verify action clears <strong>both rooms in one click</strong>. This is the long-term shape after BAR-01 lands.</p>
+
+  <div class="meta-row">
+    <div><strong>Spec</strong> · plan/features/BOOKING-UNIFIED.md</div>
+    <div><strong>Decision</strong> · #201 (FOL-05) → #202 (BAR-01, when filed)</div>
+    <div><strong>Trigger</strong> · post-MRB-15 + the next "multi-room" feature ships</div>
+  </div>
+
+  <!-- 1. Guest searches -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Guest · search</div>
+      <h2>1. From the homepage, a guest picks 2 adults + 1 child for 3 nights.</h2>
+      <p class="section-blurb">The CHD-13 search widget (top-right corner of sparkinnbohol.com) renders the unified popover picker. The guest hits Search — the URL carries the same params the /book page already reads.</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">01</div>
+        <div class="step-label">Guest</div>
+        <div class="step-title">Search widget</div>
+      </div>
+      <div>
+        <div class="step-body">
+          <p>The guest picks <strong>Oct 14 → Oct 17</strong>, <strong>2 adults + 1 child</strong>, hits Search.</p>
+        </div>
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+            <span class="mock-url">sparkinnbohol.com</span>
+          </div>
+          <div class="mock-body">
+            <p class="mock-h">Check availability</p>
+            <div class="field-row">
+              <div class="field">
+                <label>Check-in</label>
+                <input class="ipt" value="Oct 14, 2026" />
+              </div>
+              <div class="field">
+                <label>Check-out</label>
+                <input class="ipt" value="Oct 17, 2026" />
+              </div>
+            </div>
+            <div class="row3">
+              <div class="field">
+                <label>Adults</label>
+                <div class="ctr"><button>−</button><span class="val">2</span><button>+</button></div>
+              </div>
+              <div class="field">
+                <label>Children</label>
+                <div class="ctr"><button>−</button><span class="val">1</span><button>+</button></div>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <button class="cta" style="margin:0; padding:7px 14px; font-size:12px;">Search →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. /book picker -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Guest · /book</div>
+      <h2>2. The picker shows available rooms. Guest picks 2.</h2>
+      <p class="section-blurb">Two different room types because the family wants variety. The guest selects Standard + Deluxe.</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">02</div>
+        <div class="step-label">Guest</div>
+        <div class="step-title">Room picker</div>
+      </div>
+      <div>
+        <div class="step-body">
+          <p>The picker lets the guest add multiple rooms to a single reservation. Each click adds a <code>RoomLine</code> to the cart.</p>
+        </div>
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+            <span class="mock-url">sparkinnbohol.com/book?checkIn=2026-10-14&checkOut=2026-10-17&guests=3&children=1</span>
+          </div>
+          <div class="mock-body">
+            <p class="mock-h">Your stay · Oct 14 → Oct 17 (3 nights) · 2 adults, 1 child</p>
+
+            <div class="room-pick sel">
+              <div>
+                <h4>Standard Double</h4>
+                <div class="meta">Room 101 · 1 queen · fits 2 adults + 1 child</div>
+              </div>
+              <div class="price">₱5,000 <span style="font-weight:400; color:var(--ink-3);">/night</span></div>
+            </div>
+            <div class="room-pick sel">
+              <div>
+                <h4>Deluxe Twin</h4>
+                <div class="meta">Room 102 · 2 single beds · fits 2 adults</div>
+              </div>
+              <div class="price">₱7,000 <span style="font-weight:400; color:var(--ink-3);">/night</span></div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; margin-top:6px; border-top: 1px solid var(--line);">
+              <div>
+                <div style="font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Cart total</div>
+                <div style="font-size:24px; font-weight:700; margin-top:2px;">₱36,000 <span style="font-size:12px; color:var(--ink-3); font-weight:400;">for 3 nights × 2 rooms</span></div>
+              </div>
+              <button class="cta">Continue →</button>
+            </div>
+          </div>
+        </div>
+        <div class="annot">
+          <strong>BAR-01 difference:</strong> the cart has 2 lines, but they're going into a <em>single</em> booking's <code>rooms: RoomLine[]</code> array — not 2 separate booking docs. One submission, one doc, one ref.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Guest details -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Guest · checkout</div>
+      <h2>3. Lead guest fills in their details + agrees to T&Cs.</h2>
+      <p class="section-blurb">The contact form is unchanged. The lead guest identity lives on the single booking doc (no longer duplicated on N children).</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">03</div>
+        <div class="step-label">Guest</div>
+        <div class="step-title">Guest details</div>
+      </div>
+      <div>
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+            <span class="mock-url">sparkinnbohol.com/book/checkout</span>
+          </div>
+          <div class="mock-body">
+            <p class="mock-h">Lead guest details</p>
+            <div class="field-row">
+              <div class="field">
+                <label>Full name</label>
+                <input class="ipt" value="Maria Santos" />
+              </div>
+              <div class="field">
+                <label>Email</label>
+                <input class="ipt" value="maria@email.com" />
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label>Phone</label>
+                <input class="ipt" value="+63 917 555 0102" />
+              </div>
+              <div class="field">
+                <label>Special requests</label>
+                <input class="ipt" value="Late check-in around 10pm please" />
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+              <input type="checkbox" checked />
+              <span style="font-size:13px;">I agree to the cancellation policy and T&Cs</span>
+            </div>
+            <div class="cta-block">
+              <button class="cta">Confirm booking — ₱36,000</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Confirmation + email -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Guest · confirmation</div>
+      <h2>4. Server creates 1 booking doc. Guest pays via GCash. Email fires.</h2>
+      <p class="section-blurb"><code>handleCreateBooking</code> writes one <code>bookings/{id}</code> doc with the <code>rooms: [Standard, Deluxe]</code> array. The guest pays the full ₱36,000 via GCash and uploads the proof. Status: <strong>payment-uploaded</strong> on both rooms. The confirmation email is sent with the unified view.</p>
+    </div>
+
+    <div class="diff">
+      <div class="col before">
+        <h5>Today (pre-BAR-01)</h5>
+        <p>2 <code>bookings/{id}</code> docs created (one per room). 1 <code>reservations/{id}</code> doc. The confirmation email reads "R-... 2 rooms." Front desk sees 2 admin cards.</p>
+      </div>
+      <div class="col after">
+        <h5>After BAR-01</h5>
+        <p>1 <code>bookings/{id}</code> doc with <code>rooms: [Standard, Deluxe]</code>. Confirmation email reads "R-... 2 rooms." Front desk sees 1 admin card. Same wire contract, simpler data shape.</p>
+      </div>
+    </div>
+
+    <div class="mock email">
+      <div class="email-h">
+        From <strong>Spark Inn</strong> &nbsp;·&nbsp; To maria@email.com &nbsp;·&nbsp; Subject <strong>[Spark Inn] Booking submitted: R-20261014-00012 (2 rooms)</strong>
+      </div>
+      <div class="email-body">
+        <h4>Hi Maria,</h4>
+        <p class="subj">Booking submitted · awaiting payment proof</p>
+        <p>Thanks for booking at Spark Inn. Your reservation <strong>R-20261014-00012</strong> covers 2 rooms from Oct 14 to Oct 17 (3 nights).</p>
+        <div class="rooms-list" style="border:1px solid var(--line-soft); border-radius:8px; margin:8px 0;">
+          <li>
+            <span class="pos">#1</span>
+            <span><span class="num">Room 101</span> <span class="type">· Standard Double · 2 adults + 1 child</span></span>
+            <span style="color:var(--ink-3); font-size:12px;">₱15,000</span>
+            <span class="pill amber">payment-uploaded</span>
+          </li>
+          <li>
+            <span class="pos">#2</span>
+            <span><span class="num">Room 102</span> <span class="type">· Deluxe Twin · 2 adults</span></span>
+            <span style="color:var(--ink-3); font-size:12px;">₱21,000</span>
+            <span class="pill amber">payment-uploaded</span>
+          </li>
+        </div>
+        <p>Please send <strong>₱36,000</strong> via GCash and upload the proof. We'll confirm within 1 hour.</p>
+        <p style="color:var(--ink-3); font-size:12px;">Reservation ref: R-20261014-00012 · 1 booking · 2 rooms</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. Admin dashboard -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Admin · dashboard</div>
+      <h2>5. Admin logs in. Dashboard shows <strong>1 card</strong>, not 2.</h2>
+      <p class="section-blurb">The "pending payment alerts" panel reads the booking + its <code>rooms[]</code> array. One booking = one card. The card surfaces reservation-scope total/paid/due + a "{N} rooms" chip.</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">05</div>
+        <div class="step-label">Admin</div>
+        <div class="step-title">Dashboard card</div>
+      </div>
+      <div>
+        <div class="step-body">
+          <p>Front desk sees <strong>1 card</strong>: the reservation ref + the 2 rooms chip + the ₱36,000 due. They click "Verify & Record" — one action clears both rooms.</p>
+        </div>
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+            <span class="mock-url">admin.sparkinnbohol.com</span>
+          </div>
+          <div class="mock-body">
+            <p class="mock-h" style="display:flex; align-items:center; justify-content:space-between;">
+              <span>Pending payment alerts</span>
+              <span class="chip amber">1 queued</span>
+            </p>
+
+            <div class="card-pending">
+              <div class="proof">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink-3);">
+                  <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
+                </svg>
+              </div>
+              <div>
+                <h4>R-20261014-00012 <span class="chip green" style="margin-left:6px;">2 rooms</span></h4>
+                <div class="sub">Maria Santos · Oct 14 → Oct 17</div>
+                <span class="ref">Ref: GC-20261014-A8X3F</span>
+                <div style="font-size:12px; color:var(--ink-3); margin-top:4px;">₱36,000 total · <strong>₱36,000 due</strong></div>
+              </div>
+              <div class="btncol">
+                <button class="cta ghost" style="background:transparent;">Proof</button>
+                <button class="cta ghost danger" style="background:transparent;">Reject</button>
+                <button class="cta">Verify & Record</button>
+              </div>
+            </div>
+
+            <p style="font-size:12px; color:var(--ink-3); margin-top:14px;">↓ Click Verify & Record</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Verify modal -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Admin · verify</div>
+      <h2>6. Modal opens with the full ₱36,000 + a per-room coverage preview.</h2>
+      <p class="section-blurb">The staff sees "this amount will cover both rooms" before they hit Verify. The server is the source of truth — the preview is a UX hint that updates live as the staff edits the amount.</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">06</div>
+        <div class="step-label">Admin</div>
+        <div class="step-title">Verify modal</div>
+      </div>
+      <div>
+        <div class="modal">
+          <div class="modal-h">
+            <h3>Verify payment — R-20261014-00012</h3>
+            <span style="color:var(--ink-3); font-size:18px; cursor:pointer;">×</span>
+          </div>
+          <div class="modal-body">
+            <p style="font-size:13px; color:var(--ink-2); margin: 0 0 14px;">
+              Review the proof and confirm. This atomically creates a ledger entry and clears every covered room in one click.
+            </p>
+
+            <div style="background: #fbf9f4; border-radius: 8px; padding: 8px; text-align: center; margin-bottom: 14px;">
+              <div style="height: 90px; display: flex; align-items: center; justify-content: center; color: var(--ink-3); font-size: 12px; background: white; border-radius: 6px; border: 1px dashed var(--line);">
+                [ GCash screenshot — ₱36,000 from Maria Santos ]
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+              <div style="background: #f5f0e3; border-radius: 8px; padding: 8px 10px;">
+                <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Reservation total</div>
+                <div style="font-size:15px; font-weight:700; margin-top:2px;">₱36,000</div>
+              </div>
+              <div style="background: #f5f0e3; border-radius: 8px; padding: 8px 10px;">
+                <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Reservation due</div>
+                <div style="font-size:15px; font-weight:700; margin-top:2px;">₱36,000</div>
+              </div>
+            </div>
+
+            <div style="background: #fbf9f4; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
+              <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em; font-weight: 600; margin-bottom: 8px;">Coverage preview</div>
+              <div class="cov-row">
+                <span class="room">Room 101 · Standard Double</span>
+                <span class="pill green">Cleared</span>
+              </div>
+              <div class="cov-row">
+                <span class="room">Room 102 · Deluxe Twin</span>
+                <span class="pill green">Cleared</span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Verified amount</label>
+              <input class="ipt" value="36000.00" />
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label>Method</label>
+                <select class="ipt"><option>GCash</option><option>Bank Transfer</option></select>
+              </div>
+              <div class="field">
+                <label>Reference</label>
+                <input class="ipt" value="GC-20261014-A8X3F" />
+              </div>
+            </div>
+
+            <div class="cta-block">
+              <button class="cta ghost">Cancel</button>
+              <button class="cta">Verify & Record Payment</button>
+            </div>
+          </div>
+        </div>
+        <div class="annot">
+          <strong>One transaction. Both rooms clear.</strong> The server's <code>handleVerifyAndRecordPayment</code> writes <code>rooms[0].status = "payment-confirmed"</code> + <code>rooms[1].status = "payment-confirmed"</code> in a single <code>transaction.update</code>. No sibling iteration needed.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. Partial payment: coverage preview shows the mix -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Admin · partial payment</div>
+      <h2>7. What if Maria only sent ₱30,000? Coverage preview shows the mix.</h2>
+      <p class="section-blurb">Partial is the most common real-world case. The staff enters the verified amount, and the per-room coverage preview re-computes live: Room 101 turns green, Room 102 turns amber. One verify action, one ledger entry, one room still owed.</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">07</div>
+        <div class="step-label">Admin</div>
+        <div class="step-title">Partial payment</div>
+      </div>
+      <div>
+        <div class="modal">
+          <div class="modal-h">
+            <h3>Verify payment — R-20261014-00012 <span class="chip amber" style="margin-left:8px; font-size:11px;">partial</span></h3>
+            <span style="color:var(--ink-3); font-size:18px; cursor:pointer;">×</span>
+          </div>
+          <div class="modal-body">
+            <p style="font-size:13px; color:var(--ink-2); margin: 0 0 14px;">
+              The screenshot shows <strong>₱30,000</strong>. The reservation total is ₱36,000 — the coverage preview tells you which room is still owed.
+            </p>
+
+            <div style="background: #fbf9f4; border-radius: 8px; padding: 8px; text-align: center; margin-bottom: 14px;">
+              <div style="height: 90px; display: flex; align-items: center; justify-content: center; color: var(--ink-3); font-size: 12px; background: white; border-radius: 6px; border: 1px dashed var(--line);">
+                [ GCash screenshot — <strong style="color:var(--ink-1);">₱30,000</strong> from Maria Santos ]
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+              <div style="background: #f5f0e3; border-radius: 8px; padding: 8px 10px;">
+                <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Total</div>
+                <div style="font-size:15px; font-weight:700; margin-top:2px;">₱36,000</div>
+              </div>
+              <div style="background: #e8f3ec; border-radius: 8px; padding: 8px 10px;">
+                <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Applying</div>
+                <div style="font-size:15px; font-weight:700; margin-top:2px; color: #1f6b3d;">₱30,000</div>
+              </div>
+              <div style="background: #fbe9c8; border-radius: 8px; padding: 8px 10px;">
+                <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Still due</div>
+                <div style="font-size:15px; font-weight:700; margin-top:2px; color: #8a4a00;">₱6,000</div>
+              </div>
+            </div>
+
+            <div style="background: #fbf9f4; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
+              <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em; font-weight: 600; margin-bottom: 8px;">Coverage preview <span style="color:var(--amber); font-weight:600; text-transform:none; letter-spacing:0;">· live as you type</span></div>
+              <div class="cov-row">
+                <span class="room">Room 101 · Standard Double <span style="color:var(--ink-3); font-size:11px;">(₱15,000)</span></span>
+                <span class="pill green">Cleared</span>
+              </div>
+              <div class="cov-row">
+                <span class="room">Room 102 · Deluxe Twin <span style="color:var(--ink-3); font-size:11px;">(₱21,000)</span></span>
+                <span class="pill amber">₱6,000 still owed</span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Verified amount</label>
+              <input class="ipt" value="30000.00" style="border-color: var(--amber);" />
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label>Method</label>
+                <select class="ipt"><option>GCash</option><option>Bank Transfer</option></select>
+              </div>
+              <div class="field">
+                <label>Reference</label>
+                <input class="ipt" value="GC-20261014-A8X3F" />
+              </div>
+            </div>
+
+            <div class="cta-block">
+              <button class="cta ghost">Cancel</button>
+              <button class="cta">Verify & Record Payment</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="annot">
+          <strong>The preview is the FOL-05 / BAR-01 payoff.</strong> The staff sees <em>exactly</em> which room is still owed before they hit Verify. The server's <code>handleVerifyAndRecordPayment</code> writes a <code>payments</code> ledger entry for ₱30,000, then walks the rooms oldest-first: <code>rooms[0].status = "payment-confirmed"</code> (₱15,000 covered), then <code>rooms[1].status = "payment-uploaded"</code> with the residual ₱6,000 unpaid. One transaction, mixed state, no math error.
+        </div>
+
+        <p style="font-size:12px; color:var(--ink-3); margin: 22px 0 6px;">↓ Click Verify & Record Payment</p>
+
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+            <span class="mock-url">admin.sparkinnbohol.com</span>
+          </div>
+          <div class="mock-body">
+            <p class="mock-h" style="display:flex; align-items:center; justify-content:space-between;">
+              <span>Pending payment alerts</span>
+              <span class="chip amber">1 partial</span>
+            </p>
+
+            <div class="card-pending" style="border-color: #e6b85a;">
+              <div class="proof">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink-3);">
+                  <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
+                </svg>
+              </div>
+              <div>
+                <h4>R-20261014-00012 <span class="chip green" style="margin-left:6px;">2 rooms</span></h4>
+                <div class="sub">Maria Santos · Oct 14 → Oct 17</div>
+                <span class="ref">Ref: GC-20261014-A8X3F</span>
+                <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                  <span class="pill green" style="font-size:10px;">Room 101 · Verified</span>
+                  <span class="pill amber" style="font-size:10px;">Room 102 · ₱6,000 owed</span>
+                </div>
+                <div style="font-size:12px; color:var(--ink-3); margin-top:6px;">₱36,000 total · <strong style="color:var(--ink-1);">₱30,000 paid</strong> · <strong style="color: #8a4a00;">₱6,000 due</strong></div>
+              </div>
+              <div class="btncol">
+                <button class="cta ghost" style="background:transparent;">Proof</button>
+                <button class="cta ghost danger" style="background:transparent;">Reject</button>
+                <button class="cta">Verify & Record</button>
+              </div>
+            </div>
+
+            <div style="margin-top: 12px; padding: 10px 12px; background: #fbf9f4; border: 1px solid var(--line-soft); border-radius: 8px; font-size: 12px; color: var(--ink-2);">
+              <strong style="color: var(--ink-1);">Card stays on dashboard</strong> until both rooms clear. Staff can fire a "balance reminder" email/SMS to Maria, or wait for her second GCash transfer.
+            </div>
+          </div>
+        </div>
+
+        <div class="annot">
+          <strong>The card stays.</strong> Because the per-room <code>status</code> is local to the booking, the dashboard's reservation-scope card can render <em>partial</em> state without any aggregate helper. Room 101 turns green, Room 102 stays amber, the ₱6,000 due figure is computed from <code>totalPrice − sum(verified)</code>. No second source of truth, no flag to forget to flip.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. Booking detail (both rooms clear) -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Admin · detail</div>
+      <h2>8. Card drops off the dashboard. Staff opens the booking detail.</h2>
+      <p class="section-blurb">The booking detail page reads the same <code>rooms: RoomLine[]</code> array. Both rooms show "Verified." The staff can confirm the booking + fire the "Payment confirmed" email to the guest.</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">08</div>
+        <div class="step-label">Admin</div>
+        <div class="step-title">Booking detail</div>
+      </div>
+      <div>
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+            <span class="mock-url">admin.sparkinnbohol.com/bookings/R-20261014-00012</span>
+          </div>
+          <div class="mock-body" style="padding:0;">
+            <div class="detail-h">
+              <h3>R-20261014-00012 <span class="chip green" style="margin-left:8px;">2 rooms</span></h3>
+              <div style="display:flex; gap:8px;">
+                <span class="pill green">Payment confirmed</span>
+              </div>
+            </div>
+            <div class="rooms-list">
+              <li>
+                <span class="pos">#1</span>
+                <span><span class="num">Room 101</span> <span class="type">· Standard Double · 2 adults + 1 child</span></span>
+                <span style="color:var(--ink-3);">₱15,000</span>
+                <span class="pill green">Verified</span>
+              </li>
+              <li>
+                <span class="pos">#2</span>
+                <span><span class="num">Room 102</span> <span class="type">· Deluxe Twin · 2 adults</span></span>
+                <span style="color:var(--ink-3);">₱21,000</span>
+                <span class="pill green">Verified</span>
+              </li>
+            </div>
+            <div style="padding: 14px 20px; background: #fbf9f4; border-top: 1px solid var(--line-soft); display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Total · Paid · Balance</div>
+                <div style="font-size:14px; margin-top:2px;">
+                  <strong>₱36,000</strong> · <strong style="color:var(--primary);">₱36,000</strong> · <span style="color:var(--ink-3);">₱0</span>
+                </div>
+              </div>
+              <button class="cta">Confirm Booking</button>
+            </div>
+          </div>
+        </div>
+        <div class="annot">
+          <strong>The desk sees the truth.</strong> Because the per-room <code>status</code> is local to the booking, the detail page reads <code>rooms[].status</code> directly. No aggregate helper, no mirror write, no possibility of the header disagreeing with the list.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. Check-in -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Admin · check-in</div>
+      <h2>9. On arrival day, the staff checks in both rooms in one click.</h2>
+      <p class="section-blurb">The check-in flow mutates <code>rooms[0].status</code> and <code>rooms[1].status</code> to <code>"checked-in"</code> in one transaction. No header mirror write. No N-children iteration. No "did you remember the counter?" question.</p>
+    </div>
+
+    <div class="step">
+      <div>
+        <div class="step-num">09</div>
+        <div class="step-label">Admin</div>
+        <div class="step-title">Check-in</div>
+      </div>
+      <div>
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+            <span class="mock-url">admin.sparkinnbohol.com/bookings/R-20261014-00012</span>
+          </div>
+          <div class="mock-body" style="padding:0;">
+            <div class="detail-h">
+              <h3>R-20261014-00012 <span class="chip green" style="margin-left:8px;">2 rooms</span></h3>
+              <span class="pill green">Confirmed</span>
+            </div>
+            <div class="rooms-list">
+              <li>
+                <span class="pos">#1</span>
+                <span><span class="num">Room 101</span> <span class="type">· Standard Double · 2 adults + 1 child</span></span>
+                <span style="color:var(--ink-3);">Ready to check in</span>
+                <span class="pill amber">Confirmed</span>
+              </li>
+              <li>
+                <span class="pos">#2</span>
+                <span><span class="num">Room 102</span> <span class="type">· Deluxe Twin · 2 adults</span></span>
+                <span style="color:var(--ink-3);">Ready to check in</span>
+                <span class="pill amber">Confirmed</span>
+              </li>
+            </div>
+            <div style="padding: 14px 20px; background: #fbf9f4; border-top: 1px solid var(--line-soft); display:flex; justify-content:space-between; align-items:center;">
+              <div style="font-size:13px; color:var(--ink-2);">
+                <strong>Check-in readiness</strong> · both rooms · 2 adults + 1 child total
+              </div>
+              <button class="cta">Check in both rooms →</button>
+            </div>
+          </div>
+        </div>
+        <div class="annot">
+          <strong>One click. Both rooms flip.</strong> The check-in transaction reads the booking + updates <code>rooms[*].status = "checked-in"</code> + emits the check-in email. Total server code: ~30 lines, no aggregation, no mirror.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. Checkout + email -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Admin · checkout</div>
+      <h2>10. On checkout day, both rooms are checked out. The receipt email fires.</h2>
+      <p class="section-blurb">The checkout flow is symmetric to check-in: one transaction, both rooms. The receipt PDF lists each room's nightly rate + add-ons. The final email confirms the stay is complete.</p>
+    </div>
+
+    <div class="grid2">
+      <div class="mock">
+        <div class="mock-bar">
+          <span class="mock-dot r"></span><span class="mock-dot y"></span><span class="mock-dot g"></span>
+          <span class="mock-url">admin.sparkinnbohol.com/bookings/R-20261014-00012</span>
+        </div>
+        <div class="mock-body" style="padding:0;">
+          <div class="detail-h">
+            <h3>R-20261014-00012</h3>
+            <span class="pill green">In-house</span>
+          </div>
+          <div class="rooms-list">
+            <li>
+              <span class="pos">#1</span>
+              <span><span class="num">Room 101</span> <span class="type">· Standard Double</span></span>
+              <span style="color:var(--ink-3);">₱15,000</span>
+              <span class="pill green">Checked-in</span>
+            </li>
+            <li>
+              <span class="pos">#2</span>
+              <span><span class="num">Room 102</span> <span class="type">· Deluxe Twin</span></span>
+              <span style="color:var(--ink-3);">₱21,000</span>
+              <span class="pill green">Checked-in</span>
+            </li>
+          </div>
+          <div style="padding: 14px 20px; background: #fbf9f4; border-top: 1px solid var(--line-soft); display:flex; justify-content:space-between; align-items:center;">
+            <div style="font-size:13px; color:var(--ink-2);">
+              <strong>3 nights × 2 rooms</strong> · ₱36,000 collected
+            </div>
+            <button class="cta">Check out both rooms →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock email">
+        <div class="email-h">
+          From <strong>Spark Inn</strong> · To maria@email.com · Subject <strong>[Spark Inn] Receipt: R-20261014-00012 (₱36,000)</strong>
+        </div>
+        <div class="email-body">
+          <h4>Thanks for staying, Maria.</h4>
+          <p class="subj">Receipt · 2 rooms · 3 nights</p>
+          <div class="rooms-list" style="border:1px solid var(--line-soft); border-radius:8px;">
+            <li>
+              <span class="pos">#1</span>
+              <span><span class="num">Room 101</span> <span class="type">· Standard Double</span></span>
+              <span style="color:var(--ink-3);">₱15,000</span>
+              <span class="pill gray">Completed</span>
+            </li>
+            <li>
+              <span class="pos">#2</span>
+              <span><span class="num">Room 102</span> <span class="type">· Deluxe Twin</span></span>
+              <span style="color:var(--ink-3);">₱21,000</span>
+              <span class="pill gray">Completed</span>
+            </li>
+          </div>
+          <p style="margin-top: 14px;">Total paid: <strong>₱36,000</strong> via GCash. We hope to see you again.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. Recap -->
+  <section>
+    <div class="section-head">
+      <div class="section-eyebrow">Recap</div>
+      <h2>What the desk + guest experience look like after BAR-01.</h2>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="lbl">Server transactions</div>
+        <div class="val">1</div>
+        <div style="font-size: 11px; color: var(--ink-3);">per lifecycle event</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Docs written per action</div>
+        <div class="val small">1</div>
+        <div style="font-size: 11px; color: var(--ink-3);">no header mirror, no N-child iteration</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Admin cards per guest</div>
+        <div class="val small">1</div>
+        <div style="font-size: 11px; color: var(--ink-3);">regardless of room count</div>
+      </div>
+    </div>
+
+    <div class="diff" style="margin-top: 32px;">
+      <div class="col before">
+        <h5>What the desk has to know today</h5>
+        <p>"A booking can be part of a reservation with multiple rooms. Verify affects all rooms in the reservation that are covered by the amount. Reject affects all rooms. Cancel can be this room or all rooms. Discount can be this room or all rooms. Reschedule moves the date for one room. Add room adds to the reservation."</p>
+      </div>
+      <div class="col after">
+        <h5>What the desk has to know after BAR-01</h5>
+        <p>"A booking has N rooms. That's it."</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    BAR-01 spec · <code>plan/features/BOOKING-UNIFIED.md</code> · Decision #202 (when filed) · Triggered by MRB-15 ship + the next "multi-room" feature ships · 6-month project for a solo shop.
+  </footer>
+
+</div>
+</body>
+</html>

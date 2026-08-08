@@ -246,6 +246,7 @@ Project management assets. Partially gitignored.
 ```
 project/
 ├── ROADMAP.md                          ← Prioritized build checklist, phase by phase, with AI starter prompts
+├── BAR-01-booking-flow-tour.html       ← Self-contained stakeholder walkthrough of the post-BAR-01 booking flow
 ├── SETUP-GUIDE.md                      ← Step-by-step local + production setup, emulator instructions
 ├── AI-MD-SYSTEM-PROMPT.md              ← Reusable prompt template for bootstrapping MD systems on new projects
 ├── branding/                           ← Logos, fonts (.otf, .ai, .eps, .png) — tracked
