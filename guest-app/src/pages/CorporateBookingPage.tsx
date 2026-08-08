@@ -1048,9 +1048,15 @@ export function CorporateBookingPage() {
         // auto-derives one selection from
         // `roomType` + `numAdults` + `numChildren`
         // + `extraBedCount` when `roomSelections`
-        // is absent, per the `createBookingSchema`
-        // + `roomCount` default of 1).
-        roomCount: distributedRoomCart.length,
+        // is absent, per the `createBookingSchema` +
+        // `roomCount` default of 1). Per BAR-02 (2026-08-08,
+        // per decision #203): the `roomCount` field is no
+        // longer written to the reservation header.
+        // Consumers derive it at read time via
+        // `deriveReservationCounters`. The field is no
+        // longer sent in the create request body —
+        // the server reads the children list directly
+        // to compute the count.
         roomSelections: distributedRoomCart.map((stay, index) => ({
           bookingId: index === 0 ? bookingId : stay.bookingId,
           roomType: stay.roomType,

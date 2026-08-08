@@ -159,7 +159,15 @@ describe("MRB-08 — Corporate /corporate/book page: room cart", () => {
     // top of the body are the first stay's
     // values — back-compat with the server's
     // pre-MRB-06 single-room shape.
-    expect(corporatePageSrc).toMatch(/roomCount: distributedRoomCart\.length/);
+    //
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `roomCount` field is no longer written
+    // to the reservation header and is no longer
+    // sent in the create request body — the
+    // server reads the children list directly to
+    // compute the count. The negative match pins
+    // the dead-data cleanup.
+    expect(corporatePageSrc).not.toMatch(/roomCount: distributedRoomCart\.length,/);
     expect(corporatePageSrc).toMatch(/numAdults: firstStay\.numAdults/);
     expect(corporatePageSrc).toMatch(/numChildren: firstStay\.numChildren/);
     expect(corporatePageSrc).toMatch(/extraBedCount: firstStay\.extraBedCount/);
