@@ -1069,6 +1069,29 @@ export function BookingsPage() {
   // `useEffect` on `showDiscountForm` flips it to `"room"`
   // when the modal opens.
   const [staffDiscountScope, setStaffDiscountScope] = useState<"room" | "reservation" | null>(null);
+  // Per the per-individual discount guard: PWD and
+  // senior are per-individual legal entitlements (RA
+  // 7277 / RA 9442) — they must be applied to the
+  // specific guest's booking, not the whole
+  // reservation. The "All N rooms" scope in the
+  // discount modal is therefore disabled for these
+  // types. The derived value is consumed by the
+  // segmented-control button + the auto-revert
+  // useEffect below + the submit-time guard.
+  const isPerIndividualDiscount = staffDiscountType === "senior" || staffDiscountType === "pwd";
+  // Defense in depth: if the staff already picked
+  // "All N rooms" and then switches the type to
+  // senior / PWD, the scope auto-clears so the
+  // submit handler applies to the lead only (the
+  // segmented-control button is also disabled, but
+  // this catches the case where the staff has the
+  // modal open and toggles the type without
+  // re-clicking the segmented control).
+  useEffect(() => {
+    if (isPerIndividualDiscount && staffDiscountScope === "reservation") {
+      setStaffDiscountScope(null);
+    }
+  }, [isPerIndividualDiscount, staffDiscountScope]);
 
   // Per NBS-07 (2026-07-31): memo for the New Booking modal's source
   // selector. Filters the configured list to entries that are
@@ -7361,25 +7384,58 @@ export function BookingsPage() {
                     Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
                   </span>
                 </button>
-                <button
-                  type="button"
-                  data-testid="staff-discount-scope-reservation"
-                  onClick={() => setStaffDiscountScope("reservation")}
-                  className={cn(
-                    "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
-                    staffDiscountScope === "reservation"
-                      ? "border-primary bg-primary text-white shadow-sm"
-                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                  )}
-                >
-                  <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
-                  <span className={cn(
-                    "mt-0.5 block text-[10px]",
-                    staffDiscountScope === "reservation" ? "text-white/80" : "text-gray-500"
-                  )}>
-                    Reservation total
-                  </span>
-                </button>
+                {(() => {
+                  // Per the per-individual discount guard: the
+                  // "All N rooms" scope is NOT available for
+                  // senior / PWD discounts. PWD and senior are
+                  // per-individual legal entitlements (RA 7277 /
+                  // RA 9442) — they must be applied to the
+                  // specific guest's booking, not the whole
+                  // reservation. The button is disabled with a
+                  // clear visual + a one-line hint so the staff
+                  // knows why + can fall back to "This room".
+                  // The same guard auto-reverts `staffDiscountScope`
+                  // to null in a useEffect below (defense in
+                  // depth: if the staff already picked "All N
+                  // rooms" and then switched the type to senior
+                  // / PWD, the scope clears so the submit handler
+                  // applies to the lead only).
+                  const perIndividual = isPerIndividualDiscount;
+                  return (
+                    <button
+                      type="button"
+                      data-testid="staff-discount-scope-reservation"
+                      onClick={() => setStaffDiscountScope("reservation")}
+                      disabled={perIndividual}
+                      aria-disabled={perIndividual}
+                      title={
+                        perIndividual
+                          ? "Not available for senior / PWD discounts — these are per-individual entitlements. Apply to one room at a time."
+                          : undefined
+                      }
+                      className={cn(
+                        "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                        perIndividual
+                          ? "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 opacity-60"
+                          : staffDiscountScope === "reservation"
+                            ? "border-primary bg-primary text-white shadow-sm"
+                            : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                      )}
+                    >
+                      <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
+                      <span className={cn(
+                        "mt-0.5 block text-[10px]",
+                        perIndividual
+                          ? "text-gray-400"
+                          : staffDiscountScope === "reservation" ? "text-white/80" : "text-gray-500"
+                      )}>
+                        {perIndividual
+                          ? "Senior / PWD only — pick one room"
+                          : "Reservation total"}
+                      </span>
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -7403,6 +7459,25 @@ export function BookingsPage() {
             }} disabled={isApplyingStaffDiscount} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
             <button type="button" onClick={() => void (async () => {
               if (!selectedBooking || (!staffDiscountType && !staffVoucherCode.trim())) return;
+              // Per the per-individual discount guard:
+              // PWD and senior are per-individual legal
+              // entitlements (RA 7277 / RA 9442) — they
+              // must be applied to the specific guest's
+              // booking, not the whole reservation. The
+              // segmented-control UI disables the "All N
+              // rooms" button when the type is
+              // per-individual, and the useEffect above
+              // auto-clears the scope if the staff toggles
+              // the type. This is the submit-time
+              // defense: if somehow the staff submits
+              // with a per-individual type + the
+              // reservation scope (e.g. a stale state
+              // from before the type was switched), the
+              // guard falls back to single-room so the
+              // reservation-scope loop is never reached
+              // for a per-individual discount.
+              const effectiveScope =
+                isPerIndividualDiscount ? "room" : (staffDiscountScope ?? "room");
               setDiscountError(null);
               setIsApplyingStaffDiscount(true);
               try {
@@ -7419,7 +7494,7 @@ export function BookingsPage() {
                 // and surface the failure to the desk — already-
                 // repriced rooms keep their new totals; the
                 // operator retries the failed room.
-                const scope = staffDiscountScope ?? "room";
+                const scope = effectiveScope;
                 const targetIds = scope === "reservation" && selectedReservationContext
                   ? selectedReservationContext.rooms.map((room) => room.id)
                   : [selectedBooking.id];

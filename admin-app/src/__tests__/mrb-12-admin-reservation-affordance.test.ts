@@ -211,6 +211,72 @@ describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
     expect(bookingsPageSrc).toMatch(/Reservation repriced \(\$\{targetIds\.length\} rooms\)/);
   });
 
+  it("MRB-12-05: the per-individual discount guard disables the `All N rooms` scope (PWD / senior)", () => {
+    // Per the per-individual discount guard: PWD and
+    // senior are per-individual legal entitlements
+    // (RA 7277 / RA 9442) — they must be applied to
+    // the specific guest's booking, not the whole
+    // reservation. The `All N rooms` button is
+    // disabled when `staffDiscountType` is
+    // `"senior"` or `"pwd"`, with a clear visual
+    // + a tooltip + a one-line hint. The submit
+    // handler also has a defense-in-depth guard
+    // that falls back to single-room if the scope
+    // is somehow set when the type is per-individual.
+    //
+    // The `isPerIndividualDiscount` derivation is the
+    // single source of truth — the segmented-control
+    // disable + the useEffect auto-revert + the
+    // submit-time guard all read from it.
+    expect(bookingsPageSrc).toMatch(
+      /const isPerIndividualDiscount = staffDiscountType === "senior" \|\| staffDiscountType === "pwd";/
+    );
+    // The button is `disabled` when per-individual is
+    // selected.
+    expect(bookingsPageSrc).toMatch(
+      /disabled=\{perIndividual\}[\s\S]{0,500}?aria-disabled=\{perIndividual\}/
+    );
+    // The title / hint text is "Senior / PWD only — pick
+    // one room" (so the staff knows why the button is
+    // disabled).
+    expect(bookingsPageSrc).toMatch(/Senior \/ PWD only — pick one room/);
+    // The title (the tooltip) is the per-individual
+    // explanation.
+    expect(bookingsPageSrc).toMatch(
+      /Not available for senior \/ PWD discounts — these are per-individual entitlements\. Apply to one room at a time\./
+    );
+  });
+
+  it("MRB-12-05: the per-individual guard auto-reverts the scope to `null` via useEffect", () => {
+    // Defense in depth: if the staff already picked
+    // "All N rooms" and then switches the type to
+    // senior / PWD, the scope auto-clears so the
+    // submit handler applies to the lead only. The
+    // segmented-control button is also disabled
+    // (per the test above), but the useEffect
+    // catches the case where the staff has the
+    // modal open and toggles the type without
+    // re-clicking the segmented control.
+    expect(bookingsPageSrc).toMatch(
+      /if \(isPerIndividualDiscount && staffDiscountScope === "reservation"\) \{[\s\S]{0,200}?setStaffDiscountScope\(null\);/
+    );
+    expect(bookingsPageSrc).toMatch(
+      /useEffect\(\(\) => \{[\s\S]{0,800}?if \(isPerIndividualDiscount && staffDiscountScope === "reservation"\)/
+    );
+  });
+
+  it("MRB-12-05: the submit handler falls back to `room` scope when the type is per-individual (defense in depth)", () => {
+    // Belt-and-braces: even if the UI + the
+    // useEffect fail to clear the scope, the submit
+    // handler computes an `effectiveScope` that
+    // forces `room` when the type is per-individual.
+    // The reservation-scope loop is never reached
+    // for a per-individual discount.
+    expect(bookingsPageSrc).toMatch(
+      /const effectiveScope =\s*isPerIndividualDiscount \? "room" : \(staffDiscountScope \?\? "room"\);/
+    );
+  });
+
   it("MRB-12-05: the discount form's scope state resets to `null` on close (mirroring the MRB-13 cancel-modal reset)", () => {
     // The `onClose` handler resets the scope so a previous
     // session's choice never bleeds into a new one.
