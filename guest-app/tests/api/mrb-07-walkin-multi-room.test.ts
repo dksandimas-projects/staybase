@@ -329,8 +329,14 @@ describe("MRB-07 — multi-room walk-in creation", () => {
     expect(reservation.totalPrice).toBe(
       writes.reduce((sum, w) => sum + w.data.totalPrice, 0)
     );
-    expect(reservation.roomCount).toBe(2);
-    expect(reservation.activeRoomCount).toBe(2);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // 5 aggregate counter fields are no longer written
+    // to the reservation header. The N=2 derivation is
+    // `deriveReservationCounters(children).roomCount ===
+    // 2` (covered in
+    // `shared/__tests__/booking-folio.test.ts`).
+    expect(reservation.roomCount).toBeUndefined();
+    expect(reservation.activeRoomCount).toBeUndefined();
   });
 
   test("charges breakfast per guest across the reservation, not per guest per room", async () => {
@@ -444,7 +450,13 @@ describe("MRB-07 — multi-room walk-in creation", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     const occupied = updateCalls.filter((c) => c.data?.status === "occupied");
     expect(occupied.map((c) => c.path).sort()).toEqual(["rooms/room_101", "rooms/room_102"]);
-    expect(reservationWrite()!.data.checkedInRoomCount).toBe(2);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `checkedInRoomCount` is no longer written to the
+    // reservation header. The N=2 check-in derivation is
+    // `deriveReservationCounters(children).checkedInRoomCount
+    // === 2` (covered in
+    // `shared/__tests__/booking-folio.test.ts`).
+    expect(reservationWrite()!.data.checkedInRoomCount).toBeUndefined();
   });
 
   test("aborts the whole reservation when any one room is unavailable", async () => {
@@ -580,8 +592,14 @@ describe("MRB-07 — multi-room walk-in creation", () => {
       reservationRoomCount: 1
     });
     const reservation = reservationWrite()!.data;
-    expect(reservation.roomCount).toBe(1);
-    expect(reservation.activeRoomCount).toBe(1);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // 5 aggregate counter fields are no longer written
+    // to the reservation header. The N=1 derivation is
+    // `deriveReservationCounters(children).roomCount ===
+    // 1` (covered in
+    // `shared/__tests__/booking-folio.test.ts`).
+    expect(reservation.roomCount).toBeUndefined();
+    expect(reservation.activeRoomCount).toBeUndefined();
     expect(reservation.totalPrice).toBe(2000 * NIGHTS);
   });
 });

@@ -160,26 +160,32 @@ describe("MRB-02 single-room reservation create", () => {
       );
     });
 
-    it("single-room header sets roomCount: 1, activeRoomCount: 1, cancelledRoomCount: 0, checkedInRoomCount: 0, checkedOutRoomCount: 0", () => {
-      // The header's counters are the reservation's actual room
-      // count, which for the single-room MRB-02 case is 1.
+    it("does NOT stamp the five aggregate counter fields at create time (per BAR-02 / #203)", () => {
+      // Per BAR-02 (2026-08-08, per decision #203): the
+      // five aggregate counter fields are no longer
+      // written to the reservation header. Consumers
+      // derive them via `deriveReservationCounters`
+      // over the children at read time. The 2026-08-08
+      // audit verified that no `where()` or `orderBy()`
+      // anywhere in the codebase references any of the
+      // five fields — they are render-time projections
+      // only, so removing the writes cannot break a
+      // query.
       //
-      // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): both
-      // create paths now stamp the counters from the number of rooms
-      // they assigned (`assignedRooms.length` on the public path,
-      // `walkinRoomCount` on the walk-in), rather than a literal 1.
-      // This asserts the expression rather than the literal, because
-      // a whole-file search for `roomCount: 1,` passed only by
-      // accident once one path still hardcoded it.
-      expect(handlers).toMatch(/roomCount:\s*assignedRooms\.length,/);
-      expect(handlers).toMatch(/activeRoomCount:\s*assignedRooms\.length,/);
-      expect(handlers).toMatch(/roomCount:\s*walkinRoomCount,/);
-      expect(handlers).toMatch(/activeRoomCount:\s*walkinRoomCount,/);
-      // The lifecycle counters still start empty on a fresh
-      // reservation — nothing is cancelled or checked out at create.
-      expect(handlers).toMatch(/cancelledRoomCount:\s*0/);
-      expect(handlers).toMatch(/checkedInRoomCount:\s*0/);
-      expect(handlers).toMatch(/checkedOutRoomCount:\s*0/);
+      // The pre-BAR-02 shape (per MRB-06 / MRB-07,
+      // 2026-08-02, per decision #159) stamped the
+      // counters from the number of rooms assigned.
+      // That write is now gone; this assertion pins the
+      // absence. The corresponding derivation test
+      // lives in `bar-02-derive-counters.test.ts` and
+      // pins the read-time contract.
+      expect(handlers).not.toMatch(/roomCount:\s*assignedRooms\.length,/);
+      expect(handlers).not.toMatch(/activeRoomCount:\s*assignedRooms\.length,/);
+      expect(handlers).not.toMatch(/roomCount:\s*walkinRoomCount,/);
+      expect(handlers).not.toMatch(/activeRoomCount:\s*walkinRoomCount,/);
+      expect(handlers).not.toMatch(/cancelledRoomCount:\s*0/);
+      expect(handlers).not.toMatch(/checkedInRoomCount:\s*0/);
+      expect(handlers).not.toMatch(/checkedOutRoomCount:\s*0/);
     });
 
     it("derives paymentStatus from the child's status: awaiting-payment for pending, payment-uploaded for payment-uploaded", () => {

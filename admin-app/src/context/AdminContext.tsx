@@ -1748,7 +1748,6 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               companyName: data.companyName || "",
               voucherCode: data.voucherCode || "",
               memberDiscountPct: Number(data.memberDiscountPct) || 0,
-              paymentStatus: data.paymentStatus || "awaiting-payment",
               paymentMethod: data.paymentMethod || "",
               paymentProofUrl: data.paymentProofUrl ?? null,
               paymentProofPath: data.paymentProofPath ?? null,
@@ -1759,11 +1758,6 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
               privacyVersion: data.privacyVersion || "",
               cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
-              roomCount: Number(data.roomCount) || 0,
-              activeRoomCount: Number(data.activeRoomCount) || 0,
-              cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
-              checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
-              checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
               holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
               requestFingerprint: data.requestFingerprint || "",
               createdAt: parseDateOrEpoch(data.createdAt),
@@ -1771,6 +1765,28 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               createdBy: data.createdBy || "guest",
               cancellationLiability: data.cancellationLiability ?? null,
               aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
+              // Per BAR-02 (2026-08-08, per decision #203):
+              // the five aggregate counter fields +
+              // `paymentStatus` are no longer written to
+              // the reservation header. Consumers derive
+              // them via `deriveReservationCounters` +
+              // `computeReservationAggregatePaymentStatus`
+              // over the children at read time. The
+              // back-compat reads below surface `undefined`
+              // for post-BAR-02 reservations (the fields
+              // are absent) and the historical values for
+              // pre-BAR-02 reservations that still carry
+              // them in Firestore. The pre-BAR-02
+              // byte-equivalence at the read boundary is
+              // preserved (consumers that haven't migrated
+              // to the derivation helpers still see the
+              // same values).
+              paymentStatus: data.paymentStatus,
+              roomCount: data.roomCount,
+              activeRoomCount: data.activeRoomCount,
+              cancelledRoomCount: data.cancelledRoomCount,
+              checkedInRoomCount: data.checkedInRoomCount,
+              checkedOutRoomCount: data.checkedOutRoomCount,
               // Per MRB-14 (2026-08-03, per decision #180
               // — proposed): the `actualDateRange` field.
               // Pre-MRB-14 reservations have no field

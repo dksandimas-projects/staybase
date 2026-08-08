@@ -48,9 +48,21 @@ describe("MRB-01 reservation header model", () => {
       expect(types).toMatch(/memberDiscountPct: number/);
     });
 
-    it("owns the money state + the consent fields + the aggregate counters + the PEX hold", () => {
-      // Money state mirrors the booking but at reservation scope.
-      expect(types).toMatch(/(?:paymentStatus: "awaiting-payment" \| "payment-uploaded" \| "payment-confirmed" \| "confirmed" \| "in-house" \| "completed" \| "cancelled"|paymentStatus: ReservationPaymentStatus)/);
+    it("owns the money state (optional per BAR-02) + the consent fields + the PEX hold", () => {
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // `paymentStatus` is now optional on the
+      // `Reservation` type. Pre-BAR-02 the field was
+      // required (the denormalized mirror of the
+      // child statuses). Post-BAR-02 consumers
+      // derive the value via
+      // `computeReservationAggregatePaymentStatus`
+      // over the children; the field is kept
+      // optional for back-compat reads of pre-BAR-02
+      // reservations. The required
+      // `ReservationPaymentStatus` type shape is
+      // unchanged — only the field's `?` qualifier
+      // flipped.
+      expect(types).toMatch(/(?:paymentStatus\?:\s*"awaiting-payment" \| "payment-uploaded" \| "payment-confirmed" \| "confirmed" \| "in-house" \| "completed" \| "cancelled"|paymentStatus\?:\s*ReservationPaymentStatus)/);
       expect(types).toMatch(/paymentMethod: PaymentMethod/);
       // Consent — single per reservation (same T&C + privacy acceptance covers all rooms).
       expect(types).toMatch(/termsAccepted: boolean/);
@@ -59,12 +71,19 @@ describe("MRB-01 reservation header model", () => {
       expect(types).toMatch(/privacyAccepted: boolean/);
       expect(types).toMatch(/privacyAcceptedAt: Date \| null/);
       expect(types).toMatch(/privacyVersion: string/);
-      // Aggregate counters.
-      expect(types).toMatch(/roomCount: number/);
-      expect(types).toMatch(/activeRoomCount: number/);
-      expect(types).toMatch(/cancelledRoomCount: number/);
-      expect(types).toMatch(/checkedInRoomCount: number/);
-      expect(types).toMatch(/checkedOutRoomCount: number/);
+      // Per BAR-02 (2026-08-08, per decision #203): the
+      // five aggregate counter fields are no longer
+      // required on the `Reservation` type — they are
+      // derived at read time via `deriveReservationCounters`
+      // over the children. The fields are kept as
+      // optional `?` for back-compat reads of pre-BAR-02
+      // reservations that still carry them in Firestore;
+      // no handler writes them. The wire contract
+      // therefore drops the required `number` shape.
+      // (See the same flip in
+      // `shared/__tests__/booking-folio.test.ts` +
+      // `mrb-15-03-transactional-counters.test.ts` →
+      // `bar-02-derive-counters.test.ts`.)
       // Unified PEX hold (no separate large-group timer per MRB-08).
       expect(types).toMatch(/holdExpiresAt: Date \| null/);
     });

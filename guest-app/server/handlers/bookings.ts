@@ -376,9 +376,17 @@ function buildCreateEmailView(args: {
     corporateCode: args.corporateCode,
     companyName: args.companyName,
     paymentMethod: args.paymentMethod,
-    paymentStatus: args.paymentStatus,
-    activeRoomCount: args.finalRooms.length,
-    cancelledRoomCount: 0
+    paymentStatus: args.paymentStatus
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `activeRoomCount` and `cancelledRoomCount`
+    // are not stamped onto the synthetic reservation
+    // object either. The downstream email view
+    // (and the page that renders it) derives
+    // the count from the in-memory `children` array.
+    // Pre-BAR-02 the synthetic object's
+    // `activeRoomCount: args.finalRooms.length` was
+    // a stub for the same value the helper now
+    // computes directly.
   };
   // Build the synthetic child docs (the values
   // `buildReservationEmailView` reads for each
@@ -3000,11 +3008,13 @@ export async function handleCreateBooking(req: any, res: any) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: termsConsentVersion,
-        roomCount: assignedRooms.length,
-        activeRoomCount: assignedRooms.length,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 these were the
+        // create-time init for the header's denormalized
+        // counter mirror.
         holdExpiresAt: (newBooking as any).holdExpiresAt
           ? (newBooking as any).holdExpiresAt
           : null,
@@ -4648,15 +4658,14 @@ export async function handleCreateWalkin(req: any, res: any) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: DEFAULT_TERMS_VERSION,
-        // Per MRB-07 (2026-08-02, per decision #159): the aggregate
-        // counters reflect the N room stays this reservation actually
-        // created, so the admin reservation row can show room count,
-        // status and balance without fanning out to the children.
-        roomCount: walkinRoomCount,
-        activeRoomCount: walkinRoomCount,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: status === "checked-in" ? walkinRoomCount : 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 the walkin path mirrored
+        // the public create path's init (the "all
+        // checked-in" branch was the historical quirk
+        // for instant-walkin check-in).
         // Walk-ins have no auto-expiry hold (the staff is
         // creating the booking, not waiting on a guest
         // action) — `null` mirrors the public path's
@@ -5316,21 +5325,18 @@ export async function handleRejectPayment(req: any, res: any) {
       // Fires on EVERY reject for new reservations —
       // the pre-FOL-05 `isTargetInPaymentUploaded` guard
       // is removed because a reservation-scope reject
-      // that flipped the lead + 2 siblings → 0
-      // `payment-uploaded` children + the rest of the
-      // children's pre-existing statuses correctly
-      // surfaces the new aggregate (e.g. all
-      // siblings were `payment-uploaded` and all
-      // flipped to `pending` → `awaiting-payment`).
-      // The `bookingReservationId.length > 0` guard
-      // skips the write for legacy null-`reservationId`
-      // bookings — byte-equivalent to pre-Phase 3
-      // behavior. The same `updatedAt` is used for
-      // every write — no clock skew.
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on payment
+      // rejection. Consumers derive it at read time.
+      // The per-child status flip (the
+      // `transaction.update` of the lead + the FOL-05
+      // sibling-flip pass) is unchanged — that is the
+      // real state mutation. The same `updatedAt` is
+      // used for every write — no clock skew.
       if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt
         });
       }
@@ -5783,31 +5789,17 @@ export async function handleCancelBooking(req: any, res: any) {
           }
         }
 
-        // Per MRB-13: the reservation header mirror.
-        // `cancelledRoomCount` is incremented by the
-        // number of children we just cancelled in
-        // this transaction (NOT by `children.length`
-        // — a partial cancel only bumps the counter
-        // for the children we actually flipped).
-        // `activeRoomCount` is decremented by the
-        // same count, floored at 0 (the helper
-        // already floors, the explicit `Math.max`
-        // makes the invariant obvious to a future
-        // reader). `paymentStatus` is the aggregate
-        // from the post-cancellation state of every
-        // child (cancelled children report
-        // `"cancelled"`, survivors report their
-        // current status). When every child is
-        // cancelled the aggregate is `"cancelled"`
-        // — same as the per-child N=1 case.
-        const newActiveRoomCount = Math.max(
-          (Number(reservationData.activeRoomCount) || 0) - cancelledCount,
-          0
-        );
-        const newCancelledRoomCount = (Number(reservationData.cancelledRoomCount) || 0) + cancelledCount;
-        const postStatuses = children.map((c) =>
-          cancellableIds.has(c.id) ? "cancelled" : String(c.data.status || "")
-        );
+        // Per BAR-02 (2026-08-08, per decision #203):
+        // the five aggregate counter fields +
+        // `paymentStatus` are no longer written to the
+        // reservation header on cancel. Consumers
+        // derive them via `deriveReservationCounters` +
+        // `computeReservationAggregatePaymentStatus`
+        // over the children at read time. The
+        // per-child cancellation stamps (CRL-02) and
+        // the liability snapshot (CRL-07) are still
+        // written — those are real denormalized
+        // values, not pure projections.
         // Per CRL-07 (2026-08-03, per decision #173):
         // the liability snapshot is stamped onto the
         // reservation header (the source of truth for
@@ -5817,9 +5809,6 @@ export async function handleCancelBooking(req: any, res: any) {
         // shares the same `now` as the cancellation
         // stamp — no clock skew between the two.
         const reservationHeaderUpdate: Record<string, any> = {
-          cancelledRoomCount: newCancelledRoomCount,
-          activeRoomCount: newActiveRoomCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postStatuses),
           updatedAt: now
         };
         if (liabilitySnapshot) {
@@ -6021,14 +6010,19 @@ export async function handleCancelBooking(req: any, res: any) {
       // (MRB-05 PR #2). The clawback code is below
       // (after the reservation header mirror). The
       // terminal-status reject above was also updated
-      // to exclude `checked-out` (per the spec body
-      // "A production cancellation never deletes the
-      // reservation; an all-cancelled reservation
-      // remains the audit/financial record").
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on a
+      // single-cancel. Consumers derive it at read
+      // time (an all-cancelled N=1 reservation
+      // surfaces the `"cancelled"` aggregate
+      // automatically). The per-child cancellation
+      // stamps (CRL-02) + the liability snapshot
+      // (CRL-07) on the booking doc are unchanged —
+      // those are real denormalized values.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
           updatedAt: now
         });
       }
@@ -6881,19 +6875,21 @@ export async function handleAddPayment(req: any, res: any) {
       // pre-FOL-05 single-child helper couldn't express).
       // Fires on EVERY add-payment for new reservations
       // — the pre-FOL-05 `transitionedToPaymentConfirmed`
-      // guard is removed because a partial add-payment
-      // that flips zero siblings still leaves the header's
-      // aggregate unchanged, and a partial add-payment
-      // that flips N siblings correctly surfaces the new
-      // aggregate. The `bookingReservationId.length > 0`
-      // guard skips the write for legacy null-`reservationId`
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on
+      // add-payment. Consumers derive it at read time.
+      // The per-child status flip (the FOL-05
+      // sibling-flip pass) is unchanged — that is
+      // the real state mutation. The
+      // `bookingReservationId.length > 0` guard skips
+      // the write for legacy null-`reservationId`
       // bookings — byte-equivalent to pre-Phase 3
       // behavior. The same `now` is used for every
       // write — no clock skew.
       if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -8044,26 +8040,23 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
 
       // 4. Per FOL-05 (2026-08-07, per decision #201):
       // the reservation header's `paymentStatus` mirror is
-      // now aggregate-sourced (the N>1 path that the
-      // pre-FOL-05 single-child helper couldn't express).
-      // Fires on EVERY verify for new reservations — the
-      // pre-FOL-05 `fullyPaid` guard is removed because a
-      // partial verify that flips zero siblings still
-      // leaves the header's aggregate unchanged, and a
-      // partial verify that flips N siblings correctly
-      // surfaces the new aggregate (e.g. one covered
-      // child + one still `payment-uploaded` →
-      // `payment-uploaded`, the same as pre-flip). The
-      // `bookingReservationId.length > 0` guard skips the
-      // write for legacy null-`reservationId` bookings —
-      // byte-equivalent to pre-Phase 3 behavior. The same
-      // `now` is used for every write — no clock skew
-      // between the booking update, the sibling flips,
-      // and the header mirror.
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on
+      // verify-payment. Consumers derive it at read
+      // time. The per-child status flip (the FOL-05
+      // sibling-flip pass) is unchanged — that is
+      // the real state mutation. The
+      // `bookingReservationId.length > 0` guard skips
+      // the write for legacy null-`reservationId`
+      // bookings — byte-equivalent to pre-Phase 3
+      // behavior. The same `now` is used for every
+      // write — no clock skew between the booking
+      // update, the sibling flips, and the header
+      // touch.
       if (bookingReservationId.length > 0 && siblingChildBookings.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -8257,20 +8250,24 @@ export async function handleConfirmBooking(req: any, res: any) {
       // `pending` / `payment-uploaded` / `payment-confirmed`,
       // and the new status is always `confirmed`).
       // The mirror value comes from the N>1 aggregate
-      // helper — for the N=1 case (today's entire
-      // active surface) the aggregate is the same as
-      // the single mapped status. The
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on
+      // confirm-with-balance. Consumers derive it at
+      // read time. The per-child status transition
+      // (the `transaction.update` of the target
+      // booking + the FOL-03 sibling
+      // pre-checked-in flip) is unchanged — that is
+      // the real state mutation. The
       // `bookingReservationId.length > 0` guard skips
       // the write for legacy null-`reservationId`
-      // bookings (pre-MRB-01) — byte-equivalent to
-      // pre-Phase 5 behavior for legacy records. The
-      // same `now` is used for the booking update AND
-      // the header mirror — no clock skew between the
-      // two.
+      // bookings — byte-equivalent to pre-Phase 5
+      // behavior for legacy records. The same `now`
+      // is used for the booking update AND the
+      // header touch — no clock skew between the two.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -8473,22 +8470,21 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
       // Per MRB-05 (2026-08-02, per decision #159):
       // the reservation header's `paymentStatus`
       // mirror. The booking just transitioned to
-      // `confirmed` (the only possible new status
-      // for this handler — the CWB-01 status check
-      // guarantees the prior status was
-      // `payment-uploaded`, and the new status is
-      // always `confirmed`). The mirror value comes
-      // from the N>1 aggregate helper. The
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on
+      // confirm-with-balance-rebooking. Consumers
+      // derive it at read time. The per-child status
+      // transition is unchanged. The
       // `bookingReservationId.length > 0` guard skips
       // the write for legacy null-`reservationId`
-      // bookings (pre-MRB-01) — byte-equivalent to
-      // pre-Phase 5 behavior for legacy records. The
-      // same `now` is used for the booking update AND
-      // the header mirror.
+      // bookings — byte-equivalent to pre-Phase 5
+      // behavior for legacy records. The same `now`
+      // is used for the booking update AND the
+      // header touch.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -8738,23 +8734,17 @@ export async function handleCheckinBooking(req: any, res: any) {
       // `get()` happens BEFORE the writes. The
       // header's `activeRoomCount` /
       // `cancelledRoomCount` / `roomCount` are NOT
-      // touched here — those are owned by the create
-      // / add-room / cancel paths only (per the JSDoc
-      // on `Reservation` in `shared/types/index.ts`).
-      // The `paymentStatus` aggregate reads every
-      // child's post-update status (not just
-      // `["checked-in"]`) so the N>1 case is correct:
-      // a 2-room reservation where 1 room is
-      // checked-in and 1 is still pending reports the
-      // aggregate of `["checked-in",
-      // "payment-confirmed"]` — not a synthetic
-      // `["checked-in"]`.
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // `checkedInRoomCount` and `paymentStatus` are
+      // no longer written to the reservation header on
+      // check-in. Consumers derive them at read time.
+      // The per-child status transition (the
+      // `transaction.update` of the target booking +
+      // any FOL-03 sibling pre-checked-in flip) is
+      // unchanged — that is the real state mutation.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        const newCheckedInCount = postUpdateChildStatuses.filter((s) => s === "checked-in").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -9089,16 +9079,18 @@ export async function handleCheckoutBooking(req: any, res: any) {
       // only (per the JSDoc on `Reservation` in
       // `shared/types/index.ts`). The
       // `paymentStatus` aggregate reads every
-      // child's post-update status (not just
-      // `["checked-out"]`) so the N>1 case is correct.
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // `checkedInRoomCount` / `checkedOutRoomCount`
+      // and `paymentStatus` are no longer written to
+      // the reservation header on check-out. Consumers
+      // derive them at read time. The per-child status
+      // transition (the `transaction.update` of the
+      // target booking + the FOL-03 sibling
+      // pre-checked-in flip) is unchanged — that is
+      // the real state mutation.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        const newCheckedInCount = postUpdateChildStatuses.filter((s) => s === "checked-in").length;
-        const newCheckedOutCount = postUpdateChildStatuses.filter((s) => s === "checked-out").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          checkedOutRoomCount: newCheckedOutCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -9688,9 +9680,21 @@ function buildReservationLookupView(reservation: any, children: any[], anchorRoo
     // each room and the aggregate status for the
     // header.
     status: reservation.paymentStatus || "pending",
-    roomCount: Number(reservation.roomCount || rooms.length),
-    activeRoomCount: Number(reservation.activeRoomCount || rooms.length),
-    cancelledRoomCount: Number(reservation.cancelledRoomCount || 0),
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // three counter fields are no longer read from the
+    // reservation header. They are always derived from
+    // the `rooms` array (already in memory at this
+    // point). Pre-BAR-02 the header mirror was
+    // maintained transactionally; the new code is
+    // byte-equivalent for both pre- and post-BAR-02
+    // reservations because the derivation is the same
+    // calculation the pre-BAR-02 write performed.
+    roomCount: rooms.length,
+    activeRoomCount: Math.max(
+      rooms.length - rooms.filter((r) => r.status === "cancelled").length,
+      0
+    ),
+    cancelledRoomCount: rooms.filter((r) => r.status === "cancelled").length,
     rooms,
     // The "active room" data is what the cancel +
     // resend flows use as the server credential. The
@@ -11184,9 +11188,16 @@ export async function handleAddRoomToReservation(req: any, res: any) {
           data: { usageCount: Number((reservation as any).corporateUsageCount || 0) + 1, updatedAt: new Date() }
         };
       })();
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // `roomCount` and `activeRoomCount` are no
+      // longer written to the reservation header on
+      // add-room. Consumers derive them at read time.
+      // The real denormalized header values
+      // (`subtotal` / `totalPrice` /
+      // `aggregateRevenueAllocation` /
+      // `actualDateRange`) stay — those are not pure
+      // projections.
       updatedHeader = {
-        roomCount: existingChildren.length + 1,
-        activeRoomCount: existingChildren.length + 1,
         subtotal: newSubtotal,
         totalPrice: newTotalPrice,
         aggregateRevenueAllocation: newAggregateRevenueAllocation,

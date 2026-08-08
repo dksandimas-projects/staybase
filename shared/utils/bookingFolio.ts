@@ -593,6 +593,78 @@ export function computeReservationAggregatePaymentStatus(
   return "in-house";
 }
 
+// Per BAR-02 (2026-08-08, per decision #203): the
+// reservation counter reader. The five denormalized
+// counter fields on the reservation header
+// (`roomCount` / `activeRoomCount` / `cancelledRoomCount`
+// / `checkedInRoomCount` / `checkedOutRoomCount`) are no
+// longer written. Consumers that need them call this
+// helper over the children at read time. The derivation
+// is the canonical answer — the Firestore header field
+// (if present, for pre-BAR-02 reservations) is dead data.
+//
+// **Why this exists** — pre-BAR-02, every handler that
+// mutated a child booking also had to remember to bump
+// the matching counter on the reservation header. Seven
+// handlers (create / walkin / cancel / add-room /
+// checkin / checkout / FOL-05 sibling-flip) maintained
+// those counters transactionally; an oversight in any
+// one would silently desync the two views. The 2026-08-08
+// audit verified that no `where()` or `orderBy()` anywhere
+// in `guest-app/server`, `admin-app/src`, or `shared`
+// references any of the five fields — they are
+// render-time projections only, so removing the writes
+// cannot break a query.
+//
+// **Pure function** — no React state, no Firestore
+// calls, no async, no side effects. Pinned by
+// characterization tests in
+// `shared/__tests__/booking-folio.test.ts` (empty / N=1
+// all-active / N>1 mixed / all-cancelled / partial
+// checkin / partial checkout / all-checked-out /
+// defensive coercion).
+//
+// **Defensive coercion** — unknown child statuses
+// contribute to `roomCount` (the head count) and to
+// `activeRoomCount` (the non-cancelled head count) but
+// do not match any of the checkedIn / checkedOut
+// counters. The pre-BAR-02 transactional counter writes
+// had the same posture (a child in an unknown status
+// would not bump `checkedInRoomCount`).
+export interface ReservationCounters {
+  roomCount: number;
+  activeRoomCount: number;
+  cancelledRoomCount: number;
+  checkedInRoomCount: number;
+  checkedOutRoomCount: number;
+}
+
+export function deriveReservationCounters(
+  children: ReadonlyArray<{ status?: string | null }>
+): ReservationCounters {
+  const roomCount = children.length;
+  let cancelledRoomCount = 0;
+  let checkedInRoomCount = 0;
+  let checkedOutRoomCount = 0;
+  for (const child of children) {
+    const status = child.status;
+    if (status === "cancelled") {
+      cancelledRoomCount++;
+    } else if (status === "checked-in" || status === "in-house") {
+      checkedInRoomCount++;
+    } else if (status === "checked-out" || status === "completed") {
+      checkedOutRoomCount++;
+    }
+  }
+  return {
+    roomCount,
+    activeRoomCount: Math.max(roomCount - cancelledRoomCount, 0),
+    cancelledRoomCount,
+    checkedInRoomCount,
+    checkedOutRoomCount
+  };
+}
+
 // Per MRB-11 (2026-08-03, per decision #177): the
 // per-stream revenue allocation read path. Reports
 // uses this to read room + breakfast + add-on revenue

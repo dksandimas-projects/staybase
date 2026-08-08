@@ -273,7 +273,19 @@ export interface Reservation {
   memberDiscountPct: number;
 
   /** Money state — mirrors the child rooms but at reservation scope. A reservation is "awaiting payment" while any non-cancelled room is `pending` or `payment-uploaded`. */
-  paymentStatus: ReservationPaymentStatus;
+  // Per BAR-02 (2026-08-08, per decision #203): the
+  // `paymentStatus` field is no longer written to the
+  // reservation header. Consumers that need it call
+  // `computeReservationAggregatePaymentStatus(childStatuses)`
+  // over the children at read time. Existing
+  // pre-BAR-02 reservations may still carry the field in
+  // Firestore (harmless dead data) — the helper ignores
+  // the header and always derives from the children. The
+  // Reservation type retains the field as optional `?`
+  // for back-compat reads (the AdminContext mapper may
+  // still surface it for pre-BAR-02 reservations), but no
+  // handler writes it.
+  paymentStatus?: ReservationPaymentStatus;
   paymentMethod: PaymentMethod;
   /** Per BF-45: canonical "no payment proof" is `null` (not `""`). */
   paymentProofUrl: string | null;
@@ -289,12 +301,21 @@ export interface Reservation {
   privacyVersion: string;
   cancellationPolicySnapshot?: CancellationPolicySnapshot | null;
 
-  /** Aggregate counters — denormalized for fast UI; recomputed transactionally in MRB-04 / MRB-13. */
-  roomCount: number;
-  activeRoomCount: number;
-  cancelledRoomCount: number;
-  checkedInRoomCount: number;
-  checkedOutRoomCount: number;
+  // Per BAR-02 (2026-08-08, per decision #203): the
+  // five aggregate counter fields are no longer written
+  // to the reservation header. Consumers that need them
+  // call `deriveReservationCounters(children)` at read
+  // time. The 2026-08-08 audit verified that no
+  // `where()` or `orderBy()` anywhere in the codebase
+  // references any of the five fields — they are
+  // render-time projections only. The fields are
+  // retained as optional `?` for back-compat reads of
+  // pre-BAR-02 reservations; no handler writes them.
+  roomCount?: number;
+  activeRoomCount?: number;
+  cancelledRoomCount?: number;
+  checkedInRoomCount?: number;
+  checkedOutRoomCount?: number;
 
   // Per MRB-14 (2026-08-03, per decision #180 — proposed):
   // the per-child date spread. The header's `checkIn` /

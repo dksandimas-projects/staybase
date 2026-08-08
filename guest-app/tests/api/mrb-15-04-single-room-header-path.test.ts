@@ -325,24 +325,32 @@ describe("MRB-15-04 — Cancel handler: N=1 stays on the per-child path; reserva
   });
 });
 
-describe("MRB-15-04 — Create / walkin initialize `roomCount: 1` + `activeRoomCount: 1` for N=1 reservations (the new create path's default)", () => {
-  it("the create handler stamps `roomCount: assignedRooms.length` + `activeRoomCount: assignedRooms.length`", () => {
-    // N=1 is the common case (`assignedRooms.length === 1`)
-    // — the header is stamped with `roomCount: 1` and
-    // `activeRoomCount: 1` so the admin row's
-    // "1 rooms" badge is correct. N>1 is stamped
-    // with the actual count.
-    expect(bookingsHandlerSrc).toMatch(
+describe("MRB-15-04 — Create / walkin do NOT stamp the 5 counter fields (per BAR-02 / #203)", () => {
+  it("the create handler does NOT stamp `roomCount` or `activeRoomCount` (per BAR-02 / #203)", () => {
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the 5 aggregate counter fields are no
+    // longer written to the reservation header
+    // at create time. Consumers derive them via
+    // `deriveReservationCounters` over the
+    // children at read time. N=1 is the common
+    // case (`assignedRooms.length === 1`) — the
+    // pre-BAR-02 init stamped `roomCount: 1`
+    // and `activeRoomCount: 1` so the admin
+    // row's "1 rooms" badge was correct. The
+    // init is gone; the derivation in
+    // `bar-02-derive-counters.test.ts` gives
+    // the same byte-equivalent answer.
+    expect(bookingsHandlerSrc).not.toMatch(
       /roomCount: assignedRooms\.length,[\s\S]{0,200}?activeRoomCount: assignedRooms\.length,/
     );
   });
 
-  it("the walkin handler stamps `roomCount: walkinRoomCount` + `activeRoomCount: walkinRoomCount` (mirrors the create handler)", () => {
-    // Walkin's header stamps match the create
-    // handler's — same shape, same counter
-    // initialization, byte-equivalent to the
-    // online create path.
-    expect(bookingsHandlerSrc).toMatch(
+  it("the walkin handler does NOT stamp `roomCount` or `activeRoomCount` (mirrors the create handler)", () => {
+    // Walkin's pre-BAR-02 stamps match the
+    // create handler's — same shape, same
+    // counter initialization. Both are gone
+    // per BAR-02.
+    expect(bookingsHandlerSrc).not.toMatch(
       /roomCount: walkinRoomCount,[\s\S]{0,200}?activeRoomCount: walkinRoomCount,/
     );
   });

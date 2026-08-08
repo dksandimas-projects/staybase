@@ -91,6 +91,7 @@ Things agents must never do. Check this file before implementing any feature.
 
 - **Always lock rate at booking time** — store `ratePerNight` in the booking document at the moment of creation. Never recompute from current room rates after booking.
 - **Discount IDs are verified at check-in** — the system applies the discount at booking time on guest's honor; staff verifies ID physically. Do not build ID verification into the booking flow.
+- **Reservation counters + `paymentStatus` are derived, not denormalized (per #203 BAR-02)** — the 5 counter fields (`roomCount` / `activeRoomCount` / `cancelledRoomCount` / `checkedInRoomCount` / `checkedOutRoomCount`) and the `paymentStatus` aggregate mirror on the `Reservation` type are no longer written to the reservation header. Consumers that need them call `deriveReservationCounters(children)` + `computeReservationAggregatePaymentStatus(childStatuses)` (both in `shared/utils/bookingFolio.ts`) at read time. The 2026-08-08 audit verified that no `where()` / `orderBy()` anywhere references these fields — they are render-time projections only, so removing the writes cannot break a query. If a future feature needs the denormalized value, restore the writes (the data is still in pre-BAR-02 Firestore docs) and re-derive at the new read site. Do NOT add new transactional counter writes; the pattern is gone for a reason. The same audit verified the same posture for the `paymentStatus` aggregate mirror.
 
 ---
 

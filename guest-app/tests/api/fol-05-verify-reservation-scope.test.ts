@@ -142,15 +142,22 @@ describe("FOL-05 — verify-payment + add-payment + reject-payment are reservati
       );
     });
 
-    it("updates the reservation header's `paymentStatus` via the N>1 aggregate", () => {
-      // The header mirror fires on EVERY verify for
-      // new reservations (no `fullyPaid` gate). The
-      // mirror value is the N>1 aggregate
-      // (`computeReservationAggregatePaymentStatus(postUpdateChildStatuses)`),
-      // not the pre-FOL-05 single-child mapper
-      // (`mapBookingStatusToReservationPaymentStatus(bookingUpdates.status)`).
-      expect(verifyBody).toMatch(
-        /if \(bookingReservationId\.length > 0 && siblingChildBookings\.length > 0\) \{[\s\S]{0,500}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
+    it("does NOT write `paymentStatus` to the reservation header (per BAR-02 / #203 — the mirror is gone)", () => {
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written. Consumers derive it at read time
+      // via `computeReservationAggregatePaymentStatus`
+      // over the children. The FOL-05 sibling-flip
+      // pass is unchanged — only the redundant
+      // header mirror is gone. The pre-BAR-02
+      // shape wrote the mirror inside the same
+      // `runTransaction` as the sibling flip; the
+      // post-BAR-02 shape still does the
+      // `transaction.update(reservationRef, { updatedAt })`
+      // heartbeat but skips the `paymentStatus`
+      // field entirely.
+      expect(verifyBody).not.toMatch(
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
@@ -237,14 +244,16 @@ describe("FOL-05 — verify-payment + add-payment + reject-payment are reservati
 
     it("updates the reservation header's `paymentStatus` via the N>1 aggregate (no `transitionedToPaymentConfirmed` gate)", () => {
       // The pre-FOL-05 `transitionedToPaymentConfirmed`
-      // guard was removed (a partial add that flips
-      // zero siblings still leaves the aggregate
-      // unchanged, and a partial that flips N
-      // siblings correctly surfaces the new
-      // aggregate). The new gate is the
-      // reservation-id + sibling-children count.
-      expect(addPaymentBody).toMatch(
-        /if \(bookingReservationId\.length > 0 && siblingChildBookings\.length > 0\) \{[\s\S]{0,500}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written. The pre-BAR-02 mirror (the
+      // reservation-id + sibling-children count
+      // guard around the `paymentStatus:
+      // computeReservationAggregatePaymentStatus(postUpdateChildStatuses)`
+      // write) is gone. The FOL-05 sibling-flip
+      // pass is unchanged.
+      expect(addPaymentBody).not.toMatch(
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
       // The pre-FOL-05 gate is GONE — the new mirror
       // is not gated on the target's transition flag.
@@ -307,16 +316,16 @@ describe("FOL-05 — verify-payment + add-payment + reject-payment are reservati
 
     it("updates the reservation header's `paymentStatus` via the N>1 aggregate (no `isTargetInPaymentUploaded` gate)", () => {
       // The pre-FOL-05 reject handler gated the
-      // header mirror on `isTargetInPaymentUploaded`
-      // (the pre-FOL-05 status check threw for any
-      // other status). The FOL-05 status check
-      // RELAXES this: a target already past the
-      // money gate is allowed when at least one
-      // sibling is rejectable. The header mirror
-      // is now aggregate-sourced and fires on
-      // EVERY reject for new reservations.
-      expect(rejectPaymentBody).toMatch(
-        /if \(bookingReservationId\.length > 0 && siblingChildBookings\.length > 0\) \{[\s\S]{0,500}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written. The pre-BAR-02 mirror (the
+      // reservation-id + sibling-children count
+      // guard around the
+      // `paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses)`
+      // write) is gone. The FOL-05 sibling-rejection
+      // pass is unchanged.
+      expect(rejectPaymentBody).not.toMatch(
+        /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
 
@@ -377,15 +386,25 @@ describe("FOL-05 — verify-payment + add-payment + reject-payment are reservati
       // The pre-FOL-05 single-child mapper
       // (`mapBookingStatusToReservationPaymentStatus(status)`)
       // was the N=1 mapping. The FOL-05 mirror is
-      // aggregate-sourced
-      // (`computeReservationAggregatePaymentStatus(postUpdateChildStatuses)`).
-      // All 3 handlers should reference the
-      // aggregate in the header mirror. A future
-      // refactor that re-introduces the single-child
-      // mapper is a contract regression.
-      expect(verifyBody).toMatch(/computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/);
-      expect(addPaymentBody).toMatch(/computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/);
-      expect(rejectPaymentBody).toMatch(/computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/);
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written. The aggregate helper is still
+      // available (consumers call it at read time
+      // via `deriveReservationCounters` +
+      // `computeReservationAggregatePaymentStatus`)
+      // — but the WRITE of the aggregate to the
+      // reservation header is gone. None of the 3
+      // handlers call the helper as a write value
+      // anymore; a future refactor that
+      // re-introduces the mirror write is a
+      // contract regression. The pre-BAR-02 test
+      // shape (the helper is called as a write
+      // value) is replaced with the BAR-02
+      // assertion: the helper is NOT called in
+      // the FOL-05 handlers anymore.
+      expect(verifyBody).not.toMatch(/computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/);
+      expect(addPaymentBody).not.toMatch(/computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/);
+      expect(rejectPaymentBody).not.toMatch(/computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/);
     });
 
     it("every handler's pre-FOL-05 `fullyPaid` / `transitionedToPaymentConfirmed` gate is GONE", () => {
