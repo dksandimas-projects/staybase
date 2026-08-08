@@ -532,8 +532,18 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
     reservationRef: String(reservation.reservationRef || ""),
     reservationId: String(reservation.id || ""),
     isReservation: true,
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `activeRoomCount` is no longer read from the
+    // reservation header — it is always derived from
+    // the children. Pre-BAR-02 the header mirror was
+    // maintained transactionally; BAR-02 makes the
+    // derivation the canonical answer. `roomCount` was
+    // already a derivation over `children.length`.
     roomCount: children.length,
-    activeRoomCount: Number(reservation.activeRoomCount ?? children.length),
+    activeRoomCount: Math.max(
+      children.length - children.filter((c) => c.status === "cancelled").length,
+      0
+    ),
     rooms: roomProjections,
     roomTypeLabels,
     // Per MRB-14 (2026-08-03, per decision #180): the

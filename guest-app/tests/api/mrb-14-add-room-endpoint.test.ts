@@ -125,15 +125,18 @@ describe("MRB-14-02 — handleAddRoomToReservation surface", () => {
     // `aggregateRevenueAllocation` (sum of
     // children), the recomputed `actualDateRange`.
     // The recompute stays `isDivergent: false`
-    // because the new child shares the header's
-    // dates — the recompute is still done so the
-    // admin surfaces' dates read from
-    // `actualDateRange` always reflect the
-    // post-write children set.
-    expect(bookingsSrc).toMatch(
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // `roomCount` and `activeRoomCount` are no
+    // longer written to the reservation header on
+    // add-room. Consumers derive them at read time.
+    // The real denormalized header values (`subtotal`
+    // / `totalPrice` / `aggregateRevenueAllocation` /
+    // `actualDateRange`) stay — those are not pure
+    // projections.
+    expect(bookingsSrc).not.toMatch(
       /roomCount: existingChildren\.length \+ 1,/
     );
-    expect(bookingsSrc).toMatch(
+    expect(bookingsSrc).not.toMatch(
       /activeRoomCount: existingChildren\.length \+ 1,/
     );
     expect(bookingsSrc).toMatch(/subtotal: newSubtotal,/);

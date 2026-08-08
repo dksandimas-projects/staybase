@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.17";
+    VERSION2 = "0.264.18";
   }
 });
 
@@ -222110,6 +222110,29 @@ function computeReservationAggregatePaymentStatus(childStatuses) {
     return "completed";
   }
   return "in-house";
+}
+function deriveReservationCounters(children) {
+  const roomCount = children.length;
+  let cancelledRoomCount = 0;
+  let checkedInRoomCount = 0;
+  let checkedOutRoomCount = 0;
+  for (const child of children) {
+    const status = child.status;
+    if (status === "cancelled") {
+      cancelledRoomCount++;
+    } else if (status === "checked-in" || status === "in-house") {
+      checkedInRoomCount++;
+    } else if (status === "checked-out" || status === "completed") {
+      checkedOutRoomCount++;
+    }
+  }
+  return {
+    roomCount,
+    activeRoomCount: Math.max(roomCount - cancelledRoomCount, 0),
+    cancelledRoomCount,
+    checkedInRoomCount,
+    checkedOutRoomCount
+  };
 }
 function round2(value) {
   const numeric = Number(value);
@@ -223882,6 +223905,7 @@ __export(shared_exports, {
   createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
   createFailureBackoffState: () => createFailureBackoffState,
   datesOverlap: () => datesOverlap,
+  deriveReservationCounters: () => deriveReservationCounters,
   deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
@@ -224253,8 +224277,18 @@ function buildReservationEmailView(reservation, children) {
     reservationRef: String(reservation.reservationRef || ""),
     reservationId: String(reservation.id || ""),
     isReservation: true,
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `activeRoomCount` is no longer read from the
+    // reservation header — it is always derived from
+    // the children. Pre-BAR-02 the header mirror was
+    // maintained transactionally; BAR-02 makes the
+    // derivation the canonical answer. `roomCount` was
+    // already a derivation over `children.length`.
     roomCount: children.length,
-    activeRoomCount: Number(reservation.activeRoomCount ?? children.length),
+    activeRoomCount: Math.max(
+      children.length - children.filter((c2) => c2.status === "cancelled").length,
+      0
+    ),
     rooms: roomProjections,
     roomTypeLabels,
     // Per MRB-14 (2026-08-03, per decision #180): the
@@ -227271,9 +227305,17 @@ function buildCreateEmailView(args) {
     corporateCode: args.corporateCode,
     companyName: args.companyName,
     paymentMethod: args.paymentMethod,
-    paymentStatus: args.paymentStatus,
-    activeRoomCount: args.finalRooms.length,
-    cancelledRoomCount: 0
+    paymentStatus: args.paymentStatus
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `activeRoomCount` and `cancelledRoomCount`
+    // are not stamped onto the synthetic reservation
+    // object either. The downstream email view
+    // (and the page that renders it) derives
+    // the count from the in-memory `children` array.
+    // Pre-BAR-02 the synthetic object's
+    // `activeRoomCount: args.finalRooms.length` was
+    // a stub for the same value the helper now
+    // computes directly.
   };
   const children = args.finalRooms.map((room, index) => {
     const typeEntry = args.roomTypes.find((type) => type && type.value === room.roomType);
@@ -228841,11 +228883,13 @@ async function handleCreateBooking(req, res) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: termsConsentVersion,
-        roomCount: assignedRooms.length,
-        activeRoomCount: assignedRooms.length,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 these were the
+        // create-time init for the header's denormalized
+        // counter mirror.
         holdExpiresAt: newBooking.holdExpiresAt ? newBooking.holdExpiresAt : null,
         requestFingerprint: reservationRequestFingerprint,
         // Per MRB-14 (2026-08-03, per decision #180 —
@@ -229951,15 +229995,14 @@ async function handleCreateWalkin(req, res) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: DEFAULT_TERMS_VERSION,
-        // Per MRB-07 (2026-08-02, per decision #159): the aggregate
-        // counters reflect the N room stays this reservation actually
-        // created, so the admin reservation row can show room count,
-        // status and balance without fanning out to the children.
-        roomCount: walkinRoomCount,
-        activeRoomCount: walkinRoomCount,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: status === "checked-in" ? walkinRoomCount : 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 the walkin path mirrored
+        // the public create path's init (the "all
+        // checked-in" branch was the historical quirk
+        // for instant-walkin check-in).
         // Walk-ins have no auto-expiry hold (the staff is
         // creating the booking, not waiting on a guest
         // action) — `null` mirrors the public path's
@@ -230394,7 +230437,6 @@ async function handleRejectPayment(req, res) {
       if (bookingReservationId2.length > 0 && siblingChildBookings.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt
         });
       }
@@ -230632,18 +230674,7 @@ async function handleCancelBooking(req, res) {
             });
           }
         }
-        const newActiveRoomCount = Math.max(
-          (Number(reservationData.activeRoomCount) || 0) - cancelledCount,
-          0
-        );
-        const newCancelledRoomCount = (Number(reservationData.cancelledRoomCount) || 0) + cancelledCount;
-        const postStatuses = children.map(
-          (c2) => cancellableIds.has(c2.id) ? "cancelled" : String(c2.data.status || "")
-        );
         const reservationHeaderUpdate = {
-          cancelledRoomCount: newCancelledRoomCount,
-          activeRoomCount: newActiveRoomCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postStatuses),
           updatedAt: now
         };
         if (liabilitySnapshot) {
@@ -230772,7 +230803,6 @@ async function handleCancelBooking(req, res) {
         if (bookingReservationId2.length > 0) {
           const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
           transaction.update(reservationRef, {
-            paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
             updatedAt: now
           });
         }
@@ -231191,7 +231221,6 @@ async function handleAddPayment(req, res) {
       if (bookingReservationId2.length > 0 && siblingChildBookings.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -231783,7 +231812,6 @@ async function handleVerifyAndRecordPayment(req, res) {
       if (bookingReservationId2.length > 0 && siblingChildBookings.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -231912,7 +231940,6 @@ async function handleConfirmBooking(req, res) {
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -232007,7 +232034,6 @@ async function handleConfirmBookingWithBalance(req, res) {
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -232150,10 +232176,7 @@ async function handleCheckinBooking(req, res) {
       });
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        const newCheckedInCount = postUpdateChildStatuses.filter((s4) => s4 === "checked-in").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -232330,12 +232353,7 @@ async function handleCheckoutBooking(req, res) {
       }
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        const newCheckedInCount = postUpdateChildStatuses.filter((s4) => s4 === "checked-in").length;
-        const newCheckedOutCount = postUpdateChildStatuses.filter((s4) => s4 === "checked-out").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          checkedOutRoomCount: newCheckedOutCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postUpdateChildStatuses),
           updatedAt: now
         });
       }
@@ -232669,9 +232687,21 @@ function buildReservationLookupView(reservation, children, anchorRoomData, ancho
     // each room and the aggregate status for the
     // header.
     status: reservation.paymentStatus || "pending",
-    roomCount: Number(reservation.roomCount || rooms.length),
-    activeRoomCount: Number(reservation.activeRoomCount || rooms.length),
-    cancelledRoomCount: Number(reservation.cancelledRoomCount || 0),
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // three counter fields are no longer read from the
+    // reservation header. They are always derived from
+    // the `rooms` array (already in memory at this
+    // point). Pre-BAR-02 the header mirror was
+    // maintained transactionally; the new code is
+    // byte-equivalent for both pre- and post-BAR-02
+    // reservations because the derivation is the same
+    // calculation the pre-BAR-02 write performed.
+    roomCount: rooms.length,
+    activeRoomCount: Math.max(
+      rooms.length - rooms.filter((r3) => r3.status === "cancelled").length,
+      0
+    ),
+    cancelledRoomCount: rooms.filter((r3) => r3.status === "cancelled").length,
     rooms,
     // The "active room" data is what the cancel +
     // resend flows use as the server credential. The
@@ -233705,8 +233735,6 @@ async function handleAddRoomToReservation(req, res) {
         };
       })();
       updatedHeader = {
-        roomCount: existingChildren.length + 1,
-        activeRoomCount: existingChildren.length + 1,
         subtotal: newSubtotal,
         totalPrice: newTotalPrice,
         aggregateRevenueAllocation: newAggregateRevenueAllocation,

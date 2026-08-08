@@ -3,6 +3,7 @@ import {
   computeBookingFolio,
   computeServerFolioTotals,
   computeReservationAggregatePaymentStatus,
+  deriveReservationCounters,
   mapBookingStatusToReservationPaymentStatus,
   type FolioBooking,
   type FolioCharge,
@@ -821,6 +822,277 @@ describe("computeReservationAggregatePaymentStatus — N>1 aggregate reader (MRB
       // doesn't fire (unknown ≠ checked-out). Tier 5
       // catch-all returns `in-house`.
       expect(computeReservationAggregatePaymentStatus(["unknown-future-state", "confirmed"])).toBe("in-house");
+    });
+  });
+});
+
+// Per BAR-02 (2026-08-08, per decision #203): the
+// reservation counter reader. The five denormalized
+// counters on the reservation header are no longer
+// written — consumers derive them from the children via
+// `deriveReservationCounters`. This describe block pins
+// the derivation contract so any future change to the
+// underlying status semantics (e.g. a new "completed"
+// state) lands as a deliberate test update, not a
+// silent regression.
+//
+// Mirrors the test surface of
+// `computeReservationAggregatePaymentStatus` (the
+// sibling helper added in MRB-05): empty / N=1
+// all-active / N>1 mixed / all-cancelled / partial
+// checkin / partial checkout / all-checked-out /
+// defensive coercion.
+describe("deriveReservationCounters — the per-child counter reader (BAR-02 / #203)", () => {
+  describe("empty children", () => {
+    it("empty input returns all-zero counters", () => {
+      // The pre-BAR-02 contract (transactional write
+      // at create time) was `roomCount: 0,
+      // activeRoomCount: 0, cancelledRoomCount: 0,
+      // checkedInRoomCount: 0, checkedOutRoomCount: 0`.
+      // The derivation is byte-equivalent.
+      expect(deriveReservationCounters([])).toEqual({
+        roomCount: 0,
+        activeRoomCount: 0,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+  });
+
+  describe("N=1 — the active surface today", () => {
+    it("single `pending` room returns roomCount: 1, activeRoomCount: 1, the rest zero", () => {
+      // The N=1 byte-equivalence case for a fresh
+      // reservation that has not yet paid. The pre-BAR-02
+      // create-time header init wrote exactly these
+      // numbers.
+      expect(deriveReservationCounters([{ status: "pending" }])).toEqual({
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("single `checked-in` room bumps `checkedInRoomCount`", () => {
+      // After FOL-03 (handleCheckinBooking) — the
+      // pre-BAR-02 transactional write would have set
+      // `checkedInRoomCount: 1`. The derivation gives
+      // the same answer.
+      expect(deriveReservationCounters([{ status: "checked-in" }])).toEqual({
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 1,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("single `in-house` room is treated as checked-in (the same dual-encode as the sibling aggregate helper)", () => {
+      // The `in-house` alias is the post-MRB-05
+      // reservation-scope relabel of `checked-in` (per
+      // the spec's "Partially checked in" + "In house"
+      // encoding). The counter reader accepts both
+      // spellings so the FOL-03 check-in path stays
+      // byte-equivalent regardless of which side of the
+      // rename a reservation lands on.
+      expect(deriveReservationCounters([{ status: "in-house" }])).toEqual({
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 1,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("single `checked-out` room bumps `checkedOutRoomCount` (FOL-03 check-out path)", () => {
+      expect(deriveReservationCounters([{ status: "checked-out" }])).toEqual({
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 1
+      });
+    });
+
+    it("single `completed` room is treated as checked-out (the same dual-encode as the sibling aggregate helper)", () => {
+      // The `completed` alias is the post-MRB-05
+      // reservation-scope relabel of `checked-out` (per
+      // the spec's "Partially checked out" + "Completed"
+      // encoding). The counter reader accepts both
+      // spellings.
+      expect(deriveReservationCounters([{ status: "completed" }])).toEqual({
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 1
+      });
+    });
+
+    it("single `cancelled` room returns activeRoomCount: 0", () => {
+      // Cancellation is a secondary count — the
+      // `roomCount` (head count) stays at 1 (the room
+      // was booked and then cancelled) but
+      // `activeRoomCount` floors to 0.
+      expect(deriveReservationCounters([{ status: "cancelled" }])).toEqual({
+        roomCount: 1,
+        activeRoomCount: 0,
+        cancelledRoomCount: 1,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+  });
+
+  describe("N>1 — the multi-room surface (MRB-06+)", () => {
+    it("all-active 2-room reservation returns the same numbers the pre-BAR-02 create-time init wrote", () => {
+      // The pre-BAR-02 walkin / create paths for a
+      // 2-room reservation wrote
+      // `roomCount: 2, activeRoomCount: 2, ...rest 0`.
+      // The derivation matches.
+      expect(deriveReservationCounters([{ status: "pending" }, { status: "pending" }])).toEqual({
+        roomCount: 2,
+        activeRoomCount: 2,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("partial check-in (1 of 2 rooms checked-in) bumps `checkedInRoomCount` to 1 and `activeRoomCount` stays at 2", () => {
+      // The post-FOL-03 mid-stay state for a 2-room
+      // reservation. Pre-BAR-02, `handleCheckinBooking`
+      // would have written
+      // `checkedInRoomCount: 1, activeRoomCount: 2` in
+      // the same transaction. The derivation matches.
+      expect(deriveReservationCounters([{ status: "checked-in" }, { status: "pending" }])).toEqual({
+        roomCount: 2,
+        activeRoomCount: 2,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 1,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("partial cancel (1 of 2 rooms cancelled) decrements `activeRoomCount` and increments `cancelledRoomCount` (the MRB-13 chip value)", () => {
+      // The post-MRB-13 reservation-scope cancel state
+      // for a 2-room reservation that cancelled 1 room.
+      // Pre-BAR-02, `handleCancelBooking` would have
+      // written
+      // `cancelledRoomCount: 1, activeRoomCount: 1` in
+      // the same transaction as the per-child flip. The
+      // derivation matches — and the
+      // `BookingsPage.tsx:1548` "X cancelled" chip
+      // renders from the derivation, not the header
+      // field.
+      expect(deriveReservationCounters([{ status: "cancelled" }, { status: "pending" }])).toEqual({
+        roomCount: 2,
+        activeRoomCount: 1,
+        cancelledRoomCount: 1,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("all-cancelled 2-room reservation returns `activeRoomCount: 0` (the floor)", () => {
+      // `activeRoomCount` is `Math.max(roomCount - cancelledRoomCount, 0)` — the
+      // floor prevents a negative number when a
+      // counter drift (a pre-BAR-02 stale header
+      // claiming `cancelledRoomCount: 3` for a 2-room
+      // reservation) would otherwise surface a
+      // negative. The derivation is canonical.
+      expect(deriveReservationCounters([{ status: "cancelled" }, { status: "cancelled" }])).toEqual({
+        roomCount: 2,
+        activeRoomCount: 0,
+        cancelledRoomCount: 2,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("fully checked-out 3-room reservation returns the post-stay aggregate", () => {
+      // The post-FOL-03 check-out state for a 3-room
+      // reservation.
+      expect(deriveReservationCounters([
+        { status: "checked-out" },
+        { status: "checked-out" },
+        { status: "checked-out" }
+      ])).toEqual({
+        roomCount: 3,
+        activeRoomCount: 3,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 3
+      });
+    });
+
+    it("mixed-status 3-room reservation (1 cancelled, 1 checked-in, 1 checked-out) returns the post-stay aggregate", () => {
+      // The realistic N>1 mid-stay state: one room
+      // checked-out early, one room still in-house, one
+      // room cancelled. The chip + Status pill on the
+      // reservation row both read from this derivation.
+      expect(deriveReservationCounters([
+        { status: "checked-out" },
+        { status: "checked-in" },
+        { status: "cancelled" }
+      ])).toEqual({
+        roomCount: 3,
+        activeRoomCount: 2,
+        cancelledRoomCount: 1,
+        checkedInRoomCount: 1,
+        checkedOutRoomCount: 1
+      });
+    });
+  });
+
+  describe("defensive coercion — missing / unknown statuses", () => {
+    it("a child with `status: undefined` contributes to `roomCount` + `activeRoomCount` only", () => {
+      // The pre-BAR-02 contract: an unknown / missing
+      // status was treated as a participating child but
+      // did not bump any of the checkedIn /
+      // checkedOut counters. The derivation preserves
+      // the same posture (no string matches the
+      // cancelled / checked-in / checked-out arms).
+      expect(deriveReservationCounters([{ status: undefined }, { status: "pending" }])).toEqual({
+        roomCount: 2,
+        activeRoomCount: 2,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("a child with `status: null` contributes to `roomCount` + `activeRoomCount` only", () => {
+      // Same posture as `undefined` — the helper
+      // accepts `string | null | undefined` and treats
+      // the `null` arm as "not cancelled, not
+      // checked-in, not checked-out" (i.e. a
+      // participating child with an unknown future
+      // status).
+      expect(deriveReservationCounters([{ status: null }])).toEqual({
+        roomCount: 1,
+        activeRoomCount: 1,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
+    });
+
+    it("a child with an unknown future status string contributes to `roomCount` + `activeRoomCount` only", () => {
+      // The defensive-coercion case — a new
+      // status added in a future feature (e.g. a
+      // "no-show" state) does not break the
+      // counter math. The derivation silently
+      // treats it as a participating child.
+      expect(deriveReservationCounters([{ status: "no-show" }, { status: "pending" }])).toEqual({
+        roomCount: 2,
+        activeRoomCount: 2,
+        cancelledRoomCount: 0,
+        checkedInRoomCount: 0,
+        checkedOutRoomCount: 0
+      });
     });
   });
 });

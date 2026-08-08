@@ -125,20 +125,29 @@ describe("FOL-03 — `runTransaction` reads-before-writes contract in check-in +
       );
     });
 
-    it("the `transaction.update(reservationRef, ...)` uses `postUpdateChildStatuses` (not the raw pre-update read)", () => {
-      // The contract: the reservation header's count
-      // + aggregate are derived from the
-      // `postUpdateChildStatuses` array (the
-      // pre-update read + the just-checked-in
-      // booking's status replaced with
-      // `"checked-in"`). The pre-FOL-03 handler used
-      // the raw pre-update read's `childStatuses`,
-      // which didn't include the just-checked-in
-      // booking in the count.
-      expect(handleCheckinBody).toMatch(
+    it("the `transaction.update(reservationRef, ...)` does NOT write the counter mirror (per BAR-02 / #203 — the count + aggregate are derived at read time)", () => {
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the reservation header's `checkedInRoomCount` /
+      // `paymentStatus` mirror is no longer written
+      // on check-in. The FOL-03 contract is still
+      // preserved: `postUpdateChildStatuses` is still
+      // computed and used by the FOL-03 sibling-flip
+      // pass (the per-child status transition is the
+      // real state mutation). The pre-BAR-02 contract
+      // was that the count + aggregate were derived
+      // from the same array and written to the
+      // header in the same `runTransaction` as the
+      // sibling flip; the post-BAR-02 contract is
+      // that the array is computed and used for the
+      // sibling flip only (the header mirror is
+      // gone). Consumers that need the count or
+      // the aggregate derive them at read time via
+      // `deriveReservationCounters` +
+      // `computeReservationAggregatePaymentStatus`.
+      expect(handleCheckinBody).not.toMatch(
         /postUpdateChildStatuses\.filter\(\(s\)\s*=>\s*s\s*===\s*["']checked-in["']\)\.length/
       );
-      expect(handleCheckinBody).toMatch(
+      expect(handleCheckinBody).not.toMatch(
         /computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });
@@ -178,17 +187,20 @@ describe("FOL-03 — `runTransaction` reads-before-writes contract in check-in +
       // Same contract as the check-in handler — the
       // counts and the aggregate use
       // `postUpdateChildStatuses`. The check-out
-      // handler computes BOTH the
-      // `newCheckedInCount` (decrement) and the
-      // `newCheckedOutCount` (increment) from the
-      // post-update array.
-      expect(handleCheckoutBody).toMatch(
+      // handler no longer computes the `checkedIn`
+      // / `checkedOut` counter increments from the
+      // post-update array (per BAR-02 — the counter
+      // mirror is gone). The FOL-03 sibling-flip
+      // pass is unchanged; it still uses
+      // `postUpdateChildStatuses` to drive the
+      // per-child status transitions.
+      expect(handleCheckoutBody).not.toMatch(
         /postUpdateChildStatuses\.filter\(\(s\)\s*=>\s*s\s*===\s*["']checked-in["']\)\.length/
       );
-      expect(handleCheckoutBody).toMatch(
+      expect(handleCheckoutBody).not.toMatch(
         /postUpdateChildStatuses\.filter\(\(s\)\s*=>\s*s\s*===\s*["']checked-out["']\)\.length/
       );
-      expect(handleCheckoutBody).toMatch(
+      expect(handleCheckoutBody).not.toMatch(
         /computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
       );
     });

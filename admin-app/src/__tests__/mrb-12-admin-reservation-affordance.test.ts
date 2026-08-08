@@ -137,15 +137,34 @@ describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
     expect(bookingsPageSrc).toMatch(/"Cancelled"/);
     // The pill is rendered when the header is present; the
     // legacy "Mixed" chip is the cold-start fallback only.
-    expect(bookingsPageSrc).toMatch(/renderReservationPaymentStatusPill\(\s*row\.listReservationHeader\.paymentStatus/);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `paymentStatus` aggregate is no longer read from
+    // the reservation header. The pill is fed by
+    // `computeReservationAggregatePaymentStatus(row.listChildBookings.map(c => c.status))`
+    // (the derivation over the children that are
+    // already in memory at row-build time). The
+    // pre-BAR-02 shape was
+    // `renderReservationPaymentStatusPill(row.listReservationHeader.paymentStatus, ...)`;
+    // the post-BAR-02 shape is the same call but with
+    // a derived value.
+    expect(bookingsPageSrc).toMatch(/renderReservationPaymentStatusPill\(\s*computeReservationAggregatePaymentStatus\(/);
   });
 
-  it("MRB-12-02: the reservation row renders a `X cancelled` chip when `cancelledRoomCount > 0`", () => {
-    expect(bookingsPageSrc).toMatch(/row\.listReservationHeader\.cancelledRoomCount > 0/);
-    expect(bookingsPageSrc).toMatch(/cancelledRoomCount\} cancelled/);
-    // The chip's tooltip lists the cancelled room numbers.
+  it("MRB-12-02: the reservation row renders a `X cancelled` chip when the derived cancellation count is > 0", () => {
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // chip's count is derived from the children at
+    // read time, not read from the reservation
+    // header's `cancelledRoomCount` field. The
+    // `row.listChildBookings` array is already in
+    // memory at row-build time; the chip filters it
+    // for `status === "cancelled"`. The pre-BAR-02
+    // shape was `row.listReservationHeader.cancelledRoomCount > 0`;
+    // the post-BAR-02 shape is the inline IIFE over
+    // `listChildBookings`.
     expect(bookingsPageSrc).toMatch(/Cancelled rooms in this reservation/);
     expect(bookingsPageSrc).toMatch(/Room \$\{child\.roomNumber\}/);
+    expect(bookingsPageSrc).toMatch(/cancelledChildren/);
+    expect(bookingsPageSrc).toMatch(/child\.status === "cancelled"/);
   });
 
   it("MRB-12-03: the drawer reservation strip shows the reservation-scope Total / Paid / Balance pills", () => {

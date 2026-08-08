@@ -227,48 +227,37 @@ describe("MRB-15-08 — `handleCheckinBooking` + `handleCheckoutBooking` skip th
 });
 
 describe("MRB-15-08 — `handleVerifyAndRecordPayment` + `handleMarkPaymentConfirmed` skip the header mirror for legacy bookings", () => {
-  it("the verify-payment handler's header mirror is gated on `bookingReservationId.length > 0` (FOL-05 legacy = skip)", () => {
-    // The reservation-scope payment status
-    // mirror (per MRB-04 Phase 3) is skipped
-    // for legacy null-`reservationId` bookings
-    // — byte-equivalent to pre-Phase 3
-    // behavior. Per FOL-05 (2026-08-07, per
-    // decision #201), the helper call is now
-    // `computeReservationAggregatePaymentStatus(postUpdateChildStatuses)`
-    // (the N>1 aggregate), not the pre-FOL-05
-    // `mapBookingStatusToReservationPaymentStatus(bookingUpdates.status)`
-    // (the N=1 single-child mapper). The gate
-    // is now `bookingReservationId.length > 0 &&
-    // siblingChildBookings.length > 0`. The
-    // `siblingChildBookings.length > 0`
-    // companion is implicit for the
-    // `bookingReservationId.length > 0` path
-    // (a `reservationId` always has ≥1 child)
-    // but the explicit check pins the contract
-    // at the source level.
+  it("the verify-payment handler's header touch is gated on `bookingReservationId.length > 0` (FOL-05 legacy = skip)", () => {
+    // Per FOL-05 (2026-08-07, per decision #201):
+    // the reservation-scope payment status
+    // mirror is gated on `bookingReservationId.length > 0`
+    // — byte-equivalent to pre-Phase 3 behavior for
+    // legacy null-`reservationId` bookings. Per
+    // BAR-02 (2026-08-08, per decision #203): the
+    // mirror write itself is gone — the `paymentStatus`
+    // field is no longer written to the reservation
+    // header. The conditional `transaction.update(reservationRef, { updatedAt })`
+    // is the only header touch (a heartbeat) for
+    // post-BAR-02 reservations. The `updatedAt` is
+    // required for the AdminContext listener's snapshot
+    // ordering — the post-BAR-02 reservation row may
+    // still want to know "when did the last payment
+    // happen" even without the counter mirror.
     expect(bookingsHandlerSrc).toMatch(
-      /handleVerifyAndRecordPayment[\s\S]{0,30000}?bookingReservationId\.length > 0 && siblingChildBookings\.length > 0[\s\S]{0,200}?paymentStatus: computeReservationAggregatePaymentStatus/
+      /handleVerifyAndRecordPayment[\s\S]{0,30000}?bookingReservationId\.length > 0 && siblingChildBookings\.length > 0[\s\S]{0,200}?transaction\.update\(reservationRef,\s*\{[\s\S]{0,200}?updatedAt/
     );
   });
 
-  it("the verify-payment handler's header mirror is gated on `bookingReservationId.length > 0 && siblingChildBookings.length > 0` (FOL-05 legacy = skip)", () => {
-    // Per FOL-05 (2026-08-07, per decision #201):
-    // the pre-FOL-05 `fullyPaid` guard was
-    // removed from the header mirror — the
-    // mirror is now aggregate-sourced and
-    // fires on EVERY verify for new
-    // reservations (a partial verify that
-    // flips zero siblings still leaves the
-    // header's aggregate unchanged, and a
-    // partial verify that flips N siblings
-    // correctly surfaces the new aggregate).
-    // The new gate is the reservation-id
-    // check + the sibling-children count
-    // (byte-equivalent to pre-Phase 3 for
-    // legacy records; N=1 byte-equivalent to
-    // the pre-FOL-05 mirror).
-    expect(verifyPaymentHandlerSrc).toMatch(
-      /bookingReservationId\.length > 0 && siblingChildBookings\.length > 0[\s\S]{0,500}?paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
+  it("the verify-payment handler does NOT write `paymentStatus` to the reservation header (per BAR-02 / #203)", () => {
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `paymentStatus` mirror is no longer
+    // written. Consumers derive it at read time
+    // via `computeReservationAggregatePaymentStatus`.
+    // The FOL-05 sibling-flip pass (the per-child
+    // status flip) is unchanged — only the
+    // redundant header mirror is gone.
+    expect(verifyPaymentHandlerSrc).not.toMatch(
+      /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
     );
   });
 

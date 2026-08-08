@@ -206,48 +206,50 @@ describe("MRB-13 — reservation-scope cancel deduplicates voucher / corporate d
   });
 });
 
-describe("MRB-13 — reservation-scope cancel updates the reservation header", () => {
-  it("increments `cancelledRoomCount` by the number of children just cancelled (not by N)", () => {
-    // A partial cancel (one room cancelled out of
-    // three) only bumps the counter for the rooms
-    // we actually flipped. The increment is
-    // `cancelledCount` (the size of the cancellable
-    // set), NOT `children.length`.
-    expect(handlerSrc).toMatch(
+describe("MRB-13 — reservation-scope cancel does NOT write the counter mirror (per BAR-02 / #203)", () => {
+  it("does NOT write `cancelledRoomCount` to the reservation header on cancel", () => {
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // `cancelledRoomCount` is no longer written to
+    // the reservation header on cancel. Consumers
+    // derive it at read time via
+    // `deriveReservationCounters`. The pre-BAR-02
+    // write (`newCancelledRoomCount = ... +
+    // cancelledCount` + `cancelledRoomCount:
+    // newCancelledRoomCount` in the same
+    // transaction) is gone — see
+    // `bar-02-derive-counters.test.ts` for the
+    // corresponding derivation read test.
+    expect(handlerSrc).not.toMatch(
       /cancelledRoomCount: newCancelledRoomCount/
     );
-    const incr = handlerSrc.match(
+    expect(handlerSrc).not.toMatch(
       /newCancelledRoomCount = \(Number\(reservationData\.cancelledRoomCount\) \|\| 0\) \+ cancelledCount/
     );
-    expect(incr, "expected the cancelledRoomCount increment by cancelledCount").toBeTruthy();
   });
 
-  it("decrements `activeRoomCount` by the same count, floored at 0", () => {
-    // The activeRoomCount floor at 0 makes the
-    // invariant obvious — a partial cancel cannot
-    // drive the count negative. The helper itself
-    // floors, the explicit `Math.max` is a
-    // defensive belt-and-braces for the
-    // reservation-scope path.
-    expect(handlerSrc).toMatch(
+  it("does NOT write `activeRoomCount` to the reservation header on cancel", () => {
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // `activeRoomCount` is no longer written to the
+    // reservation header on cancel. The derivation
+    // helper floors the count to 0 — a partial
+    // cancel that flips a subset of children cannot
+    // drive the derived count negative.
+    expect(handlerSrc).not.toMatch(
       /newActiveRoomCount = Math\.max\(\s*\(Number\(reservationData\.activeRoomCount\) \|\| 0\) - cancelledCount,\s*0\s*\)/
     );
   });
 
-  it("sets `paymentStatus` from the post-cancellation state of every child (cancelled ones report `\"cancelled\"`)", () => {
-    // The aggregate helper takes a string[] of
-    // statuses and returns the derived value. The
-    // reservation-scope path maps every cancelled
-    // child to `"cancelled"` and every surviving
-    // child to its current status, so a full
-    // cancel returns `"cancelled"` (same as the
-    // per-child N=1 case) and a partial cancel
-    // returns the aggregate of the survivors.
-    const aggregateBlock = handlerSrc.match(
-      /const postStatuses = children\.map\([\s\S]{0,1500}computeReservationAggregatePaymentStatus\(postStatuses\)/
-    );
-    expect(aggregateBlock, "expected the post-cancellation aggregate").toBeTruthy();
-    expect(aggregateBlock![0]).toMatch(/cancellableIds\.has\(c\.id\) \? "cancelled" : String\(c\.data\.status \|\| ""\)/);
+  it("does NOT write `paymentStatus` to the reservation header on cancel", () => {
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `paymentStatus` mirror is no longer
+    // written on cancel. Consumers derive it at
+    // read time. The post-cancellation
+    // `cancellableIds` set is still used by the
+    // per-child CRL-02 cancellation stamps (the
+    // per-child `transaction.update` for the status
+    // flip), but the value is no longer persisted
+    // to the header.
+    expect(handlerSrc).not.toMatch(/paymentStatus: computeReservationAggregatePaymentStatus\(postStatuses\)/);
   });
 });
 

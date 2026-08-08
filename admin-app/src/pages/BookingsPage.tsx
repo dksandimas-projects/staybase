@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, CHECK_IN_ELIGIBLE_STATUSES, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, isPaymentVerified, requiredExtraBedsFor } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, CHECK_IN_ELIGIBLE_STATUSES, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, computeReservationAggregatePaymentStatus, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, isPaymentVerified, requiredExtraBedsFor } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -1522,8 +1522,18 @@ export function BookingsPage() {
               the per-booking `StatusBadge` byte-equivalent to
               pre-MRB-12. */}
           {row.listRowKind === "reservation" && row.listReservationHeader ? (
+            // Per BAR-02 (2026-08-08, per decision #203):
+            // the `paymentStatus` aggregate is no longer
+            // read from the reservation header. We derive
+            // it from `row.listChildBookings` (which is
+            // already in memory from the row builder) —
+            // the helper returns the same value the
+            // pre-BAR-02 mirror wrote, for both pre- and
+            // post-BAR-02 reservations.
             renderReservationPaymentStatusPill(
-              row.listReservationHeader.paymentStatus,
+              computeReservationAggregatePaymentStatus(
+                (row.listChildBookings || []).map((child) => child.status)
+              ),
               row.listReservationHeader.totalPrice,
               row.listReservationPaidAmount || 0
             )
@@ -1534,31 +1544,41 @@ export function BookingsPage() {
           ) : (
             <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
           )}
-          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed)
+              + per BAR-02 (2026-08-08, per decision #203):
               the cancellation-count chip. Renders only on
-              reservation rows (N>1) when the denormalized
+              reservation rows (N>1) when the derived
               `cancelledRoomCount` is > 0 — the desk never
               has to expand a row to know a group has
-              cancellations in it. Legacy N=1 single-row
-              path keeps the existing per-booking
-              `StatusBadge` (the `cancelled` tone is
-              already on the badge). The chip's tooltip
-              lists the cancelled room numbers for
-              quick triage. */}
-          {row.listRowKind === "reservation" && row.listReservationHeader && row.listReservationHeader.cancelledRoomCount > 0 && (
-            <span
-              title={
-                "Cancelled rooms in this reservation: " +
-                (row.listChildBookings || [])
-                  .filter((child) => child.status === "cancelled")
-                  .map((child) => `Room ${child.roomNumber}`)
-                  .join(", ")
-              }
-              className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-200"
-            >
-              {row.listReservationHeader.cancelledRoomCount} cancelled
-            </span>
-          )}
+              cancellations in it. Pre-BAR-02 the value
+              came from the header mirror; BAR-02 derives
+              it from `row.listChildBookings` (which is
+              already in memory from the row builder).
+              Legacy N=1 single-row path keeps the
+              per-booking `StatusBadge` (the `cancelled`
+              tone is already on the badge). The chip's
+              tooltip lists the cancelled room numbers
+              for quick triage. */}
+          {(() => {
+            if (row.listRowKind !== "reservation") return null;
+            const cancelledChildren = (row.listChildBookings || []).filter(
+              (child) => child.status === "cancelled"
+            );
+            if (cancelledChildren.length === 0) return null;
+            return (
+              <span
+                title={
+                  "Cancelled rooms in this reservation: " +
+                  cancelledChildren
+                    .map((child) => `Room ${child.roomNumber}`)
+                    .join(", ")
+                }
+                className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-200"
+              >
+                {cancelledChildren.length} cancelled
+              </span>
+            );
+          })()}
           {row.earlyCheckIn?.status === "requested" && (
             <span
               title="Early check-in pending review"
