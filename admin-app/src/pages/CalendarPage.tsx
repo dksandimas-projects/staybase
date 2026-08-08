@@ -1,7 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Edit3, Plus, XCircle } from "lucide-react";
-import { calculateSeasonalAwareRoomTotal, getNumNights, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, PaymentMethodConfig, calculateBreakfastAddOn } from "@spark-inn/shared";
+// Per NBS-2026-08-08 (F1 + F8, booking-flow audit
+// 2026-08-08): the calendar create-booking path preallocates
+// a `bookingId` + `reservationId` pair (F1) and now threads
+// the adult/child split + extra bed count (F8). The
+// preallocation matches the public `/book` + admin
+// New Booking modal patterns.
+import {
+  calculateSeasonalAwareRoomTotal,
+  getNumNights,
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  PaymentMethodConfig,
+  calculateBreakfastAddOn,
+  generateReservationId
+} from "@spark-inn/shared";
+import { collection, doc } from "firebase/firestore";
+import { db } from "../firebase/config";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -118,8 +133,43 @@ export function CalendarPage() {
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [guestCount, setGuestCount] = useState(1);
+  // Per NBS-2026-08-08 (F8, booking-flow audit 2026-08-08):
+  // the calendar-create path now collects the adult/child
+  // split + extra bed count the same way the New Booking
+  // modal does. The pre-F8 path only collected `guestCount`
+  // (the total), so the server defaulted to "all adults, no
+  // extra beds" — a 3-guest booking in a 2-adult room
+  // silently fell through the EXB-03 overflow check. The
+  // server still derives `numGuests = numAdults + numChildren`
+  // (CHD-04), so the form just needs to surface the split.
+  const [numAdults, setNumAdults] = useState(1);
+  const [numChildren, setNumChildren] = useState(0);
+  const [extraBedCount, setExtraBedCount] = useState(0);
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("pay-at-hotel");
+  // Per NBS-2026-08-08 (F1): the modal-session preallocation
+  // of the `bookingId` + `reservationId` for the calendar
+  // create path. Same shape as the BookingsPage modal —
+  // the pair is recomputed via `useMemo` when
+  // `calendarPreallocKey` changes. The key rotates when the
+  // modal opens so a second booking in the same page
+  // session gets a fresh pair.
+  const [calendarPreallocKey, setCalendarPreallocKey] = useState(0);
+  const calendarPreallocatedIds = useMemo(() => ({
+    bookingId: doc(collection(db, "bookings")).id,
+    reservationId: generateReservationId()
+  }), [calendarPreallocKey]);
+  const calendarPreallocatedBookingId = calendarPreallocatedIds.bookingId;
+  const calendarPreallocatedReservationId = calendarPreallocatedIds.reservationId;
+  const wasCalendarModalOpenRef = useRef(false);
+  useEffect(() => {
+    if (isBookingModalOpen && !wasCalendarModalOpenRef.current) {
+      wasCalendarModalOpenRef.current = true;
+      setCalendarPreallocKey((key) => key + 1);
+    } else if (!isBookingModalOpen) {
+      wasCalendarModalOpenRef.current = false;
+    }
+  }, [isBookingModalOpen]);
   const [cancelReason, setCancelReason] = useState("");
   const [moveRoomId, setMoveRoomId] = useState("");
   const [moveCheckIn, setMoveCheckIn] = useState("");
@@ -235,29 +285,81 @@ export function CalendarPage() {
     e.preventDefault();
     const trimmedFirst = firstName.trim();
     const trimmedLast = lastName.trim();
+    const trimmedEmail = guestEmail.trim();
+    const trimmedPhone = guestPhone.trim();
     if (!selection || !selectedRoom || !selectedRoomType || !trimmedFirst || !trimmedLast) return;
+    // Per NBS-2026-08-08 (F4): require a real email + phone
+    // before submit. The pre-F4 path wrote
+    // `calendar-${Date.now()}@example.invalid` + the literal
+    // string `"n/a"` to Firestore when the desk left the
+    // fields blank — a fake email that silently occupied
+    // the match-by-email field for every later
+    // link / lookup / reply. Same fix as the BookingsPage
+    // New Booking modal.
+    if (!trimmedEmail) {
+      toast.warning(
+        "Email required",
+        "Please enter a valid email for the guest — it's required for the booking confirmation and receipt."
+      );
+      return;
+    }
+    if (!trimmedPhone) {
+      toast.warning(
+        "Phone required",
+        "Please enter a phone number for the guest — it's required for check-in coordination."
+      );
+      return;
+    }
+    // Per NBS-2026-08-08 (F8): the desk's adult/child split
+    // + extra bed count. The server (CHD-04 + EXB-03)
+    // validates `numAdults + numChildren === numGuests` and
+    // applies the overflow rule, so a 3-guest booking in a
+    // 2-adult room without enough extra beds is rejected
+    // before the transaction (the previous pre-F8 silent
+    // default priced it as 3 adults in a 2-adult room).
+    const safeNumAdults = Math.max(0, Math.floor(Number(numAdults) || 0));
+    const safeNumChildren = Math.max(0, Math.floor(Number(numChildren) || 0));
+    if (safeNumAdults + safeNumChildren < 1) {
+      toast.warning(
+        "Guest count required",
+        "Please set at least one adult or child guest."
+      );
+      return;
+    }
     const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
     // Per EXB-02 (2026-07-31): the historical inline
     // `hasBreakfast ? breakfastRate * guestCount * selectedNights : 0`
     // now routes through the shared `calculateBreakfastAddOn` helper.
     // Byte-equivalent output — the helper's defensive coercion matches
     // the ternary's `hasBreakfast` gate and the `Number(x) || 0`
-    // pattern this site uses.
+    // pattern this site uses. The `numGuests` for the
+    // breakfast add-on is the total (adults + children) per
+    // the CHD-10 helper's contract.
     const totalPrice = selectedRoomTotal + calculateBreakfastAddOn({
       hasBreakfast,
       breakfastRate,
-      numGuests: guestCount,
+      numGuests: safeNumAdults + safeNumChildren,
       numNights: selectedNights
     });
     const result = await addWalkinBooking({
+      // Per NBS-2026-08-08 (F1): the modal-session preallocations.
+      preallocatedBookingId: calendarPreallocatedBookingId,
+      preallocatedReservationId: calendarPreallocatedReservationId,
       roomId: selectedRoom.id,
       roomNumber: selectedRoom.roomNumber,
       roomType: selectedRoom.type,
       firstName: trimmedFirst,
       lastName: trimmedLast,
-      guestEmail: guestEmail.trim() || `calendar-${Date.now()}@example.invalid`,
-      guestPhone: guestPhone.trim() || "n/a",
-      numGuests: guestCount,
+      guestEmail: trimmedEmail,
+      guestPhone: trimmedPhone,
+      numGuests: safeNumAdults + safeNumChildren,
+      // Per NBS-2026-08-08 (F8): the adult/child split + extra
+      // bed count. The server derives `numGuests` from the
+      // split (CHD-04) and validates the EXB-03 overflow
+      // rule against the selected room type's `maxExtraBeds`.
+      numAdults: safeNumAdults,
+      numChildren: safeNumChildren,
+      extraBedCount,
       checkIn: selection.startDate,
       checkOut: selection.endDate,
       numNights: selectedNights,
@@ -308,7 +410,19 @@ export function CalendarPage() {
     setGuestEmail("");
     setGuestPhone("");
     setGuestCount(1);
+    // Per NBS-2026-08-08 (F8): reset the adult/child split
+    // + extra bed count alongside the guest count.
+    setNumAdults(1);
+    setNumChildren(0);
+    setExtraBedCount(0);
     setHasBreakfast(false);
+    // Per NBS-2026-08-08 (F1): rotate the preallocation
+    // key so the next modal open generates a fresh
+    // `bookingId` + `reservationId` pair. The current
+    // pair is bound to the just-committed booking —
+    // reusing it for the next one would collide with
+    // the existing reservation header.
+    setCalendarPreallocKey((key) => key + 1);
   };
 
   const openBookingDrawer = (booking: Booking) => {
@@ -495,9 +609,31 @@ export function CalendarPage() {
             <label className="flex flex-col gap-2 font-semibold text-gray-700">First name<input required value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" placeholder="Maria" className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
             <label className="flex flex-col gap-2 font-semibold text-gray-700">Last name<input required value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" placeholder="Santos" className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           </div>
-          <label className="flex flex-col gap-2 font-semibold text-gray-700">Email<input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
-          <label className="flex flex-col gap-2 font-semibold text-gray-700">Phone<input value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
-          <label className="flex flex-col gap-2 font-semibold text-gray-700">Guests<input type="number" min={1} value={guestCount} onChange={(e) => setGuestCount(Number(e.target.value) || 1)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          <label className="flex flex-col gap-2 font-semibold text-gray-700">Email<input type="email" required value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          <label className="flex flex-col gap-2 font-semibold text-gray-700">Phone<input required value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          {/* Per NBS-2026-08-08 (F8): the calendar-create
+              modal now collects the adult/child split +
+              extra bed count the same way the New Booking
+              modal does. The single `guestCount` field is
+              kept for the desk's quick-set habit (it
+              distributes `numAdults = guestCount,
+              numChildren = 0` on change), and the split
+              steppers below it override when the desk
+              knows the actual mix. The server derives
+              `numGuests = numAdults + numChildren` (CHD-04)
+              and applies the EXB-03 overflow rule against
+              the room type's `maxExtraBeds`. */}
+          <label className="flex flex-col gap-2 font-semibold text-gray-700">Guests<input type="number" min={1} value={numAdults + numChildren} onChange={(e) => {
+            const nextTotal = Math.max(1, Number(e.target.value) || 1);
+            setNumAdults(nextTotal);
+            setNumChildren(0);
+            setGuestCount(nextTotal);
+          }} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-2 font-semibold text-gray-700">Adults<input type="number" min={1} max={20} value={numAdults} onChange={(e) => setNumAdults(Math.max(1, Number(e.target.value) || 1))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+            <label className="flex flex-col gap-2 font-semibold text-gray-700">Children<input type="number" min={0} max={20} value={numChildren} onChange={(e) => setNumChildren(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          </div>
+          <label className="flex flex-col gap-2 font-semibold text-gray-700">Extra beds<input type="number" min={0} max={10} value={extraBedCount} onChange={(e) => setExtraBedCount(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           <label className="flex items-center gap-2 font-semibold text-gray-700"><input type="checkbox" checked={hasBreakfast} onChange={(e) => setHasBreakfast(e.target.checked)} /> Include breakfast</label>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm">
             {[

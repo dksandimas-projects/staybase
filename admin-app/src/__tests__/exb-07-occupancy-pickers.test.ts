@@ -202,8 +202,29 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
     // 1-adult / 0-children / 0-extra-bed defaults (see
     // `createWalkinRoomStay`) AND prevents the previous group's extra
     // rooms carrying into the next booking.
+    //
+    // Per NBS-2026-08-08 (F9, booking-flow audit 2026-08-08):
+    // the post-success reset used to read
+    // `roomTypes[0]?.value || ""` while the catalog
+    // was still hydrating, which seeded the next stay
+    // with `roomType: ""` permanently (the next submit
+    // hit the "Choose an available room" gate with a
+    // blank dropdown). The F9 fix seeds the next
+    // stay with an explicit empty string and lets
+    // the existing effect at the top of the modal
+    // re-sync to the first loaded type on the next
+    // paint — so the desk sees a blank dropdown that
+    // populates once the catalog hydrates, instead
+    // of a permanent empty value.
     expect(resetBlock![0]).toMatch(
-      /setWalkinRoomStays\(\[createWalkinRoomStay\(roomTypes\[0\]\?\.value \|\| ""\)\]\)/
+      /setWalkinRoomStays\(\[createWalkinRoomStay\(""\)\]\)/
+    );
+    // The F9 fix specifically avoids the
+    // `roomTypes[0]?.value || ""` pattern while the
+    // catalog is hydrating — assert the post-success
+    // reset block does NOT carry that pattern.
+    expect(resetBlock![0]).not.toMatch(
+      /createWalkinRoomStay\(roomTypes\[0\]\?\.value/
     );
     expect(bookingsPageSrc).toMatch(
       /const createWalkinRoomStay = \(roomType: string\): WalkinRoomStay => \(\{[\s\S]{0,300}numAdults: 1,[\s\S]{0,120}numChildren: 0,[\s\S]{0,120}extraBedCount: 0/

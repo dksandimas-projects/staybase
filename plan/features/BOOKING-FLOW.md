@@ -66,6 +66,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Special requests (optional, textarea)
 - [x] Corporate fields (shown only on `/corporate/book` flow): company name (required), designation, company address, number of rooms, purpose of stay, preferred billing arrangement
 - [x] Privacy and terms consent checkbox — "I agree to the [Privacy Policy] and [Terms of Service] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` and `/terms` in new tabs
+  - [x] **Per NBS-2026-08-08 (F5, booking-flow audit 2026-08-08):** the Step 3 `canConfirm` gate now ANDs both checkboxes (`guestDetails.consent` from Step 2 + `termsConsent` from Step 3) because the server's `guestDetailsSchema.consent: z.boolean()` validates Step 2's value, not Step 3's. A guest who only ticked Step 3 hit a silent server 400 "Privacy policy consent is required." before the fix. The duplicate-checkbox UX is a pre-existing smell (both ask the same question); the F5 fix is the minimum that prevents the silent 400. A future refactor should consolidate to a single source of truth.
 - [x] Back button to Step 1, Next button to Step 3
 - [x] Inline Zod validation — errors shown per field on blur
 - [x] Next button disabled until consent checkbox is checked
@@ -167,6 +168,8 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Network error on booking creation — show error, do not create duplicate booking
 - [x] Invalid booking reference format caught server-side
 - [x] Back navigation between steps preserves form state
+- [x] **Per NBS-2026-08-08 (F2, booking-flow audit 2026-08-08): every server-side 4xx surfaces a matching recovery CTA on the Step 3 sticky footer.** The previous catch only auto-redirected for the "Room no longer available" message; every other 4xx (rate-limit 429, `MAX_STAY_NIGHTS`, `MAX_ADVANCE_DAYS`, past-checkin, etc.) stranded the user on Step 3 with a generic message and no next step. The fix maps the server error to one of three recovery actions via a `submitErrorAction: "back-to-step-1" | "retry" | "none"` discriminator: `back-to-step-1` for the stay/date-validation cases (room not available, max stay length, advance window, past check-in); `retry` for transient cases (rate limit, network); `none` for everything else (with a Dismiss button). The auto-redirect for the "Room no longer available" path now holds its timer on a `useRef` so a user-initiated nav (clicking the back CTA or the browser back button) cancels the timer (F11).
+- [x] **Per NBS-2026-08-08 (F11, booking-flow audit 2026-08-08): the 5s auto-redirect for "Room no longer available" is cancellable.** The previous bare `setTimeout` raced a user-initiated nav (the user clicks the back CTA before 5s elapses) and clobbered the URL the user already moved to. The timer is held on `redirectTimerRef: useRef<number | null>(null)`. The cleanup effect cancels any pending timer on unmount; the manual-nav CTA cancels the timer before navigating; a fresh `handleConfirmBooking` submit cancels the timer before re-firing the request.
 
 ## Manual QA
 
