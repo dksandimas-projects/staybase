@@ -478,6 +478,28 @@ export function BookingPage() {
     && cartDistribution.unassignedAdults === 0
     && cartDistribution.unassignedChildren === 0
     && distributedRoomCart.every((room) => room.numAdults >= 1);
+  // Per the per-individual discount guard (mirrors the
+  // admin-app drawer-edit fix): PWD and senior are
+  // per-individual legal entitlements (RA 7277 / RA
+  // 9442) — they must be applied to the specific
+  // guest's booking, not the whole multi-room cart.
+  // The guard below disables the senior / PWD picker
+  // options when the cart has >1 room (the per-individual
+  // shape is single-room by definition) + auto-reverts
+  // the discount type to "none" if the cart grows past
+  // 1 while senior / PWD is selected. The single source
+  // of truth is the `isPerIndividualDiscount`
+  // derivation consumed by the picker disable + the
+  // auto-revert useEffect.
+  const isPerIndividualDiscount = discountType === "senior" || discountType === "pwd";
+  const cartIsMultiRoom = distributedRoomCart.length > 1;
+  useEffect(() => {
+    if (isPerIndividualDiscount && cartIsMultiRoom) {
+      setDiscountType("none");
+      clearDiscountIdUpload();
+      setDiscountIdUploadError("");
+    }
+  }, [isPerIndividualDiscount, cartIsMultiRoom, clearDiscountIdUpload]);
   // Per CHD-11 (2026-08-04, per decision #184): the
   // per-room cap is enforced at the submit gate, not the
   // picker. Every room in the cart must fit its per-type cap
@@ -1350,7 +1372,13 @@ export function BookingPage() {
           // `guest-app/server/handlers/bookings.ts`.
           reservationId,
           roomType: firstRoomSelection.roomType,
-          roomCount: distributedRoomCart.length,
+          // Per BAR-02 (2026-08-08, per decision #203): the
+          // `roomCount` field is no longer written to the
+          // reservation header. Consumers derive it at
+          // read time via `deriveReservationCounters`. The
+          // field is no longer sent in the create request
+          // body — the server reads the children list
+          // directly to compute the count.
           roomSelections: distributedRoomCart.map((room, index) => ({
             bookingId: index === 0 ? bookingId : room.bookingId,
             roomType: room.roomType,
@@ -1843,22 +1871,48 @@ export function BookingPage() {
               </p>
               
               {seniorPwdOnlineEnabled && <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                {(["none", "senior", "pwd"] as const).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => handleDiscountChange(type)}
-                    className={cn(
-                      "flex min-h-11 items-center justify-center rounded-lg border text-sm font-semibold transition px-4",
-                      discountType === type
-                        ? "border-primary bg-primary-light text-primary"
-                        : "border-gray-200 bg-white text-gray-700 hover:border-primary"
-                    )}
-                  >
-                    {type === "none" ? "None" : type === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
-                  </button>
-                ))}
+                {(["none", "senior", "pwd"] as const).map((type) => {
+                  // Per the per-individual discount guard:
+                  // the senior / PWD buttons are disabled
+                  // when the cart has >1 room. The same
+                  // derivation is read by the auto-revert
+                  // useEffect above (which clears the
+                  // selected type if the cart grows past
+                  // 1 while the user is on the page).
+                  const isPerIndividualType = type === "senior" || type === "pwd";
+                  const disabledByGuard = isPerIndividualType && cartIsMultiRoom;
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => handleDiscountChange(type)}
+                      disabled={disabledByGuard}
+                      aria-disabled={disabledByGuard}
+                      title={
+                        disabledByGuard
+                          ? "Senior / PWD discounts are per-individual entitlements and apply to a single room. Please book the senior / PWD guest's room separately — you can add additional rooms in a second booking."
+                          : undefined
+                      }
+                      data-testid={`guest-discount-type-${type}`}
+                      className={cn(
+                        "flex min-h-11 items-center justify-center rounded-lg border text-sm font-semibold transition px-4",
+                        disabledByGuard
+                          ? "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 opacity-60"
+                          : discountType === type
+                            ? "border-primary bg-primary-light text-primary"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-primary"
+                      )}
+                    >
+                      {type === "none" ? "None" : type === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
+                    </button>
+                  );
+                })}
               </div>}
+              {seniorPwdOnlineEnabled && cartIsMultiRoom && (
+                <p className="mt-3 text-xs text-amber-700">
+                  Senior Citizen and PWD discounts are per-individual entitlements and apply to a single room. If you need a senior or PWD discount, please book that guest's room in a separate booking — the additional rooms can be added to the same reservation from the front desk at check-in.
+                </p>
+              )}
 
               {seniorPwdOnlineEnabled && discountType !== "none" && (
                 <div className="mt-5">
