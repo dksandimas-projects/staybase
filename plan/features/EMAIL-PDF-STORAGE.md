@@ -231,6 +231,7 @@ Used at check-in by front desk. Generated from booking data.
   - One row per guest, one column per night of stay
   - Each cell has a blank line or checkbox list of silog options for the guest to fill in
   - Silog options pulled from `settings/breakfastConfig.silogItems` at PDF generation time
+  - **Drawer pre-fill (2026-08-09):** if staff pre-selected a silog in the booking drawer, the matching cell renders a **filled brand-color box + white checkmark + bold label** for that guest/day, sourced from `booking.breakfastSelections["${date}-guest-${n}"]`. Other silog options stay as hollow checkboxes so the guest can still change their mind at check-in. Helper line reads "Pre-selected choices are marked; circle or check to change." Pre-fill matches by silog `name` (the drawer's `<select>` stores the item name, not id) — a silog name edit in Settings after capture will silently drop the pre-check for that booking, accepted trade-off.
 
 **Checklist:**
 - [x] Wireframe data capture exists in admin booking drawer for guest registry fields, ID photo preview, and breakfast choices
@@ -242,6 +243,7 @@ Used at check-in by front desk. Generated from booking data.
 - [x] Silog items listed as checkboxes or options per cell — guest circles/checks their choice
 - [x] Printable — front desk prints and guest fills/signs physical copy
 - [x] Same stable jsPDF font fallback requirements as receipt
+- [x] Drawer pre-selected silog is pre-filled in the printed form (filled box + check + bold label); other options stay blank (2026-08-09)
 
 ---
 

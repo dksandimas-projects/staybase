@@ -2917,7 +2917,14 @@ export function BookingsPage() {
       y += 4.8;
       pdf.setFontSize(8);
       pdf.setTextColor(120, 120, 120);
-      pdf.text("Circle or check your choice for each guest per day.", marginL, y);
+      // Per the 2026-08-09 follow-up to the booking-drawer
+      // breakfast capture: when staff pre-select a silog per
+      // guest per day in the drawer, the matching checkbox in the
+      // printed registration form is pre-filled (filled box +
+      // white check + bold label) so the guest can see what was
+      // already recorded and override at check-in if needed. The
+      // other silog options stay blank.
+      pdf.text("Pre-selected choices are marked; circle or check to change.", marginL, y);
       y += 5.5;
 
       if (activeSilogItems.length === 0) {
@@ -2933,16 +2940,43 @@ export function BookingsPage() {
             : "";
           for (let g = 0; g < b.numGuests; g++) {
             const rowLabel = stayDates.length > 1 ? `Guest ${g + 1} (${shortDate}):` : `Guest ${g + 1}:`;
+            // The drawer's <select> stores the silog item name
+            // (not id) under `${date}-guest-${g + 1}`, so the
+            // pre-fill match is by name. Editing a silog name in
+            // Settings after capture would silently drop the
+            // pre-check for that booking — accepted trade-off,
+            // matching the drawer's persistence shape.
+            const selectedName = b.breakfastSelections?.[`${date}-guest-${g + 1}`];
             pdf.setTextColor(...compactTextRgb);
             pdf.text(rowLabel, marginL, y);
             let optionX = marginL + 24;
             for (const item of activeSilogItems) {
               const optionLabel = fitText(item.name, 17);
-              pdf.setDrawColor(150, 150, 150);
-              pdf.setLineWidth(0.12);
-              pdf.rect(optionX, y - 2.8, 2.7, 2.7);
-              pdf.setTextColor(75, 75, 75);
-              pdf.text(optionLabel, optionX + 3.7, y);
+              const isSelected = !!selectedName && item.name === selectedName;
+              if (isSelected) {
+                pdf.setFillColor(...brandRgb);
+                pdf.setDrawColor(...brandRgb);
+                pdf.setLineWidth(0.12);
+                pdf.rect(optionX, y - 2.8, 2.7, 2.7, "FD");
+                // White checkmark drawn as two line segments
+                // — avoids depending on a unicode ✓ glyph that
+                // the helvetica fallback in `setPdfFont` does
+                // not ship reliably.
+                pdf.setDrawColor(255, 255, 255);
+                pdf.setLineWidth(0.4);
+                pdf.line(optionX + 0.55, y - 1.55, optionX + 1.15, y - 0.9);
+                pdf.line(optionX + 1.15, y - 0.9, optionX + 2.2, y - 2.35);
+                pdf.setTextColor(...brandRgb);
+                pdf.setFont("helvetica", "bold");
+                pdf.text(optionLabel, optionX + 3.7, y);
+                pdf.setFont("helvetica", "normal");
+              } else {
+                pdf.setDrawColor(150, 150, 150);
+                pdf.setLineWidth(0.12);
+                pdf.rect(optionX, y - 2.8, 2.7, 2.7);
+                pdf.setTextColor(75, 75, 75);
+                pdf.text(optionLabel, optionX + 3.7, y);
+              }
               optionX += Math.min(28, Math.max(20, pdf.getTextWidth(optionLabel) + 8));
             }
             y += 4.8;
