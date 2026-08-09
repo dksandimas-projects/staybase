@@ -103,6 +103,14 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 - **Unpaid Checkout:** Requires staff reason; balances above `unpaidCheckoutApprovalThreshold` (default ₱5,000) require `admin` authorization. Stamped immutably on departure.
 - **Confirm with Balance:** Staff can confirm a `payment-uploaded` booking with an intentional partial balance via `/api/bookings/confirm-with-balance`.
 
+### Lifecycle Transition Confirmation Modals (CLS)
+- **CLS-01 (2026-08-09):** the three lifecycle transition buttons in the drawer's primary action footer (`Confirm booking` / `Verify guest ID & check in` / `Review folio & check out`) all open a `ConfirmStatusModal` shell instead of firing `handleStatusTransition` directly. The shell wraps the existing `<Modal>` (focus trap, ESC, backdrop, framer animations, mobile bottom-sheet for free) and accepts `confirmTone` (`primary` / `warning` / `danger`) so the CTA inside the modal matches the button the desk just clicked. Each call site composes the transition-specific context (children: room, stay, payment, breakfast flag, folio summary, etc.) and a confirm handler.
+- **Unified check-out modal (CLS-01):** the pre-CLS-01 split-path (`modal-only-when-balance-due` + naked `handleStatusTransition` for zero-balance) is gone. The new shell always opens, and the children body decides:
+  - **balance = 0** → green "Folio fully paid" callout, no reason form, primary CTA "Complete check-out"
+  - **balance > 0 + not blocked** → amber balance callout + the UCO-02/03 reason form (shortcut chips + textarea, capped at 500 chars) + warning-tone CTA "Check out with ₱X due"
+  - **server returned "Front Desk cannot complete"** → red blocked callout + custom footer (Close button only — no confirm pair)
+- **Pre-CLS-01 path (deprecated):** `showUnpaidCheckoutForm` state, the legacy `<Modal title="Unpaid checkout — reason required">` body, the inline `setUnpaidCheckoutSubmitting` flag, the post-click `getBookingFolio(selectedBooking)` branch. Renamed to `showConfirmCheckOut` + `confirmCheckOutPending` and lifted into the shared shell.
+
 ### Guest ID Upload & HEIC Conversion
 - Accepts JPEG, PNG, WebP, HEIC, HEIF.
 - HEIC files auto-converted client-side via `heic-to@1.5.2` Web Worker before compression.

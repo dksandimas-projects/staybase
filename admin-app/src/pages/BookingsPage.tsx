@@ -40,6 +40,7 @@ import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
+import { ConfirmStatusModal } from "../components/ConfirmStatusModal";
 import { CancellationPreviewPanel } from "../components/CancellationPreviewPanel";
 import { CancellationLiabilityPanel, CancellationExceptionModal } from "../components/CancellationLiabilityPanel";
 import {
@@ -83,7 +84,9 @@ import {
   ChevronDown,
   ChevronRight,
   Search,
-  FlaskConical
+  FlaskConical,
+  LogIn,
+  LogOut
 } from "lucide-react";
 
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
@@ -607,11 +610,37 @@ export function BookingsPage() {
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
 
-  // UCO-02/03: unpaid checkout reason modal state
-  const [showUnpaidCheckoutForm, setShowUnpaidCheckoutForm] = useState(false);
+  // UCO-02/03 + CLS-01 (2026-08-09, decision #208): the
+  // lifecycle transition confirmation modals. Each lifecycle
+  // transition in the drawer's primary action footer (Confirm
+  // booking / Verify & check in / Review folio & check out)
+  // now opens a `ConfirmStatusModal` shell instead of firing
+  // `handleStatusTransition` directly. The shell is generic;
+  // each call site composes the right context (children) +
+  // confirm handler. The check-out modal doubles as the
+  // UCO-02/03 reason form when the balance is > 0 — the
+  // reason form is rendered inline as children, so the desk
+  // sees a single "check out" flow regardless of balance.
+  const [showConfirmBooking, setShowConfirmBooking] = useState(false);
+  const [confirmBookingPending, setConfirmBookingPending] = useState(false);
+  const [showConfirmCheckIn, setShowConfirmCheckIn] = useState(false);
+  const [confirmCheckInPending, setConfirmCheckInPending] = useState(false);
+  // Unified check-out modal: shows the folio summary + an
+  // inline reason field when balance > 0 (UCO-02/03 audit
+  // requirement) + the existing admin-only blocked UI when
+  // the server returns "Front Desk cannot complete".
+  const [showConfirmCheckOut, setShowConfirmCheckOut] = useState(false);
+  const [confirmCheckOutPending, setConfirmCheckOutPending] = useState(false);
   const [unpaidCheckoutReason, setUnpaidCheckoutReason] = useState("");
   const [unpaidCheckoutError, setUnpaidCheckoutError] = useState<string | null>(null);
-  const [unpaidCheckoutSubmitting, setUnpaidCheckoutSubmitting] = useState(false);
+  // `unpaidCheckoutBlocked` flips to true when the server
+  // returns the "Front Desk cannot complete" error
+  // (balance > `unpaidCheckoutApprovalThreshold` + non-admin
+  // staff); the modal then swaps the form for a red callout
+  // + a Close button, matching the legacy UnpaidCheckoutForm
+  // shape.
+  const [unpaidCheckoutBlocked, setUnpaidCheckoutBlocked] = useState(false);
+  const [unpaidCheckoutBlockMessage, setUnpaidCheckoutBlockMessage] = useState("");
   const UNPAID_REASON_SHORTCUTS = [
     { label: "Company billing", value: "approved company billing" },
     { label: "Bank transfer pending", value: "bank transfer pending" },
@@ -619,8 +648,6 @@ export function BookingsPage() {
     { label: "Disputed charge", value: "disputed charge" },
     { label: "Other", value: "other" }
   ];
-  const [unpaidCheckoutBlocked, setUnpaidCheckoutBlocked] = useState(false);
-  const [unpaidCheckoutBlockMessage, setUnpaidCheckoutBlockMessage] = useState("");
   const brandRgb = hexToRgb(config.colors.primary);
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
   const [showDiscountForm, setShowDiscountForm] = useState(false);
@@ -2401,6 +2428,95 @@ export function BookingsPage() {
     if (selectedBooking) {
       updateBookingStatus(selectedBooking.id, status);
       setSelectedBooking(prev => prev ? { ...prev, status } : null);
+    }
+  };
+
+  // Per CLS-01 (2026-08-09, decision #208): the three
+  // lifecycle transition confirmation handlers. Each one
+  // is the `onConfirm` for a `ConfirmStatusModal` mounted
+  // in the JSX; they own the pending state + the inline
+  // error display + the optimistic `setSelectedBooking`
+  // (status flip on the in-memory selected booking so the
+  // drawer renders the new state immediately, before the
+  // onSnapshot listener catches up — same shape as
+  // `handleStatusTransition`).
+  const handleConfirmBooking = async () => {
+    if (!selectedBooking) return;
+    setConfirmBookingPending(true);
+    try {
+      await updateBookingStatus(selectedBooking.id, "confirmed");
+      setSelectedBooking(prev => prev ? { ...prev, status: "confirmed" } : null);
+      setShowConfirmBooking(false);
+    } catch (err: any) {
+      toast.error("Failed to confirm booking", err?.message || "Please try again.");
+    } finally {
+      setConfirmBookingPending(false);
+    }
+  };
+
+  const handleConfirmCheckIn = async () => {
+    if (!selectedBooking) return;
+    setConfirmCheckInPending(true);
+    try {
+      await updateBookingStatus(selectedBooking.id, "checked-in");
+      setSelectedBooking(prev => prev ? { ...prev, status: "checked-in" } : null);
+      setShowConfirmCheckIn(false);
+    } catch (err: any) {
+      toast.error("Failed to check in", err?.message || "Please try again.");
+    } finally {
+      setConfirmCheckInPending(false);
+    }
+  };
+
+  const handleConfirmCheckOut = async () => {
+    if (!selectedBooking) return;
+    const folio = getBookingFolio(selectedBooking);
+    // Balance-due path: UCO-02/03 requires a reason before
+    // the destructive status flip can fire. The reason
+    // is rendered inline in the modal body, so this branch
+    // only validates the trimmed string + dispatches the
+    // `unpaidCheckoutReason` stamp alongside the status.
+    if (folio.balance > 0) {
+      const reason = unpaidCheckoutReason.trim();
+      if (!reason) {
+        setUnpaidCheckoutError("A reason is required for unpaid checkout.");
+        return;
+      }
+      setConfirmCheckOutPending(true);
+      setUnpaidCheckoutError(null);
+      try {
+        await updateBookingStatus(selectedBooking.id, "checked-out", {
+          unpaidCheckoutReason: reason
+        } as any);
+        setSelectedBooking(prev => prev ? { ...prev, status: "checked-out", unpaidCheckoutReason: reason } as any : null);
+        setShowConfirmCheckOut(false);
+      } catch (err: any) {
+        if (err?.message?.includes("Front Desk cannot complete")) {
+          setUnpaidCheckoutBlocked(true);
+          setUnpaidCheckoutBlockMessage(err.message);
+        } else {
+          setUnpaidCheckoutError(err?.message || "Failed to checkout.");
+        }
+      } finally {
+        setConfirmCheckOutPending(false);
+      }
+      return;
+    }
+    // Zero-balance path: simple status flip, no reason
+    // required. The check-out modal's children body still
+    // renders the folio summary so the desk can confirm
+    // the room total + collected amount before tapping
+    // confirm.
+    setConfirmCheckOutPending(true);
+    setUnpaidCheckoutError(null);
+    try {
+      await updateBookingStatus(selectedBooking.id, "checked-out");
+      setSelectedBooking(prev => prev ? { ...prev, status: "checked-out" } : null);
+      setShowConfirmCheckOut(false);
+    } catch (err: any) {
+      setUnpaidCheckoutError(err?.message || "Failed to checkout.");
+    } finally {
+      setConfirmCheckOutPending(false);
     }
   };
 
@@ -4292,7 +4408,7 @@ export function BookingsPage() {
       return (
         <button
           type="button"
-          onClick={() => handleStatusTransition("confirmed")}
+          onClick={() => setShowConfirmBooking(true)}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
         >
           Confirm booking
@@ -4324,7 +4440,7 @@ export function BookingsPage() {
       return (
         <button
           type="button"
-          onClick={() => handleStatusTransition("checked-in")}
+          onClick={() => setShowConfirmCheckIn(true)}
           disabled={!selectedBookingCheckInReadiness?.ready}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
         >
@@ -4338,17 +4454,21 @@ export function BookingsPage() {
       return (
         <button
           type="button"
+          // Per CLS-01 (2026-08-09, decision #208): the
+          // check-out button always opens the unified
+          // confirmation modal. The modal decides
+          // whether to render the UCO-02/03 reason form
+          // inline (balance > 0) or just a folio summary
+          // (balance = 0) — so the desk sees one consistent
+          // "check out" flow regardless of balance. The
+          // pre-CLS-01 split path (modal-only-if-balance-due
+          // + naked transition for zero-balance) is gone.
           onClick={() => {
-            const folio = getBookingFolio(selectedBooking);
-            if (folio.balance > 0) {
-              setUnpaidCheckoutReason("");
-              setUnpaidCheckoutError(null);
-              setUnpaidCheckoutBlocked(false);
-              setUnpaidCheckoutBlockMessage("");
-              setShowUnpaidCheckoutForm(true);
-            } else {
-              handleStatusTransition("checked-out");
-            }
+            setUnpaidCheckoutReason("");
+            setUnpaidCheckoutError(null);
+            setUnpaidCheckoutBlocked(false);
+            setUnpaidCheckoutBlockMessage("");
+            setShowConfirmCheckOut(true);
           }}
           className={`inline-flex min-h-[44px] w-full items-center justify-center rounded-lg px-4 text-xs font-bold text-white shadow-sm transition active:scale-95 ${
             selectedBookingFolio && selectedBookingFolio.balance > 0
@@ -7181,133 +7301,220 @@ export function BookingsPage() {
           </div>
         </form>
       </Modal>
-      <Modal
-        title="Unpaid checkout — reason required"
-        open={showUnpaidCheckoutForm}
-        onClose={() => setShowUnpaidCheckoutForm(false)}
-        className="max-w-lg"
-      >
-        {selectedBooking && (() => {
-          const folio = getBookingFolio(selectedBooking);
-          return (
-            <div className="space-y-4">
-              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
-                <p className="text-xs font-semibold text-amber-900">
-                  Outstanding balance: <span className="text-base">{formatPrice(folio.balance)}</span>
-                </p>
-                <p className="mt-1 text-[10px] text-amber-700">
-                  Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+      {/* Per CLS-01 (2026-08-09, decision #208): the three
+          lifecycle transition confirmation modals. Replaces the
+          pre-CLS-01 split-path (modal-only-if-balance-due for
+          check-out + naked transitions for Confirm booking /
+          Verify & check in + naked zero-balance check-out). The
+          check-out modal is unified: always opens, renders the
+          folio summary + an inline reason form when balance > 0
+          (UCO-02/03) + a blocked callout when the server rejects
+          the transition (admin-only threshold). */}
+      {selectedBooking && (
+        <>
+          {/* Confirm booking (payment-confirmed → confirmed) */}
+          <ConfirmStatusModal
+            open={showConfirmBooking}
+            onClose={() => setShowConfirmBooking(false)}
+            title="Confirm this booking?"
+            subtitle={selectedBooking.guestName}
+            description="The booking will move from Payment Confirmed → Confirmed. The guest will be notified by email and the booking will be ready for check-in."
+            icon={CheckCircle2}
+            iconTone="success"
+            confirmLabel="Confirm booking"
+            confirming={confirmBookingPending}
+            onConfirm={handleConfirmBooking}
+          >
+            <div className="grid gap-2 rounded-lg border border-gray-150 bg-gray-50 p-3 text-xs sm:grid-cols-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Room</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.roomNumber} · {String(selectedBooking.roomType || "Room")}
                 </p>
               </div>
-
-              {unpaidCheckoutBlocked ? (
-                <div className="space-y-3">
-                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
-                    <p className="text-xs font-bold text-red-800">Front Desk approval limit exceeded</p>
-                    <p className="mt-1 text-[10px] text-red-700">{unpaidCheckoutBlockMessage}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowUnpaidCheckoutForm(false)}
-                    className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
-                  >
-                    Close
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <label htmlFor="unpaid-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                      Reason for unpaid checkout <span className="text-red-500">*</span>
-                    </label>
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {UNPAID_REASON_SHORTCUTS.map((shortcut) => (
-                        <button
-                          key={shortcut.value}
-                          type="button"
-                          onClick={() => setUnpaidCheckoutReason(shortcut.value)}
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors ${
-                            unpaidCheckoutReason === shortcut.value
-                              ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
-                              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                          }`}
-                        >
-                          {shortcut.label}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      id="unpaid-reason"
-                      value={unpaidCheckoutReason}
-                      onChange={(e) => setUnpaidCheckoutReason(e.target.value)}
-                      placeholder="Describe why the balance remains unpaid..."
-                      rows={3}
-                      maxLength={500}
-                      className="w-full resize-none rounded-lg border border-gray-250 px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                    <p className="mt-1 text-right text-[10px] text-gray-400">{unpaidCheckoutReason.length}/500</p>
-                  </div>
-
-                  {unpaidCheckoutError && (
-                    <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{unpaidCheckoutError}</p>
-                  )}
-
-                  <div className="flex items-center justify-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowUnpaidCheckoutForm(false)}
-                      disabled={unpaidCheckoutSubmitting}
-                      className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!selectedBooking) return;
-                        const reason = unpaidCheckoutReason.trim();
-                        if (!reason) {
-                          setUnpaidCheckoutError("A reason is required for unpaid checkout.");
-                          return;
-                        }
-                        setUnpaidCheckoutSubmitting(true);
-                        setUnpaidCheckoutError(null);
-                        try {
-                          await updateBookingStatus(selectedBooking.id, "checked-out", {
-                            unpaidCheckoutReason: reason
-                          } as any);
-                          setSelectedBooking(prev => prev ? { ...prev, status: "checked-out", unpaidCheckoutReason: reason } as any : null);
-                          setShowUnpaidCheckoutForm(false);
-                        } catch (err: any) {
-                          if (err.message?.includes("Front Desk cannot complete")) {
-                            setUnpaidCheckoutBlocked(true);
-                            setUnpaidCheckoutBlockMessage(err.message);
-                          } else {
-                            setUnpaidCheckoutError(err.message || "Failed to checkout.");
-                          }
-                        } finally {
-                          setUnpaidCheckoutSubmitting(false);
-                        }
-                      }}
-                      disabled={unpaidCheckoutSubmitting || !unpaidCheckoutReason.trim()}
-                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-50"
-                    >
-                      {unpaidCheckoutSubmitting ? (
-                        <>
-                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          Checking out…
-                        </>
-                      ) : (
-                        `Check out with ${formatPrice(folio.balance)} due`
-                      )}
-                    </button>
-                  </div>
-                </>
-              )}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Stay</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.checkIn} → {selectedBooking.checkOut} ({selectedBooking.numNights} night{Number(selectedBooking.numNights) === 1 ? "" : "s"})
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Payment method</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Total</p>
+                <p className="font-semibold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</p>
+              </div>
             </div>
-          );
-        })()}
-      </Modal>
+          </ConfirmStatusModal>
+
+          {/* Verify & check-in (confirmed → checked-in) */}
+          <ConfirmStatusModal
+            open={showConfirmCheckIn}
+            onClose={() => setShowConfirmCheckIn(false)}
+            title="Check in guest?"
+            subtitle={selectedBooking.guestName}
+            description="The booking will move from Confirmed → Checked-in. The guest will be marked as in-house and the room status will flip to occupied."
+            icon={LogIn}
+            iconTone="primary"
+            confirmLabel="Check in guest"
+            confirming={confirmCheckInPending}
+            onConfirm={handleConfirmCheckIn}
+          >
+            <div className="grid gap-2 rounded-lg border border-gray-150 bg-gray-50 p-3 text-xs sm:grid-cols-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Room</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.roomNumber} · {String(selectedBooking.roomType || "Room")}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Stay</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.checkIn} → {selectedBooking.checkOut} ({selectedBooking.numNights} night{Number(selectedBooking.numNights) === 1 ? "" : "s"})
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Guests</p>
+                <p className="font-semibold text-gray-900">{selectedBooking.numGuests}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Breakfast</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.hasBreakfast ? "Included" : "Not included"}
+                </p>
+              </div>
+            </div>
+          </ConfirmStatusModal>
+
+          {/* Check out (checked-in → checked-out) — unified.
+              Replaces the pre-CLS-01 UnpaidCheckoutForm modal
+              that only opened when balance > 0. The new shell
+              always opens, the children body is conditional:
+              folio summary (always) + reason form (balance > 0
+              + not blocked) + blocked callout (server said
+              "Front Desk cannot complete"). */}
+          <ConfirmStatusModal
+            open={showConfirmCheckOut}
+            onClose={() => setShowConfirmCheckOut(false)}
+            title="Check out guest?"
+            subtitle={selectedBooking.guestName}
+            description="The booking will move from Checked-in → Checked-out. Once confirmed, this status change is final and the room is marked available for the next guest."
+            icon={LogOut}
+            iconTone={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0 ? "warning" : "primary";
+            })()}
+            confirmLabel={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0
+                ? `Check out with ${formatPrice(folio.balance)} due`
+                : "Complete check-out";
+            })()}
+            confirmTone={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0 ? "warning" : "primary";
+            })()}
+            confirming={confirmCheckOutPending}
+            confirmDisabled={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0 && !unpaidCheckoutReason.trim();
+            })()}
+            onConfirm={handleConfirmCheckOut}
+            footer={unpaidCheckoutBlocked ? (
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmCheckOut(false)}
+                  className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            ) : undefined}
+          >
+            {(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return (
+                <div className="space-y-4">
+                  <div className={`rounded-lg border px-4 py-3 ${
+                    folio.balance > 0
+                      ? "bg-amber-50 border-amber-200"
+                      : "bg-green-50 border-green-200"
+                  }`}>
+                    {folio.balance > 0 ? (
+                      <>
+                        <p className="text-xs font-semibold text-amber-900">
+                          Outstanding balance: <span className="text-base">{formatPrice(folio.balance)}</span>
+                        </p>
+                        <p className="mt-1 text-[10px] text-amber-700">
+                          Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs font-semibold text-green-900">
+                          Folio fully paid
+                        </p>
+                        <p className="mt-1 text-[10px] text-green-700">
+                          Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  {unpaidCheckoutBlocked ? (
+                    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                      <p className="text-xs font-bold text-red-800">Front Desk approval limit exceeded</p>
+                      <p className="mt-1 text-[10px] text-red-700">{unpaidCheckoutBlockMessage}</p>
+                    </div>
+                  ) : folio.balance > 0 ? (
+                    <>
+                      <div>
+                        <label htmlFor="unpaid-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                          Reason for unpaid checkout <span className="text-red-500">*</span>
+                        </label>
+                        <div className="mb-2 flex flex-wrap gap-1.5">
+                          {UNPAID_REASON_SHORTCUTS.map((shortcut) => (
+                            <button
+                              key={shortcut.value}
+                              type="button"
+                              onClick={() => setUnpaidCheckoutReason(shortcut.value)}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors ${
+                                unpaidCheckoutReason === shortcut.value
+                                  ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
+                                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                              }`}
+                            >
+                              {shortcut.label}
+                            </button>
+                          ))}
+                        </div>
+                        <textarea
+                          id="unpaid-reason"
+                          value={unpaidCheckoutReason}
+                          onChange={(e) => setUnpaidCheckoutReason(e.target.value)}
+                          placeholder="Describe why the balance remains unpaid..."
+                          rows={3}
+                          maxLength={500}
+                          className="w-full resize-none rounded-lg border border-gray-250 px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        <p className="mt-1 text-right text-[10px] text-gray-400">{unpaidCheckoutReason.length}/500</p>
+                      </div>
+                      {unpaidCheckoutError && (
+                        <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{unpaidCheckoutError}</p>
+                      )}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })()}
+          </ConfirmStatusModal>
+        </>
+      )}
       {/* PRC-11: Focused Record Payment modal */}
       <Modal
         title="Record Onsite Payment"
