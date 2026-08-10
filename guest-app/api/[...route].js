@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.6";
+    VERSION2 = "0.266.7";
   }
 });
 
@@ -232572,11 +232572,6 @@ async function handleLookupBooking(req, res) {
           return res.status(404).json({ success: false, error: "Booking not found." });
         }
         return await enrichAndRespond(res, { id: match.id, ...match });
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: "Please provide your booking email or lookup token along with the reservation reference."
-        });
       }
       const firstChildSnap = await adminDb.collection("bookings").where("reservationId", "==", reservation.id).orderBy("reservationPosition", "asc").limit(1).get();
       if (firstChildSnap.empty) {

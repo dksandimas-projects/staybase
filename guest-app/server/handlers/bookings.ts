@@ -9346,24 +9346,51 @@ export async function handleLookupBooking(req: any, res: any) {
     }
 
     if (trimmedReservationRef) {
-      // Per MRB-10 (2026-08-02, per decision #169): the
-      // direct reservation-scope lookup. The MRB-09
+      // Per MRB-10 (2026-08-02, per decision #169) +
+      // #209 (RFO-01, 2026-08-10): the direct
+      // reservation-scope lookup. The MRB-09
       // reservation-scope emails carry a
-      // `reservationRef` link so the guest can deep-link
-      // straight to the reservation without first
-      // landing on a per-child booking. The auth gate
-      // is the existing `ref + (email | token)`
-      // contract: the email is the second factor
-      // against the reservation's lead guest; the
-      // token is the per-child magic link (the
-      // reservation ref links to the first child's
-      // token in the email footer — future iteration).
+      // `reservationRef` link so the guest can
+      // deep-link straight to the reservation
+      // without first landing on a per-child
+      // booking.
       //
-      // The credential is required — a bare
-      // `reservationRef` is not enough to see a
-      // reservation (an attacker who guesses an
-      // `R-YYYYMMDD-NNNNN` would otherwise see the
-      // whole block view).
+      // Three input shapes are accepted (priority
+      // is most-specific-first, mirroring the
+      // per-child dispatch above):
+      //   R- + email   → email-second-factor gate
+      //                   against `reservation.leadGuestEmail`
+      //   R- + token   → token gate against the
+      //                   first child's `lookupToken`
+      //                   (the per-child magic link
+      //                   path)
+      //   R- alone     → no credential gate; the
+      //                   defense is the same
+      //                   Turnstile + 10/min/IP rate
+      //                   limit + 3-failure 1-hour
+      //                   backoff as the
+      //                   `ref`-alone path
+      //                   (`plan/docs/SECURITY.md
+      //                   §Booking Lookup Security`).
+      //                   The R- ref is the
+      //                   reservation's public
+      //                   identifier (subject line,
+      //                   body header, receipt PDF
+      //                   filename) — the form copy
+      //                   on `/my-booking` reads
+      //                   "Enter your booking
+      //                   reference or the email you
+      //                   used to book", so the
+      //                   guest expects the R- to
+      //                   work without a second
+      //                   factor. The 99,999-key
+      //                   per-day namespace
+      //                   (5-digit sequence per
+      //                   `RESERVATION_REF_REGEX`)
+      //                   has the same enumeration
+      //                   risk as the SI- ref-alone
+      //                   path; the same defenses
+      //                   apply.
       const reservationSnap = await adminDb.collection("reservations")
         .where("reservationRef", "==", trimmedReservationRef)
         .limit(1)
@@ -9372,9 +9399,10 @@ export async function handleLookupBooking(req: any, res: any) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
       const reservation = { id: reservationSnap.docs[0].id, ...reservationSnap.docs[0].data() };
-      // Resolve the credential. The reservation's
-      // `leadGuestEmail` is the canonical email for
-      // the email-second-factor path; the magic-link
+      // Resolve the credential when one was
+      // supplied. The reservation's `leadGuestEmail`
+      // is the canonical email for the
+      // email-second-factor path; the magic-link
       // path is per-child (the first child's
       // `lookupToken` is what the email footer
       // carries).
@@ -9402,17 +9430,15 @@ export async function handleLookupBooking(req: any, res: any) {
         // paths can detect the reservationId + return
         // the reservation view.
         return await enrichAndRespond(res, { id: match.id, ...match });
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: "Please provide your booking email or lookup token along with the reservation reference."
-        });
       }
-      // Email path: find the first child (or any
-      // child — the credential already gates access)
-      // and hand to `enrichAndRespond` which detects
-      // the `reservationId` and returns the
-      // reservation view.
+      // R- alone (no credential) OR credential
+      // matched. Find the first child by
+      // `reservationPosition` and hand to
+      // `enrichAndRespond` which detects the
+      // `reservationId` and returns the
+      // reservation view (N>1 → `kind:
+      // "reservation"`; N=1 → `kind: "single"`,
+      // byte-equivalent to the per-child view).
       const firstChildSnap = await adminDb.collection("bookings")
         .where("reservationId", "==", reservation.id)
         .orderBy("reservationPosition", "asc")

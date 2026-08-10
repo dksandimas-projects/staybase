@@ -29,6 +29,11 @@ const emailHandlerSrc = readFileSync(
   "utf8"
 );
 
+const bookingsHandlerSrc = readFileSync(
+  resolve(__dirname, "../../server/handlers/bookings.ts"),
+  "utf8"
+);
+
 const lookupPageSrc = readFileSync(
   resolve(__dirname, "../../src/pages/BookingLookupPage.tsx"),
   "utf8"
@@ -149,29 +154,45 @@ describe("RFO-01 — BookingLookupPage form routes R- inputs through reservation
     // dispatch keeps the form's UX simple — the
     // guest pastes whatever the email subject
     // carries and the page figures out the rest.
+    // The call uses `trimmedEmail || undefined` so
+    // a bare R- with no email still passes through
+    // (the server accepts R- alone per the #209
+    // audit amendment).
     const handleSearch = lookupPageSrc.match(
       /const handleSearch = async \(e: React\.FormEvent\) => \{[\s\S]*?\};/
     );
     expect(handleSearch, "expected handleSearch").toBeTruthy();
     expect(handleSearch![0]).toMatch(/RESERVATION_REF_REGEX\.test\(trimmedRef\)/);
     expect(handleSearch![0]).toMatch(
-      /await performLookup\("", trimmedEmail, undefined, trimmedRef\)/
+      /await performLookup\("", trimmedEmail \|\| undefined, undefined, trimmedRef\)/
     );
   });
 
-  it("a bare R- ref without an email shows a clear inline error", () => {
-    // The reservation-scope path requires a
-    // second factor. The page mirrors the
-    // server's 400 copy so the guest sees the
-    // next step without round-tripping the
-    // form. Copy is intentionally consistent
-    // with `handleLookupBooking`'s reply.
+  it("a bare R- ref without an email is submitted as-is (no inline error)", () => {
+    // Per the #209 audit amendment (R- alone is
+    // accepted, same defense posture as the SI-
+    // ref-alone path), the form no longer demands
+    // a second factor when the user types an R-
+    // ref. The page's header copy reads "Enter
+    // your booking reference or the email you used
+    // to book" — the R- alone case matches that
+    // contract. If the user did type an email, the
+    // server uses it as a second-factor gate
+    // against `reservation.leadGuestEmail`; if
+    // not, the server hands the first child to
+    // `enrichAndRespond` directly. The previous
+    // "Please enter the email you used to book
+    // alongside the reservation reference" copy
+    // is retired.
     const handleSearch = lookupPageSrc.match(
       /const handleSearch = async \(e: React\.FormEvent\) => \{[\s\S]*?\};/
     );
     expect(handleSearch).toBeTruthy();
-    expect(handleSearch![0]).toMatch(
+    expect(handleSearch![0]).not.toMatch(
       /Please enter the email you used to book alongside the reservation reference\./
+    );
+    expect(handleSearch![0]).toMatch(
+      /if \(trimmedRef && RESERVATION_REF_REGEX\.test\(trimmedRef\)\) \{[\s\S]*?await performLookup\("", trimmedEmail \|\| undefined, undefined, trimmedRef\)/
     );
   });
 
@@ -213,6 +234,57 @@ describe("RFO-01 — performLookup signature accepts reservationRef", () => {
     expect(fn).toBeTruthy();
     expect(fn![0]).toMatch(
       /if \(reservationRef\) \{[\s\S]*?setLookupAuthMode\("email"\)/
+    );
+  });
+});
+
+describe("RFO-01 — server handleLookupBooking accepts a bare reservationRef", () => {
+  it("the 400 'please provide credential' reply is retired (the bare R- path is accepted)", () => {
+    // Per the #209 audit amendment: the bare R-
+    // path is now accepted (same defense posture
+    // as the SI- `ref`-alone path). The previous
+    // 400 message that asked for a credential
+    // was retired — the page's form copy reads
+    // "Enter your booking reference or the email
+    // you used to book", and the R- ref is the
+    // reservation's public identifier. A guest
+    // who pastes just the R- should not get a
+    // hard error asking for an email.
+    expect(bookingsHandlerSrc).not.toMatch(
+      /Please provide your booking email or lookup token along with the reservation reference\./
+    );
+  });
+
+  it("the R- alone path falls through to the first child + enrichAndRespond (no 400 escape)", () => {
+    // The previous `else { return res.status(400) ... }`
+    // branch is removed; the R- alone path now
+    // continues through the same first-child
+    // lookup the email + token paths use. The
+    // server reads the reservation doc by
+    // `reservationRef`, finds the first child by
+    // `reservationPosition`, and hands to
+    // `enrichAndRespond` which returns
+    // `kind: "reservation"` (N>1) or
+    // `kind: "single"` (N=1).
+    const rfoBlock = bookingsHandlerSrc.match(
+      /if \(trimmedReservationRef\) \{[\s\S]*?return await enrichAndRespond\(res, firstChild\);/
+    );
+    expect(rfoBlock, "expected the reservationRef block").toBeTruthy();
+    // No 400 reply inside the block (the previous
+    // credential-required escape is gone).
+    expect(rfoBlock![0]).not.toMatch(/res\.status\(400\)/);
+    // The fall-through still reads the first child.
+    expect(rfoBlock![0]).toMatch(/orderBy\("reservationPosition",\s*"asc"\)/);
+  });
+
+  it("the lookupSchema still accepts a reservationRef (the input shape is unchanged)", () => {
+    // The schema's reservationRef field is
+    // unchanged. The new behavior is purely
+    // server-side: the R- alone path no longer
+    // 400s, the rest of the input validation
+    // is byte-equivalent.
+    expect(bookingsHandlerSrc).toMatch(
+      /reservationRef: z\s*\.string\(\)\s*\.trim\(\)\s*\.max\(40\)\s*\.regex\(\s*\/\^R-\\d\{8\}-\\d\{5\}\$\//
     );
   });
 });

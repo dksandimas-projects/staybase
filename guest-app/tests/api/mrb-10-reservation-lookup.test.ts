@@ -101,13 +101,39 @@ describe("MRB-10 — direct reservationRef lookup path", () => {
     );
   });
 
-  it("a bare reservationRef with no credential returns 400 with a clear message", () => {
-    // The credential is required — a bare
-    // `reservationRef` is not enough to see a
-    // reservation. A bare `R-YYYYMMDD-NNNNN` would
-    // otherwise be enumerable (1k per day).
+  it("a bare reservationRef with no credential falls through to enrichAndRespond (R- alone path)", () => {
+    // Per #209 (RFO-01, 2026-08-10) the bare R- path
+    // is accepted with the same defense posture as
+    // the SI- `ref`-alone path. The previous 400
+    // response (the original MRB-10 spec, decision
+    // #169) was retired because the R- ref is the
+    // reservation's public identifier (subject line,
+    // body header, receipt PDF filename) and the
+    // form's header copy reads "Enter your booking
+    // reference or the email you used to book" —
+    // the guest expects the R- to work without a
+    // second factor. The 99,999-key per-day
+    // namespace has the same enumeration risk as
+    // the SI- ref-alone path; the same defenses
+    // (Turnstile + 10/min rate limit + 3-failure
+    // 1-hour backoff) apply.
+    //
+    // The R- alone path removes the
+    // `else { return res.status(400) ... }` branch
+    // and falls through to the same first-child
+    // lookup + `enrichAndRespond` call the
+    // email-second-factor path uses.
+    expect(bookingsHandlerSrc).not.toMatch(
+      /Please provide your booking email or lookup token along with the reservation reference\./
+    );
+    // The fall-through still reads the first child
+    // and hands to enrichAndRespond (the same
+    // shape the email + token paths use).
     expect(bookingsHandlerSrc).toMatch(
-      /else \{[\s\S]*?return res\.status\(400\)\.json\(\{[\s\S]*?error: "Please provide your booking email or lookup token along with the reservation reference\."/
+      /if \(trimmedReservationRef\) \{[\s\S]*?const reservationSnap[\s\S]*?where\("reservationRef",\s*"==",\s*trimmedReservationRef\)/
+    );
+    expect(bookingsHandlerSrc).toMatch(
+      /if \(trimmedReservationRef\) \{[\s\S]*?orderBy\("reservationPosition",\s*"asc"\)/
     );
   });
 

@@ -736,23 +736,28 @@ export function BookingLookupPage() {
     // identifier from the email subject and the page
     // routes to the right server path.
     //
-    // The reservation-scope path requires a second
-    // factor (the lead guest's email) so an attacker
-    // can't enumerate reservations by guessing R- refs.
-    // The legacy per-child paths still allow ref-alone
-    // (the rate limit + Turnstile + 3-failure 1-hour
-    // backoff are the load-bearing defenses for the
-    // ~100k/day per-property namespace).
+    // The R- alone path is accepted (no email
+    // required) — the server's `handleLookupBooking`
+    // reads `reservationRef` from the reservations
+    // collection and hands the first child to
+    // `enrichAndRespond`. The defense is the same
+    // Turnstile + 10/min rate limit + 3-failure
+    // 1-hour backoff as the SI- `ref`-alone path
+    // (the 99,999-key per-day namespace is the same
+    // for both ref types). The form's header copy
+    // reads "Enter your booking reference or the
+    // email you used to book" — the R- alone case
+    // matches that contract. If the user also typed
+    // an email, the server uses it as a
+    // second-factor gate against
+    // `reservation.leadGuestEmail` (a stricter
+    // check; the 404 reply is identical to the
+    // not-found case so the response is not an
+    // email-existence oracle).
     if (trimmedRef && RESERVATION_REF_REGEX.test(trimmedRef)) {
-      if (!trimmedEmail) {
-        setSearchError(
-          "Please enter the email you used to book alongside the reservation reference."
-        );
-        return;
-      }
       setSearchError("");
       setHasSearched(true);
-      await performLookup("", trimmedEmail, undefined, trimmedRef);
+      await performLookup("", trimmedEmail || undefined, undefined, trimmedRef);
       return;
     }
     setSearchError("");
