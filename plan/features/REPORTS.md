@@ -6,7 +6,24 @@
 
 ## Overview
 
-The `/reports` page gives staff visibility into hotel performance and sales over time. Organized into two tabs: **Performance** (occupancy, bookings by source) and **Sales** (all revenue streams consolidated). Both tabs are exportable as PDF and XLSX. Accessible to both Front Desk and Admin roles.
+The `/reports` page gives staff visibility into hotel performance and sales over time. Organized into four tabs: **Performance** (occupancy, bookings by source, ADR/RevPAR), **Sales** (all revenue streams consolidated, including VAT, receivables, corporate invoicing, loyalty liability, and the Finance & Reports Sales XLSX), **Daily Close** (end-of-shift cash reconciliation — the only tab front desk can see), and **Liability** (cancellation-liability queue + refund-state projection, admin-only). Performance / Sales / Daily Close are exportable as PDF; the page-level CSV is the generic bookings ledger; the Sales XLSX is the multi-sheet financial export; the admin-only Full Backup bundles Bookings + StoreOrders + every other operator surface.
+
+## Role-Based Access
+
+Per RPT-04 (2026-08-10): the page-level route (`/reports`) is open to both staff roles, but the four tabs are gated — three are admin-only, one is shared.
+
+| Role | Tabs visible | Exports available |
+|---|---|---|
+| Front Desk | **Daily Close** only | Page-level CSV (bookings ledger), Print |
+| Admin | All four: Performance, Sales, Daily Close, Liability | Page-level CSV, Print, PDF, Sales XLSX, Full Backup XLSX |
+
+Rationale: front desk only acts on the data surfaced on this page through the Daily Close tab (end-of-shift reconciliation). The other three tabs are managerial / financial / refund-queue data whose underlying actions (refunds, points redemption, full backup) are already admin-only — collapsing the view to match the action surface removes a PII / financial-data leak that didn't serve any front-desk workflow.
+
+Implementation: in `admin-app/src/pages/ReportsPage.tsx`, the `useState<ReportTab>(...)` initializer branches on `currentUser?.role === "admin"` (defaults Performance for admin, Daily Close for front desk). The three admin-only tab buttons (`Performance`, `Sales`, `Liability`) are wrapped in `{currentUser?.role === "admin" && (...)}` so they don't render for front desk. The Backup button is unchanged (already admin-gated). Regression test: `admin-app/src/__tests__/rpt-04-front-desk-daily-close-only.test.ts` (source-text guards).
+
+## Pre-RPT-04 history
+
+Before 2026-08-10 the spec line read "Accessible to both Front Desk and Admin roles" — front desk could see all four tabs and every action button except the Backup export, but the refund / points / full-backup actions those tabs lead to were already admin-gated. The split fixed a view / action mismatch (front desk could *see* refund state but couldn't *act* on it).
 
 ### Export CSV Button (page header, both tabs)
 
@@ -35,6 +52,7 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 - [x] Most common action is reachable in ≤ 2 clicks from the sidebar
 - [x] Loading state uses skeleton, not spinner
 - [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] **RPT-04 role-based access** — front-desk staff land on the Daily Close tab and only see the Daily Close tab + the page-level CSV / Print actions; the Performance, Sales, and Liability tabs and the Full Backup action are admin-only. See §Role-Based Access below.
 - [x] Every error state has a plain-language message and a next step — no dead ends
 - [x] Destructive actions have a single confirmation step — not buried in menus
 - [x] Empty states explain why data is missing and what to do

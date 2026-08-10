@@ -206,7 +206,15 @@ export function ReportsPage() {
   } = useAdmin();
   const { isMobile } = useBreakpoint();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<ReportTab>("performance");
+  // Per AUDIT-2026-08-10: Performance, Sales, and Liability
+  // are admin-only (managerial / financial / refund-queue
+  // data). Front desk only sees the Daily Close tab on this
+  // page, which is the end-of-shift cash reconciliation they
+  // own. Default the active tab accordingly so a front-desk
+  // user lands on the only available tab.
+  const [activeTab, setActiveTab] = useState<ReportTab>(
+    currentUser?.role === "admin" ? "performance" : "daily-close"
+  );
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState(() => {
     return shiftDateKey(dateKeyInTimeZone(new Date(), config.timezone), -29);
@@ -1913,7 +1921,9 @@ export function ReportsPage() {
           <p className="text-xs text-gray-500 mt-1">
             {activeTab === "performance"
               ? "Operational overview: occupancy, acquisition channels, and inventory."
-              : "Consolidated revenue across rooms, breakfast add-ons, and Spark Essentials store orders."}
+              : activeTab === "daily-close"
+                ? "End-of-shift cash reconciliation. Count the till, lock the day's collections, and pass the next shift the day's ledger."
+                : "Consolidated revenue across rooms, breakfast add-ons, and Spark Essentials store orders."}
           </p>
         </div>
 
@@ -2028,30 +2038,36 @@ export function ReportsPage() {
         </div>
       </header>
 
-      {/* Tabs */}
+      {/* Tabs — Performance / Sales / Liability are admin-only
+          (see activeTab default above). The Daily Close tab is
+          the only one rendered for front-desk staff. */}
       <div role="tablist" className="flex gap-1 rounded-lg bg-gray-100 p-1 max-w-md">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "performance"}
-          onClick={() => setActiveTab("performance")}
-          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
-            activeTab === "performance" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
-          }`}
-        >
-          Performance
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "sales"}
-          onClick={() => setActiveTab("sales")}
-          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
-            activeTab === "sales" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
-          }`}
-        >
-          Sales
-        </button>
+        {currentUser?.role === "admin" && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "performance"}
+            onClick={() => setActiveTab("performance")}
+            className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+              activeTab === "performance" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            Performance
+          </button>
+        )}
+        {currentUser?.role === "admin" && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "sales"}
+            onClick={() => setActiveTab("sales")}
+            className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+              activeTab === "sales" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            Sales
+          </button>
+        )}
         <button
           type="button"
           role="tab"
@@ -2063,18 +2079,20 @@ export function ReportsPage() {
         >
           Daily Close
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "liability"}
-          onClick={() => setActiveTab("liability")}
-          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
-            activeTab === "liability" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
-          }`}
-          data-testid="report-tab-liability"
-        >
-          Liability
-        </button>
+        {currentUser?.role === "admin" && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "liability"}
+            onClick={() => setActiveTab("liability")}
+            className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+              activeTab === "liability" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+            }`}
+            data-testid="report-tab-liability"
+          >
+            Liability
+          </button>
+        )}
       </div>
 
       {activeTab === "performance" && (
