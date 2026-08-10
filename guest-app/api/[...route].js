@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.3";
+    VERSION2 = "0.266.4";
   }
 });
 
@@ -221478,7 +221478,7 @@ var init_references = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, AddRoomBookingSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     init_zod();
@@ -221641,6 +221641,10 @@ var init_booking = __esm({
       // explicitly provided — a defensive path for a
       // future migration tool).
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+    }).strict();
+    SetLouReceivedSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(1).max(64),
+      louReceived: external_exports.boolean()
     }).strict();
     AddRoomBookingSchema = external_exports.object({
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX),
@@ -223863,6 +223867,7 @@ __export(shared_exports, {
   STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
   SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
   SeoPublishSchema: () => SeoPublishSchema,
+  SetLouReceivedSchema: () => SetLouReceivedSchema,
   TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
   TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
   UNSUPPORTED_PAYMENT_METHODS: () => UNSUPPORTED_PAYMENT_METHODS,
@@ -227852,6 +227857,19 @@ var createBookingSchema = external_exports.object({
   // the write boundary. Pre-MRB-11 callers omit it; the
   // server fills it in.
   revenueAllocation: BookingRevenueAllocationSchema.optional(),
+  // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+  // the LOU (Letter of Undertaking) flag for corporate
+  // chargeback bookings. The guest never sets this — the
+  // field is staff-toggled post-creation via
+  // `/api/bookings/set-lou-received` once the LOU arrives.
+  // The schema accepts `true` (the rare case where the
+  // corporate client supplied the LOU up-front and the
+  // staff walks it in pre-marked) and `false` (the common
+  // case — the booking is `pending` until the LOU workflow
+  // resolves it). The field defaults to `false` so a
+  // missing value matches the "LOU not yet received"
+  // state.
+  louReceived: external_exports.boolean().optional().default(false),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
 async function handleCreateBooking(req, res) {
@@ -228781,6 +228799,18 @@ async function handleCreateBooking(req, res) {
         // is null for normal bookings; the convert-to-booking UI (per
         // audit 1.4 SEV-1 #2) will populate it.
         linkedInquiryId: linkedInquiryId || null,
+        // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+        // the LOU (Letter of Undertaking) flag for corporate
+        // chargeback bookings. Stamped from the request body
+        // (rare — the LOU usually arrives later and the desk
+        // toggles via `/api/bookings/set-lou-received`). Default
+        // `false`. The field exists on every booking doc; the
+        // `corporate.flat-rate / with-code` paths that arrive
+        // via the public flow set it to the body value, the
+        // walkin + convert-inquiry paths leave it at `false`
+        // (chargeback doesn't apply to those surfaces).
+        louReceived: body.louReceived === true,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
         // Per BI-11 (booking-intercom audit 2026-07-06): the
         // corporate flow collects `designation`,
         // `companyAddress`, `purposeOfStay`, and
@@ -230369,6 +230399,53 @@ async function handleRejectDiscount(req, res) {
   } catch (error) {
     console.error("Discount rejection handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+async function handleSetLouReceived(req, res) {
+  const { bookingId, louReceived } = req.body || {};
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (typeof louReceived !== "boolean") {
+    return res.status(400).json({ success: false, error: "louReceived must be a boolean (true or false)." });
+  }
+  try {
+    let result = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(String(bookingId).trim());
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("Booking not found.");
+      }
+      const booking = bookingSnap.data();
+      if (booking.isCorporate !== true) {
+        throw new Error("LOU flag only applies to corporate chargeback bookings (isCorporate: true).");
+      }
+      if (booking.paymentMethod !== "pay-at-hotel") {
+        throw new Error("LOU flag only applies to chargeback bookings (paymentMethod: 'pay-at-hotel').");
+      }
+      const staffUid = req.staff?.uid || "staff";
+      const now = /* @__PURE__ */ new Date();
+      const updates = {
+        louReceived,
+        ...louReceived ? {
+          louReceivedAt: now,
+          louReceivedBy: staffUid
+        } : {
+          louReceivedAt: null,
+          louReceivedBy: null
+        },
+        updatedAt: now
+      };
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "An unexpected error occurred while updating the LOU flag.";
+    const status = message === "Booking not found." ? 404 : 400;
+    console.error("Set LOU handler error:", error);
+    return res.status(status).json({ success: false, error: message });
   }
 }
 var MAX_PAYMENT_REJECTION_REASON_LENGTH = 500;
@@ -237367,6 +237444,17 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleApplyBookingDiscount(req, res);
+  }
+  if (domain === "bookings" && action === "set-lou-received" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-lou:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many LOU updates. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleSetLouReceived(req, res);
   }
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 6e4)) {

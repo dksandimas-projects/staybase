@@ -602,6 +602,10 @@ export interface AdminContextType {
   // notification for the bell.
   verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string; siblingFlippedCount?: number }>;
   rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; siblingRejectedCount?: number }>;
+  // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+  // staff-toggled LOU (Letter of Undertaking) flag for
+  // corporate chargeback bookings.
+  setLouReceived: (bookingId: string, louReceived: boolean) => Promise<{ success: boolean; error?: string }>;
   // Per CWB (decision #122, 2026-07-23): staff-triggered
   // transition from `payment-uploaded` to `confirmed` when
   // a positive balance will be collected at check-in. Server
@@ -2439,6 +2443,41 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true, siblingRejectedCount };
     } catch (err: any) {
       console.error("Error rejecting payment:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  // Per LOW-1 (reports audit 2026-08-10) +
+  // `DECISIONS-FEATURES.md #99` (LOU workflow):
+  // the staff-toggled LOU (Letter of Undertaking) flag
+  // for corporate chargeback bookings. The desk calls
+  // this when the company's LOU arrives by email
+  // (per `plan/features/CORPORATE-BOOKING.md` §LOU).
+  // The server stamps `louReceived` +
+  // `louReceivedAt` + `louReceivedBy` on the booking
+  // doc and the receivables widget picks up the
+  // change via the standard onSnapshot subscription.
+  // Un-marking is supported (pass `false`) so the
+  // rare "we marked it but the company withdrew"
+  // case is reversible.
+  const setLouReceived = async (bookingId: string, louReceived: boolean): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/set-lou-received`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, louReceived })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to update the LOU flag." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error setting LOU flag:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -5804,6 +5843,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         resendBookingEmail,
         verifyAndRecordPayment,
         rejectPayment,
+        setLouReceived,
         confirmBookingWithBalance,
         roomBlocks,
         createRoomBlock,

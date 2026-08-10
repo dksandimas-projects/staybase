@@ -290,7 +290,9 @@ Booking {
   lookupToken: string
   source: BookingSource
   linkedInquiryId: string | null     // set when created from a converted corporate inquiry (per `DECISIONS-FEATURES.md #102`)
-  louReceived: boolean               // staff-toggled flag for chargeback bookings (per `DECISIONS-FEATURES.md #99`)
+  louReceived: boolean               // staff-toggled flag for chargeback bookings (per `DECISIONS-FEATURES.md #99` + LOW-1 in the 2026-08-10 reports audit)
+  louReceivedAt: Date | null         // stamp on the LOU toggle — null while pending, server timestamp when received
+  louReceivedBy: string | null       // staff UID who toggled the flag (matches the `discountVerifiedBy` / `cancelledBy` audit pattern)
   notes: string
   memberId: string | null
   pointsRedeemed: number              // points redeemed by staff (0 if none)
