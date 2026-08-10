@@ -147,16 +147,56 @@ describe("MRB-14-02 — handleAddRoomToReservation surface", () => {
     expect(bookingsSrc).toMatch(/actualDateRange: newActualDateRange,/);
   });
 
-  it("increments `corporateCodes.usageCount` by 1 for a corporate reservation (per MRB-08's N-rooms = N-uses rule)", () => {
+  it("increments `corporateCodes.usageCount` by 1 for a corporate reservation (per MRB-08's N-rooms = N-uses rule, H-01 fix)", () => {
     // The handler MUST write a `usageCount += 1`
     // to the corporate code's doc in the SAME
     // transaction (a refusal to write would
     // silently lose the corporate-cap accounting).
+    //
+    // Per H-01 (corporate booking audit 2026-08-10):
+    // the increment MUST be derived from the
+    // corporateCodes doc's own `usageCount` — read
+    // inside the transaction before any writes
+    // (FOL-03 reads-before-writes) — NOT from
+    // `reservation.corporateUsageCount` (a field
+    // that does not exist on the reservation
+    // header). The pre-H-01 path read
+    // `(reservation as any).corporateUsageCount ||
+    // 0` and silently wrote `usageCount: 1` to
+    // the corporateCodes doc on every add-room,
+    // breaking the cap check on the create path.
     expect(bookingsSrc).toMatch(
       /corporateUsageUpdate: \{ ref: any; data: any \} \| null = \(\(\) =>/
     );
-    expect(bookingsSrc).toMatch(
+    // The increment source must be the corporateCodes
+    // doc's `usageCount`, read earlier in the
+    // transaction. The `(reservation as any).
+    // corporateUsageCount` shape is the H-01 bug
+    // and MUST NOT reappear.
+    expect(bookingsSrc).not.toMatch(
       /usageCount: Number\(\(reservation as any\)\.corporateUsageCount \|\| 0\) \+ 1/
+    );
+    expect(bookingsSrc).toMatch(
+      /usageCount: \(Number\(corpData\.usageCount\) \|\| 0\) \+ 1/
+    );
+  });
+
+  it("reads the corporateCodes doc for the add-room usageCount increment (per H-01, before any writes)", () => {
+    // Per H-01 (corporate booking audit 2026-08-10):
+    // the corporateCodes doc MUST be read inside the
+    // add-room transaction, BEFORE any writes begin
+    // (FOL-03). The snapshot is stashed and consumed
+    // by the deferred `corporateUsageUpdate` write.
+    // Without this read, the increment has no real
+    // baseline and silently writes `1` on every
+    // add-room.
+    expect(bookingsSrc).toMatch(
+      /corporateCodeDocForUpdate = await transaction\.get\(corpRef\)/
+    );
+    // The deferred write consumes the snapshot —
+    // not the reservation header.
+    expect(bookingsSrc).toMatch(
+      /if \(!corporateCodeDocForUpdate \|\| !corporateCodeDocForUpdate\.exists\) return null/
     );
   });
 
