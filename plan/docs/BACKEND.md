@@ -161,6 +161,43 @@ Single-document collections holding dynamic configuration:
 
 ---
 
+### `corporateInquiries/{inquiryId}`
+
+| Field | Type | Notes |
+|---|---|---|
+| `companyName` | string | Inquiring company |
+| `contactPerson` | string | Lead contact full name |
+| `email` / `phone` | string | Contact details (PII — staff/admin only) |
+| `numRooms` | number | Requested block size |
+| `preferredDates` | object \| string | `{ from, to }` struct (current) or legacy string; see `plan/features/CORPORATE-INQUIRIES.md` |
+| `specialRequirements` | string | Free-text purpose of stay |
+| `status` | enum | `"new"` \| `"contacted"` \| `"negotiating"` \| `"converted"` \| `"declined"` |
+| `handler` / `notes[]` | string / array | Staff handling + per-touch notes |
+| `accessCodeId` | string | Doc ID of the `corporateCodes/{code}` generated for this inquiry |
+| `convertedBookingId` / `convertedBookingRef` | string | Back-link to the resulting booking once the inquiry is converted |
+| `createdAt` / `updatedAt` | timestamp | Audit |
+
+Public submissions land here via `POST /api/corporate/inquiry` (rate-limited + Turnstile-gated + honeypot). The conversion path (`POST /api/corporate/convert-inquiry`, staff-only) creates a `bookings/{id}` doc and links the two in a single transaction — see `plan/features/CORPORATE-BOOKING.md §Multi-Room Block` and `plan/features/CORPORATE-INQUIRIES.md`.
+
+---
+
+### `corporateCodes/{code}`
+
+| Field | Type | Notes |
+|---|---|---|
+| `code` | string | Public code string (also the Firestore doc ID in most cases) |
+| `companyName` | string | Returned to the public via `/api/validate/corporate-code` |
+| `ratePerRoomType` | object | `Record<roomTypeValue, number>` — negotiated nightly rate per room type. Empty object = no negotiated rate; falls back to the type's flat `corporateRate`, then the standard `pricePerNight` |
+| `isActive` | boolean | Default `true`; staff flips to `false` to deactivate |
+| `expiresAt` | timestamp \| null | Optional expiry; the validator rejects past-dated codes |
+| `usageCap` | number \| null | Max uses (sum across all bookings against the code) |
+| `usageCount` | number | Server-maintained counter, incremented in-transaction on create + add-room, decremented on cancel. See `plan/features/CORPORATE-BOOKING.md §Corporate Code usageCount Counter Ownership` |
+| `createdAt` / `updatedAt` | timestamp | Audit |
+
+The doc ID is the code string by convention. The validate + create handlers both honour a `code`-field fallback for codes whose Firestore doc ID differs from the public `code` field (defense in depth). Public reads go through `POST /api/validate/corporate-code` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, companyName, ratePerRoomType }` — never `usageCount`, `usageCap`, or `expiresAt`. Firestore rules: read/write staff-only (BI-08) — see `plan/docs/SECURITY.md §corporateCodes`.
+
+---
+
 ### `members/{memberId}`
 
 | Field | Type | Notes |

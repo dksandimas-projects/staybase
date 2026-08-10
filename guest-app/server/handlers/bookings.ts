@@ -10828,6 +10828,26 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         ? perRoomTypeCorporateRate
         : typeWeekendRate;
 
+      // Per H-01 (corporate booking audit 2026-08-10):
+      // the previous add-room path derived the corporate
+      // code's `usageCount` delta from the reservation
+      // header's `corporateUsageCount` — a field that
+      // does not exist on the reservation doc. The real
+      // counter lives on `corporateCodes/{code}`. The
+      // buggy shape silently wrote `usageCount: 1` to
+      // the corporateCodes doc on every add-room,
+      // resetting the real counter and breaking the
+      // cap check on the create path. The fix reads
+      // the corporateCodes doc HERE (before the writes
+      // begin at step 9, per FOL-03's reads-before-
+      // writes rule) and stashes the snapshot for the
+      // deferred `corporateUsageUpdate` write below.
+      let corporateCodeDocForUpdate: any = null;
+      if (isCorporateReservation && corporateCode) {
+        const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        corporateCodeDocForUpdate = await transaction.get(corpRef);
+      }
+
       const seasonalRateOverrides = normalizeSeasonalRateOverrides((hotelConfig as any).seasonalRateOverrides || []);
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: headerCheckIn,
@@ -11164,12 +11184,29 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       // by 1. Vouchers are per-child (the new
       // child's `voucherUsageUpdate` already
       // handled the increment above).
+      //
+      // Per H-01 (corporate booking audit 2026-08-10):
+      // the corporateCodes doc snapshot was read earlier
+      // in this transaction (step 5, before any writes,
+      // per FOL-03). The increment reads from that
+      // snapshot, NOT from the reservation header (which
+      // has no `corporateUsageCount` field) — mirrors
+      // the create-path pattern at `bookings.ts:2271-2277`
+      // and the cancel-path pattern at
+      // `bookings.ts:5788-5792`. If the corporateCodes
+      // doc was deleted between create and now, we no-op
+      // (mirror the cancel path's `cpDoc.exists` guard).
       const corporateUsageUpdate: { ref: any; data: any } | null = (() => {
         if (!isCorporateReservation || !corporateCode) return null;
+        if (!corporateCodeDocForUpdate || !corporateCodeDocForUpdate.exists) return null;
+        const corpData = corporateCodeDocForUpdate.data() || {};
         const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
         return {
           ref: corpRef,
-          data: { usageCount: Number((reservation as any).corporateUsageCount || 0) + 1, updatedAt: new Date() }
+          data: {
+            usageCount: (Number(corpData.usageCount) || 0) + 1,
+            updatedAt: new Date()
+          }
         };
       })();
       // Per BAR-02 (2026-08-08, per decision #203):

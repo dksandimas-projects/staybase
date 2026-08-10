@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.24";
+    VERSION2 = "0.266.3";
   }
 });
 
@@ -223364,6 +223364,9 @@ function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options =
   } else {
     effectiveNow = /* @__PURE__ */ new Date();
     requestedUses = now?.requestedUses ?? 1;
+  }
+  if (Number.isNaN(effectiveNow.getTime())) {
+    effectiveNow = /* @__PURE__ */ new Date();
   }
   if (!Number.isFinite(requestedUses) || requestedUses < 1) {
     requestedUses = 1;
@@ -233504,6 +233507,11 @@ async function handleAddRoomToReservation(req, res) {
       })();
       const activeBaseRate = perRoomTypeCorporateRate > 0 ? perRoomTypeCorporateRate : typeBaseRate;
       const activeWeekendRate = perRoomTypeCorporateRate > 0 ? perRoomTypeCorporateRate : typeWeekendRate;
+      let corporateCodeDocForUpdate = null;
+      if (isCorporateReservation && corporateCode) {
+        const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        corporateCodeDocForUpdate = await transaction.get(corpRef);
+      }
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides || []);
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: headerCheckIn,
@@ -233752,10 +233760,15 @@ async function handleAddRoomToReservation(req, res) {
       );
       const corporateUsageUpdate = (() => {
         if (!isCorporateReservation || !corporateCode) return null;
+        if (!corporateCodeDocForUpdate || !corporateCodeDocForUpdate.exists) return null;
+        const corpData = corporateCodeDocForUpdate.data() || {};
         const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
         return {
           ref: corpRef,
-          data: { usageCount: Number(reservation.corporateUsageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
+          data: {
+            usageCount: (Number(corpData.usageCount) || 0) + 1,
+            updatedAt: /* @__PURE__ */ new Date()
+          }
         };
       })();
       updatedHeader = {

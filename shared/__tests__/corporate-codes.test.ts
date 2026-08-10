@@ -162,4 +162,43 @@ describe("validateCorporateCode", () => {
       expect(res.valid).toBe(true);
     });
   });
+
+  // Per M-01 (corporate booking audit 2026-08-10):
+  // the helper must defend against an `Invalid Date`
+  // passed as the `now` argument. A NaN `now` causes
+  // every Date comparison to evaluate to `false`, so
+  // the expiry check would silently pass on an expired
+  // code. The fix falls back to the wall clock when
+  // the supplied `now` is not a valid Date.
+  describe("validateCorporateCode — Invalid Date defence (M-01, corporate audit 2026-08-10)", () => {
+    test("treats an Invalid Date `now` as right now and still rejects an expired code", () => {
+      // A code expired in 2026 against an Invalid
+      // `now` should still reject — the NaN-Date
+      // fallback uses the wall clock (2026+ today),
+      // which is past the expiry.
+      const expired = {
+        ...activeCode,
+        expiresAt: new Date("2026-01-01T00:00:00Z")
+      };
+      const res = validateCorporateCode(expired, new Date("not-a-date"));
+      expect(res.valid).toBe(false);
+      expect(res.error).toContain("expired");
+    });
+
+    test("treats an Invalid Date `now` as right now and still accepts a non-expired code", () => {
+      // A code that expires in 2027 against an Invalid
+      // `now` should still accept (the wall-clock
+      // fallback is before 2027).
+      const res = validateCorporateCode(activeCode, new Date("not-a-date"));
+      expect(res.valid).toBe(true);
+    });
+
+    test("does not regress on a valid Date `now` argument", () => {
+      // Sanity check: the NaN guard must not change
+      // the happy path. A valid `now` arg still
+      // uses the supplied value.
+      const res = validateCorporateCode(activeCode, new Date("2026-06-10T12:00:00Z"));
+      expect(res.valid).toBe(true);
+    });
+  });
 });
