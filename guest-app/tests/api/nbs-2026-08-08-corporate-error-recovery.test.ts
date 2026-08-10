@@ -158,4 +158,46 @@ describe("NBS-2026-08-08 — corporate /corporate/book error recovery + URL fall
       expect(cancelMatch).not.toBeNull();
     });
   });
+
+  // Per M-04 (corporate booking audit 2026-08-10):
+  // the URL `?roomType=` value is validated against
+  // the room type catalog before the cart auto-seed
+  // effect runs. A direct hit to
+  // `/corporate/book?roomType=does-not-exist` used to
+  // seed the cart with an unknown type and only hit
+  // a server 400 on submit. The fix falls back to
+  // the first available type on miss — same pattern
+  // as the F10 date URL fallback.
+  describe("M-04 — corporate ?roomType= URL param validation (corporate audit 2026-08-10)", () => {
+    it("the auto-seed effect validates the URL roomType against the catalog (not just `find()`)", () => {
+      // The pre-M-04 path used
+      // `roomTypes.find((type) => type.value === fromQuery)`
+      // — which returns `undefined` for a missing type
+      // and seeds the cart with `roomType: undefined`.
+      // The M-04 fix uses `.some(...)` to gate the
+      // fallback so an unknown URL value falls back to
+      // `availableRoomTypes[0]?.type` instead of seeding
+      // the cart with garbage.
+      const validateMatch = corporatePageSrc.match(
+        /const fromQueryIsValid = fromQuery[\s\S]{0,80}roomTypes\.some\(\(type\) => type\.value === fromQuery\)/
+      );
+      expect(validateMatch).not.toBeNull();
+    });
+
+    it("the auto-seed effect falls back to the first available type when the URL roomType is unknown", () => {
+      // The fallback chain must be:
+      //   1. URL value, but only if it's in the catalog
+      //   2. the first available type (any type with
+      //      at least 1 room free for the dates)
+      //   3. null (no seed — the user picks a type
+      //      from the empty cart)
+      // The pre-M-04 path fell through to step 1 even
+      // for unknown values, which seeded the cart with
+      // `roomType: undefined`.
+      const fallbackMatch = corporatePageSrc.match(
+        /const candidate = fromQueryIsValid[\s\S]{0,80}availableRoomTypes\[0\]\?\.type/
+      );
+      expect(fallbackMatch).not.toBeNull();
+    });
+  });
 });

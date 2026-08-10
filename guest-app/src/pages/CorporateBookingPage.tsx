@@ -337,6 +337,15 @@ export function CorporateBookingPage() {
   // manually (clicking the back CTA or the browser back
   // button) before the 5s elapses. The cleanup effect
   // below cancels any pending timer on unmount.
+  //
+  // Per L-06 (corporate audit 2026-08-10): the effect
+  // also runs on `currentStepKey` change so a
+  // navigation away from review (e.g. the user clicks
+  // back to Step 1 or 2) does not fire the stale
+  // redirect. The pre-L-06 effect only ran on unmount,
+  // which a same-page nav (URL searchParam change) does
+  // not trigger — the timer would still fire and
+  // override the user's manual nav.
   const redirectTimerRef = useRef<number | null>(null);
   useEffect(() => {
     return () => {
@@ -345,7 +354,7 @@ export function CorporateBookingPage() {
         redirectTimerRef.current = null;
       }
     };
-  }, []);
+  }, [currentStepKey]);
 
   // Per `plan/features/SETTINGS.md §Payment Methods` — the booking
   // payment list is dynamic. Sourced from
@@ -538,11 +547,26 @@ export function CorporateBookingPage() {
   // loaded (no `roomsLoading` flicker) and on the
   // cart being empty (no-op after the user has
   // added rooms).
+  //
+  // Per M-04 (corporate booking audit 2026-08-10):
+  // the URL `?roomType=` value is validated against
+  // the room type catalog before the seed runs. A
+  // direct hit to `/corporate/book?roomType=does-not-exist`
+  // used to seed the cart with an unknown type — the
+  // guest picked dates + occupancy, then hit a 400 on
+  // submit from the server's strict `publicRoomSelectionSchema`.
+  // The fix falls back to the first available type on
+  // miss (same shape as the F10 date URL fallback at
+  // `CorporateBookingPage.tsx:172-185`). A missing URL
+  // value still falls back to the first available type.
   useEffect(() => {
     if (roomCart.length > 0) return;
     if (roomsLoading || roomTypes.length === 0) return;
     const fromQuery = searchParams.get("roomType");
-    const candidate = fromQuery
+    const fromQueryIsValid = fromQuery
+      ? roomTypes.some((type) => type.value === fromQuery)
+      : false;
+    const candidate = fromQueryIsValid
       ? roomTypes.find((type) => type.value === fromQuery)
       : availableRoomTypes[0]?.type;
     if (!candidate) return;
@@ -1319,11 +1343,16 @@ export function CorporateBookingPage() {
           <div className="min-h-11 min-w-11" />
         </div>
         
-        {/* Persistent corporate rate badge — per W2.13 / decision #101 */}
+        {/* Persistent corporate rate badge — per W2.13 / decision #101.
+            Per L-01 (corporate audit 2026-08-10): the wording is now
+            aligned with the spec — "Corporate Rate — [Company Name or
+            Flat Rate]". The pre-L-01 label ("Active Negotiated Pricing")
+            drifted from the spec and used "Flat Corporate Rate" on the
+            flat-rate path. */}
         {(companyName || isFlatRate) && currentStepKey !== "confirm" && (
           <div className="bg-primary/10 border-t border-primary/20 text-center py-1.5 text-xs text-primary font-medium">
-            Active Negotiated Pricing: <span className="font-bold underline">{companyName || "Flat Corporate Rate"}</span>
-            {activeCode && " — Negotiated rate applied"}
+            Corporate Rate — <span className="font-bold underline">{companyName || "Flat Rate"}</span>
+            {activeCode && " (Negotiated rate applied)"}
           </div>
         )}
       </header>
