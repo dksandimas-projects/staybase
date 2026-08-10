@@ -227,6 +227,26 @@ export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;
 export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;
 export type WalkinRoomLineInput = z.infer<typeof WalkinRoomLineSchema>;
 
+// Per LOW-1 (reports audit 2026-08-10) +
+// `DECISIONS-FEATURES.md #99` (LOU workflow):
+// the staff-toggled LOU (Letter of Undertaking) flag
+// for corporate chargeback bookings. The schema lives
+// in the shared package (not co-located with the
+// handler) so a future `setLouReceived` call site —
+// or a future client-side preview / display — can
+// import the same shape. The schema is `.strict()` so
+// a client can't add unknown fields (matches the
+// discipline of every other staff-mutation schema in
+// this file). The handler enforces the
+// `isCorporate + paymentMethod === "pay-at-hotel"`
+// guard separately.
+export const SetLouReceivedSchema = z.object({
+  bookingId: z.string().trim().min(1).max(64),
+  louReceived: z.boolean()
+}).strict();
+
+export type SetLouReceivedInput = z.infer<typeof SetLouReceivedSchema>;
+
 // Per MRB-14 (2026-08-03, per decision #180 — proposed):
 // the add-room surface. Staff adds a room to an existing
 // pre-arrival reservation using the header's current

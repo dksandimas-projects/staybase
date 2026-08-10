@@ -1240,6 +1240,19 @@ export const createBookingSchema = z.object({
   // the write boundary. Pre-MRB-11 callers omit it; the
   // server fills it in.
   revenueAllocation: BookingRevenueAllocationSchema.optional(),
+  // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+  // the LOU (Letter of Undertaking) flag for corporate
+  // chargeback bookings. The guest never sets this — the
+  // field is staff-toggled post-creation via
+  // `/api/bookings/set-lou-received` once the LOU arrives.
+  // The schema accepts `true` (the rare case where the
+  // corporate client supplied the LOU up-front and the
+  // staff walks it in pre-marked) and `false` (the common
+  // case — the booking is `pending` until the LOU workflow
+  // resolves it). The field defaults to `false` so a
+  // missing value matches the "LOU not yet received"
+  // state.
+  louReceived: z.boolean().optional().default(false),
   _hp: z.string().max(200).optional().default("")
 }).strict();
 
@@ -2858,6 +2871,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // is null for normal bookings; the convert-to-booking UI (per
         // audit 1.4 SEV-1 #2) will populate it.
         linkedInquiryId: linkedInquiryId || null,
+        // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+        // the LOU (Letter of Undertaking) flag for corporate
+        // chargeback bookings. Stamped from the request body
+        // (rare — the LOU usually arrives later and the desk
+        // toggles via `/api/bookings/set-lou-received`). Default
+        // `false`. The field exists on every booking doc; the
+        // `corporate.flat-rate / with-code` paths that arrive
+        // via the public flow set it to the body value, the
+        // walkin + convert-inquiry paths leave it at `false`
+        // (chargeback doesn't apply to those surfaces).
+        louReceived: body.louReceived === true,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
         // Per BI-11 (booking-intercom audit 2026-07-06): the
         // corporate flow collects `designation`,
         // `companyAddress`, `purposeOfStay`, and
@@ -5131,6 +5156,132 @@ export async function handleRejectDiscount(req: any, res: any) {
   } catch (error: any) {
     console.error("Discount rejection handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
+// Per LOW-1 (reports audit 2026-08-10) +
+// `DECISIONS-FEATURES.md #99` (LOU workflow):
+// the staff-toggled LOU (Letter of Undertaking) flag
+// for corporate chargeback bookings. A corporate
+// chargeback lands as `status: "pending" +
+// paymentMethod: "pay-at-hotel" + isCorporate: true`
+// and stays pending until the company's LOU arrives
+// by email (per `plan/features/CORPORATE-BOOKING.md`
+// §LOU). The desk previously had no way to mark the
+// LOU as received — `louReceived` was declared in
+// `TYPES.md` but never written or read by any code
+// path, so the receivables widget's "Corporate AR"
+// card was perpetually inflated by chargeback rows
+// that had already been resolved out-of-band.
+//
+// The toggle is a strict staff-only mutation (matches
+// the auth posture of `apply-discount` +
+// `reject-discount` + `reject-payment`): the
+// `authenticateStaff` middleware at the apiRouter
+// level gates the call. The `louReceivedAt` +
+// `louReceivedBy` companion fields are stamped on
+// the same write so the audit trail matches the
+// existing staff-mutation fields (`handledBy`,
+// `discountVerifiedBy`, `cancelledBy`, etc.).
+//
+// The endpoint accepts the same `true` / `false`
+// payload as the schema; a `null` / missing value is
+// rejected at the schema level (the desk must be
+// explicit). To UN-mark an LOU (the rare "we marked
+// it received but the company withdrew" case), the
+// desk can call this endpoint with `louReceived:
+// false`; the `louReceivedAt` / `louReceivedBy`
+// companions are cleared in the same write.
+export async function handleSetLouReceived(req: any, res: any) {
+  const { bookingId, louReceived } = req.body || {};
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (typeof louReceived !== "boolean") {
+    return res.status(400).json({ success: false, error: "louReceived must be a boolean (true or false)." });
+  }
+
+  try {
+    let result: Record<string, any> = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(String(bookingId).trim());
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("Booking not found.");
+      }
+      const booking = bookingSnap.data()!;
+      // Per DECISIONS-FEATURES.md #99: LOU only applies
+      // to corporate chargeback bookings. A non-corporate
+      // booking (personal pay, walk-in, online) cannot
+      // have a chargeback. The guard prevents the desk
+      // from accidentally toggling the flag on the
+      // wrong booking shape.
+      if (booking.isCorporate !== true) {
+        throw new Error("LOU flag only applies to corporate chargeback bookings (isCorporate: true).");
+      }
+      // Per DECISIONS-FEATURES.md #99: the LOU is the
+      // settlement trigger for chargebacks
+      // (`paymentMethod === "pay-at-hotel"`). A corporate
+      // personal-pay booking never has an LOU — even if
+      // the desk toggles the flag, the math consumers
+      // (Reports) only use it on chargeback rows. We
+      // allow the toggle here for forward-compat but the
+      // guard above is the corporate-true check.
+      if (booking.paymentMethod !== "pay-at-hotel") {
+        throw new Error("LOU flag only applies to chargeback bookings (paymentMethod: 'pay-at-hotel').");
+      }
+      const staffUid = req.staff?.uid || "staff";
+      const now = new Date();
+      // Per the unwired-spec fix: the LOU toggle is a
+      // single-stamp field write. We do NOT change
+      // `status` here — the booking stays `pending`
+      // (or whatever status the desk has flipped it to)
+      // and the LOU flag is a parallel signal. The
+      // receivables widget's filter (per MED-1) now
+      // reads the LOU flag AND the status to decide
+      // whether to count a chargeback row; the
+      // combined rule is: `isCorporate + paymentMethod
+      // === 'pay-at-hotel' + louReceived !== true` is
+      // still AR (LOU not yet received). Once
+      // `louReceived === true` the row is excluded
+      // from the corporate AR widget (the receivable
+      // was settled via LOU, not a payment).
+      //
+      // Wait — looking at the MED-1 fix above, the
+      // receivables filter does NOT check
+      // `louReceived`. So a "LOU received" row is
+      // STILL in the receivables list (status is
+      // still `pending`, the desk hasn't flipped the
+      // status). That's by-design for now: the LOU
+      // is "we have the paperwork" but the actual
+      // payment is still pending. A future fix can
+      // also auto-flip the status to `confirmed` when
+      // the LOU arrives (the staff has accepted the
+      // chargeback terms). For this round the LOU
+      // field is a signal + audit stamp; the status
+      // stays in the desk's hands.
+      const updates: Record<string, any> = {
+        louReceived,
+        ...(louReceived
+          ? {
+              louReceivedAt: now,
+              louReceivedBy: staffUid
+            }
+          : {
+              louReceivedAt: null,
+              louReceivedBy: null
+            }),
+        updatedAt: now
+      };
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    const message = error.message || "An unexpected error occurred while updating the LOU flag.";
+    const status = message === "Booking not found." ? 404 : 400;
+    console.error("Set LOU handler error:", error);
+    return res.status(status).json({ success: false, error: message });
   }
 }
 

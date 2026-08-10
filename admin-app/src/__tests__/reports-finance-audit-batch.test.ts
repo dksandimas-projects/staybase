@@ -198,3 +198,98 @@ describe("BookingsPage onsite tender wiring", () => {
     expect(bookings).toMatch(/hasCash \? base : \[CASH_ONSITE_PAYMENT_METHOD, \.\.\.base\]/);
   });
 });
+
+// Per MED-1 / MED-2 / LOW-2 (reports audit 2026-08-10):
+// the receivables + occupancy + acquisition widgets must
+// include the corporate chargeback case (pending +
+// pay-at-hotel + isCorporate) and the corporate personal-pay
+// receipt-pending case (payment-uploaded + isCorporate) —
+// both are real ARs / real room holds that the pre-fix
+// status whitelist dropped.
+describe("ReportsPage status filter coverage (reports audit 2026-08-10)", () => {
+  it("MED-1 — receivables filter includes the corporate chargeback (`pending` + `pay-at-hotel` + isCorporate)", () => {
+    // The pre-fix filter was a single-line
+    // `["confirmed","payment-confirmed","checked-in","checked-out"].includes(...)`
+    // — a corporate chargeback (`status: "pending"`,
+    // `paymentMethod: "pay-at-hotel"`, `isCorporate: true`)
+    // never matched, so it never appeared in the "Corporate
+    // AR" card or the by-company list. The post-fix filter
+    // adds the corporate chargeback case explicitly.
+    expect(reports).toMatch(
+      /booking\.status === "pending" && booking\.isCorporate === true && booking\.paymentMethod === "pay-at-hotel"/
+    );
+  });
+
+  it("LOW-2 — receivables filter includes the corporate personal-pay receipt-pending case (`payment-uploaded` + isCorporate)", () => {
+    // A corporate personal-pay booking that uploaded a
+    // receipt (`status: "payment-uploaded"`,
+    // `isCorporate: true`) is a real AR until staff verifies
+    // the receipt. The pre-fix filter excluded it; the
+    // post-fix filter includes it.
+    expect(reports).toMatch(
+      /booking\.status === "payment-uploaded" && booking\.isCorporate === true/
+    );
+  });
+
+  it("MED-1 — receivables filter STILL excludes the non-corporate walk-in `pending` + `pay-at-hotel` (will pay on arrival, not AR)", () => {
+    // A non-corporate `pending` walk-in is not an AR —
+    // the guest will pay on arrival at the desk. The
+    // post-fix filter must NOT include this case (the
+    // condition is gated on `isCorporate === true`).
+    //
+    // The single-line source-text check looks for the
+    // `&& booking.isCorporate === true` guard on BOTH new
+    // cases. If a future refactor drops the `isCorporate`
+    // guard from either branch, the walk-in-pending case
+    // would leak into the AR aging report and inflate the
+    // drawer variance (the desk would expect cash that
+    // hasn't been collected yet).
+    const pendingBranch = reports.match(
+      /booking\.status === "pending"[\s\S]{0,160}booking\.isCorporate === true/
+    );
+    const paymentUploadedBranch = reports.match(
+      /booking\.status === "payment-uploaded"[\s\S]{0,160}booking\.isCorporate === true/
+    );
+    expect(pendingBranch).not.toBeNull();
+    expect(paymentUploadedBranch).not.toBeNull();
+  });
+
+  it("MED-2 — occupancy memo derives from the broader room-hold set (pending + payment-uploaded + the existing 4 statuses), NOT from revenueBookings", () => {
+    // Per MED-2 (reports audit 2026-08-10): the create
+    // transaction holds the room regardless of payment
+    // status, so occupancy + acquisition must include
+    // `pending` and `payment-uploaded`. The pre-fix path
+    // derived `occupancyBookings` from `revenueBookings`
+    // (which intentionally excludes those statuses for
+    // cash-side accuracy) — a corporate chargeback that
+    // stayed `pending` for weeks while the LOU was
+    // processed was missing from the room-type occupancy
+    // chart AND the acquisition / booking-source chart.
+    //
+    // The fix introduces a `roomHoldBookings` memo that
+    // includes every room-holding status and feeds the
+    // occupancy + acquisition widgets. The revenue memo
+    // stays narrow.
+    expect(reports).toMatch(/const roomHoldBookings = useMemo/);
+    // The room-hold set explicitly includes `pending` and
+    // `payment-uploaded` (the two pre-fix gap cases).
+    expect(reports).toMatch(
+      /b\.status === "pending" \|\|[\s\S]{0,200}b\.status === "payment-uploaded"/
+    );
+    // The occupancy memo sources from `roomHoldBookings`,
+    // not `revenueBookings`.
+    expect(reports).toMatch(
+      /return roomHoldBookings\.filter\(b => \{/
+    );
+  });
+
+  it("MED-2 — revenue memo is UNCHANGED (stays narrow, cash-side metric)", () => {
+    // The revenue memo must keep its 4-status whitelist so
+    // a paid-but-not-yet-confirmed booking is revenue-
+    // eligible (the historical `payment-confirmed`
+    // inclusion per line 422-427).
+    expect(reports).toMatch(
+      /b\.status === "payment-confirmed" \|\| b\.status === "confirmed" \|\| b\.status === "checked-in" \|\| b\.status === "checked-out"/
+    );
+  });
+});
