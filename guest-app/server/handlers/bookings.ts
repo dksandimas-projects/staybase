@@ -10037,6 +10037,25 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // investigate, then either restore the header or
       // migrate the booking to a fresh one.
       let existingReservationData: any = null;
+      // Per FOL-03 (2026-08-10, audit follow-up): the
+      // children `get()` for the `actualDateRange`
+      // recompute must happen BEFORE the booking +
+      // reservation header `transaction.update()` calls.
+      // The pre-FOL-03 handler did the read AFTER the
+      // writes (the comment claimed it needed the
+      // post-update state for the just-rescheduled
+      // child) — Firestore's `runTransaction` rejects
+      // any read after a write, so the whole reschedule
+      // surfaced as a 500. The fix pre-reads the
+      // children here, and for the just-rescheduled
+      // child substitutes the in-memory NEW dates
+      // (checkInDate / checkOutDate) into the array.
+      // The post-update state of the just-rescheduled
+      // child is constructed in JavaScript, not
+      // observed via a re-read. Same pattern as
+      // `handleCheckinBooking` + `handleCheckoutBooking`
+      // (FOL-03 original, 2026-08-07).
+      let rescheduleChildrenDates: Array<{ checkIn: Date; checkOut: Date }> | null = null;
       if (reservationDocRef) {
         const existingReservationSnap = await transaction.get(reservationDocRef);
         if (existingReservationSnap.exists) {
@@ -10044,6 +10063,36 @@ export async function handleRescheduleBooking(req: any, res: any) {
         } else {
           throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
         }
+        // Pre-read every sibling of the just-rescheduled
+        // booking. The just-rescheduled child is the
+        // current `booking` (it carries the OLD dates at
+        // this point — the write hasn't happened yet);
+        // we replace its contribution with the NEW dates
+        // in the array below.
+        const rescheduleChildrenQuery = adminDb
+          .collection("bookings")
+          .where("reservationId", "==", bookingReservationId as string);
+        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
+        rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
+          if (docSnap.id === String(bookingId)) {
+            // The just-rescheduled child — use the
+            // NEW dates from the in-memory function
+            // scope. The Firestore doc still carries
+            // the old dates; the post-update state
+            // is constructed in JavaScript per the
+            // FOL-03 "pre-read + post-update construct"
+            // pattern.
+            return {
+              checkIn: checkInDate,
+              checkOut: checkOutDate
+            };
+          }
+          const childData = docSnap.data() as any;
+          return {
+            checkIn: toDateOrNull(childData.checkIn) || checkInDate,
+            checkOut: toDateOrNull(childData.checkOut) || checkOutDate
+          };
+        });
       }
       if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
         throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
@@ -10509,12 +10558,17 @@ export async function handleRescheduleBooking(req: any, res: any) {
         // header's original `checkIn` / `checkOut` stay
         // immutable (the previous block of code no longer
         // updates them); we read every child via
-        // `where("reservationId", "==", id)` inside the
-        // transaction and pass their current dates to
+        // `where("reservationId", "==", id)` INSIDE the
+        // transaction (the read happens at the top of the
+        // transaction, right after the reservation header
+        // read — per FOL-03, all reads must complete before
+        // any writes) and pass their current dates to
         // `computeReservationActualDateRange`. The
         // just-rescheduled child is represented by its
-        // NEW dates (the `updatedBooking` we just
-        // built); every other child contributes its
+        // NEW dates (constructed in JavaScript from
+        // `checkInDate` / `checkOutDate` — the
+        // post-update state, not the pre-write Firestore
+        // snapshot); every other child contributes its
         // current dates as-is. Pre-MRB-14 reservations
         // have no `actualDateRange` — for those the
         // helper falls through to writing
@@ -10524,31 +10578,21 @@ export async function handleRescheduleBooking(req: any, res: any) {
         // because the admin surfaces + email continue
         // to read the children's per-child dates for
         // pre-MRB-14 rows).
-        const rescheduleChildrenQuery = adminDb
-          .collection("bookings")
-          .where("reservationId", "==", bookingReservationId as string);
-        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
-        const rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
-          const childData = docSnap.data() as any;
-          if (docSnap.id === String(bookingId)) {
-            // The just-rescheduled child — use the
-            // new dates from `updatedBooking` (the
-            // post-write state, not the pre-write
-            // snapshot).
-            return {
-              checkIn: checkInDate,
-              checkOut: checkOutDate
-            };
-          }
-          return {
-            checkIn: childData.checkIn,
-            checkOut: childData.checkOut
-          };
-        });
+        //
+        // The pre-read `rescheduleChildrenDates` array
+        // was populated right after the reservation
+        // header read at the top of the transaction
+        // (around line 10058) — the just-rescheduled
+        // child's entry already has the NEW dates
+        // substituted in via the `if (docSnap.id === String(bookingId))`
+        // branch in the early-read `.map()`. Reusing
+        // the pre-built array here means the late
+        // block is pure compute + writes — no reads
+        // — which is what the FOL-03 contract demands.
         const rescheduleActualDateRange = computeReservationActualDateRange(
           existingReservationData.checkIn,
           existingReservationData.checkOut,
-          rescheduleChildrenDates
+          rescheduleChildrenDates || []
         );
         const rescheduleFingerprint = computeRequestFingerprint({
           reservationId: bookingReservationId as string,

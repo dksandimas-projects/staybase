@@ -51,16 +51,29 @@ describe("MRB-14 — reschedule refactor preserves the header's shared dates", (
   });
 
   it("handleRescheduleBooking recomputes `actualDateRange` from every child via `where(\"reservationId\", \"==\", ...)` inside the transaction", () => {
-    // The recompute lives inside the same
-    // `runTransaction` as the child update so it
-    // reads the post-write child state. The helper
-    // `computeReservationActualDateRange` is the
-    // contract.
+    // The recompute reads every child via the
+    // `where("reservationId", "==", id)` query and
+    // passes the per-child dates to
+    // `computeReservationActualDateRange`. The read
+    // is gated on `reservationDocRef && existingReservationData`
+    // (only reservation-scope reschedules need the
+    // recompute — legacy null-`reservationId` bookings
+    // stay on the per-child path).
+    //
+    // Per the FOL-03 audit follow-up (2026-08-10):
+    // the read happens at the TOP of the transaction
+    // (right after the reservation header read), not
+    // in the late `actualDateRange` block. The
+    // `fol-03-reschedule-transaction-read-order.test.ts`
+    // suite pins the FOL-03 ordering contract; this
+    // test pins the MRB-14 `actualDateRange` contract
+    // (the read is still present, the values it
+    // returns still flow into the recompute).
     expect(bookingsSrc).toMatch(
       /adminDb\s*\n\s*\.collection\("bookings"\)\s*\n\s*\.where\("reservationId", "==", bookingReservationId as string\)/
     );
     expect(bookingsSrc).toMatch(
-      /const rescheduleActualDateRange = computeReservationActualDateRange\(\s*\n\s*existingReservationData\.checkIn,[\s\S]*?rescheduleChildrenDates\s*\n\s*\)/
+      /const rescheduleActualDateRange = computeReservationActualDateRange\(\s*\n\s*existingReservationData\.checkIn,[\s\S]*?rescheduleChildrenDates \|\| \[\][\s\S]*?\)/
     );
     // The recomputed range is written to the header
     // in the same `transaction.update(reservationDocRef, ...)`
@@ -70,12 +83,18 @@ describe("MRB-14 — reschedule refactor preserves the header's shared dates", (
 
   it("handleRescheduleBooking represents the just-rescheduled child with its NEW dates in the recompute", () => {
     // The recompute overrides the just-rescheduled
-    // child's dates with the post-write `checkInDate`
-    // / `checkOutDate` (the new values the client
-    // submitted). Every other child contributes its
-    // current dates as-is.
+    // child's dates with the NEW `checkInDate` /
+    // `checkOutDate` (the values the client submitted).
+    // Every other child contributes its current dates
+    // as-is. The substitution happens in the
+    // pre-read `.map()` at the TOP of the transaction
+    // (per FOL-03 audit follow-up, 2026-08-10) — the
+    // just-rescheduled child cannot be re-read after
+    // the write, so the post-update state is
+    // constructed in JavaScript from the in-memory
+    // function scope.
     expect(bookingsSrc).toMatch(
-      /if \(docSnap\.id === String\(bookingId\)\) \{\s*\n\s*\/\/ The just-rescheduled child — use the\s*\n\s*\/\/ new dates from `updatedBooking`[\s\S]*?return \{\s*\n\s*checkIn: checkInDate,\s*\n\s*checkOut: checkOutDate\s*\n\s*\};/
+      /if \(docSnap\.id === String\(bookingId\)\) \{[\s\S]*?return \{[\s\S]*?checkIn: checkInDate,[\s\S]*?checkOut: checkOutDate[\s\S]*?\};/
     );
   });
 });

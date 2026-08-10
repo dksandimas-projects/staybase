@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.7";
+    VERSION2 = "0.266.9";
   }
 });
 
@@ -232926,6 +232926,7 @@ async function handleRescheduleBooking(req, res) {
       })();
       const reservationDocRef = bookingReservationId2 ? adminDb.collection("reservations").doc(bookingReservationId2) : null;
       let existingReservationData2 = null;
+      let rescheduleChildrenDates = null;
       if (reservationDocRef) {
         const existingReservationSnap = await transaction.get(reservationDocRef);
         if (existingReservationSnap.exists) {
@@ -232933,6 +232934,21 @@ async function handleRescheduleBooking(req, res) {
         } else {
           throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
         }
+        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
+        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
+        rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
+          if (docSnap.id === String(bookingId)) {
+            return {
+              checkIn: checkInDate,
+              checkOut: checkOutDate
+            };
+          }
+          const childData = docSnap.data();
+          return {
+            checkIn: toDateOrNull(childData.checkIn) || checkInDate,
+            checkOut: toDateOrNull(childData.checkOut) || checkOutDate
+          };
+        });
       }
       if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
         throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
@@ -233243,25 +233259,10 @@ async function handleRescheduleBooking(req, res) {
       }
       transaction.update(bookingRef, updatedBooking);
       if (reservationDocRef && existingReservationData2) {
-        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
-        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
-        const rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
-          const childData = docSnap.data();
-          if (docSnap.id === String(bookingId)) {
-            return {
-              checkIn: checkInDate,
-              checkOut: checkOutDate
-            };
-          }
-          return {
-            checkIn: childData.checkIn,
-            checkOut: childData.checkOut
-          };
-        });
         const rescheduleActualDateRange = computeReservationActualDateRange(
           existingReservationData2.checkIn,
           existingReservationData2.checkOut,
-          rescheduleChildrenDates
+          rescheduleChildrenDates || []
         );
         const rescheduleFingerprint = computeRequestFingerprint({
           reservationId: bookingReservationId2,
