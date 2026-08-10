@@ -288,3 +288,39 @@ describe("RFO-01 — server handleLookupBooking accepts a bare reservationRef", 
     );
   });
 });
+
+describe("RFO-01 — form hides when the reservation card is the active view", () => {
+  it("the form's hidden class includes activeReservation (decision #130)", () => {
+    // Per decision #130 in plan/features/BOOKING-LOOKUP.md,
+    // the search form is always mounted (so the
+    // Turnstile widget's container div is a stable
+    // DOM node across picker / card transitions)
+    // but the form is hidden when the picker or
+    // card is the active view. The original
+    // conditional checked `pickerResults?.length ||
+    // activeBooking`; the MRB-10 reservation-scope
+    // card was added later and the conditional was
+    // not updated, so the form stayed visible
+    // alongside the R- card. The fix adds
+    // `|| activeReservation` to both the `hidden`
+    // class and the `aria-hidden` prop so the
+    // reservation-scope card takes over the full
+    // result area cleanly.
+    const formMatch = lookupPageSrc.match(
+      /className=\{`mx-auto max-w-md[^`]*`\}/
+    );
+    expect(formMatch, "expected the form's className").toBeTruthy();
+    expect(formMatch![0]).toMatch(/pickerResults\?\.length \|\| activeBooking \|\| activeReservation/);
+  });
+
+  it("the form's aria-hidden prop also includes activeReservation", () => {
+    // The aria-hidden prop must mirror the
+    // visibility class so screen readers don't
+    // announce the form's "Find your booking"
+    // header when the result card is the active
+    // view.
+    expect(lookupPageSrc).toMatch(
+      /aria-hidden=\{Boolean\(pickerResults\?\.length \|\| activeBooking \|\| activeReservation\) \|\| undefined\}/
+    );
+  });
+});

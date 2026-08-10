@@ -1165,8 +1165,8 @@ export function BookingLookupPage() {
           variants={scaleIn}
           initial={shouldReduceMotion ? false : "hidden"}
           animate="visible"
-          aria-hidden={Boolean(pickerResults?.length || activeBooking) || undefined}
-          className={`mx-auto max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8 ${pickerResults?.length || activeBooking ? "hidden" : ""}`}
+          aria-hidden={Boolean(pickerResults?.length || activeBooking || activeReservation) || undefined}
+          className={`mx-auto max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8 ${pickerResults?.length || activeBooking || activeReservation ? "hidden" : ""}`}
         >
             <div className="text-center">
               <Search className="mx-auto h-12 w-12 text-primary" />
