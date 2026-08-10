@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.4";
+    VERSION2 = "0.266.6";
   }
 });
 
@@ -224334,6 +224334,13 @@ function buildReservationEmailView(reservation, children) {
   };
 }
 function lookupUrl(booking) {
+  const reservationRef = String(booking.reservationRef || "").trim();
+  const leadGuestEmail = String(booking.guestEmail || "").trim();
+  if (reservationRef && leadGuestEmail) {
+    return siteUrl(
+      `/my-booking?reservationRef=${encodeURIComponent(reservationRef)}&email=${encodeURIComponent(leadGuestEmail.toLowerCase())}`
+    );
+  }
   const ref = encodeURIComponent(booking.bookingRef || "");
   const token2 = encodeURIComponent(booking.lookupToken || "");
   if (!ref || !token2) return siteUrl("/my-booking");

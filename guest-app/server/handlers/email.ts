@@ -590,7 +590,28 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
 // magic link can authenticate the recipient without
 // leaking PII into URLs / browser history / Vercel
 // access logs.
+//
+// Per #209 (RFO-01 reservation-lookup surface, 2026-08-10):
+// when the email is reservation-scope (N>1 rooms, the
+// view carries `reservationRef` + `guestEmail` from the
+// reservation header), the deep link uses the R- ref +
+// the lead guest email so the guest can paste the public
+// identifier from the email subject into /my-booking
+// without the magic link. The N=1 path keeps the
+// `?ref=<SI>&token=<token>` shape byte-equivalent (the
+// existing magic link still works for single rooms).
+// The server's `handleLookupBooking` accepts both shapes
+// — the email-second-factor gate is the same (the lead
+// guest's email for reservations, the booking's email
+// for single rooms).
 function lookupUrl(booking: any) {
+  const reservationRef = String(booking.reservationRef || "").trim();
+  const leadGuestEmail = String(booking.guestEmail || "").trim();
+  if (reservationRef && leadGuestEmail) {
+    return siteUrl(
+      `/my-booking?reservationRef=${encodeURIComponent(reservationRef)}&email=${encodeURIComponent(leadGuestEmail.toLowerCase())}`
+    );
+  }
   const ref = encodeURIComponent(booking.bookingRef || "");
   const token = encodeURIComponent(booking.lookupToken || "");
   if (!ref || !token) return siteUrl("/my-booking");

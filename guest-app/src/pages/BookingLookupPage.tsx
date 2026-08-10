@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { GUEST_CANCELLABLE_STATUSES, resolvePaymentMethodLabel, scaleIn } from "@spark-inn/shared";
+import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn } from "@spark-inn/shared";
 import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
 import config from "@config";
 import { db } from "../firebase/config";
@@ -409,7 +409,28 @@ export function BookingLookupPage() {
   // field is omitted from the request body. The server
   // picks the token-vs-email query path based on which
   // is supplied.
-  const performLookup = async (bookingRef: string, guestEmail?: string, token?: string) => {
+  //
+  // Per #209 (RFO-01 reservation-lookup surface,
+  // 2026-08-10): the lookup also accepts a
+  // `reservationRef` (R-YYYYMMDD-NNNNN). When the
+  // deep-link / form routes through a reservation ref,
+  // the email field is required (the server verifies
+  // it against `reservation.leadGuestEmail`; a bare
+  // R- ref is not enough to enumerate reservations).
+  // The dispatch priority is most-specific-first
+  // (mirrors the server's `handleLookupBooking`):
+  //   reservationRef + email → reservation-scope path
+  //   ref + token            → magic-link path (H2)
+  //   ref + email            → ref+email path
+  //   ref alone              → ref-only path
+  //   email alone            → picker / single card
+  //   token alone            → magic-link w/o ref
+  const performLookup = async (
+    bookingRef: string,
+    guestEmail?: string,
+    token?: string,
+    reservationRef?: string
+  ) => {
     setCompletedCancellationPreview(null);
     setIsSearching(true);
     setSearchError("");
@@ -442,10 +463,51 @@ export function BookingLookupPage() {
       const payload: Record<string, string> = {
         turnstileToken
       };
-      if (bookingRef) {
+      // Per #209: the reservation-scope dispatch takes
+      // priority over the per-child ref path. The server
+      // reads the `reservationRef` key first (see
+      // `handleLookupBooking`), and the MRB-09 emails
+      // carry `?reservationRef=…&email=…` so the guest
+      // can paste the public identifier from the email
+      // subject into /my-booking without a magic link.
+      if (reservationRef) {
+        payload.reservationRef = reservationRef;
+        if (guestEmail) {
+          payload.guestEmail = guestEmail;
+          setLookupAuthMode("email");
+          setActiveLookupToken("");
+        } else if (token) {
+          // The server also accepts a per-child
+          // lookupToken on the reservation path (the
+          // first child's token is the email footer's
+          // magic link). Keep the auth mode as "token"
+          // so the cancel + resend re-uses the token.
+          payload.token = token;
+          setLookupAuthMode("token");
+          setActiveLookupToken(token);
+        } else {
+          // No second factor — the server will 400 with
+          // "Please provide your booking email or
+          // lookup token along with the reservation
+          // reference." Surface the same copy locally
+          // so a guest who arrived via the R--only
+          // deep link (e.g. a screenshot of the email
+          // subject) sees the right next step.
+          setLookupAuthMode("email");
+          setActiveLookupToken("");
+        }
+      } else if (bookingRef) {
         payload.bookingRef = bookingRef;
-      }
-      if (token) {
+        if (token) {
+          payload.token = token;
+          setLookupAuthMode("token");
+          setActiveLookupToken(token);
+        } else if (guestEmail) {
+          payload.guestEmail = guestEmail;
+          setLookupAuthMode("email");
+          setActiveLookupToken("");
+        }
+      } else if (token) {
         payload.token = token;
         setLookupAuthMode("token");
         setActiveLookupToken(token);
@@ -588,6 +650,16 @@ export function BookingLookupPage() {
   };
 
   useEffect(() => {
+    // Per #209 (RFO-01 reservation-lookup surface,
+    // 2026-08-10): the deep-link now also accepts a
+    // `reservationRef` (R-YYYYMMDD-NNNNN) for the
+    // MRB-09 reservation-scope emails. Priority is
+    // reservation-scope first (the email subject
+    // carries the R- ref; the email is the public
+    // identifier the guest is most likely to paste
+    // into the form), then the legacy `?ref=…&token=…`
+    // / `?ref=…&email=…` paths.
+    const reservationRef = searchParams.get("reservationRef");
     const ref = searchParams.get("ref");
     // Per H2 (hardening batch 2026-06-26): the deep-link
     // now carries `?token=<lookupToken>` (set by the
@@ -596,20 +668,44 @@ export function BookingLookupPage() {
     // backward compat with any old in-flight links.
     const token = searchParams.get("token");
     const email = searchParams.get("email");
-    if (!ref) return;
-    if (!token && !email) return;
+    if (!reservationRef && !ref) return;
+    // The reservation-scope path requires a credential
+    // (email or token). Without it the server returns
+    // 400 — we still render the form so the guest can
+    // fill in the missing piece rather than showing a
+    // blank page with a hard error.
+    if (reservationRef && !token && !email) return;
+    if (!reservationRef && !token && !email) return;
     // Per BI-02/BI-03: the magic-link auto-lookup must wait for the
     // Turnstile widget to issue a token — the lookup endpoint is
     // gated for real now. The effect re-runs when the token arrives
     // (deps below); the signature guard keeps it single-fire.
     if (!turnstileToken) return;
-    const signature = `${ref}::${token || email || ""}`;
+    const activeRef = reservationRef || ref || "";
+    const signature = `${activeRef}::${token || email || ""}`;
     if (lastAutoLookupSignatureRef.current === signature) return;
     lastAutoLookupSignatureRef.current = signature;
-    setRefInput(ref);
+    // Pre-fill the visible form so a deep-link
+    // landing still shows the guest what was used
+    // (the form stays mounted; the search form is
+    // hidden when the result card is the active
+    // view, per decision #130).
+    if (reservationRef) {
+      setRefInput(reservationRef);
+    } else if (ref) {
+      setRefInput(ref);
+    }
     if (email) setEmailInput(email);
     setHasSearched(true);
-    void performLookup(ref, email || undefined, token || undefined);
+    if (reservationRef) {
+      void performLookup("", email || undefined, token || undefined, reservationRef);
+    } else {
+      // The early `return` above guarantees `ref` is
+      // non-null when we reach this branch (we returned
+      // when both `reservationRef` and `ref` were empty),
+      // so the `?? ""` is purely for the typecheck.
+      void performLookup(ref ?? "", email || undefined, token || undefined);
+    }
   }, [searchParams, turnstileToken]);
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -629,6 +725,34 @@ export function BookingLookupPage() {
     const trimmedEmail = emailInput.trim();
     if (!trimmedRef && !trimmedEmail) {
       setSearchError("Please enter your booking reference or the email you used to book.");
+      return;
+    }
+    // Per #209 (RFO-01 reservation-lookup surface,
+    // 2026-08-10): the form's ref field accepts BOTH a
+    // per-child booking ref (SI-YYYYMMDD-NNNNN) AND a
+    // reservation ref (R-YYYYMMDD-NNNNN). The two share
+    // the same field so the guest doesn't have to know
+    // which one they have — they paste the public
+    // identifier from the email subject and the page
+    // routes to the right server path.
+    //
+    // The reservation-scope path requires a second
+    // factor (the lead guest's email) so an attacker
+    // can't enumerate reservations by guessing R- refs.
+    // The legacy per-child paths still allow ref-alone
+    // (the rate limit + Turnstile + 3-failure 1-hour
+    // backoff are the load-bearing defenses for the
+    // ~100k/day per-property namespace).
+    if (trimmedRef && RESERVATION_REF_REGEX.test(trimmedRef)) {
+      if (!trimmedEmail) {
+        setSearchError(
+          "Please enter the email you used to book alongside the reservation reference."
+        );
+        return;
+      }
+      setSearchError("");
+      setHasSearched(true);
+      await performLookup("", trimmedEmail, undefined, trimmedRef);
       return;
     }
     setSearchError("");
@@ -1049,10 +1173,10 @@ export function BookingLookupPage() {
 
             <form onSubmit={handleSearch} className="mt-8 space-y-5">
               <label className="grid gap-2 text-sm font-medium text-gray-700">
-                Booking Reference
+                Booking or Reservation Reference
                 <input
                   type="text"
-                  placeholder="e.g. SI-20260612-042"
+                  placeholder="e.g. SI-20260612-042 or R-20260815-00012"
                   value={refInput}
                   onChange={(e) => setRefInput(e.target.value)}
                   disabled={isSearching}
