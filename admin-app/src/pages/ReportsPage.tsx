@@ -426,6 +426,42 @@ export function ReportsPage() {
     [bookings]
   );
 
+  // Per MED-1 / MED-2 / LOW-2 (reports audit 2026-08-10):
+  // the room-hold set includes every status where the
+  // create / convert-inquiry / add-room transaction has
+  // reserved the room. `pending` + `payment-uploaded`
+  // bookings DO hold the room — the create transaction's
+  // availability check prevents a double-booking on the
+  // same dates — so the occupancy + acquisition widgets
+  // must include them. The revenue widgets stay narrow
+  // (revenue is a cash-side metric, not a room-hold metric).
+  //
+  // Per DECISIONS-FEATURES.md #99 + `plan/features/CORPORATE-BOOKING.md`:
+  // a corporate chargeback lands as `pending` +
+  // `paymentMethod: "pay-at-hotel"` and stays pending
+  // until the LOU workflow resolves it (can be weeks).
+  // The pre-fix receivables filter excluded `pending`,
+  // so a corporate chargeback was invisible to the
+  // "Corporate AR" card and the by-company list until
+  // staff manually flipped the status (a step the spec
+  // doesn't actually require — the LOU flag is the
+  // canonical signal, but the field is unwired so
+  // status-bumping is the current workaround). Same
+  // bookings were also missing from the occupancy chart.
+  // The fix broadens the room-hold set so the room
+  // count + the AR aging reflect the real booked state.
+  const roomHoldBookings = useMemo(() =>
+    bookings.filter(b =>
+      b.status === "pending" ||
+      b.status === "payment-uploaded" ||
+      b.status === "payment-confirmed" ||
+      b.status === "confirmed" ||
+      b.status === "checked-in" ||
+      b.status === "checked-out"
+    ),
+    [bookings]
+  );
+
   const rangeBookings = useMemo(() => {
     return revenueBookings.filter(b => {
       const checkInKey = reportDateKey(b.checkIn);
@@ -453,11 +489,20 @@ export function ReportsPage() {
     });
   }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey, payments]);
 
-  // ── Occupancy-eligible bookings (same as rangeBookings but includes future unpaid confirmed bookings) ──
-  // Future confirmed bookings with no payments recorded are excluded from revenue (correct)
-  // but counted for occupancy and acquisition metrics since the room is still reserved.
+  // ── Occupancy-eligible bookings (every room-holding status) ──
+  // Per MED-2 (reports audit 2026-08-10): the room is held
+  // by the create transaction regardless of payment status,
+  // so occupancy + acquisition must include `pending` and
+  // `payment-uploaded` bookings. The pre-fix path derived
+  // `occupancyBookings` from `revenueBookings` (which
+  // intentionally excludes those statuses for cash-side
+  // accuracy) — a corporate chargeback that stayed
+  // `pending` for weeks while the LOU was processed was
+  // missing from the room-type occupancy chart AND the
+  // acquisition / booking-source chart, skewing the
+  // period forecast.
   const occupancyBookings = useMemo(() => {
-    return revenueBookings.filter(b => {
+    return roomHoldBookings.filter(b => {
       const checkInKey = reportDateKey(b.checkIn);
       const checkOutKey = reportDateKey(b.checkOut);
       if (!checkInKey || !checkOutKey) return false;
@@ -476,7 +521,7 @@ export function ReportsPage() {
 
       return true;
     });
-  }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey]);
+  }, [roomHoldBookings, periodStartKey, periodEndKey, hotelTodayKey]);
 
   const rangeStoreOrders = useMemo(
     () => storeOrders.filter(o => isWithinSelectedRange(o.status === "delivered" ? (o.deliveredAt || o.createdAt) : o.createdAt)),
@@ -639,7 +684,47 @@ export function ReportsPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return bookings
-      .filter((booking) => ["confirmed", "payment-confirmed", "checked-in", "checked-out"].includes(booking.status))
+      // Per MED-1 / LOW-2 (reports audit 2026-08-10): the
+      // receivables filter now includes the two missing
+      // pre-confirmation corporate cases that hold a
+      // receivable.
+      //
+      //   - `status: "pending" + isCorporate + paymentMethod === "pay-at-hotel"`
+      //     — a corporate chargeback that hasn't received
+      //     the LOU yet (per DECISIONS-FEATURES.md #99 +
+      //     CORPORATE-BOOKING.md §LOU). Stays `pending` for
+      //     the entire LOU-processing window (days/weeks);
+      //     the pre-fix filter dropped it from the
+      //     "Corporate AR" card.
+      //   - `status: "payment-uploaded" + isCorporate`
+      //     — a corporate personal-pay booking with a
+      //     receipt uploaded, awaiting staff verification.
+      //     A real AR until staff flips the status via
+      //     "Verify & Record Payment".
+      //
+      // Non-corporate `pending` + `pay-at-hotel` (a
+      // walk-in guest who hasn't arrived yet) and
+      // non-corporate `payment-uploaded` (a personal-pay
+      // guest with a receipt to verify) are excluded —
+      // they're not "owed money" in the same way:
+      // - the walk-in will pay on arrival (the staff
+      //   collects at the desk, no AR),
+      // - the personal-pay `payment-uploaded` is
+      //   individually verified via "Verify & Record
+      //   Payment" (the desk can see it in the pending
+      //   payments alert, not in the AR aging list).
+      .filter((booking) => {
+        if (["confirmed", "payment-confirmed", "checked-in", "checked-out"].includes(booking.status)) {
+          return true;
+        }
+        if (booking.status === "pending" && booking.isCorporate === true && booking.paymentMethod === "pay-at-hotel") {
+          return true;
+        }
+        if (booking.status === "payment-uploaded" && booking.isCorporate === true) {
+          return true;
+        }
+        return false;
+      })
       .map((booking) => {
         const bookingCharges = charges.filter((charge) => charge.bookingId === booking.id).reduce((sum, charge) => sum + charge.amount, 0);
         const addToBillTotal = storeOrders
