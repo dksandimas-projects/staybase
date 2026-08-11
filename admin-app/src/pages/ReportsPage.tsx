@@ -233,6 +233,23 @@ export function ReportsPage() {
   // pay-per-read Firestore traffic).
   const [rawCharges, setRawCharges] = useState<RawReportCharge[]>([]);
   const [rawPayments, setRawPayments] = useState<RawReportPayment[]>([]);
+  // Per MRB-04 Phase 2.x (2026-08-02, per decision #159):
+  // new-reservation refunds live at
+  // `reservations/{id}/refunds/{refundId}` — a SEPARATE
+  // subcollection from `bookings/{id}/payments/`. The
+  // `payments` collectionGroup subscription below only
+  // catches the legacy path (refunds written to
+  // `bookings/{id}/payments/{refundId}` as negative
+  // entries). The `refunds` collectionGroup subscription
+  // catches the new path. Both merge into the same
+  // `payments` array via the useMemo at line ~368 so
+  // `refundsTotal` + the per-method breakdown + the
+  // Daily Close ledger + receivables all see every
+  // refund. Firestore rules already grant
+  // `collectionGroup(db, "refunds")` read to staff
+  // (RPT-03, `firestore.rules:475`) — `LiabilityTab`
+  // uses the same subscription.
+  const [rawRefunds, setRawRefunds] = useState<RawReportPayment[]>([]);
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [dailyCloses, setDailyCloses] = useState<any[]>([]);
@@ -321,6 +338,57 @@ export function ReportsPage() {
     return unsubscribe;
   }, [toast]);
 
+  // Per MRB-04 Phase 2.x: subscribe to the `refunds`
+  // collectionGroup so new-reservation refunds
+  // (`reservations/{id}/refunds/{refundId}`) are
+  // visible to the Refunds KPI + per-method breakdown
+  // + Daily Close ledger. The subscription mirrors the
+  // shape the `payments` collectionGroup mapper uses
+  // (line ~290) so the merge into `payments` below is
+  // a no-op for the consumer. The record's
+  // `data.bookingId` is stamped at write time
+  // (`bookings.ts:7617`) so the
+  // `bookingDisplayById.get(bookingId)` lookup
+  // resolves the bookingRef for the display. The
+  // `data.bookingId` fallback to the path's parent
+  // (the reservationId) only fires if a future write
+  // path drops the stamp — current production data
+  // has it on every new-reservation refund.
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "refunds"), (snapshot) => {
+      setRawRefunds(snapshot.docs.map((refundDoc) => {
+        const data = refundDoc.data();
+        const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
+        const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
+        const bookingId = isReservationRefund
+          ? String(data.bookingId || parentDocumentId)
+          : parentDocumentId;
+        return {
+          id: refundDoc.id,
+          type: "refund",
+          source: "booking",
+          sourceId: bookingId,
+          bookingId,
+          bookingRef: "",
+          roomNumber: "",
+          guestName: "",
+          amount: Number(data.amount || 0),
+          method: String(data.method || "unknown"),
+          transactionReference: data.transactionReference ? String(data.transactionReference) : null,
+          note: String(data.note || ""),
+          reason: data.reason ? String(data.reason) : null,
+          approvedBy: data.approvedBy ? String(data.approvedBy) : null,
+          recordedBy: String(data.recordedBy || "staff"),
+          recordedAt: toDate(data.recordedAt)
+        };
+      }));
+    }, (error) => {
+      console.error("Failed to load refund ledger:", error);
+      toast.error("Could not load refunds", "Collections totals remain available. Refresh to try again.");
+    });
+    return unsubscribe;
+  }, [toast]);
+
   useEffect(() => {
     const unsubscribe = onSnapshot(
       query(collection(db, "dailyCloses"), orderBy("closedAt", "desc")),
@@ -366,7 +434,20 @@ export function ReportsPage() {
   );
 
   const payments = useMemo<ReportPayment[]>(() =>
-    rawPayments.map((payment) => {
+    // Merge the `payments` collectionGroup (legacy
+    // refunds + all payments) with the `refunds`
+    // collectionGroup (new-reservation refunds, per
+    // MRB-04 Phase 2.x). Both arrays carry the same
+    // `ReportPayment` shape so the display resolution
+    // below is uniform — `refundsTotal` + the
+    // per-method breakdown + the Daily Close ledger +
+    // receivables all pick up the new-reservation
+    // refunds automatically. The `rawRefunds` rows
+    // arrive with `bookingId` set (from
+    // `data.bookingId` stamped at write time), so the
+    // `bookingDisplayById.get(bookingId)` lookup
+    // resolves every row.
+    [...rawPayments, ...rawRefunds].map((payment) => {
       if (payment.source === "store-order") {
         return payment;
       }
@@ -378,7 +459,7 @@ export function ReportsPage() {
         guestName: display?.guestName || ""
       };
     }),
-    [rawPayments, bookingDisplayById]
+    [rawPayments, rawRefunds, bookingDisplayById]
   );
 
   const chartColors = [
@@ -1347,6 +1428,49 @@ export function ReportsPage() {
           console.error(`Failed to export payments for booking ${b.id}:`, error);
         }
       }));
+
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision
+      // #159): new-reservation refunds live at
+      // `reservations/{id}/refunds/{refundId}` — a
+      // SEPARATE subcollection from the booking's
+      // `payments/`. The per-booking loop above only
+      // catches the legacy path (refunds as
+      // negative-amount entries on
+      // `bookings/{id}/payments/`). The refunds
+      // collectionGroup read below catches the new
+      // path. Same row shape as the legacy refund
+      // rows — `Type: "refund"`, `Amount` negative, the
+      // rest of the columns identical. The record
+      // carries `data.bookingId` (stamped at write
+      // time per `bookings.ts:7617`) so the
+      // `bookings.find(...)` lookup resolves the
+      // bookingRef for the spreadsheet cell. Falls
+      // back to the path's parent (the reservationId)
+      // if a future write path drops the stamp —
+      // current production data has it on every
+      // new-reservation refund.
+      const allRefundsSnap = await getDocs(collectionGroup(db, "refunds"));
+      allRefundsSnap.forEach((refundDoc) => {
+        const data = refundDoc.data();
+        const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
+        const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
+        const bookingId = isReservationRefund
+          ? String(data.bookingId || parentDocumentId)
+          : parentDocumentId;
+        const booking = bookings.find((item) => item.id === bookingId);
+        paymentRows.push({
+          "Booking Ref": booking?.bookingRef || bookingId,
+          Type: "refund",
+          Amount: Number(data.amount || 0),
+          Method: data.method || "",
+          "Transaction Reference": data.transactionReference || "",
+          Note: data.note || "",
+          Reason: data.reason || "",
+          "Approved By": data.approvedBy || "",
+          "Recorded By": data.recordedBy || "",
+          "Recorded At": toDate(data.recordedAt)?.toISOString() || ""
+        });
+      });
 
       const allChargesSnap = await getDocs(collectionGroup(db, "charges"));
       allChargesSnap.forEach((chargeDoc) => {
