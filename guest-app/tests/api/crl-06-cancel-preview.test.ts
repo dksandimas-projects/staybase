@@ -287,6 +287,96 @@ describe("CRL-06 — `handleCancelPreview` is exported from the bookings handler
       /const preview = evaluateCancelPreview\(\{[\s\S]*?scope: requestedScope,[\s\S]*?reservationNetCollected,[\s\S]*?allocationSubtotal\s*\}/
     );
   });
+
+  // Per CRL-06 fix (2026-08-11, decision #184): the
+  // snapshot-fallback chain. At booking creation the
+  // snapshot is written to the RESERVATION header, not
+  // to the child booking. The preview handler used to
+  // read the child's snapshot directly and pass `null`
+  // to the helper when missing — the helper then
+  // fell through to `checkInMs = Date.now()` and every
+  // beyond-cutoff cancel reported "0.0 hours before
+  // check-in" with a 0% refund. The fallback chain
+  // is: child's own snapshot, then the reservation
+  // header's snapshot, then (for legacy no-
+  // `reservationId` bookings) a synthesized legacy
+  // snapshot from the booking's own `checkIn` field.
+  it("falls back to the reservation header's snapshot when the child's snapshot is null (CRL-06 fix, decision #184)", () => {
+    const handlerBody = handlerSrc.match(
+      /export async function handleCancelPreview\(req: any, res: any\) \{[\s\S]*?\n\}/
+    );
+    expect(handlerBody, "expected the handler body").toBeTruthy();
+    // The reservation-scope cancellable-children branch
+    // must use the `||` chain with the in-scope
+    // `reservationCancellationPolicySnapshot` constant.
+    expect(handlerBody![0]).toMatch(
+      /cancellationPolicySnapshot:\s*\n?\s*data\.cancellationPolicySnapshot \|\| reservationCancellationPolicySnapshot/
+    );
+    // The `reservationCancellationPolicySnapshot`
+    // constant is read from the reservation header.
+    expect(handlerBody![0]).toMatch(
+      /reservationCancellationPolicySnapshot\s*=\s*\n?\s*reservationSnapshot\.cancellationPolicySnapshot \|\| null/
+    );
+  });
+
+  it("synthesizes a legacy-default snapshot from `bookingData.checkIn` when the booking has no `reservationId` (CRL-06 fix, decision #184)", () => {
+    // The legacy pre-MRB-01 case (no `reservationId`)
+    // has no reservation header to fall back to and
+    // no snapshotted policy on the booking doc. The
+    // fix synthesizes a legacy-default snapshot from
+    // the booking's own `checkIn` Timestamp so the
+    // helper's time math uses the real check-in date
+    // (not `Date.now()`).
+    const handlerBody = handlerSrc.match(
+      /export async function handleCancelPreview\(req: any, res: any\) \{[\s\S]*?\n\}/
+    );
+    expect(handlerBody, "expected the handler body").toBeTruthy();
+    // The synthesized snapshot carries the 48/100/0
+    // legacy defaults + the booking's own check-in
+    // instant as `scheduledCheckInTime`.
+    expect(handlerBody![0]).toMatch(
+      /cutoffHours:\s*48,\s*\n?\s*refundPctBefore:\s*100,\s*\n?\s*refundPctAfter:\s*0/
+    );
+    expect(handlerBody![0]).toMatch(/source:\s*"legacy-fallback"/);
+  });
+});
+
+describe("CRL-07 fix (2026-08-11, decision #184) — destructive cancel uses the same snapshot fallback chain", () => {
+  // The destructive-cancel handler computes the
+  // liability snapshot from the same per-child
+  // `cancellationPolicySnapshot`. Without the
+  // reservation-header fallback, a paid booking
+  // cancelled >48h out silently produces
+  // `policyRefund: 0` and skips the staff refund
+  // workflow — the production-risk path.
+  it("the reservation-scope branch falls back to the reservation header's snapshot", () => {
+    const handlerBody = handlerSrc.match(
+      /if \(isReservationScope\) \{[\s\S]*?const liabilitySnapshot = await computeCancellationLiabilityInTransaction/
+    );
+    expect(handlerBody, "expected the reservation-scope liability branch").toBeTruthy();
+    expect(handlerBody![0]).toMatch(
+      /reservationCancellationPolicySnapshotForLiability\s*=\s*\n?\s*\(reservationData && reservationData\.cancellationPolicySnapshot\) \|\| null/
+    );
+    expect(handlerBody![0]).toMatch(
+      /cancellationPolicySnapshot:\s*\n?\s*c\.data\.cancellationPolicySnapshot \|\| reservationCancellationPolicySnapshotForLiability/
+    );
+  });
+
+  it("the per-child branch reads the reservation header for the snapshot fallback", () => {
+    // The per-child branch (scope === "room") also
+    // needs the fallback — the booking's own snapshot
+    // is null in the current write shape. The fix
+    // reads the reservation header inside the same
+    // transaction + synthesizes a legacy snapshot for
+    // null-`reservationId` bookings.
+    const handlerBody = handlerSrc.match(
+      /const bookingReservationIdForLiability = String\(freshBooking\.reservationId \|\| ""\)\.trim\(\);[\s\S]*?const liabilitySnapshot = await computeCancellationLiabilityInTransaction/
+    );
+    expect(handlerBody, "expected the per-child liability branch").toBeTruthy();
+    expect(handlerBody![0]).toMatch(/perChildReservationCancellationPolicySnapshot/);
+    expect(handlerBody![0]).toMatch(/perChildLegacyFallbackSnapshot/);
+    expect(handlerBody![0]).toMatch(/perChildEffectiveSnapshot/);
+  });
 });
 
 describe("CRL-06 — the apiRouter wires the preview route with rate limit + staff auth", () => {

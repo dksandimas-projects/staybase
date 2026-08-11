@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.9";
+    VERSION2 = "0.266.10";
   }
 });
 
@@ -230691,6 +230691,7 @@ async function handleCancelBooking(req, res) {
           cancellableIds.add(child.id);
         }
         const cancelledCount = cancellableIds.size;
+        const reservationCancellationPolicySnapshotForLiability = reservationData && reservationData.cancellationPolicySnapshot || null;
         const cancellableChildren = children.filter((c2) => cancellableIds.has(c2.id)).map((c2) => ({
           id: c2.id,
           bookingRef: String(c2.data.bookingRef || ""),
@@ -230698,7 +230699,7 @@ async function handleCancelBooking(req, res) {
           roomType: String(c2.data.roomType || ""),
           totalPrice: Number(c2.data.totalPrice) || 0,
           reservationPosition: Number(c2.data.reservationPosition) || null,
-          cancellationPolicySnapshot: c2.data.cancellationPolicySnapshot || null
+          cancellationPolicySnapshot: c2.data.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
         }));
         const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
           transaction,
@@ -230712,7 +230713,7 @@ async function handleCancelBooking(req, res) {
               roomType: String(bookingData2.roomType || ""),
               totalPrice: Number(bookingData2.totalPrice) || 0,
               reservationPosition: Number(bookingData2.reservationPosition) || null,
-              cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
             },
             reservation: {
               id: lookedUpReservationId,
@@ -230851,6 +230852,23 @@ async function handleCancelBooking(req, res) {
           }
         }
         const bookingReservationIdForLiability = String(freshBooking.reservationId || "").trim();
+        let perChildReservationCancellationPolicySnapshot = null;
+        if (bookingReservationIdForLiability.length > 0) {
+          const perChildReservationRef = adminDb.collection("reservations").doc(bookingReservationIdForLiability);
+          const perChildReservationDoc = await transaction.get(perChildReservationRef);
+          if (perChildReservationDoc.exists) {
+            perChildReservationCancellationPolicySnapshot = (perChildReservationDoc.data() || {}).cancellationPolicySnapshot || null;
+          }
+        }
+        const perChildLegacyFallbackSnapshot = !bookingReservationIdForLiability && freshBooking.checkIn ? {
+          cutoffHours: 48,
+          refundPctBefore: 100,
+          refundPctAfter: 0,
+          policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+          scheduledCheckInTime: (freshBooking.checkIn.toDate ? freshBooking.checkIn.toDate() : new Date(freshBooking.checkIn)).toISOString(),
+          source: "legacy-fallback"
+        } : null;
+        const perChildEffectiveSnapshot = freshBooking.cancellationPolicySnapshot || perChildReservationCancellationPolicySnapshot || perChildLegacyFallbackSnapshot;
         const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
           transaction,
           {
@@ -230863,7 +230881,7 @@ async function handleCancelBooking(req, res) {
               roomType: String(freshBooking.roomType || ""),
               totalPrice: Number(freshBooking.totalPrice) || 0,
               reservationPosition: Number(freshBooking.reservationPosition) || null,
-              cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot: perChildEffectiveSnapshot
             },
             // For per-child cancel, the helper needs
             // the reservation context (the folio read
@@ -230884,7 +230902,7 @@ async function handleCancelBooking(req, res) {
               roomType: String(freshBooking.roomType || ""),
               totalPrice: Number(freshBooking.totalPrice) || 0,
               reservationPosition: Number(freshBooking.reservationPosition) || null,
-              cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot: perChildEffectiveSnapshot
             }]
           }
         );
@@ -231084,6 +231102,7 @@ async function handleCancelPreview(req, res) {
         reservationRef: String(reservationSnapshot.reservationRef || ""),
         totalPrice: Number(reservationSnapshot.totalPrice) || 0
       };
+      const reservationCancellationPolicySnapshot2 = reservationSnapshot.cancellationPolicySnapshot || null;
       const eligibleChildren = childrenSnap.docs.map((d) => {
         const data = d.data() || {};
         const status = String(data.status || "");
@@ -231098,7 +231117,7 @@ async function handleCancelPreview(req, res) {
           roomType: String(data.roomType || ""),
           totalPrice: Number(data.totalPrice) || 0,
           reservationPosition: Number(data.reservationPosition) || null,
-          cancellationPolicySnapshot: data.cancellationPolicySnapshot || null
+          cancellationPolicySnapshot: data.cancellationPolicySnapshot || reservationCancellationPolicySnapshot2
         };
       }).filter(Boolean);
       allocationSubtotal = eligibleChildren.reduce(
@@ -231107,6 +231126,14 @@ async function handleCancelPreview(req, res) {
       );
       cancellableChildren = isReservationScope ? eligibleChildren : eligibleChildren.filter((child) => child.id === bookingDocumentRef.id);
     } else {
+      const legacyFallbackSnapshot = bookingData2.checkIn ? {
+        cutoffHours: 48,
+        refundPctBefore: 100,
+        refundPctAfter: 0,
+        policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+        scheduledCheckInTime: (bookingData2.checkIn.toDate ? bookingData2.checkIn.toDate() : new Date(bookingData2.checkIn)).toISOString(),
+        source: "legacy-fallback"
+      } : null;
       cancellableChildren = [{
         id: bookingDocumentRef.id,
         bookingRef: String(bookingData2.bookingRef || ""),
@@ -231114,7 +231141,7 @@ async function handleCancelPreview(req, res) {
         roomType: String(bookingData2.roomType || ""),
         totalPrice: Number(bookingData2.totalPrice) || 0,
         reservationPosition: Number(bookingData2.reservationPosition) || null,
-        cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+        cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || legacyFallbackSnapshot
       }];
     }
     let reservationNetCollected = 0;
@@ -231137,6 +231164,14 @@ async function handleCancelPreview(req, res) {
         0
       );
     }
+    const legacyFallbackSnapshotForAnchor = !hasReservation && bookingData2.checkIn ? {
+      cutoffHours: 48,
+      refundPctBefore: 100,
+      refundPctAfter: 0,
+      policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+      scheduledCheckInTime: (bookingData2.checkIn.toDate ? bookingData2.checkIn.toDate() : new Date(bookingData2.checkIn)).toISOString(),
+      source: "legacy-fallback"
+    } : null;
     const lookedUpBookingForHelper = {
       id: bookingDocumentRef.id,
       bookingRef: String(bookingData2.bookingRef || ""),
@@ -231144,7 +231179,7 @@ async function handleCancelPreview(req, res) {
       roomType: String(bookingData2.roomType || ""),
       totalPrice: Number(bookingData2.totalPrice) || 0,
       reservationPosition: Number(bookingData2.reservationPosition) || null,
-      cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+      cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || (hasReservation ? reservationCancellationPolicySnapshot : legacyFallbackSnapshotForAnchor)
     };
     const preview = evaluateCancelPreview({
       scope: requestedScope,

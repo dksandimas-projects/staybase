@@ -5804,6 +5804,20 @@ export async function handleCancelBooking(req: any, res: any) {
         // snapshot is `null` when `policyRefund === 0`
         // (no liability work to do) and the field is
         // simply absent from the header update.
+        // Per CRL-07 fix (2026-08-11, decision #184): the
+        // snapshot fallback chain — child booking's own
+        // snapshot, then the reservation header's. Without
+        // the reservation fallback, every child whose
+        // booking doc has no snapshot (the current state
+        // — snapshots are written to the reservation
+        // header at create time, not the child) produces
+        // `policyRefund: 0` for any beyond-cutoff cancel,
+        // silently swallowing the guest's refund. The
+        // header's snapshot is the canonical source for
+        // the whole reservation, so we use it here. Same
+        // fix lives in `handleCancelPreview`.
+        const reservationCancellationPolicySnapshotForLiability =
+          (reservationData && reservationData.cancellationPolicySnapshot) || null;
         const cancellableChildren = children
           .filter((c) => cancellableIds.has(c.id))
           .map((c) => ({
@@ -5813,7 +5827,8 @@ export async function handleCancelBooking(req: any, res: any) {
             roomType: String(c.data.roomType || ""),
             totalPrice: Number(c.data.totalPrice) || 0,
             reservationPosition: Number(c.data.reservationPosition) || null,
-            cancellationPolicySnapshot: c.data.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot:
+              c.data.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
           }));
         const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
           transaction,
@@ -5827,7 +5842,8 @@ export async function handleCancelBooking(req: any, res: any) {
               roomType: String(bookingData.roomType || ""),
               totalPrice: Number(bookingData.totalPrice) || 0,
               reservationPosition: Number(bookingData.reservationPosition) || null,
-              cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot:
+                bookingData.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
             },
             reservation: {
               id: lookedUpReservationId,
@@ -6060,7 +6076,43 @@ export async function handleCancelBooking(req: any, res: any) {
       // (the header has no liability field on a
       // per-child cancel — the cancelled child
       // carries the snapshot).
+      // Per CRL-07 fix (2026-08-11, decision #184): the
+      // per-child branch also needs the reservation
+      // header snapshot as a fallback. The booking's
+      // own `cancellationPolicySnapshot` is null in the
+      // current write shape (the snapshot lives on the
+      // reservation), so we read the header here. If
+      // the header exists, use its snapshot; otherwise
+      // (legacy null-`reservationId`) synthesize a
+      // legacy-default snapshot from the booking's own
+      // `checkIn` field — same fix as in
+      // `handleCancelPreview`.
       const bookingReservationIdForLiability = String(freshBooking.reservationId || "").trim();
+      let perChildReservationCancellationPolicySnapshot: any = null;
+      if (bookingReservationIdForLiability.length > 0) {
+        const perChildReservationRef = adminDb.collection("reservations").doc(bookingReservationIdForLiability);
+        const perChildReservationDoc = await transaction.get(perChildReservationRef);
+        if (perChildReservationDoc.exists) {
+          perChildReservationCancellationPolicySnapshot =
+            (perChildReservationDoc.data() || {}).cancellationPolicySnapshot || null;
+        }
+      }
+      const perChildLegacyFallbackSnapshot = !bookingReservationIdForLiability && freshBooking.checkIn
+        ? {
+            cutoffHours: 48,
+            refundPctBefore: 100,
+            refundPctAfter: 0,
+            policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+            scheduledCheckInTime: (freshBooking.checkIn.toDate
+              ? freshBooking.checkIn.toDate()
+              : new Date(freshBooking.checkIn)).toISOString(),
+            source: "legacy-fallback" as const
+          }
+        : null;
+      const perChildEffectiveSnapshot =
+        freshBooking.cancellationPolicySnapshot
+        || perChildReservationCancellationPolicySnapshot
+        || perChildLegacyFallbackSnapshot;
       const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
         transaction,
         {
@@ -6073,7 +6125,7 @@ export async function handleCancelBooking(req: any, res: any) {
             roomType: String(freshBooking.roomType || ""),
             totalPrice: Number(freshBooking.totalPrice) || 0,
             reservationPosition: Number(freshBooking.reservationPosition) || null,
-            cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot: perChildEffectiveSnapshot
           },
           // For per-child cancel, the helper needs
           // the reservation context (the folio read
@@ -6096,7 +6148,7 @@ export async function handleCancelBooking(req: any, res: any) {
             roomType: String(freshBooking.roomType || ""),
             totalPrice: Number(freshBooking.totalPrice) || 0,
             reservationPosition: Number(freshBooking.reservationPosition) || null,
-            cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot: perChildEffectiveSnapshot
           }]
         }
       );
@@ -6576,6 +6628,27 @@ export async function handleCancelPreview(req: any, res: any) {
         reservationRef: String(reservationSnapshot.reservationRef || ""),
         totalPrice: Number(reservationSnapshot.totalPrice) || 0
       };
+      // Per CRL-06 fix (2026-08-11, decision #184): at
+      // booking creation the snapshot is written to the
+      // RESERVATION header (`reservations/{id}.cancellationPolicySnapshot`),
+      // not to the child booking. The cancel-preview
+      // helper (`evaluateCancelPreview`) reads the
+      // snapshot off each child; without this fallback,
+      // a null child snapshot falls through to
+      // `checkInMs = Date.now()` (the helper's
+      // `fallbackContext.checkInDateKey` is empty
+      // string) and the time math silently reads
+      // "0.0 hours before check-in" — every
+      // beyond-cutoff cancel reports the wrong refund
+      // even though the guest's actual check-in is days
+      // away. The reservation header is the canonical
+      // source (every child under it was stamped with
+      // the same policy at create time, per CRL-05), so
+      // we fall back to it here. Same fix lives in
+      // `handleCancelBooking` (the destructive-cancel
+      // liability computation uses the same shape).
+      const reservationCancellationPolicySnapshot =
+        reservationSnapshot.cancellationPolicySnapshot || null;
       const eligibleChildren = childrenSnap.docs
         .map((d: any) => {
           const data = d.data() || {};
@@ -6605,7 +6678,8 @@ export async function handleCancelPreview(req: any, res: any) {
             roomType: String(data.roomType || ""),
             totalPrice: Number(data.totalPrice) || 0,
             reservationPosition: Number(data.reservationPosition) || null,
-            cancellationPolicySnapshot: data.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot:
+              data.cancellationPolicySnapshot || reservationCancellationPolicySnapshot
           };
         })
         .filter(Boolean) as typeof cancellableChildren;
@@ -6622,6 +6696,29 @@ export async function handleCancelPreview(req: any, res: any) {
       // single child with the looked-up booking's
       // own snapshot. The legacy null-`reservationId`
       // path is the same shape (no sibling read).
+      // Per CRL-06 fix (2026-08-11, decision #184):
+      // pre-MRB-01 bookings have no reservation
+      // header to fall back to + the booking doc itself
+      // has no snapshotted policy. Without this
+      // constructor, the helper's `fallbackContext`
+      // has `checkInDateKey: ""` and falls through to
+      // `checkInMs = Date.now()` (same 0h-readout bug
+      // as the reservation case). We synthesize a
+      // legacy-default snapshot from the booking's own
+      // `checkIn` field so the time math uses the
+      // real check-in date.
+      const legacyFallbackSnapshot = bookingData.checkIn
+        ? {
+            cutoffHours: 48,
+            refundPctBefore: 100,
+            refundPctAfter: 0,
+            policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+            scheduledCheckInTime: (bookingData.checkIn.toDate
+              ? bookingData.checkIn.toDate()
+              : new Date(bookingData.checkIn)).toISOString(),
+            source: "legacy-fallback" as const
+          }
+        : null;
       cancellableChildren = [{
         id: bookingDocumentRef.id,
         bookingRef: String(bookingData.bookingRef || ""),
@@ -6629,7 +6726,7 @@ export async function handleCancelPreview(req: any, res: any) {
         roomType: String(bookingData.roomType || ""),
         totalPrice: Number(bookingData.totalPrice) || 0,
         reservationPosition: Number(bookingData.reservationPosition) || null,
-        cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+        cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || legacyFallbackSnapshot
       }];
     }
 
@@ -6682,6 +6779,26 @@ export async function handleCancelPreview(req: any, res: any) {
     // `cancellableChildren` is the full set the
     // policy applies to (a single child for `"room"`
     // scope, N children for `"reservation"` scope).
+    // Per CRL-06 fix (2026-08-11, decision #184): the
+    // snapshot fallback chain — child booking's own
+    // snapshot, then the reservation header's, then
+    // (for legacy no-`reservationId` bookings) a
+    // synthesized legacy snapshot from the booking's
+    // `checkIn` field. The chain is in `cancellableChildren`
+    // already; we mirror it here for the anchor so the
+    // helper's policy text + cutoff source match.
+    const legacyFallbackSnapshotForAnchor = !hasReservation && bookingData.checkIn
+      ? {
+          cutoffHours: 48,
+          refundPctBefore: 100,
+          refundPctAfter: 0,
+          policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+          scheduledCheckInTime: (bookingData.checkIn.toDate
+            ? bookingData.checkIn.toDate()
+            : new Date(bookingData.checkIn)).toISOString(),
+          source: "legacy-fallback" as const
+        }
+      : null;
     const lookedUpBookingForHelper = {
       id: bookingDocumentRef.id,
       bookingRef: String(bookingData.bookingRef || ""),
@@ -6689,7 +6806,9 @@ export async function handleCancelPreview(req: any, res: any) {
       roomType: String(bookingData.roomType || ""),
       totalPrice: Number(bookingData.totalPrice) || 0,
       reservationPosition: Number(bookingData.reservationPosition) || null,
-      cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+      cancellationPolicySnapshot:
+        bookingData.cancellationPolicySnapshot
+        || (hasReservation ? reservationCancellationPolicySnapshot : legacyFallbackSnapshotForAnchor)
     };
 
     const preview = evaluateCancelPreview({
