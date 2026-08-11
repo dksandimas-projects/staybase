@@ -11,7 +11,7 @@
 // the guest has paid.
 
 import type { CancellationPreview } from "@spark-inn/shared";
-import { Info, ShieldCheck } from "lucide-react";
+import { CalendarPlus, History, Info, ShieldCheck } from "lucide-react";
 import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
 
@@ -20,13 +20,23 @@ interface CancellationPreviewPanelProps {
   isLoading?: boolean;
   error?: string | null;
   className?: string;
+  // Per CRL-08 (2026-08-11, per decision #213): the
+  // booking's "Booked on" + "Originally for" dates.
+  // Both ISO strings; `null` / undefined when the
+  // booking has never been rescheduled (the panel
+  // suppresses "Originally for" in that case). The
+  // "Booked on" line always renders when present.
+  bookedOn?: string | null;
+  originallyFor?: string | null;
 }
 
 export function CancellationPreviewPanel({
   preview,
   isLoading = false,
   error = null,
-  className
+  className,
+  bookedOn = null,
+  originallyFor = null
 }: CancellationPreviewPanelProps) {
   if (error) {
     return (
@@ -84,6 +94,42 @@ export function CancellationPreviewPanel({
           ? `Reservation ${preview.reservationRef || "—"} — ${preview.rooms?.length || 0} cancellable room${preview.rooms?.length === 1 ? "" : "s"}`
           : `Booking ${preview.bookingRef}`}
       </p>
+      {/* Per CRL-08 (2026-08-11, per decision #213):
+          the booking's "Booked on" + "Originally for"
+          metadata. The two dates make a recent reschedule
+          visible at a glance — when "Originally for" is
+          before the current stay dates, the booking was
+          moved. Rendered as a small two-line block under
+          the booking ref so the staff can see the snapshot
+          age + the original schedule before reading the
+          policy verdict. The "Originally for" line is
+          hidden when the booking has never been rescheduled
+          (the helper returns `null` in that case). */}
+      {(bookedOn || originallyFor) && (
+        <dl
+          data-testid="cancellation-preview-booking-dates"
+          className="mt-2 grid grid-cols-1 gap-1 rounded-md bg-gray-50 px-2 py-1.5 text-[10px] sm:grid-cols-2"
+        >
+          {bookedOn && (
+            <div className="flex items-center gap-1.5">
+              <CalendarPlus size={11} className="shrink-0 text-gray-500" aria-hidden="true" />
+              <dt className="font-semibold uppercase tracking-wider text-gray-500">Booked on</dt>
+              <dd className="font-medium text-gray-700" data-testid="cancellation-preview-booked-on">
+                {formatBookedOnDate(bookedOn)}
+              </dd>
+            </div>
+          )}
+          {originallyFor && (
+            <div className="flex items-center gap-1.5">
+              <History size={11} className="shrink-0 text-gray-500" aria-hidden="true" />
+              <dt className="font-semibold uppercase tracking-wider text-gray-500">Originally for</dt>
+              <dd className="font-medium text-gray-700" data-testid="cancellation-preview-originally-for">
+                {formatBookedOnDate(originallyFor)}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
 
       {/* Per-room projections (only on reservation scope). */}
       {preview.kind === "reservation" && preview.rooms && preview.rooms.length > 0 && (
@@ -196,4 +242,22 @@ export function CancellationPreviewPanel({
       </div>
     </div>
   );
+}
+
+// Per CRL-08 (2026-08-11, per decision #213): the
+// booking-date formatter. Renders the ISO string as
+// a friendly "Aug 7, 2026" label using the existing
+// `Intl.DateTimeFormat` API. The same helper is shared
+// with the admin booking drawer's "Booked on" line
+// and the guest /my-booking card; the admin panel
+// uses the local copy because the import is local to
+// the admin app + the formatting is identical.
+function formatBookedOnDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
 }

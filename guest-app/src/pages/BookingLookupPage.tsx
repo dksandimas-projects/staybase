@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BedDouble, Calendar, CalendarPlus, History, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Wallet } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -65,6 +65,15 @@ interface BookingData {
   // surfaces a reference number to guests; staff read it from
   // the admin drawer when needed.
   paymentRejectionReason?: string | null;
+  // Per CRL-08 (2026-08-11, per decision #213): the
+  // booking's "Booked on" + "Originally for" dates.
+  // Both ISO strings; `null` when the underlying
+  // date is unknown. "Originally for" is `null` when
+  // the booking has never been rescheduled — the
+  // card suppresses the "Originally for" line in
+  // that case so the surface stays clean.
+  bookedOn?: string | null;
+  originallyFor?: string | null;
 }
 
 // Per MBP / decisions #123 (2026-07-24) + #126 (2026-07-25):
@@ -144,6 +153,15 @@ interface ReservationView {
   rooms: ReservationRoom[];
   primaryBookingId: string;
   primaryBookingRef: string;
+  // Per CRL-08 (2026-08-11, per decision #213): the
+  // reservation's "Booked on" + "Originally for" dates.
+  // Both ISO strings; `null` when the underlying date
+  // is unknown. The card surfaces "Booked on" always
+  // and "Originally for" only when set (the helper
+  // returns `null` when the booking has never been
+  // rescheduled).
+  bookedOn?: string | null;
+  originallyFor?: string | null;
 }
 
 function toDateInput(value: unknown): string {
@@ -170,6 +188,29 @@ function formatStayDate(value: string) {
     day: "numeric",
     year: "numeric"
   }).format(new Date(`${value}T00:00:00`));
+}
+
+// Per CRL-08 (2026-08-11, per decision #213): the
+// booking-date label formatter for the "Booked on" /
+// "Originally for" rows. The server returns ISO
+// strings (or `null` when the date is unknown); this
+// helper turns the ISO into the same friendly
+// "Aug 7, 2026" format the existing `formatStayDate`
+// helper uses, with `timeZone: "UTC"` so the day
+// matches the stored date regardless of the viewer's
+// local timezone. Returns the original string when
+// the input is unparseable so the UI doesn't crash on
+// a malformed value.
+function formatBookedOnLabel(value: string | null | undefined): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC"
+  });
 }
 
 const RESEND_COOLDOWN_MS = 60_000;
@@ -1383,6 +1424,50 @@ export function BookingLookupPage() {
                     )}
                   </div>
 
+                  {/* Per CRL-08 (2026-08-11, per decision #213):
+                      the booking's "Booked on" + "Originally for"
+                      dates as a small footer line. "Booked on"
+                      always renders when present; "Originally for"
+                      is suppressed when the booking has never been
+                      rescheduled (the server returns `null` in that
+                      case). The two dates make a recent reschedule
+                      visible at a glance — when "Originally for" is
+                      before the current stay dates, the booking was
+                      moved. Renders as a thin row under the existing
+                      3-column "Stay dates / Room / Reservation
+                      total" grid so the timeline reads top-to-bottom
+                      in the same place the guest already looks for
+                      the booking metadata. */}
+                  {(activeBooking.bookedOn || activeBooking.originallyFor) && (
+                    <div
+                      data-testid="booking-card-booking-dates"
+                      className="mt-5 grid gap-3 border-t border-gray-100 pt-5 sm:grid-cols-2"
+                    >
+                      {activeBooking.bookedOn && (
+                        <div className="flex gap-3">
+                          <CalendarPlus className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase">Booked on</p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {formatBookedOnLabel(activeBooking.bookedOn)}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      {activeBooking.originallyFor && (
+                        <div className="flex gap-3">
+                          <History className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase">Originally for</p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {formatBookedOnLabel(activeBooking.originallyFor)}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {activeBooking.specialRequests && (
                     <div className="mt-6 border-t border-gray-100 pt-5">
                       <p className="text-xs font-semibold text-gray-500 uppercase">Special Requests</p>
@@ -1652,6 +1737,46 @@ export function BookingLookupPage() {
                     <p className="text-xs font-semibold uppercase text-gray-500">Booked under</p>
                     <p className="mt-1 font-mono text-sm font-semibold text-gray-900">{activeReservation.maskedEmail}</p>
                   </div>
+                </div>
+              )}
+
+              {/* Per CRL-08 (2026-08-11, per decision #213):
+                  the reservation's "Booked on" + "Originally for"
+                  dates as a footer line. Same shape as the
+                  single-booking card above; renders under the
+                  "Booked under" line so the timeline reads in the
+                  same place the guest already looks for the
+                  reservation metadata. "Originally for" is
+                  suppressed when the reservation has never been
+                  rescheduled (the server returns `null` in that
+                  case). */}
+              {(activeReservation.bookedOn || activeReservation.originallyFor) && (
+                <div
+                  data-testid="reservation-card-booking-dates"
+                  className="mt-5 grid gap-3 border-t border-gray-100 pt-5 sm:grid-cols-2"
+                >
+                  {activeReservation.bookedOn && (
+                    <div className="flex gap-3">
+                      <CalendarPlus className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-gray-500">Booked on</p>
+                        <p className="mt-1 text-sm font-semibold text-gray-900">
+                          {formatBookedOnLabel(activeReservation.bookedOn)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {activeReservation.originallyFor && (
+                    <div className="flex gap-3">
+                      <History className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-gray-500">Originally for</p>
+                        <p className="mt-1 text-sm font-semibold text-gray-900">
+                          {formatBookedOnLabel(activeReservation.originallyFor)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

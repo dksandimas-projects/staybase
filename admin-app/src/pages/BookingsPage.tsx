@@ -10,10 +10,12 @@ import {
   calculateSeasonalAwareRoomTotal,
   compressImageFile,
   CHECK_IN_ELIGIBLE_STATUSES,
+  getBookedOnDate,
   getCheckInReadiness,
   getLatestPaymentReference,
   getManilaDateInfo,
   getLockedManualNightlyRate,
+  getOriginallyForCheckIn,
   type BookingRateBreakdown,
   type BookingSourceConfig,
   type CancellationPreview,
@@ -169,6 +171,25 @@ function formatShortDate(value: any): string {
   const date = toDate(value);
   if (!date) return "—";
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+// Per CRL-08 (2026-08-11, per decision #213): the
+// booking-date label formatter. Renders the ISO /
+// Date / Timestamp from `getBookedOnDate` /
+// `getOriginallyForCheckIn` as a friendly
+// "Aug 7, 2026" string. The helper returns `null`
+// when the input is null/undefined or unparseable so
+// the caller can pass it straight to the drawer
+// without an extra null guard.
+function formatBookedOnLabel(value: Date | null | undefined): string | null {
+  if (!value) return null;
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null;
+  return value.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC"
+  });
 }
 
 // Per 2026-07-24 (refactor/unify-payment-reference-fields):
@@ -678,6 +699,15 @@ export function BookingsPage() {
   const [cancelPreview, setCancelPreview] = useState<CancellationPreview | null>(null);
   const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
   const [cancelPreviewError, setCancelPreviewError] = useState<string | null>(null);
+  // Per CRL-08 (2026-08-11, per decision #213): the
+  // "Booked on" + "Originally for" dates for the
+  // cancel modal's metadata line. The server returns
+  // them as ISO strings alongside the `preview`
+  // payload; `null` when the booking was never
+  // rescheduled (the panel suppresses the "Originally
+  // for" line in that case).
+  const [cancelPreviewBookedOn, setCancelPreviewBookedOn] = useState<string | null>(null);
+  const [cancelPreviewOriginallyFor, setCancelPreviewOriginallyFor] = useState<string | null>(null);
   const cancelPreviewRequestIdRef = useRef(0);
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
   const [chargeToVoid, setChargeToVoid] = useState<IncidentalCharge | null>(null);
@@ -2645,6 +2675,11 @@ export function BookingsPage() {
     // bleeds into a new session.
     setCancelPreview(null);
     setCancelPreviewError(null);
+    // Per CRL-08: drop the booked-on / originally-for
+    // siblings too so a previous session's metadata
+    // never bleeds into a new session.
+    setCancelPreviewBookedOn(null);
+    setCancelPreviewOriginallyFor(null);
   };
 
   // Per CRL-06 (2026-08-02): the cancellation preview
@@ -2678,6 +2713,11 @@ export function BookingsPage() {
       }
       if (requestId !== cancelPreviewRequestIdRef.current) return;
       setCancelPreview(data.preview);
+      // Per CRL-08: pick up the booking-date siblings
+      // from the same response. ISO strings; `null`
+      // when the booking was never rescheduled.
+      setCancelPreviewBookedOn(typeof data.bookedOn === "string" ? data.bookedOn : null);
+      setCancelPreviewOriginallyFor(typeof data.originallyFor === "string" ? data.originallyFor : null);
     } catch (err: any) {
       // Per CRL-06: the preview is best-effort. The
       // destructive cancel still proceeds (the user
@@ -2687,6 +2727,11 @@ export function BookingsPage() {
       if (requestId === cancelPreviewRequestIdRef.current) {
         setCancelPreview(null);
         setCancelPreviewError(err?.message || "Could not load the cancellation preview.");
+        // Per CRL-08: clear the booking-date siblings
+        // on error so the panel doesn't show stale
+        // metadata from a prior session.
+        setCancelPreviewBookedOn(null);
+        setCancelPreviewOriginallyFor(null);
       }
     } finally {
       if (requestId === cancelPreviewRequestIdRef.current) {
@@ -3140,6 +3185,34 @@ export function BookingsPage() {
           })
       : [b];
     if (receiptBookings.length === 0) receiptBookings.push(b);
+    // Per CRL-08 (2026-08-11, per decision #213): the
+    // receipt's "Booked on" + "Originally for" dates.
+    // For post-MRB-01 reservations the header's
+    // `checkIn` is the immutable original (per
+    // MRB-14) + the header's `createdAt` is the
+    // reservation-level creation time. For legacy
+    // pre-MRB-01 bookings (no `reservationId`) the
+    // booking's own `rescheduleHistory` carries the
+    // pre-reschedule `fromCheckIn` (the create-time
+    // original). The receipt adds the two lines to
+    // the Stay card so the printed copy matches the
+    // email + the admin drawer + the guest
+    // /my-booking card.
+    const receiptBookedOn = getBookedOnDate({
+      booking: { createdAt: (b as any).createdAt },
+      reservation: b.reservationId
+        ? reservationsMap.get(b.reservationId) as any
+        : null
+    });
+    const receiptOriginallyFor = getOriginallyForCheckIn({
+      booking: {
+        checkIn: (b as any).checkIn,
+        rescheduleHistory: (b as any).rescheduleHistory
+      },
+      reservation: b.reservationId
+        ? reservationsMap.get(b.reservationId) as any
+        : null
+    });
     const receiptReference = isReservationReceipt
       ? (b.reservationRef || b.bookingRef)
       : b.bookingRef;
@@ -3341,6 +3414,24 @@ export function BookingsPage() {
           }
           return `${nightsLabel} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}`;
         })() },
+        // Per CRL-08 (2026-08-11, per decision #213): the
+        // booking's "Booked on" + "Originally for" dates
+        // on the receipt PDF. The values are precomputed
+        // above (see `receiptBookedOn` / `receiptOriginallyFor`
+        // for the post-MRB-01 + legacy fallback chain) and
+        // passed into the Stay card so the printed receipt
+        // matches the email + the admin drawer + the guest
+        // /my-booking card. Both lines are suppressed when
+        // the underlying date is unknown (the helper
+        // returns `null` when the booking has never been
+        // rescheduled OR when the legacy pre-MRB-01 booking
+        // has no reschedule history).
+        ...(receiptBookedOn
+          ? [{ label: "Booked on", value: formatBookedOnLabel(receiptBookedOn) ?? "—" }]
+          : []),
+        ...(receiptOriginallyFor
+          ? [{ label: "Originally for", value: formatBookedOnLabel(receiptOriginallyFor) ?? "—" }]
+          : []),
         {
           label: "Rate",
           value: isReservationReceipt ? "See room allocations" : `${formatAmount(b.ratePerNight)} / night`
@@ -5158,6 +5249,37 @@ export function BookingsPage() {
               // for new bookings — see the
               // `selectedBookingLatestReference` memo above.
               latestPaymentReference={selectedBookingLatestReference}
+              // Per CRL-08 (2026-08-11, per decision #213): the
+              // booking's "Booked on" + "Originally for" dates
+              // for the metadata line. Both ISO strings
+              // formatted via the shared `getBookedOnDate` /
+              // `getOriginallyForCheckIn` helpers; the
+              // reservation header is resolved via the existing
+              // `reservationsMap` so post-MRB-01 bookings get
+              // the immutable header `checkIn` while legacy
+              // bookings fall through to the
+              // `rescheduleHistory` path. The `formatBookedOnLabel`
+              // helper turns the ISO into a "Aug 7, 2026"
+              // string for the UI.
+              bookedOnLabel={formatBookedOnLabel(
+                getBookedOnDate({
+                  booking: { createdAt: (selectedBooking as any).createdAt },
+                  reservation: selectedBooking.reservationId
+                    ? reservationsMap.get(selectedBooking.reservationId) as any
+                    : null
+                })
+              )}
+              originallyForLabel={formatBookedOnLabel(
+                getOriginallyForCheckIn({
+                  booking: {
+                    checkIn: (selectedBooking as any).checkIn,
+                    rescheduleHistory: (selectedBooking as any).rescheduleHistory
+                  },
+                  reservation: selectedBooking.reservationId
+                    ? reservationsMap.get(selectedBooking.reservationId) as any
+                    : null
+                })
+              )}
             />
             </div>
 
@@ -6546,6 +6668,15 @@ export function BookingsPage() {
                           preview={cancelPreview}
                           isLoading={cancelPreviewLoading}
                           error={cancelPreviewError}
+                          // Per CRL-08: the booking's
+                          // "Booked on" + "Originally for"
+                          // dates for the metadata line.
+                          // Both nullable; the panel
+                          // suppresses "Originally for"
+                          // when the booking has never
+                          // been rescheduled.
+                          bookedOn={cancelPreviewBookedOn}
+                          originallyFor={cancelPreviewOriginallyFor}
                         />
                       </div>
                     }
@@ -6565,6 +6696,10 @@ export function BookingsPage() {
                       // bleeds into a new session.
                       setCancelPreview(null);
                       setCancelPreviewError(null);
+                      // Per CRL-08: drop the booked-on /
+                      // originally-for siblings too.
+                      setCancelPreviewBookedOn(null);
+                      setCancelPreviewOriginallyFor(null);
                     }}
                   />
                 ) : (

@@ -227,6 +227,11 @@ The 4-eyes pattern from the email-only path is unchanged: Turnstile + 10/min/IP 
 
 ---
 
+## Booking-Date Surface (CRL-08 follow-up, decision #213, shipped 2026-08-11)
+> The lookup response carries two new top-level fields — `bookedOn` (ISO string for the booking's `createdAt`) and `originallyFor` (ISO string for the create-time scheduled check-in, BEFORE any reschedule; `null` when the booking has never been rescheduled) — so the page can show the guest "Booked on Aug 7, 2026" + "Originally for Aug 12, 2026" whenever a recent reschedule moved the stay. The values come from the new `getBookedOnDate` + `getOriginallyForCheckIn` helpers in `shared/utils/bookingHistory.ts`. The "Originally for" line is suppressed when it equals the current stay (the user already sees the current check-in; showing the same date twice is noise). Server: `guest-app/server/handlers/bookings.ts §enrichAndRespond` (the `bookedOn` + `originallyFor` IIFEs in the single-booking fall-through response) + `§buildReservationLookupView` (the same two fields in the reservation-scope response). The cancel-preview response also gains the two fields as top-level siblings to `preview` so the cancellation panel renders the same metadata line. **No new auth surface, no new credential, no new wire shape — the two fields are additive ISO strings, both nullable, both ride the existing `success` envelope. The privacy posture is unchanged (`maskedEmail` only, no `guestName`).** Tests: `guest-app/tests/api/crl-08-reschedule-snapshot-refresh.test.ts` (the lookup-response + cancel-preview-response describe blocks, 6 source-text guards) + `shared/__tests__/booking-history.test.ts` (12 behavioral tests covering the helper math for the post-MRB-01 / legacy / never-rescheduled / Firestore Timestamp / ISO string shapes).
+
+---
+
 ## Reservation-Scope Guest Cancellation (MRB-13)
 > Decision: `plan/docs/DECISIONS-FEATURES.md #166`. Scope model + reservation-scope server transaction live in `plan/features/BOOKINGS-MANAGEMENT.md §Reservation-Scope Cancellation (MRB-13)`. The guest surface this section owns: the `/my-booking` cancel modal copy + body shape.
 

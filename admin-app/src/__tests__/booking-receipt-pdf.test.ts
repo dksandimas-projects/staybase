@@ -47,7 +47,16 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
 
     it("uses jsPDF in a4 mm mode (matches registration PDF style)", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
-      const funcBody = bookingsPageSrc.slice(funcStart, funcStart + 2200);
+      // Per CRL-08 (2026-08-11, decision #213): the
+      // printBookingReceiptPDF function grew by ~25
+      // lines for the "Booked on" / "Originally for"
+      // enrichment + the receipt stay-row additions.
+      // The `new jsPDF` constructor now lives past
+      // the original 2200-char window. Bumping the
+      // slice to 4500 keeps the test green while
+      // still scoped to the receipt function (the
+      // next function in the file is far away).
+      const funcBody = bookingsPageSrc.slice(funcStart, funcStart + 4500);
       expect(funcBody).toMatch(/new\s+jsPDF\(\s*\{\s*unit:\s*["']mm["']\s*,\s*format:\s*["']a4["']/);
     });
 

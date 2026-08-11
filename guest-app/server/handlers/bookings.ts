@@ -130,6 +130,9 @@ import {
   // `handleCancelBooking`) call this helper inside the
   // same `runTransaction` as the booking status flip.
   createCancellationPolicySnapshot,
+  getCheckInInstant,
+  getBookedOnDate,
+  getOriginallyForCheckIn,
   computeReservationAggregatePaymentStatus
 } from "@spark-inn/shared";
 // Per CRL-06 (2026-08-02): the preview helper
@@ -6838,7 +6841,23 @@ export async function handleCancelPreview(req: any, res: any) {
       allocationSubtotal
     });
 
-    return res.status(200).json({ success: true, preview });
+    // Per CRL-08 (2026-08-11, per decision #213): the
+    // cancellation preview also carries the booking's
+    // "Booked on" + "Originally for" dates so the panel
+    // can render the metadata line. The helper is the
+    // same `getBookedOnDate` / `getOriginallyForCheckIn`
+    // the lookup response uses; the fields are ISO
+    // strings (or `null` when the booking was never
+    // rescheduled / the legacy case has no history).
+    const bookedOnDate = getBookedOnDate({ booking: bookingData, reservation });
+    const originallyForDate = getOriginallyForCheckIn({ booking: bookingData, reservation });
+
+    return res.status(200).json({
+      success: true,
+      preview,
+      bookedOn: bookedOnDate ? bookedOnDate.toISOString() : null,
+      originallyFor: originallyForDate ? originallyForDate.toISOString() : null
+    });
   } catch (error: any) {
     console.error("Booking cancellation preview error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -9810,12 +9829,25 @@ async function enrichAndRespond(res: any, bookingData: any) {
   // byte-equivalent to the per-child view for N=1).
   // Legacy pre-MRB-01 bookings (no `reservationId`)
   // also fall through to `kind: "single"`.
+  //
+  // Per CRL-08 (2026-08-11, per decision #213): the
+  // `reservation` binding is hoisted to the function
+  // scope so the single-booking fall-through (N=1 +
+  // legacy) can also surface `bookedOn` (the reservation
+  // header's `createdAt` when present) + `originallyFor`
+  // (the reservation's immutable original check-in per
+  // MRB-14). The reservation-scope branch assigns the
+  // full header shape; the single-booking fall-through
+  // uses the partial header to compute the same two
+  // fields. `null` for legacy pre-MRB-01 bookings (no
+  // header to read).
   const reservationId = String(bookingData.reservationId || "").trim();
+  let reservation: any = null;
   if (reservationId) {
     const reservationRef = adminDb.collection("reservations").doc(reservationId);
     const reservationSnap = await reservationRef.get();
     if (reservationSnap.exists) {
-      const reservation = { id: reservationId, ...reservationSnap.data() };
+      reservation = { id: reservationId, ...reservationSnap.data() };
       const childrenSnap = await adminDb.collection("bookings")
         .where("reservationId", "==", reservationId)
         .get();
@@ -9875,7 +9907,27 @@ async function enrichAndRespond(res: any, bookingData: any) {
       paymentMethod: bookingData.paymentMethod,
       status: bookingData.status,
       hasBreakfast: bookingData.hasBreakfast,
-      specialRequests: bookingData.specialRequests || ""
+      specialRequests: bookingData.specialRequests || "",
+      // Per CRL-08 (2026-08-11, per decision #213):
+      // the booking was made + the originally-scheduled
+      // check-in. The card renders "Booked on <date>"
+      // always; "Originally for <date>" is rendered only
+      // when the booking has been rescheduled (the
+      // helper returns `null` when the original equals
+      // the current check-in OR when the legacy
+      // pre-MRB-01 booking has no reschedule history).
+      // Both fields are serialized as ISO strings
+      // (the existing `checkIn` / `checkOut` fields
+      // carry the raw Firestore Timestamp — the lookup
+      // card already knows how to render those).
+      bookedOn: (() => {
+        const d = getBookedOnDate({ booking: bookingData, reservation });
+        return d ? d.toISOString() : null;
+      })(),
+      originallyFor: (() => {
+        const d = getOriginallyForCheckIn({ booking: bookingData, reservation });
+        return d ? d.toISOString() : null;
+      })()
     }
   });
 }
@@ -10000,7 +10052,24 @@ function buildReservationLookupView(reservation: any, children: any[], anchorRoo
     // valid; we use the first child for consistency
     // with the legacy single-booking card.
     primaryBookingId: anchorBooking.id,
-    primaryBookingRef: anchorBooking.bookingRef
+    primaryBookingRef: anchorBooking.bookingRef,
+    // Per CRL-08 (2026-08-11, per decision #213):
+    // the reservation-level "Booked on" + "Originally
+    // for" dates. The card renders "Booked on <date>"
+    // always; "Originally for <date>" is rendered only
+    // when the reservation has been rescheduled (the
+    // helper returns `null` when the original equals
+    // the current check-in). Both fields are ISO
+    // strings for byte-compatibility with the single-
+    // booking response shape.
+    bookedOn: (() => {
+      const d = getBookedOnDate({ booking: anchorBooking, reservation });
+      return d ? d.toISOString() : null;
+    })(),
+    originallyFor: (() => {
+      const d = getOriginallyForCheckIn({ booking: anchorBooking, reservation });
+      return d ? d.toISOString() : null;
+    })()
   };
 }
 
@@ -10842,6 +10911,50 @@ export async function handleRescheduleBooking(req: any, res: any) {
           // never-true invariant — the transaction
           // never lands with 0 children).
           actualDateRange: rescheduleActualDateRange,
+          // Per CRL-08 (2026-08-11, per decision #213):
+          // the reschedule refreshes the snapshotted
+          // `cancellationPolicySnapshot` so its
+          // `scheduledCheckInTime` reflects the NEW check-in
+          // date. The snapshot was stamped at create time
+          // (CRL-05) with the create-time check-in baked in;
+          // without this refresh, the cancel-preview
+          // (`handleCancelPreview`) reads the OLD instant and
+          // reports `hoursRemaining` from a date that's no
+          // longer the guest's check-in (a booking rescheduled
+          // from 2026-08-12 to 2026-08-21 read "28.6h before
+          // check-in" on a date where the new check-in is 10
+          // days away — the wrong refund verdict + the wrong
+          // "within 48h cutoff" copy). The pre-CRL-08
+          // fallback path used the booking's own `checkIn`
+          // field directly, but the snapshot lives on the
+          // reservation header in the current write shape
+          // (CRL-05 design), so we refresh it in the same
+          // transaction. We preserve the snapshot's policy
+          // text + cutoff values + source (those are pinned
+          // at create time per CRL-05; a later settings
+          // change should not retroactively apply to a
+          // reschedule) and only recompute the
+          // `scheduledCheckInTime` instant from the new
+          // `checkIn` + the existing hotel config. The refresh
+          // is a no-op when the header has no snapshot (a
+          // pre-CRL-05 booking that was never re-snapshotted
+          // — the cancel-preview's own fallback chain handles
+          // those). `getCheckInInstant` is the same helper
+          // `createCancellationPolicySnapshot` uses, so the
+          // recomputed instant is identical to a fresh
+          // snapshot's instant for the same date + timezone
+          // + checkInTime.
+          cancellationPolicySnapshot: (() => {
+            const previousSnapshot = existingReservationData && existingReservationData.cancellationPolicySnapshot;
+            if (!previousSnapshot) return undefined;
+            const tz = String(hotelConfig.timezone || "Asia/Manila");
+            const checkInTime = String(hotelConfig.checkInTime || "14:00");
+            const newScheduledCheckInTime = getCheckInInstant(checkIn, checkInTime, tz).toISOString();
+            return {
+              ...previousSnapshot,
+              scheduledCheckInTime: newScheduledCheckInTime
+            };
+          })(),
           updatedAt: now
         });
       }

@@ -178,6 +178,20 @@ function generateReceiptPdf(booking: any): Buffer {
   text("Check-in:", fmtDate(booking.checkIn), top); top += 6;
   text("Check-out:", fmtDate(booking.checkOut), top); top += 6;
   text("Nights:", String(booking.numNights || 0), top); top += 6;
+  // Per CRL-08 (2026-08-11, per decision #213): the
+  // "Booked on" + "Originally for" dates on the
+  // receipt PDF. "Booked on" always renders when
+  // present; "Originally for" only renders when the
+  // booking has been rescheduled (the server-side
+  // enrichment in `sendBookingTrigger` populates
+  // both fields before the template renders, so the
+  // PDF is a pure function of the booking object).
+  if (booking.bookedOn) {
+    text("Booked on:", fmtDate(booking.bookedOn), top); top += 6;
+  }
+  if (booking.originallyFor) {
+    text("Originally for:", fmtDate(booking.originallyFor), top); top += 6;
+  }
   // Per EXB-08 (2026-08-01, per decision #156): the
   // email's occupancy line now shows the adult/child
   // split when both fields are present, with the extra
@@ -579,8 +593,50 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
     // reservation-scope cancel template that
     // MRB-13 will call).
     cancellationReason: first.cancellationReason || "",
-    cancellationSource: first.cancellationSource || ""
+    cancellationSource: first.cancellationSource || "",
+    // Per CRL-08 (2026-08-11, per decision #213): the
+    // booking's "Booked on" + "Originally for" dates.
+    // The reservation header's `createdAt` is the
+    // reservation-level creation time; the header's
+    // `checkIn` is the immutable original (per MRB-14
+    // the reschedule no longer mutates the header's
+    // shared range, so this is the create-time
+    // check-in). Both are formatted by the
+    // `bookingRows` template; missing fields render
+    // as `null` and the template suppresses the row.
+    bookedOn: reservation.createdAt ?? first.createdAt ?? null,
+    originallyFor: (() => {
+      // If the header's original check-in matches the
+      // first room's current check-in, the booking
+      // has never been rescheduled — the email
+      // suppresses the "Originally for" row. For a
+      // multi-child reservation, the per-child
+      // comparison picks up the first room's
+      // `checkIn` (the actual per-child date after
+      // any reschedule).
+      const original = reservation.checkIn;
+      if (!original) return null;
+      if (first.checkIn && sameDateString(original, first.checkIn)) return null;
+      return original;
+    })()
   };
+}
+
+// Per CRL-08 (2026-08-11, per decision #213): the
+// date-equality helper used by the email view to
+// decide whether the "Originally for" row should
+// render. Two dates are "the same" when their
+// YYYY-MM-DD portion matches — the check-in instant
+// is the hotel's local check-in time so a Date vs a
+// Firestore Timestamp are usually at different
+// times of day; the date-string comparison is the
+// right shape (the email is a date-level surface,
+// not a timestamp surface).
+function sameDateString(a: any, b: any): boolean {
+  const aDate = a && typeof a.toDate === "function" ? a.toDate() : (a instanceof Date ? a : new Date(a));
+  const bDate = b && typeof b.toDate === "function" ? b.toDate() : (b instanceof Date ? b : new Date(b));
+  if (Number.isNaN(aDate.getTime()) || Number.isNaN(bDate.getTime())) return false;
+  return aDate.toISOString().slice(0, 10) === bDate.toISOString().slice(0, 10);
 }
 
 // Per H2 (hardening batch 2026-06-26): the public
@@ -754,6 +810,8 @@ function bookingRows(booking: any) {
       ${row("Check-out", checkOutValue)}
       ${row("Nights", `${booking.numNights || 0} night(s)`)}
       ${row("Total", formatMoney(booking.totalPrice))}
+      ${booking.bookedOn ? row("Booked on", formatDate(booking.bookedOn)) : ""}
+      ${booking.originallyFor ? row("Originally for", formatDate(booking.originallyFor)) : ""}
     `;
   }
   const roomLabel = booking.roomName || booking.roomType || "Not set";
@@ -766,6 +824,8 @@ function bookingRows(booking: any) {
     ${row("Nights", `${booking.numNights || 0} night(s)`)}
     ${rateBreakdownRows(booking)}
     ${row("Total", formatMoney(booking.totalPrice))}
+    ${booking.bookedOn ? row("Booked on", formatDate(booking.bookedOn)) : ""}
+    ${booking.originallyFor ? row("Originally for", formatDate(booking.originallyFor)) : ""}
   `;
 }
 
@@ -2033,6 +2093,55 @@ async function getTomorrowConfirmedBookings() {
 }
 
 export async function sendBookingTrigger(action: EmailAction, booking: any) {
+  // Per CRL-08 (2026-08-11, per decision #213): enrich
+  // the booking with the "Booked on" + "Originally for"
+  // dates for single-booking emails. The reservation-
+  // scope view (built by `buildReservationEmailView`)
+  // already carries both fields; this branch covers
+  // legacy pre-MRB-01 null-`reservationId` bookings +
+  // modern N=1 bookings sent as a single-booking
+  // email. For the modern N=1 case the booking's
+  // `reservationId` is set but the caller didn't go
+  // through the reservation-scope view (e.g. the
+  // `findBooking` fallback in the resend-email path),
+  // so we look up the reservation header and compute
+  // the same values. The legacy null-`reservationId`
+  // path uses the booking's own `rescheduleHistory`
+  // (or `null` when the booking has never been
+  // rescheduled). The booking object is the only
+  // input the templates need — the enrichment is
+  // in-place, no extra fields surface to the wire.
+  if (booking && !booking.isReservation) {
+    if (!booking.bookedOn) {
+      booking.bookedOn = booking.createdAt ?? null;
+    }
+    if (!booking.originallyFor) {
+      const reservationId = String(booking.reservationId || "").trim();
+      if (reservationId) {
+        try {
+          const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
+          if (reservationDoc.exists) {
+            const headerCheckIn = reservationDoc.data()?.checkIn;
+            if (headerCheckIn && !sameDateString(headerCheckIn, booking.checkIn)) {
+              booking.originallyFor = headerCheckIn;
+            }
+          }
+        } catch (headerErr) {
+          console.warn(`Failed to load reservation header for booking-dates enrichment:`, headerErr);
+        }
+      } else {
+        // Legacy pre-MRB-01: read the booking's own
+        // reschedule history. The first entry's
+        // `fromCheckIn` is the create-time original.
+        const history = Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [];
+        if (history.length > 0 && history[0]?.fromCheckIn) {
+          if (!sameDateString(history[0].fromCheckIn, booking.checkIn)) {
+            booking.originallyFor = history[0].fromCheckIn;
+          }
+        }
+      }
+    }
+  }
   // Per ECE-01 (2026-07-24): payment-confirmed email may include a
   // "House rules" card sourced from `settings.websiteContent.houseRules`.
   // Per ECE-02 (2026-07-26, decision #139): the same card also

@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.12";
+    VERSION2 = "0.266.15";
   }
 });
 
@@ -222268,6 +222268,29 @@ function computeReservationActualDateRange(headerCheckIn, headerCheckOut, childr
 var init_bookingFolio = __esm({
   "../shared/utils/bookingFolio.ts"() {
     init_bookingDiscounts();
+  }
+});
+
+// ../shared/utils/bookingHistory.ts
+function getOriginallyForCheckIn(input) {
+  const reservationOriginal = toDateOrNull(input.reservation?.checkIn);
+  if (reservationOriginal) {
+    return reservationOriginal;
+  }
+  const history = Array.isArray(input.booking?.rescheduleHistory) ? input.booking.rescheduleHistory : [];
+  if (history.length > 0) {
+    const first = history[0];
+    const original = toDateOrNull(first?.fromCheckIn);
+    if (original) return original;
+  }
+  return toDateOrNull(input.booking?.checkIn);
+}
+function getBookedOnDate(input) {
+  return toDateOrNull(input.reservation?.createdAt) ?? toDateOrNull(input.booking?.createdAt);
+}
+var init_bookingHistory = __esm({
+  "../shared/utils/bookingHistory.ts"() {
+    init_bookingDates();
   }
 });
 
@@ -223926,6 +223949,7 @@ __export(shared_exports, {
   generateMemberNumber: () => generateMemberNumber,
   generateReservationId: () => generateReservationId,
   generateStoreOrderRef: () => generateStoreOrderRef,
+  getBookedOnDate: () => getBookedOnDate,
   getBookingRevenueStreams: () => getBookingRevenueStreams,
   getBookingVatBreakdown: () => getBookingVatBreakdown,
   getCheckInInstant: () => getCheckInInstant,
@@ -223937,6 +223961,7 @@ __export(shared_exports, {
   getLockedManualNightlyRate: () => getLockedManualNightlyRate,
   getManilaDateInfo: () => getManilaDateInfo,
   getNumNights: () => getNumNights,
+  getOriginallyForCheckIn: () => getOriginallyForCheckIn,
   getReservationFolioSummary: () => getReservationFolioSummary,
   getReservationRevenueStreams: () => getReservationRevenueStreams,
   getSeasonalRateForNight: () => getSeasonalRateForNight,
@@ -223992,6 +224017,7 @@ var init_shared = __esm({
     init_types3();
     init_bookingDates();
     init_bookingFolio();
+    init_bookingHistory();
     init_bookingAddOns();
     init_bookingDiscounts();
     init_bookingOccupancy();
@@ -224115,6 +224141,14 @@ function generateReceiptPdf(booking) {
   top += 6;
   text("Nights:", String(booking.numNights || 0), top);
   top += 6;
+  if (booking.bookedOn) {
+    text("Booked on:", fmtDate(booking.bookedOn), top);
+    top += 6;
+  }
+  if (booking.originallyFor) {
+    text("Originally for:", fmtDate(booking.originallyFor), top);
+    top += 6;
+  }
   {
     const numAdults = Number(booking.numAdults);
     const numChildren = Number(booking.numChildren);
@@ -224330,8 +224364,31 @@ function buildReservationEmailView(reservation, children) {
     // reservation-scope cancel template that
     // MRB-13 will call).
     cancellationReason: first.cancellationReason || "",
-    cancellationSource: first.cancellationSource || ""
+    cancellationSource: first.cancellationSource || "",
+    // Per CRL-08 (2026-08-11, per decision #213): the
+    // booking's "Booked on" + "Originally for" dates.
+    // The reservation header's `createdAt` is the
+    // reservation-level creation time; the header's
+    // `checkIn` is the immutable original (per MRB-14
+    // the reschedule no longer mutates the header's
+    // shared range, so this is the create-time
+    // check-in). Both are formatted by the
+    // `bookingRows` template; missing fields render
+    // as `null` and the template suppresses the row.
+    bookedOn: reservation.createdAt ?? first.createdAt ?? null,
+    originallyFor: (() => {
+      const original = reservation.checkIn;
+      if (!original) return null;
+      if (first.checkIn && sameDateString(original, first.checkIn)) return null;
+      return original;
+    })()
   };
+}
+function sameDateString(a, b3) {
+  const aDate = a && typeof a.toDate === "function" ? a.toDate() : a instanceof Date ? a : new Date(a);
+  const bDate = b3 && typeof b3.toDate === "function" ? b3.toDate() : b3 instanceof Date ? b3 : new Date(b3);
+  if (Number.isNaN(aDate.getTime()) || Number.isNaN(bDate.getTime())) return false;
+  return aDate.toISOString().slice(0, 10) === bDate.toISOString().slice(0, 10);
 }
 function lookupUrl(booking) {
   const reservationRef = String(booking.reservationRef || "").trim();
@@ -224430,6 +224487,8 @@ function bookingRows(booking) {
       ${row("Check-out", checkOutValue)}
       ${row("Nights", `${booking.numNights || 0} night(s)`)}
       ${row("Total", formatMoney(booking.totalPrice))}
+      ${booking.bookedOn ? row("Booked on", formatDate(booking.bookedOn)) : ""}
+      ${booking.originallyFor ? row("Originally for", formatDate(booking.originallyFor)) : ""}
     `;
   }
   const roomLabel = booking.roomName || booking.roomType || "Not set";
@@ -224442,6 +224501,8 @@ function bookingRows(booking) {
     ${row("Nights", `${booking.numNights || 0} night(s)`)}
     ${rateBreakdownRows(booking)}
     ${row("Total", formatMoney(booking.totalPrice))}
+    ${booking.bookedOn ? row("Booked on", formatDate(booking.bookedOn)) : ""}
+    ${booking.originallyFor ? row("Originally for", formatDate(booking.originallyFor)) : ""}
   `;
 }
 function card(title, body) {
@@ -225362,6 +225423,34 @@ async function getTomorrowConfirmedBookings() {
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 async function sendBookingTrigger(action, booking) {
+  if (booking && !booking.isReservation) {
+    if (!booking.bookedOn) {
+      booking.bookedOn = booking.createdAt ?? null;
+    }
+    if (!booking.originallyFor) {
+      const reservationId = String(booking.reservationId || "").trim();
+      if (reservationId) {
+        try {
+          const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
+          if (reservationDoc.exists) {
+            const headerCheckIn = reservationDoc.data()?.checkIn;
+            if (headerCheckIn && !sameDateString(headerCheckIn, booking.checkIn)) {
+              booking.originallyFor = headerCheckIn;
+            }
+          }
+        } catch (headerErr) {
+          console.warn(`Failed to load reservation header for booking-dates enrichment:`, headerErr);
+        }
+      } else {
+        const history = Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [];
+        if (history.length > 0 && history[0]?.fromCheckIn) {
+          if (!sameDateString(history[0].fromCheckIn, booking.checkIn)) {
+            booking.originallyFor = history[0].fromCheckIn;
+          }
+        }
+      }
+    }
+  }
   const HOUSE_RULES_ACTIONS = /* @__PURE__ */ new Set([
     "payment-confirmed",
     "booking-confirmed",
@@ -231191,7 +231280,14 @@ async function handleCancelPreview(req, res) {
       reservationNetCollected,
       allocationSubtotal
     });
-    return res.status(200).json({ success: true, preview });
+    const bookedOnDate = getBookedOnDate({ booking: bookingData2, reservation });
+    const originallyForDate = getOriginallyForCheckIn({ booking: bookingData2, reservation });
+    return res.status(200).json({
+      success: true,
+      preview,
+      bookedOn: bookedOnDate ? bookedOnDate.toISOString() : null,
+      originallyFor: originallyForDate ? originallyForDate.toISOString() : null
+    });
   } catch (error) {
     console.error("Booking cancellation preview error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -232713,11 +232809,12 @@ async function enrichAndRespond(res, bookingData2) {
     }
   }
   const reservationId = String(bookingData2.reservationId || "").trim();
+  let reservation = null;
   if (reservationId) {
     const reservationRef = adminDb.collection("reservations").doc(reservationId);
     const reservationSnap = await reservationRef.get();
     if (reservationSnap.exists) {
-      const reservation = { id: reservationId, ...reservationSnap.data() };
+      reservation = { id: reservationId, ...reservationSnap.data() };
       const childrenSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationId).get();
       const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       if (children.length > 1) {
@@ -232759,7 +232856,27 @@ async function enrichAndRespond(res, bookingData2) {
       paymentMethod: bookingData2.paymentMethod,
       status: bookingData2.status,
       hasBreakfast: bookingData2.hasBreakfast,
-      specialRequests: bookingData2.specialRequests || ""
+      specialRequests: bookingData2.specialRequests || "",
+      // Per CRL-08 (2026-08-11, per decision #213):
+      // the booking was made + the originally-scheduled
+      // check-in. The card renders "Booked on <date>"
+      // always; "Originally for <date>" is rendered only
+      // when the booking has been rescheduled (the
+      // helper returns `null` when the original equals
+      // the current check-in OR when the legacy
+      // pre-MRB-01 booking has no reschedule history).
+      // Both fields are serialized as ISO strings
+      // (the existing `checkIn` / `checkOut` fields
+      // carry the raw Firestore Timestamp — the lookup
+      // card already knows how to render those).
+      bookedOn: (() => {
+        const d = getBookedOnDate({ booking: bookingData2, reservation });
+        return d ? d.toISOString() : null;
+      })(),
+      originallyFor: (() => {
+        const d = getOriginallyForCheckIn({ booking: bookingData2, reservation });
+        return d ? d.toISOString() : null;
+      })()
     }
   });
 }
@@ -232852,7 +232969,24 @@ function buildReservationLookupView(reservation, children, anchorRoomData, ancho
     // valid; we use the first child for consistency
     // with the legacy single-booking card.
     primaryBookingId: anchorBooking.id,
-    primaryBookingRef: anchorBooking.bookingRef
+    primaryBookingRef: anchorBooking.bookingRef,
+    // Per CRL-08 (2026-08-11, per decision #213):
+    // the reservation-level "Booked on" + "Originally
+    // for" dates. The card renders "Booked on <date>"
+    // always; "Originally for <date>" is rendered only
+    // when the reservation has been rescheduled (the
+    // helper returns `null` when the original equals
+    // the current check-in). Both fields are ISO
+    // strings for byte-compatibility with the single-
+    // booking response shape.
+    bookedOn: (() => {
+      const d = getBookedOnDate({ booking: anchorBooking, reservation });
+      return d ? d.toISOString() : null;
+    })(),
+    originallyFor: (() => {
+      const d = getOriginallyForCheckIn({ booking: anchorBooking, reservation });
+      return d ? d.toISOString() : null;
+    })()
   };
 }
 var resolveEarlyCheckinSchema = external_exports.object({
@@ -233398,6 +233532,50 @@ async function handleRescheduleBooking(req, res) {
           // never-true invariant — the transaction
           // never lands with 0 children).
           actualDateRange: rescheduleActualDateRange,
+          // Per CRL-08 (2026-08-11, per decision #213):
+          // the reschedule refreshes the snapshotted
+          // `cancellationPolicySnapshot` so its
+          // `scheduledCheckInTime` reflects the NEW check-in
+          // date. The snapshot was stamped at create time
+          // (CRL-05) with the create-time check-in baked in;
+          // without this refresh, the cancel-preview
+          // (`handleCancelPreview`) reads the OLD instant and
+          // reports `hoursRemaining` from a date that's no
+          // longer the guest's check-in (a booking rescheduled
+          // from 2026-08-12 to 2026-08-21 read "28.6h before
+          // check-in" on a date where the new check-in is 10
+          // days away — the wrong refund verdict + the wrong
+          // "within 48h cutoff" copy). The pre-CRL-08
+          // fallback path used the booking's own `checkIn`
+          // field directly, but the snapshot lives on the
+          // reservation header in the current write shape
+          // (CRL-05 design), so we refresh it in the same
+          // transaction. We preserve the snapshot's policy
+          // text + cutoff values + source (those are pinned
+          // at create time per CRL-05; a later settings
+          // change should not retroactively apply to a
+          // reschedule) and only recompute the
+          // `scheduledCheckInTime` instant from the new
+          // `checkIn` + the existing hotel config. The refresh
+          // is a no-op when the header has no snapshot (a
+          // pre-CRL-05 booking that was never re-snapshotted
+          // — the cancel-preview's own fallback chain handles
+          // those). `getCheckInInstant` is the same helper
+          // `createCancellationPolicySnapshot` uses, so the
+          // recomputed instant is identical to a fresh
+          // snapshot's instant for the same date + timezone
+          // + checkInTime.
+          cancellationPolicySnapshot: (() => {
+            const previousSnapshot = existingReservationData && existingReservationData.cancellationPolicySnapshot;
+            if (!previousSnapshot) return void 0;
+            const tz = String(hotelConfig.timezone || "Asia/Manila");
+            const checkInTime = String(hotelConfig.checkInTime || "14:00");
+            const newScheduledCheckInTime = getCheckInInstant(checkIn, checkInTime, tz).toISOString();
+            return {
+              ...previousSnapshot,
+              scheduledCheckInTime: newScheduledCheckInTime
+            };
+          })(),
           updatedAt: now
         });
       }

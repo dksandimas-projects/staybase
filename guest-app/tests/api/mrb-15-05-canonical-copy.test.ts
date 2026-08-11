@@ -307,7 +307,7 @@ describe("MRB-15-05 — Receipt PDF labels use the canonical terminology (no 'Gr
       expect(guestBlock[0]).toMatch(/label: "Phone"/);
     }
     const stayRowsBlock = adminBookingsPageSrc.match(
-      /const stayRows = \[[\s\S]{0,3000}?label: "Rate"/
+      /const stayRows = \[[\s\S]{0,5000}?label: "Rate"/
     );
     expect(
       stayRowsBlock,

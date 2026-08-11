@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 import {
   BedDouble,
+  CalendarPlus,
   Check,
   ClipboardCheck,
   CreditCard,
+  History,
   LayoutDashboard,
   Mail,
   MoreHorizontal,
@@ -47,6 +49,18 @@ interface BookingDrawerWorkspaceHeaderProps {
   // its inputs; the parent owns the live-vs-persisted
   // disambiguation.
   latestPaymentReference?: string | null;
+  // Per CRL-08 (2026-08-11, per decision #213): the
+  // booking's "Booked on" + "Originally for" dates.
+  // Both are pre-formatted friendly strings (e.g. "Aug 7,
+  // 2026"); `null` when the underlying date is unknown.
+  // "Originally for" is `null` when the booking has
+  // never been rescheduled (no need to show the same
+  // date twice). The parent computes the values from
+  // the live booking + reservation via the shared
+  // `getBookedOnDate` / `getOriginallyForCheckIn`
+  // helpers.
+  bookedOnLabel?: string | null;
+  originallyForLabel?: string | null;
 }
 
 const sections: Array<{
@@ -69,7 +83,9 @@ export function BookingDrawerWorkspaceHeader({
   balance,
   missingCheckInItems,
   paymentMethodLabel,
-  latestPaymentReference
+  latestPaymentReference,
+  bookedOnLabel = null,
+  originallyForLabel = null
 }: BookingDrawerWorkspaceHeaderProps) {
   const needsPaymentReview = booking.status === "payment-uploaded";
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
@@ -99,6 +115,36 @@ export function BookingDrawerWorkspaceHeader({
                 Room {booking.roomNumber} · {booking.roomType.replace(/-/g, " ")}
               </span>
               <span>{booking.checkIn} → {booking.checkOut}</span>
+              {/* Per CRL-08 (2026-08-11, per decision #213):
+                  the booking's "Booked on" + "Originally for"
+                  dates surface here so the staff can see at a
+                  glance when the booking was made + whether the
+                  dates have been rescheduled. "Originally for"
+                  is suppressed when the booking has never been
+                  rescheduled (the parent passes `null` in that
+                  case). Both render in the same metadata row as
+                  the room + stay dates so the staff reads the
+                  full timeline in one place. */}
+              {bookedOnLabel && (
+                <span
+                  className="inline-flex items-center gap-1.5"
+                  data-testid="booking-drawer-booked-on"
+                >
+                  <CalendarPlus size={13} className="text-gray-400" aria-hidden="true" />
+                  <span className="text-gray-500">Booked on</span>
+                  <span className="font-semibold text-gray-700">{bookedOnLabel}</span>
+                </span>
+              )}
+              {originallyForLabel && (
+                <span
+                  className="inline-flex items-center gap-1.5"
+                  data-testid="booking-drawer-originally-for"
+                >
+                  <History size={13} className="text-gray-400" aria-hidden="true" />
+                  <span className="text-gray-500">Originally for</span>
+                  <span className="font-semibold text-gray-700">{originallyForLabel}</span>
+                </span>
+              )}
               {/* Per EXB-08 (2026-08-01, per decision #156):
                   the drawer header's occupancy line now
                   shows the adult/child split when both
