@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.10";
+    VERSION2 = "0.266.11";
   }
 });
 
@@ -231087,6 +231087,7 @@ async function handleCancelPreview(req, res) {
     let reservation = null;
     let cancellableChildren = [];
     let allocationSubtotal = Math.max(Number(bookingData2.totalPrice) || 0, 0);
+    let reservationCancellationPolicySnapshot = null;
     if (hasReservation) {
       const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
       const [reservationDoc, childrenSnap] = await Promise.all([
@@ -231102,7 +231103,7 @@ async function handleCancelPreview(req, res) {
         reservationRef: String(reservationSnapshot.reservationRef || ""),
         totalPrice: Number(reservationSnapshot.totalPrice) || 0
       };
-      const reservationCancellationPolicySnapshot2 = reservationSnapshot.cancellationPolicySnapshot || null;
+      reservationCancellationPolicySnapshot = reservationSnapshot.cancellationPolicySnapshot || null;
       const eligibleChildren = childrenSnap.docs.map((d) => {
         const data = d.data() || {};
         const status = String(data.status || "");
@@ -231117,7 +231118,7 @@ async function handleCancelPreview(req, res) {
           roomType: String(data.roomType || ""),
           totalPrice: Number(data.totalPrice) || 0,
           reservationPosition: Number(data.reservationPosition) || null,
-          cancellationPolicySnapshot: data.cancellationPolicySnapshot || reservationCancellationPolicySnapshot2
+          cancellationPolicySnapshot: data.cancellationPolicySnapshot || reservationCancellationPolicySnapshot
         };
       }).filter(Boolean);
       allocationSubtotal = eligibleChildren.reduce(
@@ -232945,13 +232946,15 @@ async function handleRescheduleBooking(req, res) {
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
+    let bookingReservationId2 = null;
+    let existingReservationData = null;
     const expiredHoldRetirements = [];
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
-      const bookingReservationId2 = (() => {
+      bookingReservationId2 = (() => {
         const stored = String(booking.reservationId || "").trim();
         if (stored.length > 0) return stored;
         if (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId)) {
@@ -232960,12 +232963,11 @@ async function handleRescheduleBooking(req, res) {
         return null;
       })();
       const reservationDocRef = bookingReservationId2 ? adminDb.collection("reservations").doc(bookingReservationId2) : null;
-      let existingReservationData2 = null;
       let rescheduleChildrenDates = null;
       if (reservationDocRef) {
         const existingReservationSnap = await transaction.get(reservationDocRef);
         if (existingReservationSnap.exists) {
-          existingReservationData2 = existingReservationSnap.data() || {};
+          existingReservationData = existingReservationSnap.data() || {};
         } else {
           throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
         }
@@ -233293,10 +233295,10 @@ async function handleRescheduleBooking(req, res) {
         transaction.update(roomRef, { status: "occupied" });
       }
       transaction.update(bookingRef, updatedBooking);
-      if (reservationDocRef && existingReservationData2) {
+      if (reservationDocRef && existingReservationData) {
         const rescheduleActualDateRange = computeReservationActualDateRange(
-          existingReservationData2.checkIn,
-          existingReservationData2.checkOut,
+          existingReservationData.checkIn,
+          existingReservationData.checkOut,
           rescheduleChildrenDates || []
         );
         const rescheduleFingerprint = computeRequestFingerprint({
@@ -233320,8 +233322,8 @@ async function handleRescheduleBooking(req, res) {
           voucherCode: String(booking.voucherCode || "").trim().toUpperCase(),
           memberDiscountPct: Math.max(0, Math.floor(Number(booking.memberDiscountPct) || 0)),
           discountScope: normalizeDiscountScope(booking.discountScopeSnapshot),
-          termsVersion: String(existingReservationData2.termsVersion || DEFAULT_TERMS_VERSION),
-          privacyVersion: String(existingReservationData2.privacyVersion || DEFAULT_TERMS_VERSION)
+          termsVersion: String(existingReservationData.termsVersion || DEFAULT_TERMS_VERSION),
+          privacyVersion: String(existingReservationData.privacyVersion || DEFAULT_TERMS_VERSION)
         });
         transaction.update(reservationDocRef, {
           // Per MRB-14 (2026-08-03, per decision #180
@@ -233451,7 +233453,7 @@ async function handleRescheduleBooking(req, res) {
         // empty strings (the booking was created before
         // MRB-02, so it has no header to echo).
         ...updatedBooking,
-        reservationId: bookingReservationId || "",
+        reservationId: bookingReservationId2 || "",
         reservationRef: String(existingReservationData?.reservationRef || "")
       }
     });

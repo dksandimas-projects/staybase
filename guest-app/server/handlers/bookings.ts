@@ -6610,6 +6610,23 @@ export async function handleCancelPreview(req: any, res: any) {
       cancellationPolicySnapshot: any;
     }> = [];
     let allocationSubtotal = Math.max(Number(bookingData.totalPrice) || 0, 0);
+    // Per CRL-06 fix (2026-08-11, decision #184): the
+    // reservation header's snapshot. Hoisted to the
+    // outer `try` scope because the anchor's snapshot
+    // fallback chain (just below the `if`/`else`,
+    // `lookedUpBookingForHelper.cancellationPolicySnapshot`)
+    // references it. Keeping the declaration inside
+    // `if (hasReservation) { ... }` put the binding
+    // in the inner block scope, so the outer reference
+    // threw `ReferenceError: reservationCancellationPolicySnapshot
+    // is not defined` and surfaced as a 500 on every
+    // cancel-preview for a booking that has a
+    // `reservationId` (the common modern path). The
+    // legacy `!hasReservation` branch never assigns it
+    // (it stays `null`) and the anchor's ternary gates
+    // the use to the reservation case — same fallback
+    // semantics, just declared where it's read.
+    let reservationCancellationPolicySnapshot: any = null;
 
     if (hasReservation) {
       const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
@@ -6647,7 +6664,7 @@ export async function handleCancelPreview(req: any, res: any) {
       // we fall back to it here. Same fix lives in
       // `handleCancelBooking` (the destructive-cancel
       // liability computation uses the same shape).
-      const reservationCancellationPolicySnapshot =
+      reservationCancellationPolicySnapshot =
         reservationSnapshot.cancellationPolicySnapshot || null;
       const eligibleChildren = childrenSnap.docs
         .map((d: any) => {
@@ -10102,6 +10119,17 @@ export async function handleRescheduleBooking(req: any, res: any) {
   try {
     let updatedBooking: any = null;
     let fullBookingForEmail: any = null;
+    // Per MRB-02.x (2026-08-02, per decision #164): the
+    // canonical reservation id + header snapshot for this
+    // reschedule. Hoisted to the outer `try` scope because
+    // the response payload (after the transaction commits)
+    // echoes both `reservationId` and `reservationRef` —
+    // keeping the declarations inside the transaction
+    // callback would leave them out of scope at the
+    // success branch and surface as `bookingReservationId
+    // is not defined` 400s on every reschedule.
+    let bookingReservationId: string | null = null;
+    let existingReservationData: any = null;
     // Per PEX-03 (2026-08-01, per decision #147): same retirement
     // list pattern as handleCreateBooking / handleCreateWalkin.
     // The reschedule transaction may displace an expired `pending`
@@ -10131,7 +10159,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // does NOT touch a reservation header (the booking's
       // own rate breakdown + status matrix remain the
       // single source of truth for those legacy records).
-      const bookingReservationId: string | null = (() => {
+      bookingReservationId = (() => {
         const stored = String((booking as any).reservationId || "").trim();
         if (stored.length > 0) return stored;
         if (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId)) {
@@ -10155,7 +10183,11 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // unrecoverable by this request — staff must
       // investigate, then either restore the header or
       // migrate the booking to a fresh one.
-      let existingReservationData: any = null;
+      //
+      // `existingReservationData` is declared in the
+      // outer `try` scope (above the transaction) so
+      // the post-commit response payload can echo the
+      // header's `reservationRef`.
       // Per FOL-03 (2026-08-10, audit follow-up): the
       // children `get()` for the `actualDateRange`
       // recompute must happen BEFORE the booking +

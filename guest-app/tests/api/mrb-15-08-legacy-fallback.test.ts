@@ -187,8 +187,21 @@ describe("MRB-15-08 — `handleRescheduleBooking` falls through to the per-child
     // rate breakdown + status matrix remain
     // the single source of truth for those
     // legacy records).
+    //
+    // The hoist fix: `bookingReservationId` is
+    // declared with `let` in the outer `try` scope
+    // (alongside `existingReservationData`) so the
+    // post-commit response payload can echo both the
+    // `reservationId` and the header's
+    // `reservationRef`. The IIFE body is unchanged;
+    // only the surrounding declaration moved
+    // (`const` → `let` + assignment). The `{0,3000}`
+    // window between the outer-scope `let` and the
+    // in-transaction IIFE assignment covers the
+    // existing-snapshot/header-read/occupancy-check
+    // block the transaction opens with.
     expect(bookingsHandlerSrc).toMatch(
-      /handleRescheduleBooking[\s\S]{0,5000}?const bookingReservationId: string \| null = \(\(\) => \{[\s\S]{0,500}?const stored = String\(\(booking as any\)\.reservationId \|\| ""\)\.trim\(\)/
+      /export async function handleRescheduleBooking[\s\S]{0,8000}?let bookingReservationId: string \| null = null;[\s\S]{0,3000}?bookingReservationId = \(\(\) => \{[\s\S]{0,200}?const stored = String\(\(booking as any\)\.reservationId \|\| ""\)\.trim\(\)/
     );
   });
 });

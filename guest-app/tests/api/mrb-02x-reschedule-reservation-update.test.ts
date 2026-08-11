@@ -97,8 +97,19 @@ describe("MRB-02.x reschedule — reservation header update", () => {
       // is honored only when the booking's stored value
       // is null (a defensive migration path for a
       // future bulk reschedule tool).
+      //
+      // The hoist fix: `bookingReservationId` is
+      // declared with `let` in the outer `try` scope
+      // (alongside `existingReservationData`) so the
+      // post-commit response payload can echo both the
+      // `reservationId` and the header's `reservationRef`
+      // — keeping the declaration inside the transaction
+      // left them out of scope at the success branch
+      // and surfaced as `bookingReservationId is not
+      // defined` 400s. The IIFE is unchanged; only the
+      // surrounding declaration moved.
       expect(reschedule).toMatch(
-        /const bookingReservationId: string \| null = \(\(\) => \{/
+        /let bookingReservationId: string \| null = null;[\s\S]*?bookingReservationId = \(\(\) => \{/
       );
       expect(reschedule).toMatch(/String\(\(booking as any\)\.reservationId \|\| ""\)\.trim\(\)/);
     });
