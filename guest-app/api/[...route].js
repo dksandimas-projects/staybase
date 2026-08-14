@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.18";
+    VERSION2 = "0.267.0";
   }
 });
 
@@ -230339,6 +230339,101 @@ async function handleApplyBookingDiscount(req, res) {
     return res.status(status).json({ success: false, error: message });
   }
 }
+async function handleRemoveVoucher(req, res) {
+  const bookingId = String(req.body?.bookingId || "").trim();
+  const reason = String(req.body?.reason || "").trim();
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid booking id." });
+  }
+  const staffUid = String(req.staff?.uid || "staff");
+  try {
+    let result = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+      const bookingData2 = bookingDoc.data();
+      const existingVoucherCode = String(bookingData2.voucherCode || "").trim();
+      if (!existingVoucherCode) {
+        result = { idempotentReplay: true, bookingId };
+        return;
+      }
+      const voucherRef = adminDb.collection("vouchers").doc(existingVoucherCode);
+      const voucherDoc = await transaction.get(voucherRef);
+      const originalTotalPrice = bookingData2.originalTotalPrice;
+      if (originalTotalPrice === null || originalTotalPrice === void 0) {
+        throw new Error("Original total price not stored on booking.");
+      }
+      const memberDiscountPct = Number(bookingData2.memberDiscountPct || 0);
+      const rawPointsRedeemedValue = Number(bookingData2.pointsRedeemedValue || 0);
+      const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
+      const removeChain = calculateDiscountChain({
+        roomTotal: Number(originalTotalPrice) || 0,
+        breakfastTotal: 0,
+        extraBedTotal: 0,
+        seniorPct: 0,
+        // Per the VOU-02 fix: voucher is being removed,
+        // so the chain sees voucherAmount: 0. The
+        // member-discount base widens to include the
+        // voucher-amount range (the guest pays more
+        // after removal, member discount applies to
+        // the larger pre-voucher base).
+        voucherAmount: 0,
+        memberPct: memberDiscountPct,
+        scope: normalizeDiscountScope(bookingData2.discountScopeSnapshot),
+        round: true
+      });
+      const restoredTotalPrice = Math.max(removeChain.total - pointsRedeemedValue, 0);
+      const rateBreakdown = rebuildRateBreakdown({
+        // Strip `voucherCode` before spreading — it's
+        // not part of the `RebuildableBooking` type
+        // (the type only carries `voucherDiscount`).
+        // The clear is intentional (we're removing
+        // the voucher) so a stray `voucherCode`
+        // leaking through the spread would be
+        // semantically wrong.
+        ...(() => {
+          const { voucherCode: _omit, ...rest } = bookingData2;
+          return rest;
+        })(),
+        voucherCode: "",
+        voucherDiscount: 0,
+        pointsRedeemedValue,
+        totalPrice: restoredTotalPrice
+      }, {
+        pointsRedeemedValue,
+        finalTotal: restoredTotalPrice
+      });
+      const updates = {
+        voucherCode: "",
+        voucherDiscount: 0,
+        staffRemovedVoucherBy: staffUid,
+        staffRemovedVoucherReason: reason,
+        staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
+        totalPrice: restoredTotalPrice,
+        ...rateBreakdown ? { rateBreakdown } : {},
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      if (voucherDoc.exists) {
+        const voucherData = voucherDoc.data() || {};
+        transaction.update(voucherRef, {
+          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+      }
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "Unable to remove the voucher.";
+    const status = message === "Booking not found." ? 404 : 400;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 async function handleRejectDiscount(req, res) {
   const { bookingId, reason } = req.body;
   if (!bookingId) {
@@ -237595,6 +237690,14 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleApplyBookingDiscount(req, res);
+  }
+  if (domain === "bookings" && action === "remove-voucher" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleRemoveVoucher(req, res);
   }
   if (domain === "bookings" && action === "set-lou-received" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-lou:${ip}`, 30, 6e4)) {
