@@ -203,9 +203,25 @@ const seedFixtures = () => {
 const bookingWrites = () => setCalls.filter((c) => c.path.startsWith("bookings/"));
 const reservationWrite = () => setCalls.find((c) => c.path.startsWith("reservations/"));
 
+// Dynamic dates (2026-08-14): hardcoded calendar dates go stale —
+// the BI-12 guard rejects past check-ins on the public path, and
+// any future walk-in guard would break them too. Generated from
+// Manila "today" so the fixtures are always ≥ today.
+const manilaToday = new Date(Date.now() + 8 * 60 * 60 * 1000);
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+const nextWeekday = (targetDay: number) => {
+  const d = new Date(manilaToday);
+  const days = (targetDay - d.getUTCDay() + 7) % 7 || 7;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+};
+
 // Tue → Thu: two weekday nights, no weekend rate in play, so every
 // expected figure below is `pricePerNight * 2`.
-const STAY = { checkIn: "2026-08-04", checkOut: "2026-08-06" };
+const STAY = {
+  checkIn: fmtDate(nextWeekday(2)),
+  checkOut: fmtDate(nextWeekday(4))
+};
 const NIGHTS = 2;
 
 describe("MRB-07 — multi-room walk-in creation", () => {
@@ -465,8 +481,8 @@ describe("MRB-07 — multi-room walk-in creation", () => {
       id: "existing_1",
       roomId: "room_102",
       status: "confirmed",
-      checkIn: new Date("2026-08-04T00:00:00Z"),
-      checkOut: new Date("2026-08-06T00:00:00Z")
+      checkIn: new Date(`${STAY.checkIn}T00:00:00Z`),
+      checkOut: new Date(`${STAY.checkOut}T00:00:00Z`)
     }];
 
     const req = mockRequest({
