@@ -322,7 +322,8 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 ### Implementation Notes
 - [x] Use SheetJS (`xlsx` npm package) — client-side, no API route needed
 - [x] All 8 Firestore queries run in parallel via `Promise.all()` — do not run sequentially
-- [x] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId
+- [x] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId. **Plus (RPT-05, 2026-08-14):** a `getDocs(collectionGroup(db, "payments"))` catch for `reservations/{id}/payments/{paymentId}` docs (path starts with `"reservations/"`) — same dual-collectionGroup pattern the Reports page applies (per MRB-04 Phase 2.x / decision #159). Without this, the Payments sheet is missing every payment entry for every N>1 reservation.
+- [x] Charges sheet: `collectionGroup(db, "charges")` catches both `bookings/{id}/charges/` (legacy) and `reservations/{id}/charges/` (post-MRB-01). **Resolution update (RPT-05, 2026-08-14):** for reservation-scope charges, prefer the stamped `data.bookingId` over the path's parent id (which is the reservationId, not a bookingId) so the Booking Ref + Room cells resolve correctly.
 - [x] Filename: `spark-inn-full-backup-{YYYY-MM-DD}.xlsx`
 - [x] Sheet tab names match the names in the Sheets table above exactly
 - [x] First row of each sheet is a bold header row
