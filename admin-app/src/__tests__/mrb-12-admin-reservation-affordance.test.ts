@@ -211,6 +211,35 @@ describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
     expect(bookingsPageSrc).toMatch(/Reservation repriced \(\$\{targetIds\.length\} rooms\)/);
   });
 
+  // Per MRB-12-05 (2026-08-14, found during the audit pass
+  // that followed RPT-05 + EXB-12.1 + VOU-01): the admin
+  // client loop is the only thing that achieves per-child
+  // usageCount semantics for the reservation-scope apply-
+  // discount flow (the handler does +1 per call; the client
+  // calls it N times for N rooms). The existing regex pin
+  // covers the `targetIds = ...rooms.map(...)` shape, but
+  // doesn't pin the `for (const targetId of targetIds)` loop
+  // body — a future refactor that breaks the loop (e.g.,
+  // calling the endpoint once with a `reservationId`
+  // parameter instead of N times per `roomId`) would
+  // silently miscount `vouchers.usageCount` without the
+  // existing test catching it. This test pins the loop body
+  // shape at the source-text level.
+  it("MRB-12-05: the discount submit loop body calls fetch(\\/api\\/bookings\\/apply-discount) per targetId", () => {
+    // Pin the `for (const targetId of targetIds)` loop body:
+    // each iteration calls fetch with the per-room bookingId.
+    // The pattern: `for (const targetId of targetIds) { ... fetch(...bookingId: targetId...) ... }`.
+    // Without this pin, a future refactor could:
+    //   (a) collapse the loop to a single fetch call
+    //   (b) change `body.bookingId` to `body.reservationId`
+    //   (c) remove the `await` and race the responses
+    // Any of these would silently miscount voucher
+    // usageCount for reservation-scope applies.
+    expect(bookingsPageSrc).toMatch(
+      /for\s*\(\s*const\s+targetId\s+of\s+targetIds\s*\)\s*\{[\s\S]{0,3000}?await\s+fetch\([\s\S]{0,500}?\/api\/bookings\/apply-discount[\s\S]{0,1000}?bookingId:\s*targetId/
+    );
+  });
+
   it("MRB-12-05: the per-individual discount guard disables the `All N rooms` scope (PWD / senior)", () => {
     // Per the per-individual discount guard: PWD and
     // senior are per-individual legal entitlements
