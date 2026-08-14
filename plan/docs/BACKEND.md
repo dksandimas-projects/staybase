@@ -198,6 +198,35 @@ The doc ID is the code string by convention. The validate + create handlers both
 
 ---
 
+### `vouchers/{code}` *(Per VOU-01, 2026-08-14)*
+
+| Field | Type | Notes |
+|---|---|---|
+| `code` | string | Public code string (also the Firestore doc ID in most cases). Uppercased on lookup (BI-10) |
+| `discountType` | `"percent"` \| `"flat"` | `"percent"` → `% off subtotal`; `"flat"` → fixed ₱ off |
+| `discountValue` | number | Percent value (0–100) or flat ₱ value, depending on `discountType` |
+| `usageCap` | number \| null | Max uses; null = uncapped. **Per-child semantics (VOU-01)**: each child of a multi-room reservation consumes one use |
+| `usageCount` | number | Server-maintained counter. Incremented per-child on create / add-room (`handleCreateBooking` / `handleCreateWalkin` / `handleAddRoomToReservation`); decremented per-cancelled-child on cancel (`handleCancelBooking` reservation-scope uses `Map<code, count>` deduplication per MRB-13; room-scope uses `- 1`). See `plan/features/VOUCHERS.md §Voucher usageCount Counter Ownership` |
+| `expiresAt` | timestamp \| null | Optional expiry; the validator rejects past-dated codes. May be stored as ISO string or `{_seconds}` (legacy) — `toDateOrNull` normalizes both shapes (BF-500) |
+| `applicableRoomTypes` | string[] | Empty array = applies to all room types. The create handler rejects the booking if any selected room type is not in this list |
+| `isActive` | boolean | Default `true`; staff flips to `false` to deactivate. Validator rejects inactive codes |
+| `isEnabled` | boolean \| undefined | Legacy alias for `isActive`. New reads should prefer `isActive` |
+| `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/project/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
+| `createdBy` | string | Audit — staff UID |
+| `createdAt` / `updatedAt` | timestamp | Audit |
+
+The doc ID is the code string by convention. The validate + create handlers both honour a `code`-field fallback for codes whose Firestore doc ID differs from the public `code` field (BI-10). Public reads go through `POST /api/validate/voucher` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, discountType, discountValue }` — never `usageCount`, `usageCap`, `expiresAt`, or `applicableRoomTypes`. The validator at `shared/utils/vouchers.ts:11` enforces the `isActive` / `expiresAt` / `usageCap` / `applicableRoomTypes` checks. Firestore rules: read/write staff-only — see `plan/docs/SECURITY.md §vouchers`.
+
+**Counter ownership — per VOU-01 (canonical contract, never violate without spec update):**
+- `handleCreateBooking` increments by `resolvedRoomSelections.length` (the single top-level `voucherCode` field applies to ALL rooms in the body; the increment is `childrenWithVoucherCount`).
+- `handleCreateWalkin` increments by `walkinRoomCount` (the single top-level `voucherCode` field applies to ALL walked-in rooms).
+- `handleAddRoomToReservation` increments by `1` (one new child added, regardless of reservation size).
+- `handleApplyBookingDiscount` increments by `1` (single-booking discount application).
+- `handleCancelBooking` reservation-scope decrements by `Map<code, count>` (a code shared across N cancelled children decrements by N; deduplicated per MRB-13).
+- `handleCancelBooking` room-scope decrements by `1` (one cancelled child).
+
+---
+
 ### `members/{memberId}`
 
 | Field | Type | Notes |
