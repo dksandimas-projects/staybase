@@ -1430,6 +1430,51 @@ export function ReportsPage() {
       }));
 
       // Per MRB-04 Phase 2.x (2026-08-02, per decision
+      // #159): new-reservation PAYMENTS live at
+      // `reservations/{id}/payments/{paymentId}` — a
+      // SEPARATE subcollection from the booking's
+      // `payments/`. The per-booking loop above only
+      // catches the legacy path. This payments
+      // collectionGroup read catches the new path.
+      // Same row shape as the per-booking loop — `Type`
+      // derived from `data.type` or the sign of the
+      // amount, `Amount`, `Method`, `Transaction
+      // Reference`, `Note`, `Reason`, `Approved By`,
+      // `Recorded By`, `Recorded At` identical to the
+      // legacy rows. The record carries `data.bookingId`
+      // (stamped at write time per `bookings.ts` — see
+      // RPT-04's identical pattern for refunds) so the
+      // `bookings.find(...)` lookup resolves the
+      // bookingRef for the spreadsheet cell. Falls back
+      // to the path's parent (the reservationId) if a
+      // future write path drops the stamp — current
+      // production data has it on every new-reservation
+      // payment. Without this read, the Full Backup
+      // XLSX Payments sheet is missing every verified /
+      // add-payment / walk-in collection entry for every
+      // N>1 reservation (RPT-05, 2026-08-14).
+      const allReservationPaymentsSnap = await getDocs(collectionGroup(db, "payments"));
+      allReservationPaymentsSnap.forEach((paymentDoc) => {
+        if (!paymentDoc.ref.path.startsWith("reservations/")) return; // legacy handled by per-booking loop above
+        const data = paymentDoc.data();
+        const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
+        const bookingId = String(data.bookingId || parentDocumentId);
+        const booking = bookings.find((item) => item.id === bookingId);
+        paymentRows.push({
+          "Booking Ref": booking?.bookingRef || bookingId,
+          Type: data.type || (Number(data.amount || 0) < 0 ? "refund" : "payment"),
+          Amount: data.amount || 0,
+          Method: data.method || "",
+          "Transaction Reference": data.transactionReference || "",
+          Note: data.note || "",
+          Reason: data.reason || "",
+          "Approved By": data.approvedBy || "",
+          "Recorded By": data.recordedBy || "",
+          "Recorded At": toDate(data.recordedAt)?.toISOString() || ""
+        });
+      });
+
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision
       // #159): new-reservation refunds live at
       // `reservations/{id}/refunds/{refundId}` — a
       // SEPARATE subcollection from the booking's
@@ -1475,7 +1520,26 @@ export function ReportsPage() {
       const allChargesSnap = await getDocs(collectionGroup(db, "charges"));
       allChargesSnap.forEach((chargeDoc) => {
         const charge = chargeDoc.data();
-        const bookingId = chargeDoc.ref.parent.parent?.id || "";
+        // Per MRB-04 Phase 2.x (2026-08-02, per decision
+        // #159): incidental charges for new reservations
+        // live at `reservations/{id}/charges/{chargeId}`
+        // — a SEPARATE subcollection from the booking's
+        // `charges/`. The pre-RPT-05 resolution used the
+        // path's parent id directly as the bookingId,
+        // which is wrong for reservation-scope charges
+        // (parent = reservationId, not bookingId), leaving
+        // the Booking Ref + Room cells blank in the Full
+        // Backup XLSX Charges sheet. Prefer the stamped
+        // `data.bookingId` (written by every new-reservation
+        // charge handler), fall back to the path's parent
+        // for the legacy path. The bookingRef resolution
+        // is the same `bookings.find(...)` lookup the
+        // refunds + new-reservation-payments loops use.
+        const pathParentId = chargeDoc.ref.parent.parent?.id || "";
+        const isReservationCharge = chargeDoc.ref.path.startsWith("reservations/");
+        const bookingId = isReservationCharge
+          ? String(charge.bookingId || pathParentId)
+          : pathParentId;
         const booking = bookings.find((item) => item.id === bookingId);
         chargeRows.push({
           "Booking Ref": booking?.bookingRef || bookingId,
