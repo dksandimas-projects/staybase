@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.16";
+    VERSION2 = "0.266.17";
   }
 });
 
@@ -228537,6 +228537,7 @@ async function handleCreateBooking(req, res) {
       let appliedVoucherCode = "";
       let voucherUsageUpdate = null;
       if (voucherCode && !corporateDetails2.isCorporate) {
+        const childrenWithVoucherCount = resolvedRoomSelections2.length;
         const formattedCode = voucherCode.trim().toUpperCase();
         let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         let voucherDoc = await transaction.get(voucherRef);
@@ -228574,7 +228575,7 @@ async function handleCreateBooking(req, res) {
             voucherUsageUpdate = {
               ref: voucherRef,
               data: {
-                usageCount: (vData.usageCount || 0) + 1,
+                usageCount: (vData.usageCount || 0) + childrenWithVoucherCount,
                 updatedAt: /* @__PURE__ */ new Date()
               }
             };
@@ -229781,7 +229782,7 @@ async function handleCreateWalkin(req, res) {
         }, voucherBase));
         voucherUsageUpdate = {
           ref: voucherRef,
-          data: { usageCount: Number(voucherData.usageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
+          data: { usageCount: Number(voucherData.usageCount || 0) + walkinRoomCount, updatedAt: /* @__PURE__ */ new Date() }
         };
       }
       const hasManualOverride = totalPriceOverride !== void 0 && totalPriceOverride !== null;

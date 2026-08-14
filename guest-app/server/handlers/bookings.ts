@@ -2465,6 +2465,17 @@ export async function handleCreateBooking(req: any, res: any) {
       let appliedVoucherCode = "";
       let voucherUsageUpdate: { ref: any; data: any } | null = null;
       if (voucherCode && !corporateDetails.isCorporate) {
+        // Per VOU-01 (2026-08-14, per the canonical spec at
+        // `plan/features/VOUCHERS.md:91-93`): the increment
+        // is per-child, not per-reservation. The single
+        // top-level `voucherCode` field applies to ALL
+        // rooms in the booking body (no per-line voucher
+        // field exists on `publicRoomSelectionSchema`),
+        // so the increment equals the room count.
+        // Pre-VOU-01 incremented by `+ 1` regardless of
+        // room count — a 3-room reservation consumed 1
+        // cap use instead of 3.
+        const childrenWithVoucherCount = resolvedRoomSelections.length;
         const formattedCode = voucherCode.trim().toUpperCase();
         // Per BI-10 (booking-intercom audit 2026-07-06): the
         // create-time voucher lookup was `vouchers.doc(code)` only,
@@ -2546,7 +2557,7 @@ export async function handleCreateBooking(req: any, res: any) {
             voucherUsageUpdate = {
               ref: voucherRef,
               data: {
-                usageCount: (vData.usageCount || 0) + 1,
+                usageCount: (vData.usageCount || 0) + childrenWithVoucherCount,
                 updatedAt: new Date()
               }
             };
@@ -4306,9 +4317,19 @@ export async function handleCreateWalkin(req: any, res: any) {
           discountType: voucherData.discountType === "percent" ? "percent" : "flat",
           discountValue: Number(voucherData.discountValue) || 0
         }, voucherBase));
+        // Per VOU-01 (2026-08-14, per the canonical spec at
+        // `plan/features/VOUCHERS.md:91-93`): the increment
+        // is per-child, not per-reservation. The walkin
+        // schema has a single top-level `voucherCode`
+        // field that applies to ALL walked-in rooms (no
+        // per-line field on `WalkinRoomLineSchema`), so
+        // the increment equals `walkinRoomCount`. Pre-
+        // VOU-01 incremented by `+ 1` regardless of room
+        // count — a 3-room walkin consumed 1 cap use
+        // instead of 3.
         voucherUsageUpdate = {
           ref: voucherRef,
-          data: { usageCount: Number(voucherData.usageCount || 0) + 1, updatedAt: new Date() }
+          data: { usageCount: Number(voucherData.usageCount || 0) + walkinRoomCount, updatedAt: new Date() }
         };
       }
 
