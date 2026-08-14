@@ -199,11 +199,16 @@ const mockRequest = (body: any) => ({
   socket: { remoteAddress: "127.0.0.1" }
 } as any);
 
+// Dynamic dates: the server's BI-12 guard rejects past
+// check-ins, so the fixture must always be relative to
+// "today" (Manila). Same-day check-in is allowed.
+const manilaToday = new Date(Date.now() + 8 * 60 * 60 * 1000);
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
 const baseBody = {
   bookingId: "walkinBf04A",
   roomType: "standard-double",
-  checkIn: "2026-08-04",
-  checkOut: "2026-08-06",
+  checkIn: fmtDate(manilaToday),
+  checkOut: fmtDate(new Date(manilaToday.getTime() + 2 * 24 * 60 * 60 * 1000)),
   guests: 2,
   hasBreakfast: false,
   guestDetails: {

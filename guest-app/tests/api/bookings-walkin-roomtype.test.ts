@@ -18,6 +18,27 @@ let setCalls: any[] = [];
 let updateCalls: any[] = [];
 let transactionGetLog: string[] = [];
 
+// Dynamic dates (2026-08-14): hardcoded calendar dates go stale —
+// the BI-12 guard rejects past check-ins on the public path, and
+// any future walk-in guard would break them too. Generated from
+// Manila "today" so the fixtures are always ≥ today. Weekday stays
+// (Tue→Thu) never contain a weekend night; weekend stays (Sat→Mon)
+// are exactly two weekend nights — the rate semantics the tests
+// assert are preserved.
+const manilaToday = new Date(Date.now() + 8 * 60 * 60 * 1000);
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+const nextWeekday = (targetDay: number) => {
+  const d = new Date(manilaToday);
+  const days = (targetDay - d.getUTCDay() + 7) % 7 || 7;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+};
+// Tue → Thu (2 weekday nights) and Sat → Mon (2 weekend nights).
+const WEEKDAY_CHECKIN = fmtDate(nextWeekday(2));
+const WEEKDAY_CHECKOUT = fmtDate(nextWeekday(4));
+const WEEKEND_CHECKIN = fmtDate(nextWeekday(6));
+const WEEKEND_CHECKOUT = fmtDate(nextWeekday(1));
+
 vi.mock("../../server/lib/resend", () => ({
   resend: { emails: { send: vi.fn().mockResolvedValue({ id: "mock_email_id" }) } }
 }));
@@ -195,8 +216,8 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     const body = {
       bookingId: "walkinBf02A",
       roomId: "room_101",
-      checkIn: "2026-08-04", // Tue
-      checkOut: "2026-08-06", // Thu (no weekend nights)
+      checkIn: WEEKDAY_CHECKIN,
+      checkOut: WEEKDAY_CHECKOUT,
       guests: 3,
       hasBreakfast: false,
       guestDetails: {
@@ -226,8 +247,8 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     const body = {
       bookingId: "walkinChd9A",
       roomId: "room_101",
-      checkIn: "2026-08-04",
-      checkOut: "2026-08-06",
+      checkIn: WEEKDAY_CHECKIN,
+      checkOut: WEEKDAY_CHECKOUT,
       guests: 3,
       numAdults: 2,
       numChildren: 1,
@@ -260,8 +281,8 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     const body = {
       bookingId: "walkinChd9B",
       roomId: "room_101",
-      checkIn: "2026-08-04",
-      checkOut: "2026-08-06",
+      checkIn: WEEKDAY_CHECKIN,
+      checkOut: WEEKDAY_CHECKOUT,
       guests: 3,
       numAdults: 2,
       numChildren: 2,
@@ -292,8 +313,8 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     const body = {
       bookingId: "walkinBf02B",
       roomId: "room_101",
-      checkIn: "2026-08-04",
-      checkOut: "2026-08-06",
+      checkIn: WEEKDAY_CHECKIN,
+      checkOut: WEEKDAY_CHECKOUT,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -321,14 +342,14 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
   });
 
   test("uses the type entry's weekendRate for Sat/Sun nights", async () => {
-    // 2026-08-08 (Sat) → 2026-08-10 (Mon): 2 nights, both weekend.
+    // WEEKEND_CHECKIN (Sat) → WEEKEND_CHECKOUT (Mon): 2 nights, both weekend.
     // typeWeekendRate = 2500, typeBaseRate = 2000.
     // Expected total: 2500 * 2 = 5000.
     const body = {
       bookingId: "walkinBf02C",
       roomId: "room_101",
-      checkIn: "2026-08-08",
-      checkOut: "2026-08-10",
+      checkIn: WEEKEND_CHECKIN,
+      checkOut: WEEKEND_CHECKOUT,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -357,8 +378,8 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     const body = {
       bookingId: "walkinBf02D",
       roomId: "room_101",
-      checkIn: "2026-08-04",
-      checkOut: "2026-08-06",
+      checkIn: WEEKDAY_CHECKIN,
+      checkOut: WEEKDAY_CHECKOUT,
       guests: 5,
       hasBreakfast: false,
       guestDetails: {
@@ -388,8 +409,8 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     const body = {
       bookingId: "walkinBf02E",
       roomId: "room_101",
-      checkIn: "2026-08-04",
-      checkOut: "2026-08-06",
+      checkIn: WEEKDAY_CHECKIN,
+      checkOut: WEEKDAY_CHECKOUT,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -417,8 +438,8 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     const body = {
       bookingId: "walkinBf02F",
       roomId: "room_101",
-      checkIn: "2026-08-04",
-      checkOut: "2026-08-06",
+      checkIn: WEEKDAY_CHECKIN,
+      checkOut: WEEKDAY_CHECKOUT,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {

@@ -191,7 +191,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 ## Audit Remediation (2026-07-17)
 
 - **G-01 (HIGH, fixed):** `/api/bookings/create` now strict-Zod validates the complete request. `guests` is a finite integer from 1–100, unknown fields are rejected, and computed totals have a final `Number.isFinite` guard before the booking write. The already-strict walk-in schema remains unchanged.
-- **G-02 (MED, open):** No maximum stay length or advance-booking window server-side. Anonymous pay-at-hotel `pending` bookings occupy inventory until staff cancel them — long or far-future bookings can deny availability. Fix: cap `numNights` and the booking horizon in the create handlers and mirror in the date picker.
+- **G-02 (MED, fixed 2026-08-14):** The server now enforces `MAX_STAY_NIGHTS` (30) and `MAX_ADVANCE_DAYS` (365) in `handleCreateBooking` (lines 1418-1431). Both limits are defined in `shared/constants`. The client date picker surfaces the advance window. Walk-in creation is exempt from the advance-window check.
 
 ## References
 
