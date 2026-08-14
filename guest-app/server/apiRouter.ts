@@ -13,7 +13,7 @@ import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
-import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
+import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
@@ -1273,8 +1273,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
     }
 
-    
+
     return await handleCreateStoreOrder(req, res);
+  }
+
+  // Per STR-01 (2026-08-14): confirm-order is the missing
+  // staff-authenticated endpoint that decrements stock +
+  // stamps `stockDecrementedAt` + flips status to "confirmed".
+  // The cancel-order endpoint reads `stockDecrementedAt`
+  // before restoring, so this is the writer half of the
+  // create-then-confirm-then-cancel state machine.
+  if (domain === "store" && action === "confirm-order" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleConfirmStoreOrder(req, res);
   }
 
   if (domain === "store" && action === "cancel-order" && req.method === "POST") {
