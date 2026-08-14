@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.266.17";
+    VERSION2 = "0.266.18";
   }
 });
 
@@ -236263,6 +236263,116 @@ async function handleCreateStoreOrder(req, res) {
     });
   }
 }
+async function handleConfirmStoreOrder(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const body = req.body || {};
+  if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
+    return res.status(400).json({ success: false, error: "Missing required confirmation fields." });
+  }
+  const orderId = String(body.orderId).trim();
+  const roomNumber = String(body.roomNumber).trim();
+  const orderRef = String(body.orderRef).trim();
+  if (orderId.length === 0 || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid order id." });
+  }
+  if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid room number." });
+  }
+  if (orderRef.length === 0 || orderRef.length > MAX_ORDER_REF_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid order reference." });
+  }
+  const staffUid = String(req.staff?.uid || "staff");
+  try {
+    let confirmedOrder = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRefDoc = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRefDoc);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+      const orderData = orderDoc.data();
+      if (String(orderData.roomNumber || "").trim() !== roomNumber) {
+        throw new Error("ORDER_ROOM_MISMATCH");
+      }
+      if (String(orderData.orderRef || "").trim() !== orderRef) {
+        throw new Error("ORDER_REF_MISMATCH");
+      }
+      if (orderData.status !== "placed") {
+        throw new Error("ORDER_NOT_CONFIRMABLE");
+      }
+      if (orderData.stockDecrementedAt) {
+        confirmedOrder = orderData;
+        return;
+      }
+      const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
+      const itemRefs = orderItems.map((item) => adminDb.collection("storeItems").doc(item.itemId));
+      const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+      for (let index = 0; index < orderItems.length; index++) {
+        const item = orderItems[index];
+        const itemDoc = itemDocs[index];
+        if (!itemDoc.exists) continue;
+        const itemData = itemDoc.data();
+        if (itemData.stock === null || itemData.stock === void 0) continue;
+        const currentStock = Number(itemData.stock || 0);
+        const requestedQuantity = Number(item.quantity || 0);
+        const newStock = currentStock - requestedQuantity;
+        if (newStock < 0) {
+          throw new Error("OUT_OF_STOCK");
+        }
+        transaction.update(itemRefs[index], {
+          stock: newStock,
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+      }
+      transaction.update(orderRefDoc, {
+        status: "confirmed",
+        stockDecrementedAt: /* @__PURE__ */ new Date(),
+        handledBy: staffUid,
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+      confirmedOrder = { ...orderData, status: "confirmed", stockDecrementedAt: /* @__PURE__ */ new Date() };
+    });
+    if (confirmedOrder) {
+      try {
+        let guestEmail = "";
+        if (confirmedOrder.bookingId) {
+          const bookingDoc = await adminDb.collection("bookings").doc(confirmedOrder.bookingId).get();
+          if (bookingDoc.exists) {
+            guestEmail = String(bookingDoc.data()?.guestEmail || "");
+          }
+        }
+        await sendStoreOrderTrigger("store-order-confirmed", {
+          ...confirmedOrder,
+          guestEmail,
+          handledBy: staffUid
+        });
+      } catch (emailErr) {
+        console.error("Failed to send store confirmation email:", emailErr);
+      }
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        orderId,
+        status: "confirmed",
+        idempotentReplay: confirmedOrder ? !confirmedOrder.stockDecrementedAt || false : false
+      }
+    });
+  } catch (error) {
+    const message = error.message || "Unable to confirm the store order.";
+    const statusMap = {
+      ORDER_NOT_FOUND: 404,
+      ORDER_ROOM_MISMATCH: 403,
+      ORDER_REF_MISMATCH: 403,
+      ORDER_NOT_CONFIRMABLE: 400,
+      OUT_OF_STOCK: 409
+    };
+    const status = statusMap[message] || 500;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 async function handleCancelStoreOrder(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -237900,6 +238010,14 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
     }
     return await handleCreateStoreOrder(req, res);
+  }
+  if (domain === "store" && action === "confirm-order" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleConfirmStoreOrder(req, res);
   }
   if (domain === "store" && action === "cancel-order" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`store-cancel:${ip}`, 10, 6e4)) {
