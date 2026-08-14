@@ -5074,6 +5074,181 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
   }
 }
 
+// Per VOU-02 (2026-08-14, found during the discount-flow
+// review that followed STR-01): the spec at
+// plan/features/VOUCHERS.md:44 promises a "Remove applied
+// voucher option" but there was no server endpoint to
+// remove a voucher without canceling the booking. The
+// asymmetry the audit caught: handleRejectDiscount
+// exists for senior/PWD but there's no equivalent for
+// vouchers. The cancel-handler decrements usageCount on
+// cancel, but staff can't correct a mistaken apply
+// without canceling the booking (which is destructive
+// for the guest — they lose their reservation).
+//
+// This handler is the mirror of handleApplyBookingDiscount's
+// voucher branch:
+//   - reads the booking + voucher in one transaction (FOL-03)
+//   - clears voucherCode + voucherDiscount
+//   - rebuilds rateBreakdown via the shared
+//     calculateDiscountChain helper (same shape as
+//     handleRejectDiscount at line 5124) with
+//     voucherAmount: 0 (the chain sees no voucher
+//     discount on the rebuild)
+//   - decrements vouchers.usageCount by 1 (mirror of
+//     apply at line 5022), clamped at 0 — the cancel
+//     handler at store.ts:490 uses the same clamp shape
+//   - idempotent: returns success if no voucherCode is
+//     set (the "already removed" no-op + the "cancel
+//     cleared it" no-op compose cleanly)
+//   - stamps staffRejectedBy + rejectReason on the
+//     booking doc for audit trail (mirror of
+//     handleRejectDiscount at line 5152)
+//
+// Scope decision: this is a staff operation only. The
+// guest-facing "Remove" link in VOUCHERS.md:44 implies
+// a separate endpoint (the bookingId + guestEmail + token
+// auth pattern, mirroring /api/bookings/lookup). Building
+// the guest path is out of scope for VOU-02 — staff can
+// correct mistakes via this endpoint, and a future
+// guest-side remove endpoint would compose with this one
+// (idempotency holds).
+export async function handleRemoveVoucher(req: any, res: any) {
+  const bookingId = String(req.body?.bookingId || "").trim();
+  const reason = String(req.body?.reason || "").trim();
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid booking id." });
+  }
+
+  // Mirror of handleApplyBookingDiscount line ~4967:
+  // staff-authenticated, router sets `req.staff`.
+  const staffUid = String(req.staff?.uid || "staff");
+
+  try {
+    let result: Record<string, any> = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+
+      const bookingData = bookingDoc.data()!;
+
+      // Idempotency: if no voucher is currently
+      // applied, the call is a no-op (the "already
+      // removed" case + the "cancel cleared it"
+      // case compose cleanly). Mirror of the
+      // apply-discount idempotency check at line 4971.
+      const existingVoucherCode = String(bookingData.voucherCode || "").trim();
+      if (!existingVoucherCode) {
+        result = { idempotentReplay: true, bookingId };
+        return;
+      }
+
+      // Per FOL-03 reads-before-writes: read the booking
+      // doc + the voucher doc BEFORE any writes. The
+      // booking-doc update + the voucher-doc update
+      // go in one contiguous write block after the reads.
+      const voucherRef = adminDb.collection("vouchers").doc(existingVoucherCode);
+      const voucherDoc = await transaction.get(voucherRef);
+
+      // Mirror of handleRejectDiscount at line 5124:
+      // rebuild the discount chain with voucherAmount: 0
+      // (we just removed the voucher, so the chain sees
+      // no voucher discount). The originalTotalPrice +
+      // snapshotted discountScope + member/points chain
+      // recompute the correct post-removal totalPrice.
+      const originalTotalPrice = bookingData.originalTotalPrice;
+      if (originalTotalPrice === null || originalTotalPrice === undefined) {
+        throw new Error("Original total price not stored on booking.");
+      }
+      const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
+      const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
+      const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue)
+        ? Math.max(rawPointsRedeemedValue, 0)
+        : 0;
+      const removeChain = calculateDiscountChain({
+        roomTotal: Number(originalTotalPrice) || 0,
+        breakfastTotal: 0,
+        extraBedTotal: 0,
+        seniorPct: 0,
+        // Per the VOU-02 fix: voucher is being removed,
+        // so the chain sees voucherAmount: 0. The
+        // member-discount base widens to include the
+        // voucher-amount range (the guest pays more
+        // after removal, member discount applies to
+        // the larger pre-voucher base).
+        voucherAmount: 0,
+        memberPct: memberDiscountPct,
+        scope: normalizeDiscountScope(bookingData.discountScopeSnapshot),
+        round: true
+      });
+      const restoredTotalPrice = Math.max(removeChain.total - pointsRedeemedValue, 0);
+      const rateBreakdown = rebuildRateBreakdown({
+        // Strip `voucherCode` before spreading — it's
+        // not part of the `RebuildableBooking` type
+        // (the type only carries `voucherDiscount`).
+        // The clear is intentional (we're removing
+        // the voucher) so a stray `voucherCode`
+        // leaking through the spread would be
+        // semantically wrong.
+        ...((): any => {
+          const { voucherCode: _omit, ...rest } = bookingData;
+          return rest;
+        })(),
+        voucherCode: "",
+        voucherDiscount: 0,
+        pointsRedeemedValue,
+        totalPrice: restoredTotalPrice
+      }, {
+        pointsRedeemedValue,
+        finalTotal: restoredTotalPrice
+      });
+
+      // Per BF-15 (booking-flow audit 2026-06-26):
+      // `staffRejectedBy` is a staff UID per the BACKEND.md
+      // schema. Use the auth result, not the email.
+      // Per VOU-02: stamp a `staffRemovedVoucherBy` field
+      // (mirror of `discountRejectedBy`) so the audit
+      // trail distinguishes "voucher was removed by staff"
+      // from "voucher was cleared on cancel".
+      const updates = {
+        voucherCode: "",
+        voucherDiscount: 0,
+        staffRemovedVoucherBy: staffUid,
+        staffRemovedVoucherReason: reason,
+        staffRemovedVoucherAt: new Date(),
+        totalPrice: restoredTotalPrice,
+        ...(rateBreakdown ? { rateBreakdown } : {}),
+        updatedAt: new Date()
+      };
+
+      // Per the VOU-02 contract: decrement usageCount
+      // by 1, clamped at 0. Mirror of the cancel-handler
+      // decrement shape at store.ts:490. The apply
+      // handler at line 5022 increments by 1 (no clamp
+      // — usageCount is always 0+ when apply runs); the
+      // remove handler mirrors that direction in reverse.
+      if (voucherDoc.exists) {
+        const voucherData = voucherDoc.data() || {};
+        transaction.update(voucherRef, {
+          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: new Date()
+        });
+      }
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    const message = error.message || "Unable to remove the voucher.";
+    const status = message === "Booking not found." ? 404 : 400;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
 export async function handleRejectDiscount(req: any, res: any) {
   const { bookingId, reason } = req.body;
   if (!bookingId) {
