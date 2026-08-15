@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 14, 2026 (DSC-04 opened off-roadmap during the discount-flow review that followed VOU-02 — `applyReservationDiscount` is the MRB-14+ future work for atomic reservation-scope applies; the current client-loop shape is documented at `BOOKINGS-MANAGEMENT.md:64` as a known limitation; no code change yet, requires owner prioritization).
+> Last updated: August 14, 2026 (end-of-session audit summary — 7 surfaces audited, 4 real bugs/doc drifts fixed (RPT-05, EXB-12.1, VOU-01, STR-01), 1 new endpoint added (VOU-02), 1 test-discipline gap closed (discount-scope loop pin), 2 items opened for owner decision (VOU-03, DSC-04); the audit + fix pass + skill creation is now captured as a single `## Audit Session — 2026-08-14` block at the bottom of the open entries, see below for the per-fix table).
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -215,6 +215,60 @@
 - [ ] **VOU-03 — Voucher `applicableRoomTypes` is all-or-none per booking, no mixed-type support (off-roadmap doc-drift fix — requires product decision)** (open 2026-08-14, found during the discount-flow review that followed VOU-02). **DOC DRIFT — UX GAP, NOT A BUG.** Per the spec at `plan/features/VOUCHERS.md:54` + `plan/docs/BACKEND.md §vouchers/{code}.applicableRoomTypes`: a voucher restricted to a subset of room types applies to a booking IF AND ONLY IF every selected room type is in the subset. Both `handleCreateBooking` (line 2515-2516) and `handleCreateWalkin` (line 4301-4302) enforce this — `allSelectedTypesApplicable` must be true. The pre-VOU-03 code is correct for the spec it implements. The audit caught the **UX gap**: a guest booking a mixed-type reservation (e.g., 1 Standard + 1 Deluxe) cannot apply a voucher restricted to "Standard" rooms. The current shape is "all-or-none per booking" — the voucher is rejected on the whole booking even though only 1 of the 2 rooms is ineligible. **This is a product decision, not a code bug.** Two possible shapes: **(a)** all-or-none per booking (current behavior — spec'd) — voucher applies to whole reservation or none. **(b)** per-room applicability (would require a per-line `voucherCode` field on `publicRoomSelectionSchema` and `WalkinRoomLineSchema`, neither of which currently has it) — voucher applies to eligible rooms only; the ineligible rooms pay full price. The current shape is consistent with the corporate-code handling (corporate `applicableRoomTypes` is also all-or-none), so the symmetry argument favors **(a)**. The gap is documented for owner decision. **Spec:** no spec MD change required (the current spec correctly describes the implemented behavior). **Touch:** none yet (needs product decision before any code change). If the owner picks **(b)**, the implementation work would be: (1) add `voucherCode?: string` to `publicRoomSelectionSchema` + `WalkinRoomLineSchema`; (2) in `handleCreateBooking`, iterate `resolvedRoomSelections` and only include rooms with a `voucherCode` set in the voucher-applicability check + the per-child `childrenWithVoucherCount` increment (already there — VOU-01); (3) in `handleCreateWalkin`, same per-line check on `walkinRoomLines`; (4) update the spec's "Increment + decrement contract" section to clarify per-line semantics; (5) add tests for the mixed-type scenario (N>1 reservation, only some rooms have the code, only those rooms increment usageCount + get the discount). All 1575 guest-app tests pass (no code change yet).
 
 - [ ] **DSC-04 — `applyReservationDiscount` endpoint for atomic reservation-scope applies (off-roadmap future work — documented limitation)** (open 2026-08-14, found during the discount-flow review that followed VOU-02). **DOCUMENTED LIMITATION, NOT A BUG.** Per the spec at `plan/features/BOOKINGS-MANAGEMENT.md:64`: *"A transactional `applyReservationDiscount` endpoint is the MRB-14+ follow-up if atomicity ever matters."* The current `handleApplyBookingDiscount` is a per-booking handler (increments `vouchers.usageCount += 1` per call). The admin client loops over reservation rooms for the "All N rooms" scope (`BookingsPage.tsx:7874-7898`), achieving N increments across N successful calls. **The atomicity limitation:** if rooms 1+2 succeed and room 3 fails (network error, voucher cap reached, transient Admin SDK issue), rooms 1+2 are already discounted and the desk sees an error. The retry path uses the handler's idempotency check (line 4971: throws if `booking.discountType || booking.voucherCode` already set) — so the retry will NOT double-discount rooms 1+2, but the partial-failure UX is confusing. **The fix:** a new `handleApplyReservationDiscount` that opens a single transaction, iterates the reservation's rooms, applies the discount + increments usageCount for each, and rolls back atomically on any failure. **Trade-offs:** atomic reservation-scope applies add complexity (the transaction must hold all N bookings + the voucher + the rateBreakdown locks for the duration) and the partial-failure recovery UX needs a redesign. The spec acknowledges this as future work, not a current bug. **Touch:** none yet (docs-only roadmap entry). If the owner decides to prioritize atomicity, the implementation work would be: (1) new `handleApplyReservationDiscount` in `guest-app/server/handlers/bookings.ts` (~250 lines) — accepts `{ reservationId, discountType?, voucherCode? }`, reads the reservation header + every child in one transaction, applies the discount per-child, increments `vouchers.usageCount` per-child, throws on any failure (transaction aborts), returns the per-child results; (2) new router block in `guest-app/server/apiRouter.ts` with the same `authenticateStaff` gate as `apply-discount`; (3) tests for atomic rollback (one child fails → none are applied), partial-success (operator decides to retry the failing child only), and N=1 byte-equivalence (a 1-room reservation behaves identically to the existing endpoint); (4) admin client update — replace the loop with a single `applyReservationDiscount` call when `scope === "reservation"`. All 1575 guest-app tests pass (no code change yet); 1260 admin tests pass; 553 shared tests pass; TypeScript clean.
+
+## Audit Session — 2026-08-14 (RPT-05 → DSC-04)
+
+A single-day audit + fix pass across 7 Spark Inn feature surfaces. Found 2 real bugs, 1 missing handler, 1 doc-drift, 1 test-discipline gap, and 2 doc-drift items needing owner decision. The bug class — **per-child counter drift** — recurred in 2 of the 7 surfaces; the test-discipline retro (8 source-text guards + 4 runtime assertions per fix) was the key to catching it.
+
+### Per-fix summary (chronological)
+
+| # | Entry | Branch | Feature commit | Severity | Class |
+|---|---|---|---|---|---|
+| 1 | **RPT-05** — Reports Full Backup XLSX missing reservation-scope payments + charges | `fix/rpt-05-full-backup-reservation-payments` | `245837c` | Real bug | Per-child collectionGroup drift |
+| 2 | **EXB-12.1** — `booking-room-cart.test.ts` fixture missing `extraBedBreakfast` field | `fix/exb-12-booking-room-cart-fixture-mismatch` | `7453c7f` | Test bug (pre-existing on dev since EXB-12) | Test discipline |
+| 3 | **VOU-01** — Voucher `usageCount` increment was per-reservation, spec requires per-child | `fix/voucher-usagecount-per-child` | `15cd1e8` | Real bug (revenue impact — cap off by N for multi-room) | Per-child counter drift |
+| 4 | **STR-01** — `handleConfirmStoreOrder` handler missing (spec promised, never built) | `feat/store-confirm-stock-decrement` | `d462c8a` | Real bug (inventory drift — stock never decremented) | Missing feature |
+| 5 | **VOU-02** — `handleRemoveVoucher` endpoint missing (spec promised, never built) | `feat/voucher-remove-endpoint` | `fa2d1be` | Doc drift (no staff voucher-removal path; cancel was the only option) | Missing feature |
+| 6 | **VOU-03** — Voucher `applicableRoomTypes` all-or-none vs per-room — needs owner decision | `docs/roadmap-voucher-mixed-type-gap` | `f6c88fc` | Open (product decision) | UX gap |
+| 7 | **DSC-04** — `applyReservationDiscount` atomic endpoint — needs owner decision | `docs/roadmap-apply-reservation-discount` | `73aed45` | Open (future work, documented limitation) | Atomicity |
+
+Plus the test-discipline gap closed inline: **discount-scope loop pin** at `ab2d215` (5-line source-text regex guard on `BookingsPage.tsx:7874-7898` — pins the `for (const targetId of targetIds) { ... fetch(.../api/bookings/apply-discount ... bookingId: targetId ...) }` loop body so a future refactor that collapses the loop silently miscounting `vouchers.usageCount` is caught at the source level).
+
+### Bug class — what we observed
+
+The recurring shape: **a spec change added per-child / multi-room aggregate semantics, but a downstream consumer that iterates over the new shape didn't get updated.** The fix is mechanical — increment by `N` not by `1` — but the **detection** is what's hard: regex tests on the simple case pass while runtime drift hides. The v0.264.9 retrofit pattern (1 runtime assertion per regression-guard test file) was the unlock. The pre-VOU-01 source-text pin `+ 1` matched the regex — the runtime assertion reproducing the row-builder math against a 3-room fixture caught the actual bug.
+
+### What we audited + didn't fix (clean surfaces)
+
+- **Spark Rewards loyalty** — `earn-${bookingId}` / `clawback-${bookingId}` pairing intact (MRB-15-07). Per-child semantics correct.
+- **Spark Essentials Store** — per-order, not per-child aggregation; clean for this bug class. Separate missing-handler bug (`handleConfirmStoreOrder`) was fixed as STR-01.
+- **Intercom Inbox** — `intercoms/{roomId}/messages` is room-scoped; no aggregation across rooms.
+- **Notification Center** — one `notifications` doc per event; intentionally per-reservation, not per-child.
+- **Discount flow (apply-discount + reject-discount)** — per-call semantics, client orchestrates reservation-scope loop. Correct + now has test pin.
+- **Corporate Booking** — per-room at create (`+ assignedRooms.length`), `Map<code, count>` at reservation-scope cancel, `- 1` at room-scope cancel. Spec-accurate.
+- **House Rules emails** — global per-property string; no per-child fan-out.
+- **DASHBOARD-OVERVIEW** — per-booking aggregated view.
+
+### Test discipline retrofitted
+
+- **VOU-01** test file: 10 tests (6 source-text guards + 4 runtime assertions). Pattern: source-text pins the new variable name at the function-declaration site (`childrenWithVoucherCount`), runtime reproduces the row-builder against a 3-room fixture.
+- **STR-01** test file: 12 tests (8 source-text guards + 4 runtime assertions). Pattern: pins handler declaration + reads-before-writes shape + decrement math + idempotency + OUT_OF_STOCK guard + router auth wiring.
+- **VOU-02** test file: 11 tests (7 source-text guards + 4 runtime assertions). Pattern: mirrors VOU-01's per-child counter pattern + rateBreakdown rebuild via `calculateDiscountChain` + audit-trail fields.
+- **discount-scope loop pin** test: 1 test, single source-text regex on `BookingsPage.tsx:7874-7898`. Pin was cheap because the source text is small.
+
+### Open items needing owner decision
+
+- **VOU-03** (all-or-none vs per-room voucher applicability): staff currently can't apply a room-type-restricted voucher to a mixed-type reservation. The "all-or-none" shape is consistent with the corporate-code handling; the "per-room" shape requires per-line `voucherCode` fields on `publicRoomSelectionSchema` + `WalkinRoomLineSchema`. Owner picks.
+- **DSC-04** (`applyReservationDiscount` atomic endpoint): the current client-loop shape has a partial-failure UX when room N fails after rooms 1..N-1 succeeded. The handler's idempotency check prevents double-discount on retry, but the desk sees an error. A new transactional endpoint would close the gap. Spec acknowledges this as future work.
+
+### Future audit pass suggestions
+
+- **Intercom inbox + notification fan-out** for any future per-child semantics — the current per-room + per-event shapes are correct, but any new aggregate would need the same audit treatment.
+- **Spec hygiene** — every feature spec that mentions a handler name should be auditable against the actual exports in the corresponding handlers file. STR-01 + VOU-02 are the second + third "spec promised, code didn't build" findings; a one-line CI check (`grep -nE "handle\w+" plan/features/*.md | grep -v "^plan/features/.*:[0-9]*:#"`) would catch future drift.
+
+### Audit skill captured
+
+The 4-step audit workflow (spec-vs-code matrix → GOTCHAS grep → doc-drift probe → runtime + regression) is saved as a reusable skill at `~/.hermes/skills/spark-inn-4-step-audit/SKILL.md` (description: "Audit any Spark Inn feature surface for bugs + doc drift."). Future audit passes can reuse the pattern.
 
 ### Environment Test Runs & Controlled Data Reset (ETR)
 > Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **In progress: ETR-R (production-to-staging refresh) — foundation landed 2026-07-29 (R01 + R04 + R10 partial — server-side authorization, identity-replacement sanitization engine, audit row). Open: R02 (multiple modes — sanitized-snapshot is the only one in the foundation), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement with staging-reset integration — the manual import is the MVP step today).** Also open: ETR-D01..D10, ETR-15..20, ETR-21. Full spec: `plan/features/ENVIRONMENT-TEST-RESET.md`.
