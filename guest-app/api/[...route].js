@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.267.0";
+    VERSION2 = "0.268.0";
   }
 });
 
@@ -230339,6 +230339,161 @@ async function handleApplyBookingDiscount(req, res) {
     return res.status(status).json({ success: false, error: message });
   }
 }
+async function handleApplyReservationDiscount(req, res) {
+  const reservationId = String(req.body?.reservationId || "").trim();
+  const requestedDiscountType = req.body?.discountType;
+  const requestedVoucherCode = String(req.body?.voucherCode || "").trim().toUpperCase();
+  if (!reservationId) {
+    return res.status(400).json({ success: false, error: "Reservation ID is required." });
+  }
+  if (!requestedDiscountType && !requestedVoucherCode) {
+    return res.status(400).json({ success: false, error: "Choose a government discount or enter a voucher code." });
+  }
+  if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
+    return res.status(400).json({ success: false, error: "Invalid government discount type." });
+  }
+  const staffUid = String(req.staff?.uid || "staff");
+  let childRefs = [];
+  try {
+    const childSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationId).get();
+    childRefs = childSnap.docs.map((doc) => doc.ref);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || "Unable to query children." });
+  }
+  if (childRefs.length === 0) {
+    return res.status(404).json({ success: false, error: "Reservation has no bookings." });
+  }
+  try {
+    let result = { appliedTo: [], skipped: [] };
+    await adminDb.runTransaction(async (transaction) => {
+      const reservationRef = adminDb.collection("reservations").doc(reservationId);
+      const reservationSnap = await transaction.get(reservationRef);
+      if (!reservationSnap.exists) throw new Error("Reservation not found.");
+      const childSnapshots = [];
+      for (const ref of childRefs) {
+        const snap = await transaction.get(ref);
+        if (!snap.exists) {
+          throw new Error(`Booking ${ref.id} not found.`);
+        }
+        childSnapshots.push({ id: ref.id, ref, data: snap.data() });
+      }
+      const eligibleStatuses = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+      const eligible = [];
+      const skipped = [];
+      for (const child of childSnapshots) {
+        if (!eligibleStatuses.includes(child.data.status)) {
+          skipped.push(child.id);
+          continue;
+        }
+        if (child.data.discountType || child.data.voucherCode) {
+          skipped.push(child.id);
+          continue;
+        }
+        eligible.push(child);
+      }
+      if (eligible.length === 0) {
+        throw new Error("No eligible bookings in this reservation (all already have a discount or voucher, or are checked-out/cancelled).");
+      }
+      let voucherRef = null;
+      let voucherData = null;
+      if (requestedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(requestedVoucherCode);
+        let snap = await transaction.get(voucherRef);
+        if (!snap.exists) {
+          const querySnap = await transaction.get(
+            adminDb.collection("vouchers").where("code", "==", requestedVoucherCode).limit(1)
+          );
+          if (!querySnap.empty) {
+            snap = querySnap.docs[0];
+            voucherRef = snap.ref;
+          }
+        }
+        if (!snap.exists) throw new Error("Voucher is invalid or no longer available.");
+        voucherData = snap.data();
+        const expiresAt = toDateOrNull(voucherData.expiresAt);
+        const applicableRoomTypes = voucherData.applicableRoomTypes || [];
+        const capAllows = voucherData.usageCap == null || Number(voucherData.usageCount || 0) + eligible.length <= Number(voucherData.usageCap);
+        const roomsApply = applicableRoomTypes.length === 0 || eligible.every((c2) => applicableRoomTypes.includes(c2.data.roomType));
+        const valid = voucherData.isActive !== false && (!expiresAt || expiresAt >= /* @__PURE__ */ new Date()) && capAllows && roomsApply;
+        if (!valid) throw new Error("Voucher is invalid or no longer available.");
+      }
+      const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
+      const discountPct = discountType ? 20 : 0;
+      for (const child of eligible) {
+        const booking = child.data;
+        const breakdown = booking.rateBreakdown;
+        const storedOriginalTotal = Number(booking.originalTotalPrice);
+        const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0) + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+        const storedTotalPrice = Number(booking.totalPrice);
+        const subtotal = booking.originalTotalPrice !== null && booking.originalTotalPrice !== void 0 && Number.isFinite(storedOriginalTotal) && storedOriginalTotal >= 0 ? storedOriginalTotal : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0 ? breakdownSubtotal : storedTotalPrice;
+        if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
+        const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+        const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
+        let voucherDiscount = 0;
+        let voucherCode = "";
+        if (requestedVoucherCode && voucherData) {
+          voucherCode = requestedVoucherCode;
+          voucherDiscount = Math.round(calculateVoucherDiscount({
+            discountType: voucherData.discountType === "percent" ? "percent" : "flat",
+            discountValue: Number(voucherData.discountValue) || 0
+          }, voucherBase));
+        }
+        const afterVoucher = calculateVoucherBase(voucherBase, voucherDiscount);
+        const memberDiscountPct = Number(booking.memberDiscountPct || 0);
+        const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
+        const pointsValue = Number(booking.pointsRedeemedValue || 0);
+        const totalPrice = Math.max(afterVoucher - memberDiscount - pointsValue, 0);
+        const rateBreakdown = buildRateBreakdown({
+          roomLines: breakdown?.roomLines || [],
+          roomSubtotal: Number(breakdown?.roomSubtotal || subtotal),
+          breakfastTotal: (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
+          discountType,
+          discountPct,
+          voucherDiscount,
+          memberDiscountPct,
+          pointsRedeemedValue: pointsValue,
+          finalTotal: totalPrice
+        });
+        const updates = {
+          originalTotalPrice: subtotal,
+          discountType,
+          discountPct,
+          discountVerified: Boolean(discountType),
+          discountVerifiedBy: discountType ? staffUid : null,
+          discountRejected: false,
+          discountRejectedBy: null,
+          discountRejectionReason: "",
+          voucherCode,
+          voucherDiscount,
+          totalPrice,
+          rateBreakdown,
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        transaction.update(child.ref, updates);
+      }
+      let voucherUsageCount;
+      if (voucherRef && voucherData) {
+        voucherUsageCount = Number(voucherData.usageCount || 0) + eligible.length;
+        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
+      }
+      result = {
+        appliedTo: eligible.map((c2) => c2.id).sort(),
+        skipped: skipped.sort(),
+        voucherUsageCount
+      };
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "Unable to apply the discount or voucher.";
+    let status = 400;
+    if (message === "Reservation not found." || message.startsWith("Booking ") && message.endsWith(" not found.")) {
+      status = 404;
+    } else if (message === "Reservation has no bookings.") {
+      status = 404;
+    }
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 async function handleRemoveVoucher(req, res) {
   const bookingId = String(req.body?.bookingId || "").trim();
   const reason = String(req.body?.reason || "").trim();
@@ -237690,6 +237845,14 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleApplyBookingDiscount(req, res);
+  }
+  if (domain === "bookings" && action === "apply-reservation-discount" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleApplyReservationDiscount(req, res);
   }
   if (domain === "bookings" && action === "remove-voucher" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
