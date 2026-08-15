@@ -22,6 +22,7 @@
     "test:infra": "vitest run firebase/tests/storage-cors.test.ts",
     "check:api-bundle": "node scripts/check-api-bundle.mjs",
     "docs:audit": "node scripts/docs-audit.mjs",
+    "spec:audit": "node scripts/spec-handlers-audit.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project spark-inn-rules-test \"vitest run --config vitest.rules.config.ts\"",
     "test:fast": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app && npm run test:infra",
     "preflight": "node scripts/preflight.mjs"
