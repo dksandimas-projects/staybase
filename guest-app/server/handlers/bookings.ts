@@ -5074,6 +5074,267 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
   }
 }
 
+// Per DSC-04 (2026-08-15, found during the discount-flow
+// review that followed VOU-02, per owner decision option (a)):
+// the per-room `handleApplyBookingDiscount` is already atomic
+// per-booking (runTransaction at line 4963), but the admin
+// client's reservation-scope apply loops `for (const targetId
+// of targetIds) { fetch(...apply-discount ... bookingId:
+// targetId) }` over each room. If room 1 succeeds and room 2
+// fails, the desk sees an error but room 1 is already
+// discounted — partial-failure UX + manual correction needed.
+//
+// This handler is the atomic sibling: it accepts a
+// `reservationId`, discovers every child booking via the
+// pre-transaction `bookings.where("reservationId", "==", ...)`
+// pattern used at line 471, opens ONE runTransaction, re-reads
+// every child with `transaction.get` (FOL-03 reads-before-writes),
+// validates the voucher cap ONCE against the SUM of planned
+// writes (`usageCount + eligibleChildrenCount <= usageCap`),
+// and writes the discount to every child + the voucher
+// increment in the same transaction. Any failure aborts the
+// whole transaction — no partial state.
+//
+// Three behaviors that close the original gap:
+//   (a) Voucher cap validation happens once against the SUM,
+//       so a 3-child reservation with 1 cap slot left fails
+//       cleanly with 400 (no over-increment + no partial
+//       writes) instead of the current behavior where 1 child
+//       succeeds + the cap check rejects the 2nd child mid-loop
+//   (b) Each child is re-read inside the transaction (FOL-03),
+//       so a concurrent modification to one child between
+//       discovery and write is caught
+//   (c) The response shape (`{ appliedTo: [...], skipped: [...] }`)
+//       tells the desk exactly which rooms got the discount
+//       and which were skipped (already discounted, ineligible
+//       status, room-type mismatch) — replaces the current
+//       ambiguous "X of Y rooms failed" error
+//
+// Scope decision: this is staff-only. The admin client's
+// reservation-scope path (`BookingsPage.tsx:7874-7908`)
+// switches from looping `/api/bookings/apply-discount` to a
+// single `/api/bookings/apply-reservation-discount` call.
+// Single-room bookings still go through `apply-discount` —
+// the two endpoints coexist (N=1 reservation is byte-equivalent
+// either way; the per-child handler is faster for that case).
+//
+// Idempotency: matches `handleApplyBookingDiscount` (line
+// 4971). A retry with the same `reservationId` + same
+// `discountType`/`voucherCode` is a no-op — all eligible
+// children already have `discountType`/`voucherCode` set, so
+// they go into `skipped` and the cap is not re-incremented.
+export async function handleApplyReservationDiscount(req: any, res: any) {
+  const reservationId = String(req.body?.reservationId || "").trim();
+  const requestedDiscountType = req.body?.discountType;
+  const requestedVoucherCode = String(req.body?.voucherCode || "").trim().toUpperCase();
+  if (!reservationId) {
+    return res.status(400).json({ success: false, error: "Reservation ID is required." });
+  }
+  if (!requestedDiscountType && !requestedVoucherCode) {
+    return res.status(400).json({ success: false, error: "Choose a government discount or enter a voucher code." });
+  }
+  if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
+    return res.status(400).json({ success: false, error: "Invalid government discount type." });
+  }
+
+  // Staff-auth gate — same posture as the per-room handler.
+  // The router enforces this before invoking the handler; we
+  // trust `req.staff` here.
+  const staffUid = String(req.staff?.uid || "staff");
+
+  // Pre-transaction: discover every child booking for the
+  // reservation. Firestore transactions don't support
+  // `.where().get()` queries, so the child IDs must be
+  // gathered outside the transaction. We re-read each child
+  // with `transaction.get` inside the transaction (FOL-03
+  // reads-before-writes) — the pre-transaction read is just
+  // for ID discovery.
+  let childRefs: FirebaseFirestore.DocumentReference[] = [];
+  try {
+    const childSnap = await adminDb.collection("bookings")
+      .where("reservationId", "==", reservationId)
+      .get();
+    childRefs = childSnap.docs.map((doc) => doc.ref);
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Unable to query children." });
+  }
+  if (childRefs.length === 0) {
+    return res.status(404).json({ success: false, error: "Reservation has no bookings." });
+  }
+
+  try {
+    let result: { appliedTo: string[]; skipped: string[]; voucherUsageCount?: number } = { appliedTo: [], skipped: [] };
+    await adminDb.runTransaction(async (transaction) => {
+      // Read the reservation header (audit trail) + every
+      // child + the voucher (if any). ALL reads complete
+      // BEFORE any write (FOL-03).
+      const reservationRef = adminDb.collection("reservations").doc(reservationId);
+      const reservationSnap = await transaction.get(reservationRef);
+      if (!reservationSnap.exists) throw new Error("Reservation not found.");
+
+      const childSnapshots: { id: string; ref: FirebaseFirestore.DocumentReference; data: any }[] = [];
+      for (const ref of childRefs) {
+        const snap = await transaction.get(ref);
+        if (!snap.exists) {
+          throw new Error(`Booking ${ref.id} not found.`);
+        }
+        childSnapshots.push({ id: ref.id, ref, data: snap.data()! });
+      }
+
+      // Discover eligibility: each child must be in a status
+      // that allows discount + must not already have a
+      // discount or voucher applied. Eligible children are
+      // updated in this transaction; skipped children go into
+      // the response but get no write.
+      const eligibleStatuses = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+      const eligible: typeof childSnapshots = [];
+      const skipped: string[] = [];
+      for (const child of childSnapshots) {
+        if (!eligibleStatuses.includes(child.data.status)) {
+          skipped.push(child.id);
+          continue;
+        }
+        if (child.data.discountType || child.data.voucherCode) {
+          skipped.push(child.id);
+          continue;
+        }
+        eligible.push(child);
+      }
+      if (eligible.length === 0) {
+        throw new Error("No eligible bookings in this reservation (all already have a discount or voucher, or are checked-out/cancelled).");
+      }
+
+      // Voucher lookup + cap validation against the SUM of
+      // planned writes. The cap check happens ONCE here — if
+      // usageCount + eligibleChildrenCount > usageCap, the
+      // entire transaction aborts.
+      let voucherRef: FirebaseFirestore.DocumentReference | null = null;
+      let voucherData: any = null;
+      if (requestedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(requestedVoucherCode);
+        let snap: any = await transaction.get(voucherRef);
+        if (!snap.exists) {
+          const querySnap = await transaction.get(
+            adminDb.collection("vouchers").where("code", "==", requestedVoucherCode).limit(1)
+          );
+          if (!querySnap.empty) {
+            snap = querySnap.docs[0];
+            voucherRef = snap.ref;
+          }
+        }
+        if (!snap.exists) throw new Error("Voucher is invalid or no longer available.");
+        voucherData = snap.data();
+        const expiresAt = toDateOrNull(voucherData.expiresAt);
+        const applicableRoomTypes = voucherData.applicableRoomTypes || [];
+        const capAllows = voucherData.usageCap == null
+          || Number(voucherData.usageCount || 0) + eligible.length <= Number(voucherData.usageCap);
+        const roomsApply = applicableRoomTypes.length === 0
+          || eligible.every((c) => applicableRoomTypes.includes(c.data.roomType));
+        const valid = voucherData.isActive !== false
+          && (!expiresAt || expiresAt >= new Date())
+          && capAllows
+          && roomsApply;
+        if (!valid) throw new Error("Voucher is invalid or no longer available.");
+      }
+
+      // Compute + write per-child updates. The discount math
+      // is the per-child shape from `handleApplyBookingDiscount`
+      // (line 4990-5064); we hoist the constants out of the
+      // loop so they're computed once per transaction.
+      const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
+      const discountPct = discountType ? 20 : 0;
+
+      for (const child of eligible) {
+        const booking = child.data;
+        const breakdown = booking.rateBreakdown as BookingRateBreakdown | undefined;
+        const storedOriginalTotal = Number(booking.originalTotalPrice);
+        const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0)
+          + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+        const storedTotalPrice = Number(booking.totalPrice);
+        const subtotal = booking.originalTotalPrice !== null
+          && booking.originalTotalPrice !== undefined
+          && Number.isFinite(storedOriginalTotal)
+          && storedOriginalTotal >= 0
+          ? storedOriginalTotal
+          : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0
+            ? breakdownSubtotal
+            : storedTotalPrice;
+        if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
+
+        const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+        const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
+        let voucherDiscount = 0;
+        let voucherCode = "";
+        if (requestedVoucherCode && voucherData) {
+          voucherCode = requestedVoucherCode;
+          voucherDiscount = Math.round(calculateVoucherDiscount({
+            discountType: voucherData.discountType === "percent" ? "percent" : "flat",
+            discountValue: Number(voucherData.discountValue) || 0
+          }, voucherBase));
+        }
+        const afterVoucher = calculateVoucherBase(voucherBase, voucherDiscount);
+        const memberDiscountPct = Number(booking.memberDiscountPct || 0);
+        const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
+        const pointsValue = Number(booking.pointsRedeemedValue || 0);
+        const totalPrice = Math.max(afterVoucher - memberDiscount - pointsValue, 0);
+        const rateBreakdown = buildRateBreakdown({
+          roomLines: breakdown?.roomLines || [],
+          roomSubtotal: Number(breakdown?.roomSubtotal || subtotal),
+          breakfastTotal: (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
+          discountType,
+          discountPct,
+          voucherDiscount,
+          memberDiscountPct,
+          pointsRedeemedValue: pointsValue,
+          finalTotal: totalPrice
+        });
+        const updates = {
+          originalTotalPrice: subtotal,
+          discountType,
+          discountPct,
+          discountVerified: Boolean(discountType),
+          discountVerifiedBy: discountType ? staffUid : null,
+          discountRejected: false,
+          discountRejectedBy: null,
+          discountRejectionReason: "",
+          voucherCode,
+          voucherDiscount,
+          totalPrice,
+          rateBreakdown,
+          updatedAt: new Date()
+        };
+        transaction.update(child.ref, updates);
+      }
+
+      // Single voucher write — the per-child increment
+      // (`eligible.length`) matches VOU-01's per-child
+      // semantics: a 3-child reservation with a voucher
+      // applied to all 3 children increments usageCount by 3.
+      let voucherUsageCount: number | undefined;
+      if (voucherRef && voucherData) {
+        voucherUsageCount = Number(voucherData.usageCount || 0) + eligible.length;
+        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: new Date() });
+      }
+
+      result = {
+        appliedTo: eligible.map((c) => c.id).sort(),
+        skipped: skipped.sort(),
+        voucherUsageCount
+      };
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    const message = error.message || "Unable to apply the discount or voucher.";
+    let status = 400;
+    if (message === "Reservation not found." || message.startsWith("Booking ") && message.endsWith(" not found.")) {
+      status = 404;
+    } else if (message === "Reservation has no bookings.") {
+      status = 404;
+    }
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
 // Per VOU-02 (2026-08-14, found during the discount-flow
 // review that followed STR-01): the spec at
 // plan/features/VOUCHERS.md:44 promises a "Remove applied

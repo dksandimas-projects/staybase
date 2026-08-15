@@ -200,42 +200,61 @@ describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
     expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-selector"/);
     expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-room"/);
     expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-reservation"/);
-    // The submit loop calls `apply-discount` for every room
-    // when the scope is "reservation".
+    // The submit handler picks the atomic endpoint when the
+    // scope is "reservation" and a reservation context exists;
+    // falls back to the per-booking endpoint for single-room.
+    // Per DSC-04 (2026-08-15): this replaces the per-targetId
+    // loop with a single atomic fetch.
     expect(bookingsPageSrc).toMatch(
-      /scope === "reservation" && selectedReservationContext\s*\?\s*selectedReservationContext\.rooms\.map\(\(room\) => room\.id\)\s*:\s*\[selectedBooking\.id\]/
+      /isReservationScope = scope === "reservation" && !!selectedReservationContext/
+    );
+    expect(bookingsPageSrc).toMatch(
+      /endpointPath = isReservationScope\s*\?\s*"\/api\/bookings\/apply-reservation-discount"\s*:\s*"\/api\/bookings\/apply-discount"/
     );
     // The "all rooms" submit button label + toast surface the
     // reservation scope so the desk sees what was applied.
     expect(bookingsPageSrc).toMatch(/Apply to all \$\{selectedReservationContext\.roomCount\} rooms/);
-    expect(bookingsPageSrc).toMatch(/Reservation repriced \(\$\{targetIds\.length\} rooms\)/);
+    expect(bookingsPageSrc).toMatch(/Reservation repriced \(\$\{selectedReservationContext\.roomCount\} rooms\)/);
   });
 
   // Per MRB-12-05 (2026-08-14, found during the audit pass
   // that followed RPT-05 + EXB-12.1 + VOU-01): the admin
-  // client loop is the only thing that achieves per-child
+  // client loop was the only thing that achieved per-child
   // usageCount semantics for the reservation-scope apply-
-  // discount flow (the handler does +1 per call; the client
-  // calls it N times for N rooms). The existing regex pin
-  // covers the `targetIds = ...rooms.map(...)` shape, but
-  // doesn't pin the `for (const targetId of targetIds)` loop
-  // body — a future refactor that breaks the loop (e.g.,
-  // calling the endpoint once with a `reservationId`
-  // parameter instead of N times per `roomId`) would
-  // silently miscount `vouchers.usageCount` without the
-  // existing test catching it. This test pins the loop body
-  // shape at the source-text level.
-  it("MRB-12-05: the discount submit loop body calls fetch(\\/api\\/bookings\\/apply-discount) per targetId", () => {
-    // Pin the `for (const targetId of targetIds)` loop body:
-    // each iteration calls fetch with the per-room bookingId.
-    // The pattern: `for (const targetId of targetIds) { ... fetch(...bookingId: targetId...) ... }`.
-    // Without this pin, a future refactor could:
-    //   (a) collapse the loop to a single fetch call
-    //   (b) change `body.bookingId` to `body.reservationId`
-    //   (c) remove the `await` and race the responses
-    // Any of these would silently miscount voucher
-    // usageCount for reservation-scope applies.
+  // discount flow (the handler did +1 per call; the client
+  // called it N times for N rooms). The original regex pin
+  // covered the `targetIds = ...rooms.map(...)` + the
+  // `for (const targetId of targetIds)` loop body — a future
+  // refactor that broke the loop would silently miscount
+  // `vouchers.usageCount`.
+  //
+  // Per DSC-04 (2026-08-15, owner decision option a): the
+  // loop is REPLACED by a single fetch to the atomic
+  // `apply-reservation-discount` endpoint — one server-side
+  // transaction that either applies the discount to every
+  // eligible child or none. The single-room path (scope ===
+  // "room") still uses the per-booking `apply-discount`
+  // endpoint (byte-equivalent to a 1-child reservation).
+  //
+  // This test pins the new atomic-shape at the source level
+  // (replaces the old loop pin). Without this pin, a future
+  // refactor could revert to the per-child loop and silently
+  // re-introduce the partial-failure UX (room N failing
+  // after rooms 1..N-1 succeeded leaves the reservation
+  // half-discounted).
+  it("MRB-12-05: the discount submit handler routes reservation-scope applies to the atomic endpoint (DSC-04)", () => {
+    // Pin the conditional endpoint + reservationId payload
+    // shape — the same URL substring that lives in the router
+    // test (DSC-04 guard).
     expect(bookingsPageSrc).toMatch(
+      /apply-reservation-discount[\s\S]{0,2000}?reservationId:[\s\S]{0,200}?selectedReservationContext/
+    );
+    // Pin the single-room fallback to the per-booking endpoint.
+    expect(bookingsPageSrc).toMatch(
+      /bookingId:[\s\S]{0,100}?selectedBooking\.id/
+    );
+    // Anti-regression: the per-targetId loop is GONE.
+    expect(bookingsPageSrc).not.toMatch(
       /for\s*\(\s*const\s+targetId\s+of\s+targetIds\s*\)\s*\{[\s\S]{0,3000}?await\s+fetch\([\s\S]{0,500}?\/api\/bookings\/apply-discount[\s\S]{0,1000}?bookingId:\s*targetId/
     );
   });

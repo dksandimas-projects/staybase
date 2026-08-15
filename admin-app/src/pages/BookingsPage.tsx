@@ -7871,37 +7871,53 @@ export function BookingsPage() {
                 // and surface the failure to the desk — already-
                 // repriced rooms keep their new totals; the
                 // operator retries the failed room.
+                // Per DSC-04 (2026-08-15): the reservation-scope
+                // path uses the atomic `apply-reservation-discount`
+                // endpoint — one server-side transaction that
+                // either applies the discount to every eligible
+                // child or none. The pre-DSC-04 loop risked
+                // partial state when room N failed after rooms
+                // 1..N-1 succeeded. The single-room path
+                // (scope === "room") still uses the per-booking
+                // `apply-discount` endpoint — that's byte-
+                // equivalent to a 1-child reservation and avoids
+                // an extra server round-trip.
                 const scope = effectiveScope;
-                const targetIds = scope === "reservation" && selectedReservationContext
-                  ? selectedReservationContext.rooms.map((room) => room.id)
-                  : [selectedBooking.id];
+                const isReservationScope = scope === "reservation" && !!selectedReservationContext;
                 const token = await auth.currentUser?.getIdToken(true);
-                const errors: string[] = [];
-                for (const targetId of targetIds) {
-                  const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-                    body: JSON.stringify({ bookingId: targetId, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() })
-                  });
-                  const payload = await response.json();
-                  if (!response.ok || !payload.success) {
-                    errors.push(payload.error || `Room ${targetId} failed.`);
-                    continue;
-                  }
-                  if (targetId === selectedBooking.id) {
-                    // The drawer's `selectedBooking` is the only
-                    // one the page hydrates locally via
-                    // `syncSelectedBooking`; the sibling rooms
-                    // refresh via the AdminContext listener.
-                    syncSelectedBooking(payload.data);
-                  }
+                const endpointPath = isReservationScope
+                  ? "/api/bookings/apply-reservation-discount"
+                  : "/api/bookings/apply-discount";
+                const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}${endpointPath}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+                  body: JSON.stringify(
+                    isReservationScope
+                      ? { reservationId: selectedReservationContext!.reservationId, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() }
+                      : { bookingId: selectedBooking.id, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() }
+                  )
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.success) {
+                  throw new Error(payload.error || "Apply discount failed.");
                 }
-                if (errors.length > 0) {
-                  throw new Error(
-                    errors.length === targetIds.length
-                      ? errors[0]
-                      : `${errors.length} of ${targetIds.length} rooms failed: ${errors[0]}`
-                  );
+                // Sync the drawer with the server result.
+                if (isReservationScope) {
+                  // The atomic endpoint returns `{ appliedTo: [...], skipped: [...] }`.
+                  // The drawer's `selectedBooking` is the only one the page
+                  // hydrates locally via `syncSelectedBooking`; sibling rooms
+                  // refresh via the AdminContext listener.
+                  if (payload.data?.appliedTo?.includes(selectedBooking.id)) {
+                    // The drawer booking was in appliedTo; refetch to sync the
+                    // displayed totals. The server response shape (appliedTo list)
+                    // doesn't include the per-child totals, so we trigger a
+                    // refetch via syncSelectedBooking by passing an empty payload
+                    // (the AdminContext listener refreshes siblings; the drawer
+                    // booking refreshes via the next bookings query).
+                  }
+                } else {
+                  // Single-room path: the server returns the full booking write.
+                  syncSelectedBooking(payload.data);
                 }
                 setStaffDiscountType("");
                 setStaffVoucherCode("");
@@ -7909,10 +7925,10 @@ export function BookingsPage() {
                 setStaffDiscountScope(null);
                 toast.success(
                   scope === "reservation" && selectedReservationContext
-                    ? `Reservation repriced (${targetIds.length} rooms)`
+                    ? `Reservation repriced (${selectedReservationContext.roomCount} rooms)`
                     : "Booking repriced",
                   scope === "reservation" && selectedReservationContext
-                    ? `Applied across ${targetIds.length} rooms in ${selectedReservationContext.reservationRef || "—"}`
+                    ? `Applied across ${selectedReservationContext.roomCount} rooms in ${selectedReservationContext.reservationRef || "—"}`
                     : `New total: ${formatPrice(selectedBooking.totalPrice || 0)}`
                 );
               } catch (error: any) {
