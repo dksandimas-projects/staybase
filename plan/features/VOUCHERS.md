@@ -55,6 +55,7 @@ Promo vouchers allow admins to create discount codes redeemable during the guest
 - [x] Discount calculation: percent voucher applies to total after senior/PWD discount; flat voucher subtracts fixed amount; total never goes below ₱0
 - [x] Voucher and senior/PWD discount can stack — apply senior/PWD first, then voucher
 - [x] `applicableRoomTypes: []` (empty) means applies to all room types
+- [x] **Applicability check is all-or-none per booking** (per VOU-03 owner decision 2026-08-15, option (a)): a voucher restricted to a non-empty subset applies to a booking IF AND ONLY IF every selected room type is in the subset. Mixed-type reservations (e.g., 1 Standard + 1 Deluxe) cannot use a Standard-only voucher — the voucher is rejected on the whole booking, not partially applied. This shape is consistent with the corporate-code `applicableRoomTypes` handling.
 
 ## Edge Cases & States
 
