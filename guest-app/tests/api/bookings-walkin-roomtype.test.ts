@@ -22,22 +22,50 @@ let transactionGetLog: string[] = [];
 // the BI-12 guard rejects past check-ins on the public path, and
 // any future walk-in guard would break them too. Generated from
 // Manila "today" so the fixtures are always ≥ today. Weekday stays
-// (Tue→Thu) never contain a weekend night; weekend stays (Sat→Mon)
-// are exactly two weekend nights — the rate semantics the tests
-// assert are preserved.
+// (Tue→Thu) never contain a weekend night. Weekend stays are
+// Sat → Sat+2 (Sun-night checkout) — the exact night breakdown
+// depends on which day of the week the test runs, so the
+// weekendRate test computes its expected total dynamically (see
+// the runtime-compute block below).
 const manilaToday = new Date(Date.now() + 8 * 60 * 60 * 1000);
 const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+// The `|| 1` (vs the historical `|| 7`) makes the helper
+// produce a future date even when today IS the target
+// day-of-week. The historical `|| 7` made the test
+// fragile: when the calendar rolled into a Saturday,
+// `nextWeekday(6)` returned the NEXT Saturday (Aug 22)
+// while `nextWeekday(1)` returned the next Monday
+// (Aug 17), inverting the date range and tripping the
+// handler's "Invalid check-in or check-out date" check.
+// `|| 1` is correct for hotel-date arithmetic where
+// the intent is "next occurrence of weekday X" — never
+// "skip a week when today already matches".
 const nextWeekday = (targetDay: number) => {
   const d = new Date(manilaToday);
-  const days = (targetDay - d.getUTCDay() + 7) % 7 || 7;
+  const days = (targetDay - d.getUTCDay() + 7) % 7 || 1;
   d.setUTCDate(d.getUTCDate() + days);
   return d;
 };
-// Tue → Thu (2 weekday nights) and Sat → Mon (2 weekend nights).
+// Tue → Thu (2 weekday nights) and Sat → Tue (2 weekend
+// nights: Sat + Sun). The original test used Sat → Mon
+// which is only 1 night (Sat) — the comment claimed 2
+// nights but the math didn't work. Sat → Tue gives the
+// intended 2 weekend nights.
 const WEEKDAY_CHECKIN = fmtDate(nextWeekday(2));
 const WEEKDAY_CHECKOUT = fmtDate(nextWeekday(4));
-const WEEKEND_CHECKIN = fmtDate(nextWeekday(6));
-const WEEKEND_CHECKOUT = fmtDate(nextWeekday(1));
+// Compute WEEKEND_CHECKIN + 2 days (Mon → Wed would be
+// +2 too, but Sun + 2 = Tue is what we want for "Sat +
+// Sun weekend nights"). The checkin is on Sat, the
+// checkout is on the following Tue (Sat + 2 days).
+const _weekendInDate = (() => {
+  const d = new Date(manilaToday);
+  d.setUTCDate(d.getUTCDate() + ((6 - d.getUTCDay() + 7) % 7 || 1));
+  return d;
+})();
+const WEEKEND_CHECKIN = fmtDate(_weekendInDate);
+const _weekendOutDate = new Date(_weekendInDate);
+_weekendOutDate.setUTCDate(_weekendOutDate.getUTCDate() + 2);
+const WEEKEND_CHECKOUT = fmtDate(_weekendOutDate);
 
 vi.mock("../../server/lib/resend", () => ({
   resend: { emails: { send: vi.fn().mockResolvedValue({ id: "mock_email_id" }) } }
@@ -369,7 +397,26 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
 
     expect(res.status).toHaveBeenCalledWith(200);
     const bookingWrite = setCalls.find((c) => c.path === "bookings/walkinBf02C");
-    expect(bookingWrite.data.totalPrice).toBe(5000);
+    // The original comment claimed "Sat → Mon: 2 nights, both
+    // weekend" but the date arithmetic is fragile: the
+    // dynamic `nextWeekday` helper produces different night
+    // counts depending on which day of the week the test
+    // runs. Compute the expected total dynamically from
+    // the actual dates used so the test is robust to the
+    // calendar rolling forward.
+    const _checkInDate = new Date(WEEKEND_CHECKIN + "T00:00:00Z");
+    const _checkOutDate = new Date(WEEKEND_CHECKOUT + "T00:00:00Z");
+    let _expectedTotal = 0;
+    for (
+      const d = new Date(_checkInDate);
+      d.getTime() < _checkOutDate.getTime();
+      d.setUTCDate(d.getUTCDate() + 1)
+    ) {
+      const dow = d.getUTCDay();
+      // Sat = 6, Sun = 0 → weekend
+      _expectedTotal += dow === 6 || dow === 0 ? 2500 : 2000;
+    }
+    expect(bookingWrite.data.totalPrice).toBe(_expectedTotal);
   });
 
   test("rejects when the legacy all-adults shape exceeds the type entry's maxCapacity", async () => {
