@@ -181,15 +181,51 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(audioPage).toMatch(/output device selection isn't supported/i);
   });
 
-  it("Sidebar has an Audio entry that points to /audio", () => {
-    expect(sidebar).toMatch(/to:\s*"\/audio"/);
-    expect(sidebar).toMatch(/icon:\s*Headphones/);
+  it("Sidebar no longer has a top-level Audio entry (moved to Intercom header shortcut)", () => {
+    // Per refactor/audio-discovery: per-staff audio routing used
+    // to be a sidebar item that was easy to miss from the inbox
+    // (where the user actually needs it). It's now discoverable
+    // from the Intercom Inbox header — see the next it() block.
+    // The /audio route still works for direct navigation.
+    expect(sidebar).not.toMatch(/to:\s*"\/audio"/);
+    expect(sidebar).not.toMatch(/icon:\s*Headphones/);
   });
 
   it("App.tsx routes /audio to AudioSettingsPage", () => {
     expect(appTsx).toMatch(/import \{ AudioSettingsPage \}/);
     expect(appTsx).toMatch(/path="\/audio"/);
-    expect(appTsx).toMatch(/element=\{<AudioSettingsPage \/\>\}/);
+    expect(appTsx).toMatch(/element=\{<AudioSettingsPage \/>\}/);
+  });
+
+  // Intercom shortcut (refactor/audio-discovery). The /audio route
+  // is no longer in the sidebar; instead the Intercom Inbox header
+  // — the page where the staff actually notices the audio behaviour
+  // they want to control — exposes a direct link. This keeps /audio
+  // reachable in 1 click from its natural trigger point without
+  // bloating the sidebar nav.
+  it("IntercomInboxPage header has an Audio settings link that goes to /audio", () => {
+    // The link must be inside the header (not buried in the chat
+    // thread list) — staff notice the sound off the page header first.
+    const headerStart = inboxPage.indexOf("<header");
+    const headerEnd = inboxPage.indexOf("</header>");
+    expect(headerStart).toBeGreaterThan(0);
+    expect(headerEnd).toBeGreaterThan(headerStart);
+    const header = inboxPage.slice(headerStart, headerEnd);
+    // The link must live inside this header slice and use the
+    // react-router Link so the navigation stays client-side.
+    expect(header).toMatch(/<Link[^>]+to="\/audio"/);
+    // The link must import + use the Headphones glyph (distinct
+    // from the Bell sound-toggle so the staff can tell which
+    // button is which at a glance).
+    expect(inboxPage, "Headphones must be imported from lucide-react").toMatch(
+      /\bHeadphones\b[^,)]*\}\s*from\s*["']lucide-react["']/m
+    );
+    expect(header, "Headphones must be rendered inside the Inbox header").toMatch(
+      /\bHeadphones\b/
+    );
+    // The link label must mention Audio Settings so screen-readers
+    // and visible text both convey the destination.
+    expect(header).toMatch(/Audio Settings/);
   });
 
   it("useAudioRouting subscribes to guests/{uid} and writes back the audioRouting field", () => {

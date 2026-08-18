@@ -10,7 +10,7 @@ import { ArrowLeft } from "lucide-react";
 import {
   MessageSquare, Send, PhoneOff, Phone,
   ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink,
-  Bell, BellOff
+  Bell, BellOff, Headphones
 } from "lucide-react";
 import config from "@config";
 
@@ -351,6 +351,31 @@ export function IntercomInboxPage() {
           <p className="text-xs text-gray-500 mt-1">Review active room chat logs, dispatch quick-request orders, and process voice signaling calls.</p>
         </div>
         <div className="flex items-center gap-2">
+          {/*
+           * Audio settings shortcut (refactor/audio-discovery). The
+           * /audio route owns per-staff call + ringtone output device
+           * routing and is the natural place to tune the sounds this
+           * page produces (notification chime + ringtone + the live
+           * intercom call). Previously this lived as a sidebar item
+           * — easy to miss from the inbox where the user actually
+           * hears the sound. Now it sits one click away from the
+           * inbox header, grouped with the existing sound On/Off
+           * toggle since both relate to "what does this inbox
+           * sound like?".
+           *
+           * Uses the same ghost-border / uppercase-chip pattern as
+           * the Bell toggle for visual consistency. The 44px tap
+           * target is preserved per CLAUDE.md hard rules.
+           */}
+          <Link
+            to="/audio"
+            aria-label="Open audio routing settings"
+            title="Per-staff audio routing — call + ringtone output devices"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-[10px] font-bold uppercase tracking-wider text-gray-500 transition hover:bg-gray-50"
+          >
+            <Headphones size={14} aria-hidden="true" />
+            Audio Settings
+          </Link>
           <button
             type="button"
             onClick={() => setIsNotificationMuted((prev) => !prev)}
