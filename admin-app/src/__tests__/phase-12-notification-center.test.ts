@@ -412,10 +412,27 @@ describe("Phase 12 — Notification Center (decision #120)", () => {
     });
 
     it("unsubscribes in the useEffect cleanup (Hard Rule)", () => {
+      // Per NOTIF-01 (2026-08-18): the listener's cleanup
+      // is a `() => { cancelled = true; if (unsubscribe)
+      // unsubscribe(); }` arrow (NOT a direct `return
+      // unsubscribe`) because the listener attaches inside
+      // a `getIdToken(true).then(...)` callback — the
+      // `unsubscribe` ref is assigned after the refresh
+      // resolves, so the cleanup must guard against it
+      // being unset. The MRB-15-09 reservations listener
+      // uses the same shape. Pin both halves: the cleanup
+      // runs on unmount, AND it calls the listener's
+      // unsubscribe if the listener actually attached.
       const notifBlock = adminContextSrc.match(
-        /const notifRef = collection\(db, ["']notifications["']\);[\s\S]*?\}, \[currentUser\]\);/
+        /\/\/ ── Notification Center[\s\S]{0,12000}/m
       );
-      expect(notifBlock![0]).toMatch(/return\s+unsubscribe\s*;/);
+      expect(notifBlock, "expected the notifications useEffect block").not.toBeNull();
+      // Cleanup arrow exists
+      expect(notifBlock![0]).toMatch(/return\s*\(\)\s*=>\s*\{/);
+      // Cleanup cancels in-flight refresh + calls
+      // unsubscribe (the listener-attached guard)
+      expect(notifBlock![0]).toMatch(/cancelled\s*=\s*true/);
+      expect(notifBlock![0]).toMatch(/if\s*\(unsubscribe\)\s*unsubscribe\(\)/);
     });
 
     it("exposes notifications + notificationsLoading + unreadNotificationCount on the context", () => {
@@ -533,6 +550,62 @@ describe("Phase 12 — Notification Center (decision #120)", () => {
       //  - open the order drawer
       expect(bookingsPageSrc).toMatch(/searchParams\.get\(["']orderId["']\)/);
       expect(bookingsPageSrc).toMatch(/storeOrders\.find\(\(order\) => order\.id === orderId\)/);
+    });
+
+    // Per audit NOTIF-01 (2026-08-18): the notifications
+    // listener is staff-gated (`isStaff()` reads the `role`
+    // custom claim). Per MRB-15-09, every staff-gated
+    // listener MUST force-refresh the ID token before
+    // attaching — otherwise the SDK's cached token can be
+    // one refresh behind the auth-state callback's token
+    // (long-idle session / fresh tab / just-minted role
+    // claim) and the listener attaches with a stale
+    // token that fails every snapshot with `Missing or
+    // insufficient permissions`. The pre-NOTIF-01 code
+    // called `onSnapshot` directly; the post-NOTIF-01 code
+    // wraps the listener attach in a
+    // `getIdToken(true).then(...)` callback. This test pins
+    // that the pattern is present so a future refactor
+    // can't silently regress to the buggy shape.
+    it("AdminContext notifications listener force-refreshes the ID token before attaching (NOTIF-01 / MRB-15-09)", () => {
+      // The MRB-15-09 reservations listener at
+      // AdminContext.tsx:1715-1775 is the reference pattern;
+      // its enclosing useEffect body calls
+      // `auth.currentUser?.getIdToken(true).then(...)` and
+      // assigns the onSnapshot inside the .then. The
+      // notifications listener must follow the same shape.
+      // Slice to the notifications listener's enclosing
+      // useEffect body: find the line that opens the
+      // notifications useEffect and capture ~110 lines (the
+      // listener's body is ~80 lines including the .then
+      // callback).
+      const notifEffectMatch = adminContextSrc.match(
+        /\/\/ ── Notification Center[\s\S]{0,12000}/m
+      );
+      expect(notifEffectMatch, "expected the notifications useEffect block").not.toBeNull();
+      const notifEffect = notifEffectMatch![0];
+      // The force-refresh appears BEFORE the onSnapshot
+      // call inside the .then callback. The pattern is
+      // `auth.currentUser?.getIdToken(true).then(...)` —
+      // both halves must be present in the listener body.
+      expect(notifEffect).toMatch(/auth\.currentUser\?\.getIdToken\(true\)\.then\(/);
+      // The `cancelled` flag handles the unmount-mid-refresh
+      // race (mirrors the MRB-15-09 reservations pattern).
+      expect(notifEffect).toMatch(/let\s+cancelled\s*=\s*false/);
+      expect(notifEffect).toMatch(/if\s*\(cancelled\)\s*return/);
+      // The listener attaches INSIDE the .then callback,
+      // not directly. The onSnapshot call must appear
+      // after `if (cancelled) return` inside the .then
+      // (the actual code uses no trailing semicolon).
+      // The window is wide because the body inside the
+      // .then callback spans many lines (the
+      // (snapshot) => { ... } handler alone is ~40
+      // lines).
+      expect(notifEffect).toMatch(/if\s*\(cancelled\)\s*return[\s\S]{0,5000}onSnapshot\(/);
+      // The cleanup must cancel the in-flight refresh and
+      // call unsubscribe if it was assigned.
+      expect(notifEffect).toMatch(/return\s*\(\)\s*=>\s*\{[\s\S]*?cancelled\s*=\s*true/);
+      expect(notifEffect).toMatch(/if\s*\(unsubscribe\)\s*unsubscribe\(\)/);
     });
   });
 });

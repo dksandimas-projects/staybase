@@ -3670,57 +3670,89 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return;
     }
     setNotificationsLoading(true);
-    // Bounded query — never the whole collection. Firestore
-    // requires an `orderBy` on the same field as any range
-    // filter; the retention cron reads with a range filter
-    // and orders ascending (see guest-app/server/lib/
-    // notifications.ts). The composite index `(createdAt
-    // desc)` is the only one this listener needs.
-    const notifRef = collection(db, "notifications");
-    const notifQuery = query(notifRef, orderBy("createdAt", "desc"), limit(50));
-    const unsubscribe = onSnapshot(
-      notifQuery,
-      (snapshot) => {
-        const docs: Notification[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          const readBy: Record<string, Date | null> = {};
-          if (data.readBy && typeof data.readBy === "object") {
-            Object.entries(data.readBy).forEach(([uid, ts]) => {
-              if (ts && typeof (ts as any).toDate === "function") {
-                readBy[uid] = (ts as any).toDate();
-              } else if (ts instanceof Date) {
-                readBy[uid] = ts;
-              } else if (ts === null) {
-                readBy[uid] = null;
-              } else {
-                readBy[uid] = null;
-              }
-            });
-          }
-          return {
-            id: docSnap.id,
-            type: (data.type as NotificationType) || "booking",
-            title: String(data.title || ""),
-            entityType: data.entityType || "booking",
-            entityId: String(data.entityId || ""),
-            roomNumber: data.roomNumber || null,
-            bookingRef: data.bookingRef || null,
-            readBy,
-            createdBy: "system",
-            createdAt: data.createdAt && typeof (data.createdAt as any).toDate === "function"
-              ? (data.createdAt as any).toDate()
-              : new Date(0)
-          };
-        });
-        setNotifications(docs);
-        setNotificationsLoading(false);
-      },
-      (error) => {
-        console.error("Error listening to notifications collection:", error);
-        setNotificationsLoading(false);
-      }
-    );
-    return unsubscribe;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+
+    // Per MRB-15-09 (force-refresh pattern for staff-gated
+    // listeners): the `notifications` collection is
+    // `isStaff()`-gated, which reads the `role` custom
+    // claim. The Firestore SDK uses its OWN cached ID
+    // token for the listener handshake — if the cache is
+    // one refresh behind the auth-state callback's
+    // token (a long-idle session, a fresh tab, or a
+    // just-minted role claim), the listener attaches with
+    // a stale token and `Missing or insufficient
+    // permissions` silently empties the bell badge.
+    // `getIdToken(true)` is idempotent — returns the
+    // cached token if fresh, exchanges the refresh token
+    // if stale. The `await` (via `.then`) makes the
+    // listener attach AFTER the refresh. The `cancelled`
+    // flag handles the unmount-mid-refresh race.
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+      // Bounded query — never the whole collection. Firestore
+      // requires an `orderBy` on the same field as any range
+      // filter; the retention cron reads with a range filter
+      // and orders ascending (see guest-app/server/lib/
+      // notifications.ts). The composite index `(createdAt
+      // desc)` is the only one this listener needs.
+      const notifRef = collection(db, "notifications");
+      const notifQuery = query(notifRef, orderBy("createdAt", "desc"), limit(50));
+      unsubscribe = onSnapshot(
+        notifQuery,
+        (snapshot) => {
+          const docs: Notification[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            const readBy: Record<string, Date | null> = {};
+            if (data.readBy && typeof data.readBy === "object") {
+              Object.entries(data.readBy).forEach(([uid, ts]) => {
+                if (ts && typeof (ts as any).toDate === "function") {
+                  readBy[uid] = (ts as any).toDate();
+                } else if (ts instanceof Date) {
+                  readBy[uid] = ts;
+                } else if (ts === null) {
+                  readBy[uid] = null;
+                } else {
+                  readBy[uid] = null;
+                }
+              });
+            }
+            return {
+              id: docSnap.id,
+              type: (data.type as NotificationType) || "booking",
+              title: String(data.title || ""),
+              entityType: data.entityType || "booking",
+              entityId: String(data.entityId || ""),
+              roomNumber: data.roomNumber || null,
+              bookingRef: data.bookingRef || null,
+              readBy,
+              createdBy: "system",
+              createdAt: data.createdAt && typeof (data.createdAt as any).toDate === "function"
+                ? (data.createdAt as any).toDate()
+                : new Date(0)
+            };
+          });
+          setNotifications(docs);
+          setNotificationsLoading(false);
+        },
+        (error) => {
+          console.error("Error listening to notifications collection:", error);
+          setNotificationsLoading(false);
+        }
+      );
+    }).catch((refreshErr) => {
+      // The refresh itself failed (e.g. network down or
+      // refresh-token revoked). Don't block the operator
+      // from seeing the rest of the dashboard — just log
+      // and let the next user interaction retry.
+      console.error("Failed to force-refresh ID token for notifications listener:", refreshErr);
+      setNotificationsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUser]);
 
   const unreadNotificationCount = useMemo(() => {
