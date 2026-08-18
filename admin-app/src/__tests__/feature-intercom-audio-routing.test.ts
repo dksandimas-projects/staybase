@@ -211,11 +211,21 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(devices).toMatch(/function audioOutputApiSupported/);
     expect(devices).toMatch(/"setSinkId"\s+in\s+HTMLMediaElement\.prototype/);
     expect(devices).toMatch(/setSinkIdSafe/);
-    // All public helpers return safe defaults (false / null / []) on
-    // unsupported runtimes — they must not throw.
+    // All public helpers return safe defaults on unsupported runtimes —
+    // they must not throw. The contract has shifted over time:
+    //   audioOutputApiSupported       → boolean (false on unsupported)
+    //   listAudioOutputDevices        → [] on unsupported
+    //   setSinkIdSafe                 → false on unsupported
+    //   selectAudioOutputSafe         → { kind: "unsupported" } on
+    //                                   missing selectAudioOutput,
+    //                                   { kind: "error" } on missing
+    //                                   navigator / unexpected throws.
+    // All four branches must be present in source so a future
+    // refactor that drops one breaks this guard.
     expect(devices).toMatch(/return false/);
-    expect(devices).toMatch(/return null/);
     expect(devices).toMatch(/return \[\]/);
+    expect(devices).toMatch(/return\s*\{\s*kind:\s*"unsupported"\s*\}/);
+    expect(devices).toMatch(/return\s*\{\s*kind:\s*"error"\s*\}/);
   });
 
   // CSP regression guard (2026-08-19) — the audio routing code paths
@@ -495,5 +505,65 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
       devices,
       "setSinkIdSafe must accept either '' or 'default' as the post-setSinkId round-trip value"
     ).toMatch(/sinkId\s*===\s*""\s*\|\|\s*.*sinkId\s*===\s*"default"/);
+  });
+
+  // Pick result discrimination guard (2026-08-19, fix #5 in the
+  // chain) — the original selectAudioOutputSafe returned a single
+  // `string | null` and the page couldn't tell apart "the user
+  // cancelled the picker" (legit) from "the runtime doesn't
+  // support selectAudioOutput at all" (constraint). Net result:
+  // on a not-yet-permissioned origin, clicking Pick… in some
+  // Chrome builds resolved with `null` (no UI shown) and the
+  // staff had no way to learn WHY the click was a no-op.
+  it("selectAudioOutputSafe discriminates 'ok' / 'cancelled' / 'unsupported' / 'error' so the UI can react to each", () => {
+    // The function must export a discriminated union so callers
+    // can switch on `.kind` exhaustively.
+    expect(devices).toMatch(
+      /export\s+type\s+SelectAudioOutputResult|SelectAudioOutputResult\s*=\s*[^;]+/
+    );
+    // The four kinds must all be present in the union.
+    expect(devices).toMatch(/kind:\s*"ok"/);
+    expect(devices).toMatch(/kind:\s*"cancelled"/);
+    expect(devices).toMatch(/kind:\s*"unsupported"/);
+    expect(devices).toMatch(/kind:\s*"error"/);
+    // The runtime must distinguish 'unsupported' (no
+    // selectAudioOutput on navigator.mediaDevices) from
+    // 'ok' / 'cancelled' (the picker ran). A simple
+    // substring pattern is enough — minification renames vars
+    // but the literal "unsupported" sentinel is preserved.
+    expect(
+      devices,
+      "selectAudioOutputSafe must return 'unsupported' when selectAudioOutput is missing"
+    ).toMatch(/return\s*\{\s*kind:\s*"unsupported"\s*\};/);
+    // AbortError from the picker must be classified as 'cancelled'
+    // (not 'error'), so the page UI doesn't show a red error
+    // banner for normal dismissals.
+    expect(
+      devices,
+      "selectAudioOutputSafe must classify AbortError as 'cancelled'"
+    ).toMatch(/AbortError/);
+  });
+
+  // AudioSettingsPage pick-result banner guard (2026-08-19) — the
+  // page must surface a banner when the most-recent Pick…
+  // attempt found the runtime unsupported (no selectAudioOutput)
+  // so the staff can self-diagnose instead of opening a ticket.
+  it("AudioSettingsPage surfaces a 'your browser can't pick a device' banner when selectAudioOutput is unavailable", () => {
+    // The unused-pickResult state must exist.
+    expect(audioPage).toMatch(
+      /setPickResult|const\s*\[\s*\w+\s*,\s*setPickResult\s*\]\s*=\s*R?\.useState/
+    );
+    // The page must branch on the discriminator returned by the
+    // helper — not on a null check that conflates cancelled with
+    // unsupported.
+    expect(audioPage).toMatch(/result\.kind\s*===\s*"unsupported"/);
+    expect(audioPage).toMatch(/result\.kind\s*===\s*"ok"/);
+    // The unsupported banner text must explain the constraint
+    // (not just say "something went wrong").
+    expect(audioPage).toMatch(
+      /This browser can.+t open the audio device picker|browser can.{0,30}audio device picker/i
+    );
+    // data-testid pin for e2e + future test stability.
+    expect(audioPage).toMatch(/data-testid=\{`audio-pick-unsupported-\$\{surface\}`\}/);
   });
 });

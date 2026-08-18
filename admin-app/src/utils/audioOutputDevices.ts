@@ -57,20 +57,44 @@ export async function listAudioOutputDevices(): Promise<AudioOutputDevice[]> {
 
 /**
  * Pop a native OS picker to pick an output device, then persist its
- * `deviceId`. Returns the chosen deviceId, or `null` if the user
- * cancelled or the API is unavailable. Only supported in Chrome/Edge.
+ * `deviceId`. Returns:
+ *   - the chosen deviceId as a string, OR
+ *   - the literal "unsupported" sentinel when the runtime has
+ *     HTMLMediaElement.setSinkId but no navigator.mediaDevices
+ *     .selectAudioOutput (e.g. Safari < 16, Firefox, or older Chrome
+ *     with the permission-policy / chrome://flags gating disabled),
+ *   - the literal "cancelled" sentinel when the user dismissed the
+ *     picker without picking anything,
+ *   - `null` only for unexpected runtime errors.
+ * Distinguishing "unsupported" from "cancelled" lets the UI tell
+ * the staff WHY Pick… is a no-op instead of silently doing
+ * nothing.
  */
-export async function selectAudioOutputSafe(): Promise<string | null> {
-  if (typeof navigator === "undefined") return null;
+export type SelectAudioOutputResult =
+  | { kind: "ok"; deviceId: string | null }
+  | { kind: "cancelled" }
+  | { kind: "unsupported" }
+  | { kind: "error" };
+
+export async function selectAudioOutputSafe(): Promise<SelectAudioOutputResult> {
+  if (typeof navigator === "undefined") return { kind: "error" };
   const md = navigator.mediaDevices as MediaDevices & {
     selectAudioOutput?: (opts?: { deviceId?: string }) => Promise<MediaDeviceInfo | null>;
   };
-  if (typeof md.selectAudioOutput !== "function") return null;
+  if (typeof md.selectAudioOutput !== "function") return { kind: "unsupported" };
   try {
     const chosen = await md.selectAudioOutput();
-    return chosen?.deviceId ?? null;
-  } catch {
-    return null;
+    if (!chosen) return { kind: "cancelled" };
+    return { kind: "ok", deviceId: chosen.deviceId ?? null };
+  } catch (e) {
+    // AbortError is what Chrome throws when the user dismisses the
+    // native picker (clicks outside / hits Escape). Treat it as
+    // "cancelled" rather than "error" so the UI can phrase it
+    // naturally.
+    const name = (e as { name?: string })?.name;
+    if (name === "AbortError") return { kind: "cancelled" };
+    console.warn("[audio-routing] selectAudioOutput threw:", e);
+    return { kind: "error" };
   }
 }
 
