@@ -64,15 +64,15 @@ export async function renderRingtoneWav(): Promise<string | null> {
 }
 
 /**
- * Encode an AudioBuffer to a 16-bit PCM mono WAV ArrayBuffer. Used
- * by `renderRingtoneWav`; exported separately so tests can assert
- * the bytes-shape of the rendered ringtone without spinning up an
- * OfflineAudioContext.
+ * Encode a Float32 channel to a 16-bit PCM mono WAV ArrayBuffer.
+ * Exported so tests can hit it directly with a hand-rolled Float32Array
+ * (no OfflineAudioContext required in Node). `audioBufferToWav` is a
+ * thin wrapper that pulls channel 0 off an AudioBuffer and forwards
+ * here — the byte layout is identical between the two paths.
  */
-export function audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
+export function encodeWavFromChannel(channel: Float32Array, sampleRate: number): ArrayBuffer {
   const numChannels = 1;
-  const sampleRate = buffer.sampleRate;
-  const numFrames = buffer.length;
+  const numFrames = channel.length;
   const bytesPerSample = 2;
   const blockAlign = numChannels * bytesPerSample;
   const byteRate = sampleRate * blockAlign;
@@ -110,13 +110,19 @@ export function audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
   writeString("data");
   writeUint32(dataSize);
 
-  // Mix the first channel of the source buffer into the WAV (the
-  // ringtone is mono by construction, so this is a straight copy).
-  const channel = buffer.getChannelData(0);
   for (let i = 0; i < numFrames; i++) {
     const sample = Math.max(-1, Math.min(1, channel[i]));
     view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
     offset += 2;
   }
   return arrayBuffer;
+}
+
+/**
+ * Encode an AudioBuffer to a 16-bit PCM mono WAV ArrayBuffer. Used
+ * by `renderRingtoneWav`; thin wrapper around `encodeWavFromChannel`
+ * so the byte shape is pinned in one place.
+ */
+export function audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
+  return encodeWavFromChannel(buffer.getChannelData(0), buffer.sampleRate);
 }
