@@ -17,10 +17,12 @@ import { useToast } from "../components/Toast";
 // `useAdmin()` so we don't open a second Firestore listener on
 // `guests/{uid}`.
 import {
+  audioDeviceLabelsUnlocked,
   audioOutputApiSupported,
   listAudioOutputDevices,
   selectAudioOutputSafe,
-  setSinkIdSafe
+  setSinkIdSafe,
+  unlockAudioDeviceLabels
 } from "../utils/audioOutputDevices";
 import { cn } from "../utils/cn";
 
@@ -121,7 +123,9 @@ function DeviceRow({
   //                   labelled devices
   //   "error" → transient; dismissed on the next Pick… click
   //   "cancelled" → silent (the OS picker's own UI is feedback)
-  const [pickResult, setPickResult] = useState<"unsupported" | "error" | "cancelled" | null>(null);
+  const [pickResult, setPickResult] = useState<
+    "unsupported" | "denied" | "error" | "cancelled" | null
+  >(null);
   // Chrome returns an empty (or single "default") list from
   // `enumerateDevices()` until the user grants permission via the
   // native OS picker (`selectAudioOutput()`). Track whether the staff
@@ -168,6 +172,16 @@ function DeviceRow({
 
   useEffect(() => {
     void refreshDevices();
+    // If the origin already holds a media permission (the staff took an
+    // intercom call earlier, or granted it on a previous visit), device
+    // labels are already visible — don't nag them to click Pick....
+    let cancelled = false;
+    void audioDeviceLabelsUnlocked().then((unlocked) => {
+      if (!cancelled && unlocked) setPermissionGranted(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [refreshDevices]);
 
   const handleTest = useCallback(async () => {
@@ -228,43 +242,69 @@ function DeviceRow({
   }, [apiSupported, value, onAfterTest]);
 
   const handleGrantPermission = useCallback(async () => {
-    // The user's only way to surface a labelled device list is the
-    // native OS picker (Chrome/Edge only). Even picking "System
-    // default" in the picker is enough to grant enumeration
-    // permission — we just need to trigger the picker once.
+    // Two-step unlock, in preference order.
     //
-    // Distinguish four outcomes so the staff can see WHY the
-    // button appears to be a no-op:
-    //   ok          → picker produced a deviceId (may be "default")
-    //   cancelled   → picker was dismissed without a selection
-    //                 (AbortError). Silent — the OS picker is its
-    //                 own feedback.
-    //   unsupported → runtime has setSinkId but not
-    //                 selectAudioOutput (Safari < 16, Firefox,
-    //                 older Chrome, permissions policy). Show a
-    //                 banner so the staff knows the constraint.
-    //   error       → unexpected runtime throw. Show a banner.
+    // STEP 1 — the native OS output picker
+    // (`navigator.mediaDevices.selectAudioOutput()`). Best UX when it
+    // exists, but it is NOT shipped in stable Chrome or Edge: it sits
+    // behind `chrome://flags/#enable-experimental-web-platform-features`
+    // and only Firefox ships it unflagged. So on the browser the front
+    // desk actually uses, this step returns "unsupported" every time —
+    // which is exactly what the staff saw as "clicking Pick… does
+    // nothing but show a warning".
+    //
+    // STEP 2 — the portable fallback: ask for microphone permission via
+    // `getUserMedia({ audio: true })` and stop the track immediately.
+    // Until the origin holds a media permission, `enumerateDevices()`
+    // hands back a single anonymised `audiooutput` row with an empty
+    // deviceId and an empty label. The grant unlocks the FULL labelled
+    // list, which is all this page needs — the routing itself is done
+    // by `setSinkId`, not by the picker. Staff already grant the same
+    // permission when they accept an intercom call.
+    //
+    // Outcomes surfaced to the staff:
+    //   ok          → picker or fallback succeeded; device list refreshes
+    //   cancelled   → OS picker dismissed (AbortError). Silent — the
+    //                 picker was its own feedback.
+    //   denied      → microphone permission refused (or blocked by
+    //                 policy). Banner explains how to re-enable it.
+    //   unsupported → neither API exists on this runtime.
+    //   error       → unexpected runtime throw.
     const result = await selectAudioOutputSafe();
     console.info("[audio-routing] selectAudioOutput result:", result);
-    // Reset the inline banner before deciding the new state so a
-    // successful Pick clears a previous error.
-    setPickResult(result.kind === "ok" ? null : result.kind);
+
     if (result.kind === "ok") {
+      setPickResult(null);
       setPermissionGranted(true);
       const id = result.deviceId;
       if (id !== SYSTEM_DEFAULT_DEVICE_ID) {
         onChange(id);
         setTestResult(null);
       }
-    } else if (result.kind === "unsupported") {
-      // No point nagging the staff to try again on every page
-      // load — once we know the runtime is unsupported, treat the
-      // permission as effectively granted (the system default
-      // will keep working) and hide the hint.
-      setPermissionGranted(true);
+      void refreshDevices();
+      return;
     }
-    // Always refresh after — even on cancel/error the picker
-    // dismissal often unlocks labels in Chrome.
+
+    if (result.kind === "cancelled") {
+      // The staff saw the OS picker and dismissed it — no banner.
+      setPickResult("cancelled");
+      void refreshDevices();
+      return;
+    }
+
+    // Step 2: no native picker on this runtime (the normal Chrome/Edge
+    // case) — fall back to the microphone-permission unlock so the
+    // dropdown can still show real device names.
+    const unlock = await unlockAudioDeviceLabels();
+    console.info("[audio-routing] device-label unlock result:", unlock);
+    if (unlock.kind === "ok") {
+      setPickResult(null);
+      setPermissionGranted(true);
+    } else {
+      setPickResult(unlock.kind);
+      // "unsupported" is permanent — stop nagging the staff to retry.
+      if (unlock.kind === "unsupported") setPermissionGranted(true);
+    }
     void refreshDevices();
   }, [onChange, refreshDevices]);
 
@@ -347,7 +387,7 @@ function DeviceRow({
               className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700"
             >
               <AlertTriangle size={12} />
-              Click <span className="font-bold">Pick…</span> above to grant permission — Chrome hides device names until you've picked at least once.
+              Click <span className="font-bold">Pick…</span> above and allow microphone access — browsers hide audio device names until this origin holds a media permission. The mic is released immediately; it is only used to reveal the device list.
             </p>
           )}
 
@@ -371,7 +411,25 @@ function DeviceRow({
             >
               <AlertTriangle size={12} className="mt-0.5 shrink-0" />
               <span>
-                This browser can&apos;t open the audio device picker. The system default will keep working for calls + ringtones; supported on Chrome 110+ / Edge on desktop. Use Chrome DevTools console (filter <code className="rounded bg-amber-100 px-1">[audio-routing]</code>) for the runtime detection result.
+                This browser can&apos;t list audio devices — it has neither the native output picker nor microphone access. The system default will keep working for calls + ringtones. Use the DevTools console (filter <code className="rounded bg-amber-100 px-1">[audio-routing]</code>) for the runtime detection result.
+              </span>
+            </p>
+          )}
+          {/*
+           * Microphone permission was refused. Chrome/Edge do not ship
+           * `selectAudioOutput()`, so the mic grant is the ONLY way to
+           * get labelled device names — without it the dropdown is
+           * stuck on the single anonymous "System default" row.
+           */}
+          {pickResult === "denied" && (
+            <p
+              role="alert"
+              data-testid={`audio-pick-denied-${surface}`}
+              className="mt-2 inline-flex items-start gap-1.5 text-[11px] font-medium text-amber-800"
+            >
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>
+                Microphone access was blocked, so device names stay hidden. Click the padlock in the address bar → allow the microphone for this site, then click <span className="font-bold">Pick…</span> again. The mic is released the moment permission is granted — it is only used to reveal the device list.
               </span>
             </p>
           )}

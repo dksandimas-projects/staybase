@@ -32,7 +32,8 @@ The preference persists on the staff profile (`guests/{uid}.audioRouting`) and f
 - [x] **Notification device card** — `Volume2` icon, `Notifications + ringtones` chip, "Notification device" label, same `<select>` + Test + Pick trio
 - [x] **Disabled-state treatment** — when the master toggle is off, the device cards are dimmed to 60% opacity and the pickers are disabled
 - [x] **Test button** — plays a 0.5s 440Hz sine through the selected device; success = `Heard it? Great — that's your call device.` toast; failure = amber warning row `Couldn't play through that device. Try a different one.`
-- [x] **Native picker fallback** — "Pick…" button calls `navigator.mediaDevices.selectAudioOutput()` (Chrome / Edge only); labelled devices are populated on success
+- [x] **Device-name unlock ("Pick…")** — two-step: try `navigator.mediaDevices.selectAudioOutput()` (Firefox only in practice — it is NOT shipped in stable Chrome/Edge), then fall back to a `getUserMedia({ audio: true })` microphone grant that is released immediately. The grant is what actually unhides labelled `enumerateDevices()` results; the routing itself is done by `setSinkId`, not by the picker
+- [x] **Denied-mic banner** — when the fallback grant is refused, an amber row explains how to re-enable the microphone from the address-bar padlock, so `Pick…` never reads as a dead button
 - [x] **Help text** — the iOS / Firefox limitation, plus the "device gone" fallback behaviour, in a single gray info card at the bottom
 - [x] **Reset to default** — clears `enabled` + both device IDs, returns to "system default for both surfaces"
 - [x] **Unsupported-runtime screen** — when `setSinkId` is missing, the page renders an amber warning card instead of the form
@@ -65,10 +66,12 @@ The preference persists on the staff profile (`guests/{uid}.audioRouting`) and f
 
 The Audio Output Devices API is partial across browsers. Every helper in `admin-app/src/utils/audioOutputDevices.ts` is a safe no-op on unsupported runtimes so the rest of the app keeps working.
 
+> **Corrected 2026-08-19.** The original matrix claimed Chrome/Edge ship `selectAudioOutput()`. They do not — it sits behind `chrome://flags/#enable-experimental-web-platform-features` and only Firefox ships it unflagged. On the browser the front desk actually uses, `Pick…` could never open anything, which is why the page appeared broken. Device names are unlocked by a microphone-permission grant instead.
+
 | Browser | `setSinkId` on `<audio>` | `selectAudioOutput` picker | Behaviour in Spark Inn |
 |---|---|---|---|
-| Chrome 110+ / Edge 110+ / Opera | ✅ | ✅ | Full routing. The Audio Settings page shows the device pickers with the native picker fallback. |
-| Safari (macOS 14+) | ⚠️ partial | ❌ | Picker lists devices (labelled after first user interaction). Routing honours the chosen device. No native picker — the `Pick…` button is disabled. |
+| Chrome 110+ / Edge 110+ / Opera | ✅ | ❌ (flag-gated) | Full routing. `Pick…` falls back to the microphone-permission unlock to reveal device names. |
+| Safari (macOS 14+) | ⚠️ partial | ❌ | Picker lists devices (labelled after a media-permission grant). Routing honours the chosen device. `Pick…` uses the microphone fallback. |
 | Safari (iOS) | ❌ | ❌ | OS overrides any web-side routing. Audio always follows the system default output. The Audio Settings page still saves preferences so the operator's intent is recorded; the iOS device ignores them. |
 | Firefox | ❌ | ❌ | `setSinkId` is not implemented. The Audio Settings page renders the unsupported-browser screen. The intercom falls back to the existing pre-feature behaviour (system default for everything). |
 
@@ -78,10 +81,10 @@ The Audio Output Devices API is partial across browsers. Every helper in `admin-
 
 - [x] **Saved device disappears** (USB headset unplugged, Bluetooth disconnects) — `setSinkIdSafe` catches the `NotFoundError` and returns `false`; `applyToElement` falls back to system default and emits a single `console.warn` with the surface + missing deviceId so the operator can re-pick on the Audio Settings page
 - [x] **Operator changes routing while a call is in progress** — the WebRTC remote stream is re-routed on the next `acceptCall`; the active call keeps its current routing for the rest of the session. Same for the notification sound — the existing `<audio>` element is re-routed in a `useEffect` that depends on the live routing value
-- [x] **No devices enumerated** (permission not yet granted) — the picker shows a single "System default" row; the `Pick…` button opens the native picker which is the supported way to unlock labelled device lists in Chrome
+- [x] **No devices enumerated** (permission not yet granted) — the picker shows a single "System default" row; `Pick…` runs the two-step unlock (native picker, then microphone grant). Until a media permission is held, `enumerateDevices()` returns one anonymised `audiooutput` row with an empty `deviceId` and empty `label`
 - [x] **Master toggle flipped off** — both pickers clear (`callOutputDeviceId = null`, `ringtoneOutputDeviceId = null`); the saved `deviceId`s are wiped on save so a future re-enable starts from a clean slate. The `applyAudioSink` no-ops while `enabled` is `false`
 - [x] **First user interaction unlocks audio** — autoplay policy still applies; the existing pointerdown / keydown unlock listener in `IntercomInboxPage.tsx` sets `isNotificationAudioUnlocked` so the first chime after page load waits for a click. The same gate guards the call ringtone
-- [x] **Operator on a tab with no microphone permission yet** — `selectAudioOutput` doesn't require mic permission (Chrome / Edge), so the picker is usable before any `getUserMedia` call. The call audio is only created when a guest actually calls, by which point the operator has already interacted with the page and the unlock has fired
+- [x] **Operator on a tab with no microphone permission yet** — device names stay hidden until a media permission is granted, so `Pick…` requests one via `getUserMedia({ audio: true })` and stops the track immediately. Staff already grant the same permission when they accept an intercom call (`AdminContext.acceptCall`), and `admin-app/vercel.json` ships `Permissions-Policy: microphone=(self)`, so this adds no new capability to the origin. Routing to the system default works with no permission at all
 - [x] **Two staff on the same machine** — the routing is per-staff, so a shift hand-off requires each operator to re-pick their headset. A "last used device per machine" cache is intentionally out of scope; the page is one click away
 
 ---

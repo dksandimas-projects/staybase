@@ -144,4 +144,66 @@ describe("audioOutputDevices — runtime feature detection + setSinkIdSafe", () 
     const fakeEl = Object.create(proto);
     expect(await setSinkIdSafe(fakeEl as unknown as HTMLMediaElement, "device-1")).toBe(false);
   });
+
+  // Illegal-invocation regression (2026-08-19, fix #6 in the chain).
+  // The original implementation resolved setSinkId off the PROTOTYPE
+  // (`Object.getPrototypeOf(el).setSinkId(id)`), which invokes the
+  // inherited method with `this === HTMLAudioElement.prototype`. A
+  // prototype is not a real media element, so every real browser throws
+  //   TypeError: Failed to execute 'setSinkId' on 'HTMLMediaElement':
+  //   Illegal invocation
+  // The catch swallowed it and returned false, so the /audio Test
+  // button always said "Couldn't play through that device" and
+  // useAudioRouting.applyToElement never routed a single call or
+  // ringtone. The old unit stubs missed it because a plain function
+  // ignores `this`. This stub asserts the receiver, the way the real
+  // DOM binding does.
+  it("setSinkIdSafe invokes setSinkId on the element, not on the prototype", async () => {
+    const receivers: unknown[] = [];
+    const proto = {
+      // Mirrors the browser's internal-slot check: reject any call
+      // whose `this` is not a real element instance.
+      async setSinkId(this: { __isElement?: boolean; sinkId?: string }, id: string) {
+        receivers.push(this);
+        if (!this?.__isElement) {
+          const err = new TypeError(
+            "Failed to execute 'setSinkId' on 'HTMLMediaElement': Illegal invocation"
+          );
+          err.name = "TypeError";
+          throw err;
+        }
+        this.sinkId = id;
+      }
+    };
+    const el = Object.create(proto) as {
+      __isElement: boolean;
+      sinkId: string;
+    };
+    el.__isElement = true;
+    el.sinkId = "";
+
+    const ok = await setSinkIdSafe(el as unknown as HTMLMediaElement, "device-1");
+    expect(ok).toBe(true);
+    expect(el.sinkId).toBe("device-1");
+    // The receiver must be the element itself — never the prototype.
+    expect(receivers).toHaveLength(1);
+    expect(receivers[0]).toBe(el);
+    expect(receivers[0]).not.toBe(proto);
+  });
+
+  it("setSinkIdSafe round-trips the system default through the element", async () => {
+    const proto = {
+      async setSinkId(this: { __isElement?: boolean; sinkId?: string }, id: string) {
+        if (!this?.__isElement) throw new TypeError("Illegal invocation");
+        // Chrome normalises both "" and "default" to the empty string.
+        this.sinkId = id === "default" ? "" : id;
+      }
+    };
+    const el = Object.create(proto) as { __isElement: boolean; sinkId: string };
+    el.__isElement = true;
+    el.sinkId = "";
+
+    expect(await setSinkIdSafe(el as unknown as HTMLMediaElement, null)).toBe(true);
+    expect(await setSinkIdSafe(el as unknown as HTMLMediaElement, "default")).toBe(true);
+  });
 });
