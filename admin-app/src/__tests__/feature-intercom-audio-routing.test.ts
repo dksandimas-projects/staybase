@@ -354,4 +354,85 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
       /\.resume\(\)/
     );
   });
+
+  // AudioSettingsPage permission-grant discoverability guard (2026-08-19)
+  // — `enumerateDevices()` returns a single unnamed row (system default)
+  // until the user triggers `selectAudioOutput()` once. The original page
+  // shipped with a working `Pick…` button but no discoverability hint, so
+  // the staff saw an apparently empty dropdown and a Test that failed,
+  // with no clue why. The fix adds an inline help paragraph that points
+  // at the existing Pick… button as the permission-grant CTA.
+  it("AudioSettingsPage surfaces a permission-grant hint when Chrome hides the device list", () => {
+    // The hint must exist (data-testid pin so e2e tests can target it)
+    // and must mention Pick… by name so the staff knows where to click.
+    expect(audioPage).toMatch(
+      /data-testid=\{`audio-permission-hint-\$\{surface\}`\}/
+    );
+    expect(audioPage).toMatch(/Pick….*grant permission|grant permission.*Pick…/);
+
+    // The hint must be conditional on `permissionGranted === false &&
+    // devices.length <= 1`. Without those guards the hint would either
+    // never show or would show after every successful grant.
+    expect(audioPage).toMatch(/\{!permissionGranted\s*&&/);
+    expect(audioPage).toMatch(/devices\.length\s*<=\s*1/);
+
+    // The Pick… button must be wired to `handleGrantPermission`, which
+    // calls `selectAudioOutputSafe()` and then refreshes the device list.
+    // A future refactor that swaps Pick… for a different control without
+    // routing through selectAudioOutput will break permission discovery.
+    expect(audioPage).toMatch(/onClick=\{\(\) => void handleGrantPermission\(\)\}/);
+    expect(audioPage).toMatch(
+      /const handleGrantPermission\s*=\s*useCallback/
+    );
+    expect(audioPage).toMatch(/setPermissionGranted\(true\)/);
+  });
+
+  // AudioSettingsPage Test-button autoplay guard (2026-08-19) — the
+  // /audio page may be the first interactive surface a staff member hits
+  // (deep-link from email, OAuth callback bounce, etc.), so the click
+  // handler must construct and resume its own AudioContext inside the
+  // gesture handler. The earlier `AdminContext` fix doesn't help here
+  // — that context is gated on a different listener on the dashboard's
+  // own chrome, not on this audio element. This assertion pins the
+  // contract: there is exactly one site in this file that calls
+  // `new Ctor()` (where Ctor is AudioContext|webkitAudioContext), it
+  // lives inside `handleTest`, and it `.resume()`s the context.
+  it("AudioSettingsPage handleTest builds + resumes an AudioContext inside the click handler", () => {
+    // The audio page uses the union-with-fallback pattern:
+    //   const Ctor = (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext
+    //             ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    // with `testCtxRef.current ??= new Ctor();` inside the click handler.
+    // Assert both halves of the union exist on the typed window cast.
+    expect(audioPage).toMatch(/AudioContext\?: typeof AudioContext/);
+    expect(audioPage).toMatch(/webkitAudioContext\?: typeof AudioContext/);
+
+    // The constructor must live inside handleTest (between the
+    // `handleTest = useCallback` and its closing `}, [apiSupported, value, onAfterTest]);`).
+    const handleTestIdx = audioPage.indexOf("const handleTest = useCallback");
+    expect(handleTestIdx).toBeGreaterThan(0);
+    const handleTestEndIdx = audioPage.indexOf(
+      "}, [apiSupported, value, onAfterTest]);",
+      handleTestIdx
+    );
+    expect(handleTestEndIdx).toBeGreaterThan(handleTestIdx);
+    const handleTestBlock = audioPage.slice(handleTestIdx, handleTestEndIdx);
+
+    // The block must contain the AudioContext constructor + resume pattern.
+    expect(
+      handleTestBlock,
+      "handleTest must construct an AudioContext inside the click gesture"
+    ).toMatch(/new\s+Ctor\s*\(\s*\)/);
+    expect(
+      handleTestBlock,
+      "handleTest must .resume() the AudioContext before .play()"
+    ).toMatch(/ctx\.resume\(\)/);
+
+    // The block must construct via the per-row testCtxRef (so we
+    // build it inside this gesture and reuse on subsequent clicks),
+    // not from a singleton / module-level ref.
+    expect(
+      handleTestBlock,
+      "handleTest must build the AudioContext via testCtxRef, not a module-level singleton"
+    ).toMatch(/testCtxRef\.current\s*\?\?=\s*new\s+Ctor/);
+  });
 });

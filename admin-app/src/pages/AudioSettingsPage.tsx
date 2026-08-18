@@ -113,7 +113,21 @@ function DeviceRow({
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "fail" | null>(null);
+  // Chrome returns an empty (or single "default") list from
+  // `enumerateDevices()` until the user grants permission via the
+  // native OS picker (`selectAudioOutput()`). Track whether the staff
+  // has triggered the picker on this row so the dropdown can show a
+  // discoverable hint explaining the empty state. The flag flips on
+  // the FIRST successful `selectAudioOutputSafe()` call (the user
+  // may pick the system default — either path grants permission).
+  const [permissionGranted, setPermissionGranted] = useState(false);
   const testAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Fresh AudioContext created INSIDE the click handler so the user
+  // gesture is on the stack. Kept here (not in AdminContext) because
+  // the /audio page may be the very first interactive surface the
+  // staff hits, and we want Test to play on first click without a
+  // prior interaction elsewhere in the dashboard.
+  const testCtxRef = useRef<AudioContext | null>(null);
 
   const refreshDevices = useCallback(async () => {
     if (!apiSupported) return;
@@ -155,6 +169,33 @@ function DeviceRow({
         onAfterTest(false);
         return;
       }
+      // Chrome autoplay policy rejects `audio.play()` if no
+      // user gesture is on the stack OR no AudioContext has been
+      // resumed in this page session. The button click itself is a
+      // gesture for the element, but the helper contexts we use for
+      // setSinkId aren't. Build a one-shot AudioContext inside this
+      // click handler, resume it (synchronously within the gesture),
+      // play, then close. The element's `play()` is what actually
+      // produces sound — the AudioContext is here purely to satisfy
+      // the autoplay gate and to throw away with no leaks.
+      try {
+        const Ctor =
+          (window as unknown as { AudioContext?: typeof AudioContext })
+            .AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+        if (Ctor) {
+          testCtxRef.current ??= new Ctor();
+          const ctx = testCtxRef.current;
+          if (ctx.state === "suspended") {
+            await ctx.resume();
+          }
+        }
+      } catch {
+        // If we can't construct an AudioContext (e.g. very old Safari),
+        // fall through to audio.play() and let the browser decide.
+        // The failure mode is a silent test, not a crash.
+      }
       audio.currentTime = 0;
       try {
         await audio.play();
@@ -168,6 +209,24 @@ function DeviceRow({
       setIsTesting(false);
     }
   }, [apiSupported, value, onAfterTest]);
+
+  const handleGrantPermission = useCallback(async () => {
+    // The user's only way to surface a labelled device list is the
+    // native OS picker (Chrome/Edge only). Even picking "System
+    // default" in the picker is enough to grant enumeration
+    // permission — we just need to trigger the picker once. After
+    // it resolves (success or cancel), refresh the local list; if the
+    // picker returned a real device, update the row's value too.
+    const id = await selectAudioOutputSafe();
+    if (id !== null) {
+      setPermissionGranted(true);
+      if (id !== SYSTEM_DEFAULT_DEVICE_ID) {
+        onChange(id);
+        setTestResult(null);
+      }
+    }
+    void refreshDevices();
+  }, [onChange, refreshDevices]);
 
   const selectValue = value ?? SYSTEM_DEFAULT_DEVICE_ID;
 
@@ -224,14 +283,7 @@ function DeviceRow({
             </button>
             <button
               type="button"
-              onClick={async () => {
-                const id = await selectAudioOutputSafe();
-                if (id) {
-                  onChange(id === SYSTEM_DEFAULT_DEVICE_ID ? null : id);
-                  setTestResult(null);
-                }
-                void refreshDevices();
-              }}
+              onClick={() => void handleGrantPermission()}
               disabled={disabled || !apiSupported}
               className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed"
               title="Open the system device picker"
@@ -240,6 +292,24 @@ function DeviceRow({
               Pick…
             </button>
           </div>
+
+          {/*
+           * Discoverability hint: Chrome's `enumerateDevices()` returns
+           * a single unnamed row (system default) until the staff has
+           * triggered `selectAudioOutput()` once. Without this hint,
+           * they see a dropdown that looks empty + a Test that fails,
+           * with no clue why. The hint points at the existing Pick…
+           * button, which doubles as the permission-grant CTA.
+           */}
+          {!permissionGranted && devices.length <= 1 && (
+            <p
+              data-testid={`audio-permission-hint-${surface}`}
+              className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700"
+            >
+              <AlertTriangle size={12} />
+              Click <span className="font-bold">Pick…</span> above to grant permission — Chrome hides device names until you've picked at least once.
+            </p>
+          )}
 
           {testResult === "ok" && (
             <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-700">
