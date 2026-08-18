@@ -672,6 +672,7 @@ export interface AdminContextType {
   // notification sound, Audio Settings page) sees the same live value.
   audioRouting: AudioRoutingShape;
   audioRoutingLoading: boolean;
+  audioRoutingError: string | null;
   applyAudioSink: (el: HTMLMediaElement | null | undefined, surface: AudioSurface) => Promise<boolean>;
   updateAudioRouting: (next: Partial<AudioRoutingShape>) => Promise<void>;
   resetAudioRouting: () => Promise<void>;
@@ -5892,6 +5893,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         declineCall,
         audioRouting: audioRoutingState.routing,
         audioRoutingLoading: audioRoutingState.loading,
+        audioRoutingError: audioRoutingState.error,
         applyAudioSink: audioRoutingState.applyToElement,
         updateAudioRouting: audioRoutingState.updateRouting,
         resetAudioRouting: audioRoutingState.resetToDefault,

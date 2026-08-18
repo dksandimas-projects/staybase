@@ -11,7 +11,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Headphones, Info, RefreshCcw, Save, Volume2, VolumeX, AlertTriangle, Check } from "lucide-react";
 import { useAdmin } from "../context/AdminContext";
 import { useToast } from "../components/Toast";
-import { useAudioRouting } from "../hooks/useAudioRouting";
+// Per-staff audio routing state lives in AdminContext (mounted once
+// at the provider level — see plan/features/INTERCOM-AUDIO-ROUTING.md
+// §"Live subscription"). The page consumes the live value via
+// `useAdmin()` so we don't open a second Firestore listener on
+// `guests/{uid}`.
 import {
   audioOutputApiSupported,
   listAudioOutputDevices,
@@ -200,10 +204,14 @@ function DeviceRow({
 }
 
 export function AudioSettingsPage() {
-  const { currentUser } = useAdmin();
+  const {
+    audioRouting: routing,
+    audioRoutingLoading: loading,
+    audioRoutingError: error,
+    updateAudioRouting: updateRouting,
+    resetAudioRouting: resetToDefault
+  } = useAdmin();
   const toast = useToast();
-  const uid = currentUser?.uid ?? null;
-  const { routing, loading, error, updateRouting, resetToDefault } = useAudioRouting(uid);
   const [apiSupported] = useState<boolean>(() => audioOutputApiSupported());
   const [draftEnabled, setDraftEnabled] = useState<boolean>(routing.enabled);
   const [draftCall, setDraftCall] = useState<string | null>(routing.callOutputDeviceId);

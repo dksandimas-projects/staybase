@@ -102,10 +102,26 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(inboxPage).toMatch(/applyAudioSink\(audio,\s*"ringtone"\)/);
   });
 
-  it("AudioSettingsPage reads the live routing state via useAudioRouting and writes via updateRouting", () => {
-    expect(audioPage).toMatch(/useAudioRouting\(uid\)/);
-    expect(audioPage).toMatch(/updateRouting\(/);
-    expect(audioPage).toMatch(/resetToDefault/);
+  it("AudioSettingsPage consumes the live routing state via useAdmin (not its own hook)", () => {
+    // Per plan/features/INTERCOM-AUDIO-ROUTING.md §"Live subscription":
+    // the provider holds the single `onSnapshot(guests/{uid})` listener
+    // and every consumer (call audio, notification sound, Audio
+    // Settings page) reads from the same live value via context.
+    // Mounting `useAudioRouting` here would open a second listener on
+    // the same doc.
+    expect(audioPage).toMatch(/useAdmin\(\)/);
+    expect(audioPage).toMatch(/audioRouting:\s*routing/);
+    expect(audioPage).toMatch(/updateAudioRouting:\s*updateRouting/);
+    expect(audioPage).toMatch(/resetAudioRouting:\s*resetToDefault/);
+    expect(audioPage).not.toMatch(/useAudioRouting\(/);
+  });
+
+  it("AdminContext surfaces the audioRoutingError so the Audio Settings page can render the red banner", () => {
+    // Regression guard for Finding A: the page now reads error from
+    // context, so AdminContext must expose it (added alongside
+    // audioRouting + audioRoutingLoading).
+    expect(adminContext).toMatch(/audioRoutingError:\s*audioRoutingState\.error/);
+    expect(adminContext).toMatch(/audioRoutingError:\s*string \| null/);
   });
 
   it("AudioSettingsPage has Test buttons for both the call and ringtone devices", () => {
