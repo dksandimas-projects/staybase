@@ -262,4 +262,96 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     assertMediaSrc("admin-app/vercel.json", extractCsp(adminVercel));
     assertMediaSrc("guest-app/vercel.json", extractCsp(guestVercel));
   });
+
+  // AudioContext autoplay regression guard (2026-08-19) — the
+  // Firestore `onSnapshot` callbacks for bookings + intercoms call
+  // `playSynthNotification` from network-driven paths that have no
+  // user gesture on their stack. Chrome rejects `new AudioContext()`
+  // (and a synchronous `.resume()`) outside a gesture handler with:
+  //   "The AudioContext was not allowed to start. It must be resumed
+  //    (or created) after a user gesture on the page."
+  // and the warning is logged via console.warn — NOT caught by
+  // `try { ... } catch {}`. The fix pins the contract that the
+  // constructor lives ONLY inside the gesture-listener function and
+  // that `playSynthNotification` refuses to construct (or `.resume()`)
+  // when the gesture has not been recorded.
+  it("playSynthNotification never constructs AudioContext from a snapshot callback", () => {
+    // (1) Gesture listener is the only place that calls `new AudioContext`.
+    // Count occurrences in the file. Must be exactly one — inside the
+    // `unlockAudio` handler that runs inside a `pointerdown` / `keydown`
+    // callback, the only path with a user gesture on the stack.
+    const ctorMatches = adminContext.match(/new\s*\(\s*window\.AudioContext\s*\|\|/g);
+    expect(
+      ctorMatches,
+      "expected exactly one `new (window.AudioContext || ...)` call"
+    ).toHaveLength(1);
+
+    // (2) That single occurrence must live inside an event listener that
+    // fires on a user gesture. We don't try to be clever about parsing
+    // the function body — we assert the surrounding text instead. The
+    // `unlockAudio` function definition must precede the constructor.
+    const unlockIdx = adminContext.indexOf("const unlockAudio = () => {");
+    expect(unlockIdx, "unlockAudio handler not found").toBeGreaterThanOrEqual(0);
+    const ctorIdx = adminContext.indexOf(
+      "new (window.AudioContext || (window as any).webkitAudioContext)()"
+    );
+    expect(ctorIdx, "AudioContext constructor not found").toBeGreaterThan(unlockIdx);
+    // The constructor is inside the listener function body, which closes
+    // at the next `};` after the `pointerdown`/`keydown` registrations.
+    expect(
+      adminContext.indexOf("addEventListener(\"pointerdown\"", ctorIdx),
+      "constructor must be inside the unlockAudio handler"
+    ).toBeLessThan(adminContext.indexOf("addEventListener(\"keydown\"", ctorIdx) + 200);
+
+    // (3) playSynthNotification must early-return on a gesture flag.
+    // The flag's name is `audioGestureUnlockedRef` and it must default
+    // to `false` AND be set to `true` only inside the `unlockAudio`
+    // handler, never inside the snapshot callback body.
+    expect(adminContext).toMatch(
+      /audioGestureUnlockedRef\s*=\s*useRef\(false\)/
+    );
+    const unlockRefWrite = adminContext.indexOf(
+      "audioGestureUnlockedRef.current = true"
+    );
+    expect(
+      unlockRefWrite,
+      "audioGestureUnlockedRef.current = true must exist (gesture handler sets it)"
+    ).toBeGreaterThan(0);
+    expect(
+      unlockRefWrite,
+      "flip must live inside unlockAudio, not inside the snapshot callback"
+    ).toBeLessThan(adminContext.indexOf("addEventListener(\"keydown\""));
+
+    // (4) playSynthNotification must gate on the flag and bail (not
+    // construct, not .resume() outside a gesture). The literal guard
+    // pattern matters: a future refactor that drops it must break this.
+    const playIdx = adminContext.indexOf("const playSynthNotification =");
+    expect(playIdx, "playSynthNotification not found").toBeGreaterThan(0);
+    const guardIdx = adminContext.indexOf(
+      "if (!audioGestureUnlockedRef.current) return;",
+      playIdx
+    );
+    expect(
+      guardIdx,
+      "playSynthNotification must early-return when not gesture-unlocked"
+    ).toBeGreaterThan(0);
+
+    // (5) No `new AudioContext` inside playSynthNotification.
+    // This is the literal anti-pattern that produced the warning.
+    const playBlockEnd =
+      adminContext.indexOf("}, []);\n", playIdx) > 0
+        ? adminContext.indexOf("}, []);\n", playIdx)
+        : adminContext.indexOf("}, [", playIdx);
+    const playBlock = adminContext.slice(playIdx, playBlockEnd);
+    expect(
+      playBlock,
+      "playSynthNotification must not contain a `new AudioContext` call"
+    ).not.toMatch(/new\s*\(\s*window\.AudioContext|\bnew\s+AudioContext\s*\(/);
+
+    // (6) No `ctx.resume()` call — the synchronous resume from inside
+    // a snapshot callback is the autoplay-policy violation surface.
+    expect(playBlock, "playSynthNotification must not call .resume()").not.toMatch(
+      /\.resume\(\)/
+    );
+  });
 });
