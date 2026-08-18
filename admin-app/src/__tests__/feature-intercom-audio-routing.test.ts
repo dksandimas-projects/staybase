@@ -131,6 +131,30 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(audioPage).toMatch(/setSinkIdSafe\(audio,\s*value\)/);
   });
 
+  it("AudioSettingsPage's test tone data URL is a valid WAV with actual sample data, not an empty header", () => {
+    // Regression guard for the 2026-08-18 bug: the original
+    // TEST_TONE_DATA_URL was a 44-byte RIFF header with zero sample
+    // data (a "silent zero-length WAV"). The browser rejected
+    // audio.play() with NotSupportedError because there was nothing
+    // to play, so every Test press surfaced "Couldn't play through
+    // that device" regardless of which device the operator picked.
+    // A future refactor that swaps the inline base64 for an empty
+    // file again must break this test.
+    expect(audioPage).toMatch(/getTestToneDataUrl/);
+    expect(audioPage).not.toMatch(/TEST_TONE_DATA_URL/);
+    // The generator builds a 0.3s, 44.1kHz, mono, 16-bit WAV with
+    // 13,230 sample frames — 44 header bytes + 26,460 audio bytes
+    // = 26,504 bytes total. The "0.3" duration is the marker; if it
+    // is dropped back to 0 or 0.0 the test data goes to zero again.
+    expect(audioPage).toMatch(/const duration = 0\.3/);
+    expect(audioPage).toMatch(/const numSamples = Math\.floor\(sampleRate \* duration\)/);
+    expect(audioPage).toMatch(/Math\.sin\(2 \* Math\.PI \* 440 \* t\)/);
+    // The data chunk size must be `numSamples * blockAlign`, not a
+    // hardcoded 0 — that was the original bug.
+    expect(audioPage).toMatch(/const dataSize = numSamples \* blockAlign/);
+    expect(audioPage).not.toMatch(/dataSize = 0/);
+  });
+
   it("AudioSettingsPage degrades gracefully when the Audio Output Devices API is unsupported", () => {
     expect(audioPage).toMatch(/audioOutputApiSupported/);
     expect(audioPage).toMatch(/output device selection isn't supported/i);
