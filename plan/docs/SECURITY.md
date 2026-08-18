@@ -322,6 +322,7 @@ Configured in `vercel.json` for both apps. Purpose: prevent XSS by restricting w
 Key directives:
 - `script-src 'self'` + explicit allowlist: Firebase SDK CDN, Cloudflare Turnstile, Sentry
 - `frame-ancestors 'none'` — prevents clickjacking
+- `media-src 'self' blob: data:` — required by the admin app's per-staff audio routing (Test tone + call ringtone). Both code paths build a `Blob` from a generated WAV `ArrayBuffer` and assign the URL to an `<audio>` element via `URL.createObjectURL`. Without an explicit `media-src`, the CSP falls back to `default-src 'self'`, which rejects `blob:` URLs with `Refused to load media from 'blob:...' because it violates the directive: "default-src 'self'"`. Regression test pinned in `admin-app/src/__tests__/feature-intercom-audio-routing.test.ts`.
 - `X-Frame-Options: DENY` — legacy browser support
 - `X-Content-Type-Options: nosniff` — prevents MIME-type sniffing
 - `Referrer-Policy: strict-origin-when-cross-origin`

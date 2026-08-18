@@ -139,17 +139,22 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     // to play, so every Test press surfaced "Couldn't play through
     // that device" regardless of which device the operator picked.
     //
-    // Follow-up guard for the CSP violation: the original fix
-    // emitted a `data:audio/wav;base64,...` URL, but the CSP at
-    // `vercel.json` uses `default-src 'self'` with no explicit
-    // `media-src` directive, so any data: URL passed to a media
-    // element falls back to `default-src` and is blocked. The test
-    // tone is now a Blob URL (`URL.createObjectURL(blob)`), which
-    // is origin-scoped and matches `'self'` automatically — same
-    // pattern as the call ringtone in `utils/renderRingtoneWav.ts`.
+    // Follow-up guard for the CSP violation: the CSP at `vercel.json`
+    // declares `media-src 'self' blob: data:` (see
+    // `plan/docs/SECURITY.md §Content Security Policy`), which is what
+    // allows the `URL.createObjectURL(blob)` URL below to load on
+    // `<audio>` elements. Without that directive the CSP falls back to
+    // `default-src 'self'`, which rejects `blob:` URLs even though they
+    // were created on the same origin — see the dedicated CSP guard
+    // test in this file for the regression lock. The test tone still
+    // uses a Blob URL (not a `data:audio/wav;base64,...` URL) because
+    // Blob URLs are revocable via `URL.revokeObjectURL` and don't grow
+    // the URL bar; same pattern as the call ringtone in
+    // `utils/renderRingtoneWav.ts`.
     //
-    // A future refactor that swaps the Blob URL for an empty WAV
-    // or a data: URL again must break this test.
+    // A future refactor that swaps the Blob URL for an empty WAV,
+    // a data: URL, or drops the `media-src` CSP directive must break
+    // the relevant test(s).
     expect(audioPage).toMatch(/getTestToneUrl/);
     expect(audioPage).not.toMatch(/TEST_TONE_DATA_URL/);
     expect(audioPage).not.toMatch(/getTestToneDataUrl/);
@@ -211,5 +216,50 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(devices).toMatch(/return false/);
     expect(devices).toMatch(/return null/);
     expect(devices).toMatch(/return \[\]/);
+  });
+
+  // CSP regression guard (2026-08-19) — the audio routing code paths
+  // (Test tone + call ringtone) build a Blob and assign the resulting
+  // URL to an `<audio>` element via `URL.createObjectURL`. The CSP at
+  // `vercel.json` uses `default-src 'self'` with no explicit `media-src`,
+  // which falls back and rejects every `blob:` URL with
+  // `Refused to load media from 'blob:...' because it violates the
+  // directive: "default-src 'self'"`. The fix is an explicit
+  // `media-src 'self' blob: data:` on every deployed `vercel.json`. This
+  // test pins all three in lock-step so a future CSP edit that drops
+  // the directive will break this assertion instead of silently
+  // breaking the Test button (and the call ringtone) in production.
+  // See `plan/docs/SECURITY.md §Content Security Policy`.
+  it("all deployed vercel.json headers declare media-src so blob: URLs survive the CSP", () => {
+    const rootVercel = read("vercel.json");
+    const adminVercel = read("admin-app/vercel.json");
+    const guestVercel = read("guest-app/vercel.json");
+
+    const extractCsp = (source: string) => {
+      const match = source.match(
+        /"key":\s*"Content-Security-Policy",\s*"value":\s*"((?:[^"\\]|\\.)*)"/
+      );
+      expect(match, "Content-Security-Policy header not found").not.toBeNull();
+      return match?.[1] ?? "";
+    };
+
+    const assertMediaSrc = (label: string, csp: string) => {
+      const directive = csp.match(/media-src\s+([^;]+)/);
+      expect(directive, `${label}: missing media-src directive`).not.toBeNull();
+      const tokens = (directive?.[1] ?? "").trim().split(/\s+/);
+      expect(tokens, `${label}: media-src must not be empty`).not.toEqual([""]);
+      expect(
+        tokens,
+        `${label}: media-src must allow blob: (audio routing Test tone + call ringtone use URL.createObjectURL on a Blob)`
+      ).toContain("blob:");
+      // 'self' is the sane floor — without it, no same-origin media
+      // would load at all. data: is a safety net for older code paths
+      // that emit data:audio/wav;base64,... URLs instead of a blob.
+      expect(tokens, `${label}: media-src must include 'self'`).toContain("'self'");
+    };
+
+    assertMediaSrc("vercel.json", extractCsp(rootVercel));
+    assertMediaSrc("admin-app/vercel.json", extractCsp(adminVercel));
+    assertMediaSrc("guest-app/vercel.json", extractCsp(guestVercel));
   });
 });
