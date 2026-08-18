@@ -134,15 +134,21 @@ function DeviceRow({
     setIsLoadingDevices(true);
     try {
       const list = await listAudioOutputDevices();
-      // The native picker can return devices that the silent `enumerateDevices`
-      // call can't yet see (or with labels that are blank until permission is
-      // granted). The picker is also the only way to disambiguate "default"
-      // across browsers, so always include it as the first row.
-      const seen = new Set<string>(list.map((d) => d.deviceId));
-      const merged = [...list];
-      if (!seen.has(SYSTEM_DEFAULT_DEVICE_ID)) {
-        merged.unshift({ deviceId: SYSTEM_DEFAULT_DEVICE_ID, label: "System default" });
-      }
+      // Chrome's `enumerateDevices()` returns the system default as
+      // a row with `deviceId: ""` and (pre-permission) an empty
+      // `label`. With our label-substitution helper that single
+      // entry becomes { deviceId: "", label: "System default" } —
+      // indistinguishable from the synthetic default we unshift in
+      // the old code, which is why the dropdown used to show
+      // "System default, System default" with the permission hint
+      // never appearing (devices.length === 2 never satisfied
+      // the `<= 1` guard). Now we only insert the synthetic
+      // default when Chrome's enumeration is completely empty —
+      // permission state is now reflected accurately and there's
+      // never a duplicate label.
+      const merged = list.length > 0
+        ? list
+        : [{ deviceId: SYSTEM_DEFAULT_DEVICE_ID, label: "System default" }];
       setDevices(merged);
     } finally {
       setIsLoadingDevices(false);

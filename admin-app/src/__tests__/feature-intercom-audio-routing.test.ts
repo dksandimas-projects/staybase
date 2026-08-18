@@ -435,4 +435,65 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
       "handleTest must build the AudioContext via testCtxRef, not a module-level singleton"
     ).toMatch(/testCtxRef\.current\s*\?\?=\s*new\s+Ctor/);
   });
+
+  // Refresh-dedup guard (2026-08-19, fix #4 in the chain) — the
+  // first version of refreshDevices did:
+  //   const merged = [...list];
+  //   if (!seen.has("default")) merged.unshift({ deviceId: "default", ... });
+  // but Chrome's `enumerateDevices()` returns the system default
+  // with `deviceId: ""` (not "default"). Our label helper then
+  // synthesised `label: "System default"` for it, leaving the
+  // merged list with two identical "System default" rows AND a
+  // `devices.length === 2` that never satisfied the `permissionGranted
+  // === false && devices.length <= 1` hint guard. Visible result:
+  // the dropdown showed "System default, System default" and the
+  // hint never appeared.
+  // Fix: trust Chrome's enumeration when it returns anything, and
+  // only synthesise a default row when the enumeration is empty.
+  it("AudioSettingsPage refreshDevices doesn't synthesise a duplicate System default on top of Chrome's enumeration", () => {
+    // The old `seen.has(SYSTEM_DEFAULT_DEVICE_ID)` + `unshift` pattern
+    // must be gone. Replacement is the conditional ternary above.
+    expect(audioPage).not.toMatch(/if\s*\(\s*!seen\.has/);
+    expect(audioPage).not.toMatch(/merged\.unshift/);
+
+    // The new pattern must be the conditional-spread shape, which
+    // preserves Chrome's enumeration when non-empty.
+    expect(audioPage).toMatch(/list\.length\s*>\s*0\s*\?\s*list\s*:/);
+
+    // The hint's devices-count guard is unchanged (still `<= 1`)
+    // because the new merge now correctly yields length === 1 in the
+    // pre-permission state (Chrome's enumeration returns one entry
+    // even before permission is granted), so the hint will fire.
+    expect(audioPage).toMatch(/devices\.length\s*<=\s*1/);
+  });
+
+  // setSinkIdSafe round-trip guard (2026-08-19, fix #4 in the chain) —
+  // the original `el.sinkId === (deviceId ?? "")` check returned false
+  // when the input was the literal string "default" (the common case
+  // from AudioSettingsPage when nothing has been picked yet). Chrome
+  // normalises the round-trip either way — setSinkId("default")
+  // succeeds internally but reports `el.sinkId === ""` (the spec
+  // empty-string default), so the strict equality check failed and
+  // every Test button click on the default device showed "Couldn't
+  // play through that device" regardless of the device state.
+  it("setSinkIdSafe accepts the literal string 'default' without false-failing the round-trip check", () => {
+    // Read the helper module so we can pin the contract directly.
+    // The lock pins two things:
+    //  (a) the default-or-empty branch (special-cased) and
+    //  (b) the OR-accepts-both-normal-forms shape.
+    expect(devices).toMatch(/function setSinkIdSafe|setSinkIdSafe\s*=/);
+    // The "default" deviceId must be handled in its own branch —
+    // it must not fall into the strict equality check.
+    expect(
+      devices,
+      "setSinkIdSafe must special-case the 'default' deviceId"
+    ).toMatch(/deviceId\s*===\s*"default"|!deviceId\s*\|\|\s*deviceId\s*===\s*"default"/);
+    // The success path must accept both `el.sinkId === ""` and
+    // `el.sinkId === "default"` as valid round-trips after
+    // setSinkId("default") or setSinkId("").
+    expect(
+      devices,
+      "setSinkIdSafe must accept either '' or 'default' as the post-setSinkId round-trip value"
+    ).toMatch(/sinkId\s*===\s*""\s*\|\|\s*.*sinkId\s*===\s*"default"/);
+  });
 });

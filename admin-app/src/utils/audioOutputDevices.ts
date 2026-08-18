@@ -92,7 +92,20 @@ export async function setSinkIdSafe(
   if (typeof proto.setSinkId !== "function") return false;
   try {
     await proto.setSinkId(deviceId ?? "");
-    return el.sinkId === (deviceId ?? "");
+    // Chrome normalises the round-trip in two ways depending on the
+    // browser version and the device: setting sinkId to "" or
+    // "default" both end up reporting `el.sinkId === ""` (the
+    // spec-defined empty string is the "use system default"
+    // signal), and setting it to a real deviceId reports that
+    // deviceId. The old strict `el.sinkId === (deviceId ?? "")`
+    // check incorrectly returned false when the input was the
+    // string "default" (the common case from AudioSettingsPage
+    // when the staff hasn't picked anything). Accept either
+    // normal form so the default-device Test button works.
+    if (!deviceId || deviceId === "default") {
+      return el.sinkId === "" || el.sinkId === "default";
+    }
+    return el.sinkId === deviceId;
   } catch {
     return false;
   }
