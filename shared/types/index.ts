@@ -1125,3 +1125,22 @@ export interface CancellationPreview {
   policyText: string;
   policySource: "settings" | "corporate-override" | "legacy-fallback";
 }
+
+// Per-staff intercom audio routing — see `plan/features/INTERCOM-AUDIO-ROUTING.md`.
+// The Web Audio API doesn't support per-stream output device selection
+// portably (Safari/Firefox don't), so routing is implemented by attaching
+// a `deviceId` to the HTMLMediaElement (`<audio>`) used for each audio
+// surface. The shape is intentionally narrow: one boolean master toggle +
+// two device IDs, all optional, all default to "system default output".
+export interface AudioRouting {
+  enabled: boolean;
+  // Output device for the call's WebRTC remote stream. Typically a USB
+  // headset. `null` = system default output.
+  callOutputDeviceId: string | null;
+  // Output device for notification sounds (incoming chat + incoming call
+  // ringtones) and the IntercomInbox unread-message chime. Typically the
+  // built-in speaker so the operator notices new activity even while
+  // wearing a headset. `null` = system default output.
+  ringtoneOutputDeviceId: string | null;
+  updatedAt?: Date;
+}

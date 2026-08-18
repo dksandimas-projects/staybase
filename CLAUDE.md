@@ -113,6 +113,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/VOUCHERS.md` — Promo voucher management
 - `plan/features/REPORTS.md` — Occupancy, revenue, bookings by source, export
 - `plan/features/INTERCOM-INBOX.md` — Chat list, notification sound, quick request badges
+- `plan/features/INTERCOM-AUDIO-ROUTING.md` — Per-staff call + ringtone output device pickers (admin app `/audio` page, persisted on `guests/{uid}.audioRouting`)
 - `plan/features/QR-MANAGEMENT.md` — QR per room, regenerate, print
 - `plan/features/SETTINGS.md` — Hotel info, payment methods, staff accounts, website content
 - `plan/features/ADMIN-MOBILE.md` — Admin app responsive layout (Phase 11.7, shipped 2026-06-18) — sidebar / header / drawer / data table for < 768px + `useBreakpoint` + Toast + ConfirmForm + BottomTabBar + focus trap

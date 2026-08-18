@@ -62,6 +62,10 @@ import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes }
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { useAudioRouting, type AudioSurface } from "../hooks/useAudioRouting";
+import { setSinkIdSafe } from "../utils/audioOutputDevices";
+import { renderRingtoneWav } from "../utils/renderRingtoneWav";
+import type { AudioRouting as AudioRoutingShape } from "@spark-inn/shared";
 
 type StaffRole = "front-desk" | "admin";
 
@@ -663,6 +667,15 @@ export interface AdminContextType {
   acceptCall: () => void | Promise<void>;
   declineCall: () => void | Promise<void>;
 
+  // Per-staff intercom audio routing (see `plan/features/INTERCOM-AUDIO-ROUTING.md`).
+  // The hook lives in `AdminProvider` so every consumer (call audio,
+  // notification sound, Audio Settings page) sees the same live value.
+  audioRouting: AudioRoutingShape;
+  audioRoutingLoading: boolean;
+  applyAudioSink: (el: HTMLMediaElement | null | undefined, surface: AudioSurface) => Promise<boolean>;
+  updateAudioRouting: (next: Partial<AudioRoutingShape>) => Promise<void>;
+  resetAudioRouting: () => Promise<void>;
+
   // Store Orders
   storeOrders: StoreOrder[];
   updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"], cancellationReason?: string) => void | Promise<void>;
@@ -834,6 +847,13 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Auth State
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<AdminContextType["currentUser"]>(null);
+
+  // Per-staff intercom audio routing (see `plan/features/INTERCOM-AUDIO-ROUTING.md`).
+  // Subscribed once at the provider level so every consumer — the
+  // Audio Settings page, the IntercomInboxPage notification sound,
+  // and the WebRTC remote stream created in `acceptCall` — sees the
+  // same live value without each opening its own Firestore listener.
+  const audioRoutingState = useAudioRouting(currentUser?.uid ?? null);
 
   useEffect(() => {
     void setPersistence(auth, browserSessionPersistence).catch(() => undefined);
@@ -3370,80 +3390,70 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Call Signaling state — live from Firestore calls/{roomId}
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const ringtoneIntervalIdRef = useRef<any>(null);
+  // Per `plan/features/INTERCOM-AUDIO-ROUTING.md`: the call ringtone
+  // (the looping double trill before the staff answers) is rendered
+  // once to a WAV Blob and played through a hidden `<audio>` element
+  // so the staff's `ringtoneOutputDeviceId` (typically the built-in
+  // speaker) is honoured via `setSinkId`. Pre-rendering once and
+  // re-seeking on each interval is cheaper than rebuilding the
+  // oscillator graph every 3 s and routes the same sound that the
+  // previous Web Audio API tree produced.
+  const ringtoneAudioUrlRef = useRef<string | null>(null);
+  const ringtoneAudioElRef = useRef<HTMLAudioElement | null>(null);
 
   const stopCallRingtone = useCallback(() => {
     if (ringtoneIntervalIdRef.current) {
       clearInterval(ringtoneIntervalIdRef.current);
       ringtoneIntervalIdRef.current = null;
     }
+    const audio = ringtoneAudioElRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
   }, []);
 
-  const playCallRingtone = useCallback(() => {
+  const playCallRingtone = useCallback(async () => {
     if (!soundsEnabledRef.current) return;
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const url = await renderRingtoneWav();
+      if (!url) return;
+      let audio = ringtoneAudioElRef.current;
+      if (!audio) {
+        audio = new Audio(url);
+        audio.preload = "auto";
+        ringtoneAudioElRef.current = audio;
+        // Pin to the staff's chosen ringtone output device. No-op when
+        // routing is disabled or the runtime doesn't support setSinkId.
+        void audioRoutingState.applyToElement(audio, "ringtone").catch(() => undefined);
       }
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") {
-        void ctx.resume();
+      try {
+        audio.currentTime = 0;
+        void audio.play().catch(() => undefined);
+      } catch {
+        // Some browsers throw when the source isn't fully buffered yet;
+        // the next interval tick will retry with the same element.
       }
-
-      const now = ctx.currentTime;
-      const frequencies = [853, 960];
-
-      const playBurst = (startTime: number, duration: number) => {
-        const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(0, startTime);
-        gainNode.gain.linearRampToValueAtTime(0.25, startTime + 0.02);
-        gainNode.gain.setValueAtTime(0.25, startTime + duration - 0.05);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
-        const oscs = frequencies.map((freq) => {
-          const osc = ctx.createOscillator();
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(freq, startTime);
-
-          const lfo = ctx.createOscillator();
-          const lfoGain = ctx.createGain();
-          lfo.type = "sine";
-          lfo.frequency.value = 14;
-          lfoGain.gain.value = 40;
-
-          lfo.connect(lfoGain);
-          lfoGain.connect(osc.frequency);
-
-          osc.connect(gainNode);
-
-          lfo.start(startTime);
-          lfo.stop(startTime + duration);
-
-          return { osc, lfo };
-        });
-
-        gainNode.connect(ctx.destination);
-
-        oscs.forEach(({ osc }) => {
-          osc.start(startTime);
-          osc.stop(startTime + duration);
-        });
-      };
-
-      // Cadence: double electronic trill (ring 0.4s, pause 0.2s, ring 0.4s)
-      playBurst(now, 0.4);
-      playBurst(now + 0.6, 0.4);
     } catch (e) {
       console.warn("Failed to play ringtone audio:", e);
     }
-  }, []);
+  }, [renderRingtoneWav, audioRoutingState]);
+
+  // Re-route the call ringtone element when the routing preference
+  // changes (e.g. operator picks a new ringtone device).
+  useEffect(() => {
+    const audio = ringtoneAudioElRef.current;
+    if (!audio) return;
+    void audioRoutingState.applyToElement(audio, "ringtone").catch(() => undefined);
+  }, [audioRoutingState.routing, audioRoutingState]);
 
   useEffect(() => {
     const isRinging = incomingCall?.status === "ringing";
     if (isRinging && soundsEnabled) {
       if (!ringtoneIntervalIdRef.current) {
-        playCallRingtone();
+        void playCallRingtone();
         ringtoneIntervalIdRef.current = setInterval(() => {
-          playCallRingtone();
+          void playCallRingtone();
         }, 3000);
       }
     } else {
@@ -3586,6 +3596,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         remoteAudio.autoplay = true;
         remoteAudio.srcObject = remoteStream;
         adminRemoteAudioRef.current = remoteAudio;
+        // Pin the remote stream to the staff's chosen call output device
+        // (typically a USB headset). `applyAudioSink` is a no-op when
+        // audio routing is disabled or the runtime doesn't support
+        // setSinkId, so the call still works on the default output.
+        void audioRoutingState.applyToElement(remoteAudio, "call").catch(() => undefined);
         void remoteAudio.play().catch(() => {
           // Browser autoplay policy can still require staff interaction.
         });
@@ -5875,6 +5890,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         triggerIncomingCall,
         acceptCall,
         declineCall,
+        audioRouting: audioRoutingState.routing,
+        audioRoutingLoading: audioRoutingState.loading,
+        applyAudioSink: audioRoutingState.applyToElement,
+        updateAudioRouting: audioRoutingState.updateRouting,
+        resetAudioRouting: audioRoutingState.resetToDefault,
         storeOrders,
         updateStoreOrderStatus,
         billStoreOrder,

@@ -484,6 +484,9 @@ Staff {
   nationality: string
   role: StaffRole
   createdAt: Date
+  // Per-staff intercom audio routing — see `features/INTERCOM-AUDIO-ROUTING.md`.
+  // Optional; absence is the "system default output" equivalent.
+  audioRouting?: AudioRouting
 }
 ```
 

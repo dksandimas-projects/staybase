@@ -57,7 +57,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
   - Sound plays on every incoming guest message — not just the first per conversation
   - Sound only plays when inbox route is not the active focused tab
   - Sound file URL from `settings/hotelConfig.notificationSoundUrl` (Firebase Storage)
-  - Use Web Audio API — no extra library
+  - **Played through a hidden `<audio>` element** (not a Web Audio API buffer) so the staff's per-profile `audioRouting.ringtoneOutputDeviceId` (typically the built-in speaker) can be honoured via `setSinkId`. See `features/INTERCOM-AUDIO-ROUTING.md` for the surface contract + browser support matrix. The element is created once on mount and re-routed on every routing change; the page also keeps a `useEffect` that re-applies `setSinkId` when the live `audioRouting` value flips
 - [x] Tab title: update `document.title` dynamically with unread count
 - [x] Unread count: count of messages where `sender: "guest"` AND `isRead: false` across all rooms
 
@@ -81,6 +81,8 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [x] Notification sound does NOT play when inbox tab is active and focused
 - [x] Incoming call banner appears when ringing; notification sound plays when inbox is not focused after audio unlock
 - [x] Accept call → audio connects within 3 seconds on same network
+- [x] **Call audio routed to the staff's chosen call device** — the WebRTC remote stream is pinned to `audioRouting.callOutputDeviceId` (typically a USB headset) via `setSinkId` on the hidden `<audio>` element. Falls back to system default when the saved device is gone. See `features/INTERCOM-AUDIO-ROUTING.md`
+- [x] **Call ringtone routed to the staff's chosen ringtone device** — the pre-answer looping trill plays through a hidden `<audio>` element pinned to `audioRouting.ringtoneOutputDeviceId` (typically the built-in speaker). The audio is rendered to a 1.0s WAV blob on first use (same 853/960 Hz envelope as the pre-feature Web Audio API code) and reused for every subsequent play. See `features/INTERCOM-AUDIO-ROUTING.md`
 - [x] Tab title shows unread count when messages are unread
 - [x] Mark as Resolved moves conversation to Resolved tab
 - [x] Sidebar nav badge shows correct unread count
@@ -96,3 +98,4 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - Notification sound configuration: `plan/features/SETTINGS.md §Intercom`
 - Quick request configuration: `plan/features/SETTINGS.md §Intercom`
 - Unread count on dashboard: `plan/features/DASHBOARD-OVERVIEW.md`
+- **Audio routing** (call device + notification/ringtone device pickers, persisted per-staff on `guests/{uid}.audioRouting`): `plan/features/INTERCOM-AUDIO-ROUTING.md`
