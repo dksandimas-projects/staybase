@@ -99,6 +99,82 @@ export async function selectAudioOutputSafe(): Promise<SelectAudioOutputResult> 
 }
 
 /**
+ * Unlock labelled device enumeration by asking for microphone
+ * permission.
+ *
+ * WHY this exists: `navigator.mediaDevices.selectAudioOutput()` — the
+ * native OS output picker — is NOT shipped in stable Chrome or Edge.
+ * It sits behind `chrome://flags/#enable-experimental-web-platform-features`
+ * and is only unflagged in Firefox (which in turn has `setSinkId`
+ * behind its own flag). So on the browser the front desk actually
+ * uses, `selectAudioOutputSafe()` returns `{ kind: "unsupported" }`
+ * 100% of the time and the Pick… button can never open anything.
+ *
+ * The portable fallback is the same permission gate every WebRTC app
+ * uses: until the origin holds a media permission, `enumerateDevices()`
+ * returns a single anonymised `audiooutput` entry with an empty
+ * `deviceId` and an empty `label`. Granting microphone access unlocks
+ * the FULL list with real labels — which is all the /audio page needs,
+ * because the actual routing is done by `setSinkId`, not by the picker.
+ *
+ * The microphone track is stopped immediately; we want the permission
+ * grant, not the audio. The admin app already requests the same
+ * permission when staff accept an intercom call (`AdminContext`
+ * `acceptCall`), and `admin-app/vercel.json` ships
+ * `Permissions-Policy: microphone=(self)`, so this adds no new
+ * capability to the origin.
+ */
+export type UnlockDeviceLabelsResult =
+  | { kind: "ok" }
+  | { kind: "denied" }
+  | { kind: "unsupported" }
+  | { kind: "error" };
+
+export async function unlockAudioDeviceLabels(): Promise<UnlockDeviceLabelsResult> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices) return { kind: "unsupported" };
+  if (typeof navigator.mediaDevices.getUserMedia !== "function") return { kind: "unsupported" };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Release the mic immediately — we only wanted the permission
+    // grant. Leaving the track live would pin the recording indicator
+    // on for the whole shift.
+    stream.getTracks().forEach((track) => track.stop());
+    return { kind: "ok" };
+  } catch (e) {
+    const name = (e as { name?: string })?.name;
+    // NotAllowedError = user (or an admin policy) denied the prompt.
+    // SecurityError = insecure context / blocked by Permissions-Policy.
+    if (name === "NotAllowedError" || name === "SecurityError") return { kind: "denied" };
+    console.warn("[audio-routing] getUserMedia for device-label unlock threw:", e);
+    return { kind: "error" };
+  }
+}
+
+/**
+ * True once the origin holds a media permission (so device labels are
+ * visible). Uses the Permissions API where available and falls back to
+ * "do we already see a labelled device?" — `enumerateDevices()` only
+ * fills in `label` after a grant, so a non-empty label is proof.
+ */
+export async function audioDeviceLabelsUnlocked(): Promise<boolean> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices) return false;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    if (devices.some((d) => d.kind === "audiooutput" && !!d.label)) return true;
+  } catch {
+    // fall through to the Permissions API probe
+  }
+  try {
+    const status = await navigator.permissions?.query({
+      name: "microphone" as PermissionName
+    });
+    return status?.state === "granted";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `setSinkId` with three layers of defense:
  *   1. feature-detect — return `false` on unsupported runtimes
  *   2. swallow DOMException (NotFoundError when the saved device
@@ -112,10 +188,24 @@ export async function setSinkIdSafe(
   deviceId: string | null | undefined
 ): Promise<boolean> {
   if (!el) return false;
-  const proto = Object.getPrototypeOf(el) as { setSinkId?: (id: string) => Promise<void> };
-  if (typeof proto.setSinkId !== "function") return false;
+  // `setSinkId` MUST be invoked on the element itself, never on the
+  // prototype. The old code did `Object.getPrototypeOf(el).setSinkId(id)`,
+  // which resolves the inherited HTMLMediaElement.prototype.setSinkId but
+  // calls it with `this === HTMLAudioElement.prototype` — a prototype
+  // object is not a real media element, so Chrome throws
+  // `TypeError: Failed to execute 'setSinkId' on 'HTMLMediaElement':
+  // Illegal invocation` on EVERY call. The catch below swallowed it and
+  // returned false, so the /audio Test button always reported "Couldn't
+  // play through that device" and useAudioRouting.applyToElement never
+  // routed a single call or ringtone in a real browser (the unit tests
+  // passed because their stub's `setSinkId` is a plain function that
+  // doesn't care about `this`). Feature-detect through the instance —
+  // property lookup still walks the prototype chain — then invoke on the
+  // instance so the internal slot check passes.
+  const media = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
+  if (typeof media.setSinkId !== "function") return false;
   try {
-    await proto.setSinkId(deviceId ?? "");
+    await media.setSinkId(deviceId ?? "");
     // Chrome normalises the round-trip in two ways depending on the
     // browser version and the device: setting sinkId to "" or
     // "default" both end up reporting `el.sinkId === ""` (the

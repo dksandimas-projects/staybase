@@ -378,7 +378,10 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(audioPage).toMatch(
       /data-testid=\{`audio-permission-hint-\$\{surface\}`\}/
     );
-    expect(audioPage).toMatch(/Pick….*grant permission|grant permission.*Pick…/);
+    // The hint now points at the microphone grant, because
+    // `selectAudioOutput()` is not shipped in stable Chrome/Edge —
+    // the mic permission is the only portable way to unhide labels.
+    expect(audioPage).toMatch(/Pick….*allow microphone access/);
 
     // The hint must be conditional on `permissionGranted === false &&
     // devices.length <= 1`. Without those guards the hint would either
@@ -548,22 +551,56 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
   // page must surface a banner when the most-recent Pick…
   // attempt found the runtime unsupported (no selectAudioOutput)
   // so the staff can self-diagnose instead of opening a ticket.
-  it("AudioSettingsPage surfaces a 'your browser can't pick a device' banner when selectAudioOutput is unavailable", () => {
-    // The unused-pickResult state must exist.
+  it("AudioSettingsPage falls back to the microphone-permission unlock when selectAudioOutput is unavailable", () => {
+    // The pickResult state must exist.
     expect(audioPage).toMatch(
       /setPickResult|const\s*\[\s*\w+\s*,\s*setPickResult\s*\]\s*=\s*R?\.useState/
     );
     // The page must branch on the discriminator returned by the
     // helper — not on a null check that conflates cancelled with
     // unsupported.
-    expect(audioPage).toMatch(/result\.kind\s*===\s*"unsupported"/);
     expect(audioPage).toMatch(/result\.kind\s*===\s*"ok"/);
-    // The unsupported banner text must explain the constraint
-    // (not just say "something went wrong").
-    expect(audioPage).toMatch(
-      /This browser can.+t open the audio device picker|browser can.{0,30}audio device picker/i
-    );
+    expect(audioPage).toMatch(/result\.kind\s*===\s*"cancelled"/);
+
+    // STEP 2 IS THE WHOLE POINT (2026-08-19, fix #6 in the chain).
+    // `navigator.mediaDevices.selectAudioOutput()` is NOT shipped in
+    // stable Chrome or Edge — it lives behind
+    // `chrome://flags/#enable-experimental-web-platform-features`, so
+    // `selectAudioOutputSafe()` returned { kind: "unsupported" } on
+    // every click and the page's only response was a banner saying so.
+    // Clicking Pick… could never reveal a device. The page MUST fall
+    // through to `unlockAudioDeviceLabels()` (a getUserMedia mic grant,
+    // which is what actually unhides `enumerateDevices()` labels) after
+    // the native picker comes back unsupported.
+    expect(
+      audioPage,
+      "handleGrantPermission must fall back to unlockAudioDeviceLabels() when the native picker is unavailable"
+    ).toMatch(/await\s+unlockAudioDeviceLabels\(\)/);
+    // The fallback's own outcome drives the banner state.
+    expect(audioPage).toMatch(/unlock\.kind\s*===\s*"ok"/);
+    expect(audioPage).toMatch(/unlock\.kind\s*===\s*"unsupported"/);
+    // A denied mic prompt gets its own banner telling the staff how to
+    // re-enable it — otherwise Pick… still looks like a dead button.
+    expect(audioPage).toMatch(/data-testid=\{`audio-pick-denied-\$\{surface\}`\}/);
+    expect(audioPage).toMatch(/Microphone access was blocked/);
     // data-testid pin for e2e + future test stability.
     expect(audioPage).toMatch(/data-testid=\{`audio-pick-unsupported-\$\{surface\}`\}/);
+  });
+
+  // Device-label unlock helper contract (2026-08-19, fix #6) — the
+  // mic track must be released the instant the grant lands. Leaving it
+  // open would pin the browser's "recording" indicator on for the
+  // whole shift for a permission we only wanted as an enumeration key.
+  it("unlockAudioDeviceLabels grants mic permission and immediately stops the track", () => {
+    expect(devices).toMatch(/export\s+async\s+function\s+unlockAudioDeviceLabels/);
+    expect(devices).toMatch(/getUserMedia\(\{\s*audio:\s*true\s*\}\)/);
+    expect(
+      devices,
+      "the microphone track must be stopped immediately after the grant"
+    ).toMatch(/getTracks\(\)\.forEach\(\(track\)\s*=>\s*track\.stop\(\)\)/);
+    // A refused prompt must be classified as "denied", not "error" —
+    // the page shows a how-to-re-enable banner for it.
+    expect(devices).toMatch(/NotAllowedError/);
+    expect(devices).toMatch(/kind:\s*"denied"/);
   });
 });
