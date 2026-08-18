@@ -27,14 +27,16 @@ import { cn } from "../utils/cn";
 const SYSTEM_DEFAULT_DEVICE_ID = "default";
 // 440 Hz sine, 0.3s, mono, 16-bit, 44.1 kHz — generated at module load
 // and cached as a Blob URL so the "Test" button works offline without
-// bundling an audio file. The CSP at `vercel.json` uses
-// `default-src 'self'` with no explicit `media-src` directive, so any
-// data: URL passed to a media element falls back to `default-src`
-// and is blocked (see `plan/docs/SECURITY.md §Content Security Policy`).
-// A Blob URL created via `URL.createObjectURL` is origin-scoped and
-// matches `'self'` automatically — no CSP change needed. Same
-// pattern as the call ringtone in `utils/renderRingtoneWav.ts`. Short
-// enough not to be annoying, with a 10ms fade in/out envelope to
+// bundling an audio file. The CSP at `vercel.json` declares an explicit
+// `media-src 'self' blob: data:` (see `plan/docs/SECURITY.md §Content
+// Security Policy`), so the Blob URL loaded via `URL.createObjectURL`
+// is permitted. Without that directive, the CSP falls back to
+// `default-src 'self'` and rejects every `blob:` URL with
+// `Refused to load media from 'blob:...' because it violates the
+// directive: "default-src 'self'"` — see the regression test in
+// `__tests__/feature-intercom-audio-routing.test.ts` for the guard.
+// Same pattern as the call ringtone in `utils/renderRingtoneWav.ts`.
+// Short enough not to be annoying, with a 10ms fade in/out envelope to
 // avoid the click that a hard attack/release produces.
 let cachedTestToneUrl: string | null = null;
 function getTestToneUrl(): string {
