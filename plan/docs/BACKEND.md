@@ -227,6 +227,28 @@ The doc ID is the code string by convention. The validate + create handlers both
 
 ---
 
+### `guests/{userId}`
+
+> This collection holds the staff profile mirror (Firestore doc ID = Firebase Auth UID). Spark Rewards members also write into this collection but the staff-relevant fields below are what admin tooling reads. Per `features/AUTH-ROLES.md` + `features/INTERCOM-AUDIO-ROUTING.md`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `fullName` / `displayName` | string | Profile name (staff + members) |
+| `email` / `phone` | string | Contact (PII — staff/admin only) |
+| `photoUrl` | string \| null | Optional avatar |
+| `address` / `dateOfBirth` / `emergencyContact` | object / string | Member-only profile fields |
+| `preferences` | object | Member preferences (notifications, etc.) |
+| `role` | string | `"front-desk"` \| `"admin"` \| absent for non-staff members |
+| `isActive` | boolean | Staff-account enable flag (admin-only) |
+| `createdBy` / `disabledBy` | string | Staff-audit fields (admin-only) |
+| `audioRouting` | object \| null | **Per-staff intercom audio routing** (see `features/INTERCOM-AUDIO-ROUTING.md`). Shape: `{ enabled: boolean, callOutputDeviceId: string \| null, ringtoneOutputDeviceId: string \| null, updatedAt: timestamp }`. Absent (or `null`) = system-default output for both surfaces. Owner-writable per the security rules allowlist; absent is the "no preference" sentinel — the UI treats it as default. |
+| `audioRoutingUpdatedAt` | timestamp | Audit timestamp for the last `audioRouting` write |
+| `createdAt` / `updatedAt` | timestamp | Audit |
+
+> Lifecycle: `create` / `delete` are admin-only; `update` is admin OR the owner writing only to the self-write allowlist (`fullName` / `displayName` / `phone` / `photoUrl` / `address` / `dateOfBirth` / `emergencyContact` / `preferences` / `audioRouting` / `audioRoutingUpdatedAt` / `updatedAt`). See `firebase/firestore.rules §guests` and `plan/docs/SECURITY.md §guests`.
+
+---
+
 ### `members/{memberId}`
 
 | Field | Type | Notes |

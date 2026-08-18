@@ -6,6 +6,7 @@ import {
   BarChart3,
   BedDouble,
   CalendarDays,
+  Headphones,
   Home,
   MessageSquare,
   QrCode,
@@ -33,7 +34,8 @@ const navItems = [
   { label: "Intercom", to: "/intercom", icon: MessageSquare },
   { label: "QR", to: "/qr", icon: QrCode },
   { label: "Members", to: "/members", icon: Award },
-  { label: "Settings", to: "/settings", icon: Settings }
+  { label: "Settings", to: "/settings", icon: Settings },
+  { label: "Audio", to: "/audio", icon: Headphones }
 ];
 
 interface SidebarProps {

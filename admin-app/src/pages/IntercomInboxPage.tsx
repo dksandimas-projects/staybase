@@ -17,11 +17,11 @@ import config from "@config";
 const NOTIFICATION_MUTED_KEY = "intercom-notification-muted";
 
 export function IntercomInboxPage() {
-  const { 
-    intercoms, 
+  const {
+    intercoms,
     intercomThreads,
-    sendIntercomMessage, 
-    markChatAsRead, 
+    sendIntercomMessage,
+    markChatAsRead,
     setIntercomResolved,
     incomingCall,
     acceptCall,
@@ -29,7 +29,9 @@ export function IntercomInboxPage() {
     rooms,
     bookings,
     hotelConfig,
-    storeOrders
+    storeOrders,
+    applyAudioSink,
+    audioRouting
   } = useAdmin();
   const { isMobile } = useBreakpoint();
 
@@ -78,7 +80,7 @@ export function IntercomInboxPage() {
     return window.localStorage.getItem(NOTIFICATION_MUTED_KEY) === "true";
   });
   const audioContextRef = useRef<AudioContext | null>(null);
-  const notificationBufferRef = useRef<AudioBuffer | null>(null);
+  const notificationAudioRef = useRef<HTMLAudioElement | null>(null);
   const notificationInitializedRef = useRef(false);
   const previousUnreadGuestIdsRef = useRef<Set<string>>(new Set());
   const previousRingingCallKeyRef = useRef("");
@@ -108,12 +110,20 @@ export function IntercomInboxPage() {
     };
   }, []);
 
+  // Per `plan/features/INTERCOM-AUDIO-ROUTING.md`: the notification
+  // sound is now a hidden `<audio>` element (not a Web Audio API
+  // buffer) so `setSinkId` can pin it to the staff's chosen
+  // ringtone output device. The autoplay-unlock listener still
+  // applies — the first `.play()` after page load needs a user
+  // gesture in every browser. The unlock is also what gates
+  // `isNotificationAudioUnlocked`, which the chime player reads.
   useEffect(() => {
     const unlockNotificationAudio = () => {
-      if (!audioContextRef.current) {
+      if (audioContextRef.current === null && typeof window !== "undefined" && "AudioContext" in window) {
         audioContextRef.current = new AudioContext();
+        void audioContextRef.current.resume();
       }
-      void audioContextRef.current.resume().then(() => setIsNotificationAudioUnlocked(true));
+      setIsNotificationAudioUnlocked(true);
     };
 
     window.addEventListener("pointerdown", unlockNotificationAudio, { once: true });
@@ -124,31 +134,42 @@ export function IntercomInboxPage() {
       window.removeEventListener("keydown", unlockNotificationAudio);
       void audioContextRef.current?.close();
       audioContextRef.current = null;
+      notificationAudioRef.current = null;
     };
   }, []);
 
+  // Wire the notification sound URL to the routed `<audio>` element.
+  // When the URL changes we tear down the old element and create a
+  // fresh one so a new sound file is honoured. `applyAudioSink` is
+  // a safe no-op when audio routing is disabled — the element still
+  // plays through the system default in that case.
   useEffect(() => {
     const soundUrl = hotelConfig?.notificationSoundUrl;
-    notificationBufferRef.current = null;
-    if (!soundUrl || !audioContextRef.current || !isNotificationAudioUnlocked) return;
-
-    let isCancelled = false;
-    fetch(soundUrl)
-      .then((response) => response.arrayBuffer())
-      .then((arrayBuffer) => audioContextRef.current?.decodeAudioData(arrayBuffer))
-      .then((audioBuffer) => {
-        if (!isCancelled && audioBuffer) {
-          notificationBufferRef.current = audioBuffer;
-        }
-      })
-      .catch(() => {
-        notificationBufferRef.current = null;
-      });
-
+    if (!soundUrl) {
+      notificationAudioRef.current = null;
+      return;
+    }
+    const audio = new Audio(soundUrl);
+    audio.preload = "auto";
+    void applyAudioSink(audio, "ringtone").catch(() => undefined);
+    notificationAudioRef.current = audio;
     return () => {
-      isCancelled = true;
+      audio.pause();
+      audio.src = "";
+      notificationAudioRef.current = null;
     };
-  }, [hotelConfig?.notificationSoundUrl, isNotificationAudioUnlocked]);
+  }, [hotelConfig?.notificationSoundUrl, applyAudioSink]);
+
+  // Re-route the notification audio when the routing preference
+  // changes (e.g. the operator picks a new ringtone device). Same
+  // for the in-call WebRTC audio: the AdminContext side has the
+  // ref so a re-route is handled there, but for the inbox's own
+  // `<audio>` element we re-apply on every change.
+  useEffect(() => {
+    const audio = notificationAudioRef.current;
+    if (!audio) return;
+    void applyAudioSink(audio, "ringtone").catch(() => undefined);
+  }, [audioRouting, applyAudioSink]);
 
   // Handle active call duration timer
   useEffect(() => {
@@ -198,14 +219,24 @@ export function IntercomInboxPage() {
   };
 
   const playNotificationSound = () => {
-    const audioContext = audioContextRef.current;
-    const notificationBuffer = notificationBufferRef.current;
-    if (!audioContext || !notificationBuffer || audioContext.state !== "running") return;
-
-    const source = audioContext.createBufferSource();
-    source.buffer = notificationBuffer;
-    source.connect(audioContext.destination);
-    source.start();
+    const audio = notificationAudioRef.current;
+    if (!audio) return;
+    // Rewind to the start so back-to-back chimes don't drop the
+    // first 100ms. `setSinkId` was already applied at element
+    // creation; calling it again here is harmless.
+    try {
+      audio.currentTime = 0;
+    } catch {
+      // Some Safari builds throw when the element hasn't loaded
+      // enough to seek. Fall through — the .play() call will
+      // surface the same error and we silently skip.
+    }
+    void audio.play().catch(() => {
+      // Autoplay policy can still gate the first play after a
+      // cold page load. The unlock-on-pointerdown listener above
+      // covers subsequent plays. Silent skip per the original
+      // design — no toast for a missed chime.
+    });
   };
 
   // Get rooms with active occupancy or intercom history, then filter by resolved state
