@@ -25,12 +25,72 @@ import {
 import { cn } from "../utils/cn";
 
 const SYSTEM_DEFAULT_DEVICE_ID = "default";
-const TEST_TONE_DATA_URL =
-  // 440 Hz sine, 0.5s, mono, 16-bit, 44.1 kHz — encoded as a WAV data
-  // URL so the "Test" button works offline without bundling an audio
-  // file. Short enough not to be annoying, audible enough to confirm
-  // the device is wired up correctly.
-  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+// 440 Hz sine, 0.3s, mono, 16-bit, 44.1 kHz — generated at module load
+// and cached as a data URL so the "Test" button works offline without
+// bundling an audio file. The previous static data URL was a 44-byte
+// RIFF header with zero sample data; the browser rejected `.play()`
+// because there was nothing to play, so every Test press (call +
+// ringtone) showed "Couldn't play through that device" even on the
+// system default output. Short enough not to be annoying, with a 10ms
+// fade in/out envelope to avoid the click that a hard attack/release
+// produces.
+let cachedTestToneDataUrl: string | null = null;
+function getTestToneDataUrl(): string {
+  if (cachedTestToneDataUrl) return cachedTestToneDataUrl;
+  const sampleRate = 44100;
+  const duration = 0.3;
+  const numSamples = Math.floor(sampleRate * duration);
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  // RIFF header (ASCII markers written as big-endian uint32)
+  view.setUint32(0, 0x52494646, false); // "RIFF"
+  view.setUint32(4, 36 + dataSize, true); // file size - 8, little-endian
+  view.setUint32(8, 0x57415645, false); // "WAVE"
+  // fmt chunk
+  view.setUint32(12, 0x666d7420, false); // "fmt "
+  view.setUint32(16, 16, true); // subchunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  // data chunk
+  view.setUint32(36, 0x64617461, false); // "data"
+  view.setUint32(40, dataSize, true);
+
+  // Samples — 440Hz sine at 30% volume, with a 10ms fade in/out to
+  // avoid the click that a hard attack produces on some audio stacks.
+  const fadeSamples = Math.min(numSamples / 2, Math.floor(sampleRate * 0.01));
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    let envelope = 1;
+    if (i < fadeSamples) envelope = i / fadeSamples;
+    else if (i > numSamples - fadeSamples) envelope = (numSamples - i) / fadeSamples;
+    const sample = Math.sin(2 * Math.PI * 440 * t) * 0.3 * envelope;
+    view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  // Chunked String building to avoid `Maximum call stack size exceeded`
+  // on the larger data URL (~26KB binary → ~35KB base64).
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(
+      null,
+      Array.from(bytes.subarray(i, i + chunkSize))
+    );
+  }
+  cachedTestToneDataUrl = `data:audio/wav;base64,${btoa(binary)}`;
+  return cachedTestToneDataUrl;
+}
 
 type Surface = "call" | "ringtone";
 
@@ -93,7 +153,7 @@ function DeviceRow({
     setIsTesting(true);
     setTestResult(null);
     try {
-      const audio = testAudioRef.current ?? new Audio(TEST_TONE_DATA_URL);
+      const audio = testAudioRef.current ?? new Audio(getTestToneDataUrl());
       testAudioRef.current = audio;
       const ok = await setSinkIdSafe(audio, value);
       if (!ok) {
