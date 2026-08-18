@@ -113,13 +113,24 @@ function DeviceRow({
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "fail" | null>(null);
+  // Inline banner shown when the most-recent Pick… attempt can't
+  // open the native picker (runtime supports setSinkId but not
+  // selectAudioOutput). Lifecycle:
+  //   undefined → no banner
+  //   "unsupported" → permanent; surfaces why the staff won't see
+  //                   labelled devices
+  //   "error" → transient; dismissed on the next Pick… click
+  //   "cancelled" → silent (the OS picker's own UI is feedback)
+  const [pickResult, setPickResult] = useState<"unsupported" | "error" | "cancelled" | null>(null);
   // Chrome returns an empty (or single "default") list from
   // `enumerateDevices()` until the user grants permission via the
   // native OS picker (`selectAudioOutput()`). Track whether the staff
   // has triggered the picker on this row so the dropdown can show a
   // discoverable hint explaining the empty state. The flag flips on
   // the FIRST successful `selectAudioOutputSafe()` call (the user
-  // may pick the system default — either path grants permission).
+  // may pick the system default — either path grants permission),
+  // OR when the runtime is detected as permanently unsupported
+  // (no point nagging the staff to try again).
   const [permissionGranted, setPermissionGranted] = useState(false);
   const testAudioRef = useRef<HTMLAudioElement | null>(null);
   // Fresh AudioContext created INSIDE the click handler so the user
@@ -220,17 +231,40 @@ function DeviceRow({
     // The user's only way to surface a labelled device list is the
     // native OS picker (Chrome/Edge only). Even picking "System
     // default" in the picker is enough to grant enumeration
-    // permission — we just need to trigger the picker once. After
-    // it resolves (success or cancel), refresh the local list; if the
-    // picker returned a real device, update the row's value too.
-    const id = await selectAudioOutputSafe();
-    if (id !== null) {
+    // permission — we just need to trigger the picker once.
+    //
+    // Distinguish four outcomes so the staff can see WHY the
+    // button appears to be a no-op:
+    //   ok          → picker produced a deviceId (may be "default")
+    //   cancelled   → picker was dismissed without a selection
+    //                 (AbortError). Silent — the OS picker is its
+    //                 own feedback.
+    //   unsupported → runtime has setSinkId but not
+    //                 selectAudioOutput (Safari < 16, Firefox,
+    //                 older Chrome, permissions policy). Show a
+    //                 banner so the staff knows the constraint.
+    //   error       → unexpected runtime throw. Show a banner.
+    const result = await selectAudioOutputSafe();
+    console.info("[audio-routing] selectAudioOutput result:", result);
+    // Reset the inline banner before deciding the new state so a
+    // successful Pick clears a previous error.
+    setPickResult(result.kind === "ok" ? null : result.kind);
+    if (result.kind === "ok") {
       setPermissionGranted(true);
+      const id = result.deviceId;
       if (id !== SYSTEM_DEFAULT_DEVICE_ID) {
         onChange(id);
         setTestResult(null);
       }
+    } else if (result.kind === "unsupported") {
+      // No point nagging the staff to try again on every page
+      // load — once we know the runtime is unsupported, treat the
+      // permission as effectively granted (the system default
+      // will keep working) and hide the hint.
+      setPermissionGranted(true);
     }
+    // Always refresh after — even on cancel/error the picker
+    // dismissal often unlocks labels in Chrome.
     void refreshDevices();
   }, [onChange, refreshDevices]);
 
@@ -314,6 +348,41 @@ function DeviceRow({
             >
               <AlertTriangle size={12} />
               Click <span className="font-bold">Pick…</span> above to grant permission — Chrome hides device names until you've picked at least once.
+            </p>
+          )}
+
+          {/*
+           * Pick result banner — surfaces WHY the staff clicked
+           * Pick… and nothing happened, so they can self-diagnose
+           * instead of opening a ticket. Distinct copy per kind:
+           *   "unsupported" → permanent fallback banner (runtime
+           *                   supports setSinkId but not
+           *                   selectAudioOutput)
+           *   "error"       → transient banner (call the picker
+           *                   failed at runtime)
+           * "cancelled" is intentionally silent — the OS picker
+           * was its own feedback.
+           */}
+          {pickResult === "unsupported" && (
+            <p
+              role="alert"
+              data-testid={`audio-pick-unsupported-${surface}`}
+              className="mt-2 inline-flex items-start gap-1.5 text-[11px] font-medium text-amber-800"
+            >
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>
+                This browser can&apos;t open the audio device picker. The system default will keep working for calls + ringtones; supported on Chrome 110+ / Edge on desktop. Use Chrome DevTools console (filter <code className="rounded bg-amber-100 px-1">[audio-routing]</code>) for the runtime detection result.
+              </span>
+            </p>
+          )}
+          {pickResult === "error" && (
+            <p
+              role="alert"
+              data-testid={`audio-pick-error-${surface}`}
+              className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-red-700"
+            >
+              <AlertTriangle size={12} />
+              Couldn&apos;t open the audio device picker. Try again or pick another browser.
             </p>
           )}
 
