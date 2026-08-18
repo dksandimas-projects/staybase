@@ -131,17 +131,28 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(audioPage).toMatch(/setSinkIdSafe\(audio,\s*value\)/);
   });
 
-  it("AudioSettingsPage's test tone data URL is a valid WAV with actual sample data, not an empty header", () => {
+  it("AudioSettingsPage's test tone is a valid WAV with actual sample data, not an empty header", () => {
     // Regression guard for the 2026-08-18 bug: the original
     // TEST_TONE_DATA_URL was a 44-byte RIFF header with zero sample
     // data (a "silent zero-length WAV"). The browser rejected
     // audio.play() with NotSupportedError because there was nothing
     // to play, so every Test press surfaced "Couldn't play through
     // that device" regardless of which device the operator picked.
-    // A future refactor that swaps the inline base64 for an empty
-    // file again must break this test.
-    expect(audioPage).toMatch(/getTestToneDataUrl/);
+    //
+    // Follow-up guard for the CSP violation: the original fix
+    // emitted a `data:audio/wav;base64,...` URL, but the CSP at
+    // `vercel.json` uses `default-src 'self'` with no explicit
+    // `media-src` directive, so any data: URL passed to a media
+    // element falls back to `default-src` and is blocked. The test
+    // tone is now a Blob URL (`URL.createObjectURL(blob)`), which
+    // is origin-scoped and matches `'self'` automatically — same
+    // pattern as the call ringtone in `utils/renderRingtoneWav.ts`.
+    //
+    // A future refactor that swaps the Blob URL for an empty WAV
+    // or a data: URL again must break this test.
+    expect(audioPage).toMatch(/getTestToneUrl/);
     expect(audioPage).not.toMatch(/TEST_TONE_DATA_URL/);
+    expect(audioPage).not.toMatch(/getTestToneDataUrl/);
     // The generator builds a 0.3s, 44.1kHz, mono, 16-bit WAV with
     // 13,230 sample frames — 44 header bytes + 26,460 audio bytes
     // = 26,504 bytes total. The "0.3" duration is the marker; if it
@@ -153,6 +164,11 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     // hardcoded 0 — that was the original bug.
     expect(audioPage).toMatch(/const dataSize = numSamples \* blockAlign/);
     expect(audioPage).not.toMatch(/dataSize = 0/);
+    // The tone must be served as a Blob URL (CSP-friendly),
+    // not a data: URL (CSP-blocked under default-src 'self').
+    expect(audioPage).toMatch(/new Blob\(\[buffer\],\s*\{\s*type:\s*"audio\/wav"\s*\}\)/);
+    expect(audioPage).toMatch(/URL\.createObjectURL\(blob\)/);
+    expect(audioPage).not.toMatch(/data:audio\/wav;base64,/);
   });
 
   it("AudioSettingsPage degrades gracefully when the Audio Output Devices API is unsupported", () => {
