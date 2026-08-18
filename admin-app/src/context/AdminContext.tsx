@@ -3101,6 +3101,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   }, []);
 
   const audioContextRef = useRef<AudioContext | null>(null);
+  // Chrome rejects `new AudioContext()` outside a user-gesture handler:
+  //   "The AudioContext was not allowed to start. It must be resumed
+  //    (or created) after a user gesture on the page."
+  // The Firestore `onSnapshot` callbacks for bookings + intercoms call
+  // `playSynthNotification` on first load hydration *and* on every
+  // network-driven update, which runs outside any gesture. If we let
+  // that path construct the AudioContext, Chrome logs the autoplay
+  // warning to the console (and the context stays suspended —
+  // `oscillator.start()` is silent). Gate the constructor on this
+  // boolean, which only the gesture handler (below) flips.
+  const audioGestureUnlockedRef = useRef(false);
 
   useEffect(() => {
     const unlockAudio = () => {
@@ -3110,6 +3121,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       if (audioContextRef.current.state === "suspended") {
         void audioContextRef.current.resume();
       }
+      audioGestureUnlockedRef.current = true;
     };
     window.addEventListener("pointerdown", unlockAudio, { once: true });
     window.addEventListener("keydown", unlockAudio, { once: true });
@@ -3121,14 +3133,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
 
   const playSynthNotification = useCallback((type: "booking" | "payment" | "message" | "arrival" | "departure") => {
     if (!soundsEnabledRef.current) return;
+    // Bail before touching the AudioContext. The gesture handler above is
+    // the only place that constructs it — if the staff signed in via deep
+    // link (no prior click on the admin chrome), the first few snapshot
+    // notifications will be silent, which is correct: Chrome requires the
+    // user to interact with the page before audio plays.
+    if (!audioGestureUnlockedRef.current) return;
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume();
-      }
 
       const now = ctx.currentTime;
 
