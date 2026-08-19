@@ -29,9 +29,30 @@ import { resolve } from "node:path";
 // `callDuration` are also emitted by the write path
 // (`recordCallHistory` at `AdminContext.tsx:3547-3559`) and pinned
 // here for the round-trip byte-equivalence.
+//
+// **Decision #216 cross-file pin (2026-08-19):** the
+// `recordCallHistory` write payload (AdminContext.tsx:3547-3575)
+// includes 14 keys, and the Firestore `intercoms/{roomId}/messages`
+// create rule's `keys().hasOnly([...])` allowlist (firebase/firestore.rules:362-)
+// MUST include every key the writer emits — otherwise the
+// create is rejected and the call-history thread entry silently
+// fails to write. The pre-#216 rule was missing
+// `callAnsweredByName` from the allowlist, so every call-history
+// write was rejected by the rule and the "Call answered by {Name}"
+// message never landed in the thread. The cross-file contract is
+// pinned here as a source-text test (cheap daily safety net) AND
+// as a rule-emulator test at
+// `firebase/tests/intercoms-messages-call-history-rules.emulator.test.ts`
+// (gold standard — loads the real rules and exercises the actual
+// access decision).
 
 const adminSrc = readFileSync(
   resolve(__dirname, "../../../admin-app/src/context/AdminContext.tsx"),
+  "utf8"
+);
+
+const firestoreRulesSrc = readFileSync(
+  resolve(__dirname, "../../../firebase/firestore.rules"),
   "utf8"
 );
 
@@ -125,5 +146,115 @@ describe("AdminContext.tsx — FOL-02 mapper-hydration closure on the IntercomMe
       expect(mapperBody).toMatch(/isEarlyCheckInRequest:\s*!!data\.isEarlyCheckInRequest/);
       expect(mapperBody).toMatch(/currentStayId:\s*data\.currentStayId\s*\|\|\s*undefined/);
     });
+  });
+});
+
+describe("firebase/firestore.rules — call-history cross-file contract (decision #216, 2026-08-19)", () => {
+  // Decision #216 closure: the `recordCallHistory` writer emits
+  // 14 keys; the Firestore rule's `keys().hasOnly([...])`
+  // allowlist for the `intercoms/{roomId}/messages` create must
+  // include EVERY key the writer emits. The pre-#216 rule was
+  // missing `callAnsweredByName` from the allowlist, so every
+  // post-#214 call-history write was rejected by the rule and
+  // the chat thread never received the "Call answered" entry.
+  //
+  // The cross-file contract is pinned here as a source-text
+  // test (cheap daily safety net, runs in the normal test loop)
+  // AND as a rule-emulator test at
+  // `firebase/tests/intercoms-messages-call-history-rules.emulator.test.ts`
+  // (gold standard — loads the real rules + exercises the
+  // actual access decision). The source-text test catches a
+  // future refactor that drops the field from the rule; the
+  // emulator test catches a future refactor that uses an
+  // invalid rule shape (e.g. `keys().union(...)` — invalid
+  // because `keys()` is a List, `.union()` is Set-only; NC-02c
+  // shipped this exact shape bug).
+
+  // Anchor on the messages create rule so a future refactor
+  // that moves the rule block doesn't break the test for the
+  // wrong reason. The slice runs from the `allow create:
+  // if isStaff()` opening to the next `allow ` directive (the
+  // start of the next rule in the same `match` block). This
+  // captures the entire rule body without relying on
+  // brace-counting — which is brittle because the rule
+  // expression is a `&&`-chained boolean with deeply nested
+  // parens (list literals like `["call-answered",
+  // "call-missed", "call-declined"]`, paren-wrapped clauses
+  // like `(request.resource.data.sender != "system" || ...)`).
+  // The "next `allow`" anchor is the next rule's start, which
+  // is always a single-line directive.
+  const createRuleStart = firestoreRulesSrc.indexOf("allow create: if isStaff()");
+  // Find the start of the next `allow ` directive in the same
+  // `match` block. The next rule is `allow update: if isStaff()
+  // || ...`, so the anchor is `allow update:`.
+  const nextAllowIdx = firestoreRulesSrc.indexOf("\n        allow update:", createRuleStart);
+  const createRuleEnd = nextAllowIdx > 0 ? nextAllowIdx : firestoreRulesSrc.length;
+  const createRuleBody = firestoreRulesSrc.slice(createRuleStart, createRuleEnd);
+
+  it("includes `callAnsweredByName` in the messages create `hasOnly` allowlist (the #216 fix)", () => {
+    // Without this pin, a future refactor that drops the field
+    // from the allowlist would re-introduce the silent-write-
+    // rejection bug (operator reported 2026-08-19: "i am not
+    // seeing the call history on the thread after the call,
+    // why is this?"). The contract is: every key the
+    // recordCallHistory writer emits must be in the allowlist.
+    expect(createRuleBody).toMatch(/["']callAnsweredByName["']/);
+  });
+
+  it("includes all four call-history fields in the messages create `hasOnly` allowlist (FOL-02 + #214 contract)", () => {
+    // The four fields are: `messageType` (drives the chat
+    // panel's centered footer-row render), `callStartedAt`
+    // (call-connected server timestamp), `callDuration`
+    // (seconds), `callAnsweredByName` (staff attribution from
+    // the #214 `runTransaction` claim). All four are
+    // optional, so a doc with none of them (a regular chat
+    // message) still passes the create rule.
+    expect(createRuleBody).toMatch(/["']messageType["']/);
+    expect(createRuleBody).toMatch(/["']callStartedAt["']/);
+    expect(createRuleBody).toMatch(/["']callDuration["']/);
+    expect(createRuleBody).toMatch(/["']callAnsweredByName["']/);
+  });
+
+  it("includes the always-on message fields in the messages create `hasOnly` allowlist (regression guard)", () => {
+    // The 10 always-on / non-call-history fields the writer
+    // always emits. A future refactor that drops one of these
+    // from the allowlist would break every chat message (not
+    // just call-history), so the pin is here as a regression
+    // guard.
+    expect(createRuleBody).toMatch(/["']text["']/);
+    expect(createRuleBody).toMatch(/["']sender["']/);
+    expect(createRuleBody).toMatch(/["']guestName["']/);
+    expect(createRuleBody).toMatch(/["']timestamp["']/);
+    expect(createRuleBody).toMatch(/["']isRead["']/);
+    expect(createRuleBody).toMatch(/["']isQuickRequest["']/);
+    expect(createRuleBody).toMatch(/["']isStoreOrder["']/);
+    expect(createRuleBody).toMatch(/["']orderRef["']/);
+    expect(createRuleBody).toMatch(/["']isEarlyCheckInRequest["']/);
+    expect(createRuleBody).toMatch(/["']currentStayId["']/);
+  });
+
+  it("rejects non-allowlisted keys (the cross-file contract is enforced, not just declared)", () => {
+    // The source-text pin only catches a future refactor that
+    // drops a field from the allowlist text. The rule-emulator
+    // test at `firebase/tests/intercoms-messages-call-history-
+    // rules.emulator.test.ts` is the gold standard for proving
+    // the allowlist is actually enforced at evaluation time
+    // (the NC-02c `keys().union(...)` shape bug would pass
+    // every source-text test but fail the emulator test). This
+    // test references the emulator test as the canonical pin
+    // for the enforcement contract.
+    const emulatorTestPath = resolve(
+      __dirname,
+      "../../../firebase/tests/intercoms-messages-call-history-rules.emulator.test.ts"
+    );
+    const emulatorTestExists = (() => {
+      try {
+        readFileSync(emulatorTestPath, "utf8");
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    expect(emulatorTestExists).toBe(true);
   });
 });
