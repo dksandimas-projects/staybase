@@ -449,7 +449,7 @@ export interface CorporateInquiry {
 export interface IntercomMessage {
   id: string;
   text: string;
-  sender: "guest" | "front-desk";
+  sender: "guest" | "front-desk" | "system";
   guestName: string;
   timestamp: string;
   isRead: boolean;
@@ -458,6 +458,15 @@ export interface IntercomMessage {
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
   currentStayId?: string;
+  // Per `feat/call-history-messages`. Defined in the canonical
+  // type at `@spark-inn/shared` (`shared/types/index.ts`) — these
+  // fields are mirrored here only because the AdminContext uses a
+  // local duplicate instead of importing the shared type. Consumers
+  // (IntercomChatPanel) hit this shape via `import type { IntercomMessage
+  // } from "../context/AdminContext"` and need the new fields.
+  messageType?: "call-answered" | "call-missed" | "call-declined";
+  callStartedAt?: string;
+  callDuration?: number;
 }
 
 export interface IntercomThread {
@@ -3382,6 +3391,118 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
+  // Per `feat/call-history-messages`. Records a single
+  // system-message doc in `intercoms/{roomNumber}/messages` for
+  // every call lifecycle event. The doc carries the structured
+  // `messageType: "call-answered" | "call-missed" | "call-declined"`
+  // discriminator plus a human-readable `text` body so legacy
+  // clients (or readers that don't yet know about messageType)
+  // still see a sensible line in the chat thread.
+  //
+  // Inputs are computed by `cleanupAdminCall` and read directly
+  // from the three telemetry refs the call lifecycle writes into.
+  // We deliberately do NOT take duration from the persisted
+  // `calls/{roomId}.startedAt` / `endedAt` Firestore timestamps
+  // because:
+  //   1. Reading them back would race the cleanup, and
+  //   2. The duration is a client-relative measurement that the
+  //      server timestamp deltas would over-engineer.
+  // millisAtStart is recorded on acceptCall; millisAtEnd on
+  // cleanup. For a missed call, millisAtStart is the moment the
+  // call transitioned to ringing in the snapshot listener —
+  // `recordCallHistory` reads that from `incomingCall.startedAt`
+  // if available (which the existing snapshot mapper already
+  // produces).
+  const recordCallHistory = async (
+    roomId: string,
+    outcome: "call-answered" | "call-missed" | "call-declined",
+    durationMs: number | null
+  ) => {
+    try {
+      // Format helpers local to the doc — kept inline so the
+      // system message reads identically across the admin
+      // web app without importing a shared formatter.
+      const fmtClock = (ms: number) => {
+        const d = new Date(ms);
+        return d.toLocaleTimeString(config.locale, {
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      };
+      const fmtDuration = (ms: number) => {
+        const totalSec = Math.max(0, Math.round(ms / 1000));
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        if (m === 0) return `${s}s`;
+        return `${m}m ${s.toString().padStart(2, "0")}s`;
+      };
+
+      const durationMsSafe =
+        typeof durationMs === "number" && durationMs >= 0 ? durationMs : 0;
+      const durationSec = Math.round(durationMsSafe / 1000);
+
+      let text: string;
+      // The "started at" wall-clock for the system message comes
+      // from the appropriate signal:
+      //   answered → millisAtEnd - durationMs (caller passes
+      //               the actual start wall clock)
+      //   missed/declined → currentClockAtRinging, captured by
+      //               the snapshot mapper on incomingCall.startedAt
+      //               and stored in adminCallRingingStartedAtRef
+      //               (set in the snapshot effect below)
+      const startedAtMs =
+        outcome === "call-answered"
+          ? Math.max(0, Date.now() - durationMsSafe)
+          : adminCallRingingStartedAtRef.current ?? Date.now() - durationMsSafe;
+      const clockStr = fmtClock(startedAtMs);
+
+      if (outcome === "call-answered") {
+        text = `Call answered at ${clockStr} · ${fmtDuration(durationMsSafe)}`;
+      } else if (outcome === "call-missed") {
+        text = `Missed call at ${clockStr} · rang ${fmtDuration(durationMsSafe)}`;
+      } else {
+        text = `Call declined at ${clockStr}`;
+      }
+
+      // Persist alongside the regular thread state so the room
+      // surfaces the call banner / last-message preview correctly.
+      await setDoc(doc(db, "intercoms", roomId), {
+        roomId,
+        roomNumber: roomId,
+        currentStayId: intercomThreads[roomId]?.currentStayId ?? null,
+        resolved: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+        text,
+        sender: "system",
+        guestName: "Front Desk",
+        timestamp: serverTimestamp(),
+        isRead: true,
+        isQuickRequest: false,
+        isStoreOrder: false,
+        isEarlyCheckInRequest: false,
+        currentStayId: intercomThreads[roomId]?.currentStayId ?? null,
+        messageType: outcome,
+        callStartedAt: outcome === "call-answered"
+          ? Timestamp.fromMillis(startedAtMs)
+          : null,
+        // The Firestore rules cap timestamp==request.time, but
+        // they do NOT cap number-valued optional fields, so we can
+        // send duration in seconds without a Timestamp shim.
+        callDuration: durationSec
+      });
+    } catch (error) {
+      // Best-effort — never let the audit-trail write break the
+      // call cleanup flow. A failure here means the chat history
+      // is missing one entry; the active-call banner / hang-up
+      // already succeeded by the time recordCallHistory is
+      // called.
+      console.warn(`[call-history] failed to record ${outcome} for ${roomId}:`, error);
+    }
+  };
+
   const markChatAsRead = async (roomId: string) => {
     const unreadGuestMessages = (intercoms[roomId] || []).filter((message) => message.sender === "guest" && !message.isRead);
     if (unreadGuestMessages.length === 0) return;
@@ -3500,6 +3621,47 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
   const adminPreviousCallRoomIdRef = useRef<string | null>(null);
 
+  // Per-call-history-messages telemetry. Three refs the call
+  // dispatch helper reads at cleanup time to determine the
+  // outcome:
+  //
+  //   adminCallAnsweredRef      — true after acceptCall successfully
+  //                                established the peer connection.
+  //                                False for ringing → ended (missed)
+  //                                and ringing → declined (declined).
+  //   adminCallStartedAtRef     — wall-clock millis at which acceptCall
+  //                                succeeded; used to compute the
+  //                                call-duration seconds on hang-up.
+  //                                Null when never answered.
+  //   adminCallExplicitDeclineRef — true when declineCall was the
+  //                                trigger for cleanup (staff pressed
+  //                                Ignore). False when the snap-
+  //                                shot listener's nextCall watcher
+  //                                ended the call automatically
+  //                                (second-call-wins supersede) or
+  //                                when the call simply timed out.
+  //   adminCallRingingStartedAtRef — wall-clock millis at which
+  //                                the snapshot listener first saw
+  //                                the new call as `status: "ringing"`.
+  //                                Used to compute "the call rang
+  //                                for N seconds" on the missed /
+  //                                declined system message.
+  //
+  // These refs are the only state needed to write the correct
+  // `messageType` system doc — no extra context, no global store.
+  // Reset by `cleanupAdminCall` (every disconnect path) so the
+  // next call starts with a clean slate.
+  const adminCallAnsweredRef = useRef<boolean>(false);
+  const adminCallStartedAtRef = useRef<number | null>(null);
+  const adminCallExplicitDeclineRef = useRef<boolean>(false);
+  const adminCallRingingStartedAtRef = useRef<number | null>(null);
+  // Room number the call-history message should be attached to
+  // — the snapshot listener sets this on every fresh ringing
+  // call; acceptCall / declineCall override it before calling
+  // cleanup so the dispatcher always knows which thread to
+  // write to, even after `incomingCall` has been cleared.
+  const adminCallRoomIdRef = useRef<string | null>(null);
+
   // Per-call microphone mute flag. `false` = mic hot, `true` =
   // track.enabled = false on the local outbound audio. Auto-resets
   // to false on every new call (acceptCall, status → active) and on
@@ -3537,6 +3699,55 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   }, [isMicMuted]);
 
   const cleanupAdminCall = () => {
+    // Per-call-history-messages: dispatch the system message
+    // BEFORE we tear down refs / release the peer connection, so
+    // `recordCallHistory` can read the four outcome refs.
+    //
+    // Outcome resolution:
+    //   adminCallAnsweredRef === true
+    //     → "call-answered"; duration = Date.now() - adminCallStartedAtRef
+    //   adminCallAnsweredRef === false AND adminCallExplicitDeclineRef === true
+    //     → "call-declined"; no duration recorded (decline is instantaneous)
+    //   adminCallAnsweredRef === false AND adminCallExplicitDeclineRef === false
+    //     → "call-missed"; duration = Date.now() - adminCallRingingStartedAtRef
+    //
+    // We also gate on adminCallRoomIdRef being set — without a
+    // room we have no thread to attach the message to. That can
+    // happen if the snapshot effect clears the room before any
+    // ringing happened (e.g. race on logout). Skip silently.
+    (async () => {
+      const roomId = adminCallRoomIdRef.current;
+      if (!roomId) return;
+      const answered = adminCallAnsweredRef.current === true;
+      const explicitDecline = adminCallExplicitDeclineRef.current === true;
+      let outcome: "call-answered" | "call-missed" | "call-declined" | null = null;
+      let durationMs: number | null = null;
+      if (answered) {
+        outcome = "call-answered";
+        const start = adminCallStartedAtRef.current;
+        durationMs = start === null ? 0 : Math.max(0, Date.now() - start);
+      } else if (explicitDecline) {
+        outcome = "call-declined";
+        // Decline is instantaneous by design; we don't record a
+        // ringing duration on the decline system message (the
+        // text is just "Call declined at HH:MM" — no duration).
+        durationMs = null;
+      } else {
+        outcome = "call-missed";
+        const start = adminCallRingingStartedAtRef.current;
+        durationMs = start === null ? 0 : Math.max(0, Date.now() - start);
+      }
+      if (!outcome) return;
+      await recordCallHistory(roomId, outcome, durationMs);
+    })().catch((err) => {
+      // The async IIFE above already catches its own errors
+      // inside recordCallHistory; this catch is belt-and-braces
+      // for any uncaught throw between the await and the
+      // dispatch. Never let a logging failure disrupt the
+      // hangup flow.
+      console.warn("[call-history] dispatch hook threw:", err);
+    });
+
     adminIceUnsubscribeRef.current?.();
     adminIceUnsubscribeRef.current = null;
     adminProcessedIceIdsRef.current.clear();
@@ -3556,6 +3767,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // Mirrors the "Mute resets on every new call" UX of phone /
     // conferencing apps — see isMicMuted docs above for rationale.
     setIsMicMuted(false);
+    // Per-call-history-messages: clear the four outcome refs at the
+    // END so the next call starts with a clean slate. Note that
+    // setIsMicMuted is in the same "reset" category but uses
+    // useState because the UI subscribes to it; the call-history
+    // refs aren't observed by React (the dispatcher reads them
+    // once at hangup) so plain refs work and stay cheap.
+    adminCallAnsweredRef.current = false;
+    adminCallStartedAtRef.current = null;
+    adminCallExplicitDeclineRef.current = false;
+    adminCallRingingStartedAtRef.current = null;
+    adminCallRoomIdRef.current = null;
   };
 
   useEffect(() => {
@@ -3601,7 +3823,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           });
           cleanupAdminCall();
         }
-        adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
+        // Per-call-history-messages: capture the wall-clock millis at
+// which the incoming call's `status: "ringing"` first showed up
+// in the snapshot. We capture on EVERY snapshot tick where the
+// incoming-call roomId differs from the previous one we served
+// (covers the natural new-call case AND the second-call-wins
+// supersede case — both store the correct start for the newly
+// active call). The ref is read by `recordCallHistory` to format
+// the "Missed call at HH:MM · rang Ns" text on the missed path.
+if (nextCall && nextCall.roomId !== previousRoomId) {
+  // New call — set the ringing start. This also re-sets on every
+  // supersede, which is correct: the second call IS a fresh
+  // ringing start for the front desk.
+  adminCallRingingStartedAtRef.current = Date.now();
+}
+adminCallRoomIdRef.current = nextCall?.roomId ?? null;
+// (When nextCall becomes null but the previous call had a
+// ringing start, the dispatcher's "Date.now() -
+// adminCallRingingStartedAtRef.current" math inside recordCallHistory
+// handles the duration naturally — no need to capture an explicit
+// "end" timestamp here.)
+adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         setIncomingCall(nextCall);
         if (!nextCall) {
           cleanupAdminCall();
@@ -3641,16 +3883,47 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           status: "active",
           endedAt: null
         });
+        // No peer connection is built in this branch (the call
+        // doc has no offer). For call-history, treat this branch
+        // as if the staff moved straight to "active" without
+        // audio — mark answered + record the start. The next
+        // declineCall / hang-up will write the "call-answered"
+        // system message with whatever the actual elapsed time
+        // turns out to be (probably <1s; still useful as a
+        // "staff pressed accept but no audio" audit trail).
+        adminCallAnsweredRef.current = true;
+        adminCallStartedAtRef.current = Date.now();
+        adminCallRoomIdRef.current = incomingCall.roomId;
         return;
       }
 
       cleanupAdminCall();
+      // Per-call-history-messages: re-pin the room + started-at
+      // for THIS new accepted call (cleanupAdminCall cleared all
+      // five refs at its tail; we need to re-set the room and
+      // started-at BEFORE the next cleanup so the dispatcher
+      // can attribute the future call-answered message to this
+      // call, not to whatever the previous one was).
+      adminCallRoomIdRef.current = incomingCall.roomId;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       adminMediaStreamRef.current = stream;
 
       const peerConnection = new RTCPeerConnection(rtcConfiguration);
       adminPeerConnectionRef.current = peerConnection;
       stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+
+      // Per-call-history-messages: mark this call as answered
+      // and capture the wall-clock start the moment the local
+      // stream is wired into the peer connection. This timestamp
+      // is what `recordCallHistory` subtracts from Date.now()
+      // at hangup time to compute the answered-call duration in
+      // seconds. Keep the assignment right after the
+      // `addTrack` loop so the ref is set BEFORE any
+      // `cleanupAdminCall` from a later error path can race
+      // it — every cleanup that runs after this point will see
+      // `adminCallAnsweredRef.current === true`.
+      adminCallAnsweredRef.current = true;
+      adminCallStartedAtRef.current = Date.now();
 
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) return;
@@ -3716,6 +3989,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
 
   const declineCall = async () => {
     if (!incomingCall) return;
+    // Per-call-history-messages: flag this cleanup as "the staff
+    // explicitly clicked Ignore" so the dispatcher in
+    // cleanupAdminCall writes a "call-declined" (not
+    // "call-missed") entry. The roomId ref is also pinned here
+    // — the snapshot effect may have already cleared it if
+    // decline happened immediately after the second-call-wins
+    // supersede fired.
+    adminCallExplicitDeclineRef.current = true;
+    adminCallRoomIdRef.current = incomingCall.roomId;
     cleanupAdminCall();
     await updateDoc(doc(db, "calls", incomingCall.roomId), {
       status: "ended",

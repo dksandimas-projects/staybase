@@ -372,15 +372,31 @@ service cloud.firestore {
             "isStoreOrder",
             "orderRef",
             "isEarlyCheckInRequest",
-            "currentStayId"
+            "currentStayId",
+            // Per `feat/call-history-messages`: three new optional
+            // fields on system messages that surface the call
+            // outcome in the chat thread. `messageType` drives the
+            // distinct render; `callStartedAt` + `callDuration`
+            // carry the answered-call telemetry. All three are
+            // optional so existing chat messages are unaffected.
+            "messageType",
+            "callStartedAt",
+            "callDuration"
           ])
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 1000
-          && request.resource.data.sender in ["guest", "front-desk"]
+          && request.resource.data.sender in ["guest", "front-desk", "system"]
           && request.resource.data.guestName is string
           && request.resource.data.guestName.size() <= 120
           && request.resource.data.timestamp == request.time
-          && (!("currentStayId" in request.resource.data.keys()) || request.resource.data.currentStayId == null || request.resource.data.currentStayId is string);
+          && (!("currentStayId" in request.resource.data.keys()) || request.resource.data.currentStayId == null || request.resource.data.currentStayId is string)
+          // When sender === "system", the messageType must be one
+          // of the three documented call outcomes (or absent for
+          // future-proofing). No ad-hoc "system" docs without a
+          // type — keeps the audit trail structured.
+          && (request.resource.data.sender != "system"
+              || (request.resource.data.keys().hasAny(["messageType"])
+                  && request.resource.data.messageType in ["call-answered", "call-missed", "call-declined"]));
         allow update: if isStaff()
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead"]);
         allow delete: if isStaff();

@@ -44,6 +44,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
   - [x] Active call UI: banner changes to connected state with call duration and Hang Up action
   - [x] Hang up: closes RTCPeerConnection, updates `calls/{roomId}.status = "ended"`
   - [x] Notification sound plays on incoming call using the same Web Audio API pattern as messages when the inbox is not focused and audio is unlocked
+- [x] **Call history as system messages** — every WebRTC call lifecycle event (accepted / missed / declined) writes a `intercoms/{roomNumber}/messages` doc with `sender: "system"`, `messageType: "call-answered" | "call-missed" | "call-declined"`, and a human-readable `text` body so the chat thread becomes a permanent call history. Surface area: `AdminContext.recordCallHistory()` is the single dispatch helper, called from `cleanupAdminCall()` so every disconnect path emits the right system message without per-call-site duplication. Staff see e.g. "Call answered at 2:14 PM · 3m 22s" / "Missed call at 2:14 PM · rang 18s" / "Call declined at 2:14 PM" centered in the thread with a Phone / PhoneMissed / PhoneOff icon.
 
 ## Data & Logic Checklist
 
