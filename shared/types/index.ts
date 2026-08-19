@@ -934,7 +934,30 @@ export interface CorporateInvoice {
   paidBy: string | null;
 }
 
-export type IntercomSender = "guest" | "front-desk";
+export type IntercomSender = "guest" | "front-desk" | "system";
+
+// Per `feat/call-history-messages`: call lifecycle events now
+// surface as system messages in the chat thread so the front
+// desk has a permanent record. The three outcomes map directly
+// to the three values staff see on screen:
+//
+//   "call-answered" — staff accepted via Accept Voice;
+//                     duration is recorded
+//   "call-missed"   — call went ringing → ended without anyone
+//                     connecting (guest hung up, network drop,
+//                     or the call timed out before staff picked up)
+//   "call-declined" — staff explicitly pressed Ignore
+//
+// All three produce a `intercoms/{roomNumber}/messages` doc with
+// `sender: "system"`, formatted `text`, and (for answered) call-
+// duration metadata. Future-proofing: an undefined messageType
+// means the doc is a regular guest/staff chat message — old clients
+// continue to render the text body normally.
+export type IntercomMessageType =
+  | "call-answered"
+  | "call-missed"
+  | "call-declined"
+  | undefined;
 
 export interface IntercomMessage {
   id: string;
@@ -947,6 +970,22 @@ export interface IntercomMessage {
   isStoreOrder: boolean;
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
+  // Set when sender === "system" — drives the muted / italic
+  // render branch in IntercomChatPanel. Undefined for normal
+  // guest and staff chat messages.
+  messageType?: IntercomMessageType;
+  // When messageType === "call-answered": the Firestore server
+  // timestamp at which the call connected (i.e. when the staff
+  // accepted and the audio stream went live).
+  callStartedAt?: Date;
+  // When messageType === "call-answered": the call duration in
+  // seconds (connected → hung up). When messageType ===
+  // "call-missed": how long the call rang before it ended.
+  // Computed at write time from `Date.now()` on the dispatcher's
+  // clock, not from Firestore server time, because the
+  // duration is a client-relative measurement that doesn't need
+  // a server round-trip to compute.
+  callDuration?: number;
 }
 
 export interface IntercomThread {

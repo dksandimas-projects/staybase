@@ -151,6 +151,32 @@ MRB-06 public creates may contain an explicit room selection for each requested 
 
 ---
 
+### `intercoms/{roomNumber}/messages/{messageId}` *(Per `feat/call-history-messages`, 2026-08-19)*
+
+Every chat-thread message is stored here, including the system's own audit trail for WebRTC call lifecycle events. Both guests and staff write here; the only special case is `sender: "system"` for the three call-history outcomes (see below). The subcollection is the source of truth for the chat panel render in `IntercomChatPanel.tsx`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `text` | string | The message body. For `sender: "system"` + a `messageType`, this is the pre-formatted line e.g. `"Call answered at 2:14 PM · 3m 22s"`. For ordinary chat messages it's the raw text typed by sender. |
+| `sender` | string | `"guest"` \| `"front-desk"` \| `"system"`. Required. The enum allows the render layer to bucket messages by alignment (left/right/centered). |
+| `guestName` | string | Display name. For guests, the room's current chat name; for staff, literal `"Front Desk"`; for system, literal `"Front Desk"` (system messages render with no name in the chrome). |
+| `timestamp` | timestamp | `serverTimestamp()` at write time. The Firestore rule `timestamp == request.time` enforces this — clients can't backdate. |
+| `isRead` | boolean | `false` for incoming guest messages until the staff opens the thread. `true` for outgoing staff replies and for all system messages (no unread bubble for call history). |
+| `isQuickRequest` | boolean | Drives the blue "Quick request" pill in the chat panel. |
+| `isStoreOrder` | boolean | Routes the message into the `StoreOrderMessageCard` render path. |
+| `orderRef` | string \| null | `storeOrders` doc id when `isStoreOrder` is true. |
+| `isEarlyCheckInRequest` | boolean | Drives the early-check-in staff action surface. |
+| `currentStayId` | string \| null | Echo of the room's `currentStayId` at write time. Lets staff filter the thread by stay on the back end if they want. |
+| `messageType` | string \| null | The audit-type discriminator. Undefined for normal chat messages. Set to one of three values when `sender === "system"`: `"call-answered"` \| `"call-missed"` \| `"call-declined"`. Drives the centred footer row render with Phone / PhoneMissed / PhoneOff icons. The Firestore rule rejects any system doc that doesn't carry a recognised `messageType`. |
+| `callStartedAt` | timestamp \| null | For `messageType === "call-answered"`, the server-side start of the audio stream. Combined with `callDuration` gives the full call telemetry. Null for missed/declined. |
+| `callDuration` | number \| null | Seconds. For `"call-answered"`: how long the staff was connected. For `"call-missed"`: how long the call rang before disconnect. Null for `"call-declined"` (decline is instantaneous by design). |
+
+> **Lifecycle:** The collection is append-only from the staff side; rows are never edited. Guests can only insert (via the rate-limited `/api/intercom/send` route). Per Firestore rules (`firestore.rules §intercoms.messages`), staff may create with `sender ∈ {guest, front-desk, system}`, but `sender === "system"` REQUIRES `messageType ∈ {call-answered, call-missed, call-declined}` — so ad-hoc system docs without an audit type are denied at the rule layer.
+
+> **Why this lives here, not in `calls/{roomNumber}`:** the call lifecycle state lives in `calls/{roomNumber}` (transient, gets cleaned up after hangup), but the chat thread is the user-facing surface and the natural place to review a guest's call history alongside their messages. The split keeps transient state from bloating the chat thread count and lets `calls` be GC'd by future retention rules without losing the message-level audit.
+
+---
+
 ### `settings/{settingId}`
 
 Single-document collections holding dynamic configuration:

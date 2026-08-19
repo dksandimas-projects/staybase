@@ -3,9 +3,13 @@ import {
   ArchiveRestore,
   CheckCheck,
   MessageSquare,
+  Phone,
+  PhoneMissed,
+  PhoneOff,
   RotateCcw,
   Send,
   User,
+  Volume2,
   type LucideIcon
 } from "lucide-react";
 import { cn } from "../utils/cn";
@@ -163,6 +167,46 @@ export function IntercomChatPanel({
           messages.map((msg) => {
             const isFd = msg.sender === "front-desk";
             const storeOrder = msg.orderRef ? storeOrdersByRef.get(msg.orderRef) : undefined;
+
+            // Per `feat/call-history-messages`: system messages
+            // (sender === "system", messageType set) render in a
+            // distinct centered footer-style row — italic, muted,
+            // with the call-state icon (Phone / PhoneMissed /
+            // PhoneOff). They ignore the FD-vs-guest alignment
+            // because they aren't owned by either party, and they
+            // skip the "FD" / guest-avatar circle entirely. The
+            // text body already carries the human-readable
+            // summary (e.g. "Call answered at 2:14 PM · 3m 22s")
+            // written by recordCallHistory, so we don't reconstruct
+            // the line here — we just pick the right icon.
+            if (msg.sender === "system" && msg.messageType) {
+              const icon = msg.messageType === "call-answered"
+                ? Phone
+                : msg.messageType === "call-missed"
+                  ? PhoneMissed
+                  : PhoneOff;
+              const toneClass = msg.messageType === "call-missed"
+                ? "text-amber-600"
+                : msg.messageType === "call-declined"
+                  ? "text-gray-400"
+                  : "text-primary";
+              return (
+                <div
+                  key={msg.id}
+                  data-testid={`call-system-message-${msg.messageType}`}
+                  role="status"
+                  className="flex w-full justify-center"
+                >
+                  <div className="inline-flex max-w-[90%] items-center gap-1.5 rounded-full bg-gray-50 px-3 py-1 text-center text-[10px] italic text-gray-500 ring-1 ring-gray-150">
+                    {(() => {
+                      const Icon = icon;
+                      return <Icon size={11} aria-hidden="true" className={cn("shrink-0", toneClass)} />;
+                    })()}
+                    <span className="leading-tight">{msg.text}</span>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
