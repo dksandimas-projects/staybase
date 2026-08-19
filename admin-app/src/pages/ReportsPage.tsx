@@ -310,6 +310,20 @@ export function ReportsPage() {
         const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
         const isStoreTender = data.source === "store-order";
         const sourceId = isStoreTender ? String(data.sourceId || parentDocumentId) : parentDocumentId;
+        // Per RPT-06 (2026-08-19): mirror the refunds
+        // listener's reservation-path detection. Post-MRB-01
+        // payments live at `reservations/{id}/payments/{id}`,
+        // so the path's parent is the reservationId (a UUID),
+        // not the per-room bookingId — the legacy fallback
+        // `parentDocumentId` resolved the display to a raw UUID
+        // in the Booking column. The `data.bookingId` stamp
+        // (written at `bookings.ts:7647` for reservation-scope
+        // payments) is the per-room attribution; fall back to
+        // the path's parent only if a future write path drops
+        // the stamp (current production data has it on every
+        // new-reservation payment, per RPT-04's identical test
+        // for refunds).
+        const isReservationPayment = !isStoreTender && paymentDoc.ref.path.startsWith("reservations/");
         return {
           id: paymentDoc.id,
           type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
@@ -317,7 +331,7 @@ export function ReportsPage() {
           sourceId,
           // Keep store tenders outside booking-folio sums. They reconcile the
           // direct-paid store charge but must not settle the guest's room bill.
-          bookingId: isStoreTender ? `store:${sourceId}` : parentDocumentId,
+          bookingId: isStoreTender ? `store:${sourceId}` : (isReservationPayment ? String(data.bookingId || parentDocumentId) : parentDocumentId),
           bookingRef: isStoreTender ? String(data.orderRef || sourceId) : "",
           roomNumber: isStoreTender ? String(data.roomNumber || "") : "",
           guestName: isStoreTender ? String(data.guestName || "") : "",
