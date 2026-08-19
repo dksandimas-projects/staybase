@@ -197,6 +197,18 @@ export function ReportsPage() {
     members,
     staff,
     corporateInquiries,
+    // Per RPT-07 (2026-08-19): the AdminContext
+    // `subscribeToReservations` listener (per MRB-12) is the
+    // canonical source for reservation headers — its
+    // `reservationRef` + `leadGuestName` fields resolve the
+    // Daily Close ledger's reservation-level payment rows
+    // (post-MRB-01 payments at
+    // `reservations/{id}/payments/{id}` with `data.bookingId:
+    // null` — see RPT-06 sibling + the GOTCHAS FOL-02 entry
+    // on the per-room vs reservation-level attribution).
+    // Subscribe via the same context every other admin
+    // surface already consumes; no new collectionGroup read.
+    reservations,
     // Per NBS-08 (2026-07-31): the acquisition chart reads the
     // configured booking sources list, not a hardcoded array. An
     // unconfigured source (a new "agoda" / "OTA" entry) would
@@ -310,6 +322,20 @@ export function ReportsPage() {
         const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
         const isStoreTender = data.source === "store-order";
         const sourceId = isStoreTender ? String(data.sourceId || parentDocumentId) : parentDocumentId;
+        // Per RPT-06 (2026-08-19): mirror the refunds
+        // listener's reservation-path detection. Post-MRB-01
+        // payments live at `reservations/{id}/payments/{id}`,
+        // so the path's parent is the reservationId (a UUID),
+        // not the per-room bookingId — the legacy fallback
+        // `parentDocumentId` resolved the display to a raw UUID
+        // in the Booking column. The `data.bookingId` stamp
+        // (written at `bookings.ts:7647` for reservation-scope
+        // payments) is the per-room attribution; fall back to
+        // the path's parent only if a future write path drops
+        // the stamp (current production data has it on every
+        // new-reservation payment, per RPT-04's identical test
+        // for refunds).
+        const isReservationPayment = !isStoreTender && paymentDoc.ref.path.startsWith("reservations/");
         return {
           id: paymentDoc.id,
           type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
@@ -317,7 +343,7 @@ export function ReportsPage() {
           sourceId,
           // Keep store tenders outside booking-folio sums. They reconcile the
           // direct-paid store charge but must not settle the guest's room bill.
-          bookingId: isStoreTender ? `store:${sourceId}` : parentDocumentId,
+          bookingId: isStoreTender ? `store:${sourceId}` : (isReservationPayment ? String(data.bookingId || parentDocumentId) : parentDocumentId),
           bookingRef: isStoreTender ? String(data.orderRef || sourceId) : "",
           roomNumber: isStoreTender ? String(data.roomNumber || "") : "",
           guestName: isStoreTender ? String(data.guestName || "") : "",
@@ -421,6 +447,34 @@ export function ReportsPage() {
     return map;
   }, [bookings]);
 
+  // Per RPT-07 (2026-08-19): the `payments` collectionGroup
+  // catches reservation-level rows at
+  // `reservations/{id}/payments/{id}` where `data.bookingId`
+  // is `null` (per MRB-04 Phase 2.x / `bookings.ts:7638-7640`,
+  // the per-room attribution contract). The RPT-06 fix routed
+  // those rows through `parentDocumentId` (the reservationId)
+  // for the display lookup — the per-room
+  // `bookingDisplayById.get(reservationId)` misses (bookings
+  // don't have docs with id = reservationId) and the legacy
+  // fallback would still render the raw UUID. This map
+  // provides the reservation-level metadata (the public
+  // `R-YYYYMMDD-NNNNN` ref + the lead guest name) so the
+  // display chain can render a human-readable ref instead.
+  // The AdminContext's `subscribeToReservations` listener
+  // (per MRB-12) is the canonical source — no new
+  // collectionGroup read. Keyed by `reservationId`; the
+  // bookingId for a reservation-level payment is exactly
+  // the reservationId after the RPT-06 routing, so the join
+  // can do a single `.get(bookingId)` against either map.
+  const reservationMetaById = useMemo(() => {
+    const map = new Map<string, { reservationRef: string; leadGuestName: string }>();
+    reservations.forEach((r) => map.set(r.id, {
+      reservationRef: r.reservationRef || "",
+      leadGuestName: r.leadGuestName || ""
+    }));
+    return map;
+  }, [reservations]);
+
   const charges = useMemo<ReportCharge[]>(() =>
     rawCharges.map((charge) => {
       const display = bookingDisplayById.get(charge.bookingId);
@@ -447,19 +501,46 @@ export function ReportsPage() {
     // `data.bookingId` stamped at write time), so the
     // `bookingDisplayById.get(bookingId)` lookup
     // resolves every row.
+    //
+    // Per RPT-07 (2026-08-19): for reservation-level
+    // payment rows (post-MRB-01,
+    // `reservations/{id}/payments/{id}` with
+    // `data.bookingId: null`), the RPT-06 routing
+    // sets `payment.bookingId` to the `reservationId`.
+    // The per-room `bookingDisplayById.get(bookingId)`
+    // misses (bookings don't have docs with id =
+    // reservationId) — the chain falls through to
+    // `reservationMetaById` for the public `R-` ref
+    // + the lead guest name. The final fallback is
+    // `payment.bookingId` (the raw reservationId
+    // UUID) — the same defensive shape RPT-06 had
+    // pre-fix, preserved for any future write path
+    // that drops the reservation header.
     [...rawPayments, ...rawRefunds].map((payment) => {
       if (payment.source === "store-order") {
         return payment;
       }
       const display = bookingDisplayById.get(payment.bookingId);
+      // Only consult the reservation map when the
+      // per-room lookup missed — otherwise a
+      // per-room bookingId that happens to match a
+      // reservationId (theoretically possible
+      // between the two id generators) would be
+      // shadowed. The shape difference (Firestore
+      // auto-id 20 chars for bookings vs RFC4122
+      // UUID 36 chars for reservations) makes a
+      // collision impossible in practice, but the
+      // explicit `!display` guard is the right
+      // shape anyway.
+      const reservationMeta = display ? null : reservationMetaById.get(payment.bookingId) || null;
       return {
         ...payment,
-        bookingRef: display?.bookingRef || payment.bookingId,
+        bookingRef: display?.bookingRef || reservationMeta?.reservationRef || payment.bookingId,
         roomNumber: display?.roomNumber || "",
-        guestName: display?.guestName || ""
+        guestName: display?.guestName || reservationMeta?.leadGuestName || ""
       };
     }),
-    [rawPayments, rawRefunds, bookingDisplayById]
+    [rawPayments, rawRefunds, bookingDisplayById, reservationMetaById]
   );
 
   const chartColors = [
