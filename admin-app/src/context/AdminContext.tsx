@@ -1279,7 +1279,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   }
 
+  // Per RM-05 / decision #220 (2026-08-19): hard-delete of a `rooms/{id}`
+  // document is destructive and only admins should be able to do it
+  // from the admin app (Front Desk can still create / edit / toggle
+  // status per `firestore.rules:22`). The server rule
+  // (`allow delete: if isAdmin()` at `firestore.rules:23`) already
+  // rejects Front Desk with `permission-denied`, but the wasted
+  // round-trip + the misleading toast pushed the operator's report.
+  // The handler-side gate mirrors the rule so the UI gets a clean
+  // "Admins only" error and a future refactor can't accidentally
+  // allow Front Desk through a different rules gap.
   const deleteRoom = async (roomId: string, reason = ""): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
+    if (currentUser?.role !== "admin") {
+      const error = "Only administrators can delete rooms.";
+      notify.error("Cannot delete room", error);
+      return { success: false, error };
+    }
     const room = rooms.find((r) => r.id === roomId);
     if (!room) {
       const error = "Room not found.";
@@ -2981,41 +2996,70 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Per W1.12 / decision #85: real `onSnapshot` listener on the `members`
   // collection. Replaces the hardcoded `useState<Member[]>([fake entry])`
   // mock that hid all real members from the admin UI. Cleanup on unmount.
+  //
+  // Per MRB-15-09 / decision #219 (2026-08-19): the listener was
+  // missing the `auth.currentUser?.getIdToken(true)` force-refresh
+  // wrapper that the reservations listener (line 1832) and the
+  // post-NOTIF-01 notifications listener adopted. Without the
+  // refresh, a fresh sign-in / long-idle session / first load
+  // after a role mint attached the listener with a stale SDK
+  // token and the `isStaff()` rule on `/members/{userId}`
+  // (`firestore.rules:229`) returned `Missing or insufficient
+  // permissions`. The error was logged at the `.catch` site but
+  // never surfaced to the UI — `members` stayed `[]`, the page
+  // rendered the empty-state card ("No members match the current
+  // search.") which the operator reported as "blank white screen"
+  // (bugs #20 + #21). The fix mirrors the reservations pattern
+  // exactly: await the refresh before attaching the snapshot,
+  // guard the unmount-mid-refresh race with `cancelled`, and
+  // keep the unsubscribe arrow in the cleanup branch.
   const [members, setMembers] = useState<Member[]>([]);
   useEffect(() => {
     if (!currentUser) return;
     const membersRef = collection(db, "members");
-    const unsubscribe = onSnapshot(
-      membersRef,
-      (snapshot) => {
-        const membersData: Member[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          membersData.push({
-            id: doc.id,
-            memberNumber: data.memberNumber || "",
-            fullName: data.fullName || "",
-            email: data.email || "",
-            phone: data.phone || "",
-            photoUrl: data.photoUrl || "",
-            authProvider: data.authProvider || "email",
-            isMember: data.isMember !== false,
-            memberSince: data.memberSince || "",
-            rewardsPoints: data.rewardsPoints || 0,
-            tier: data.tier || "standard",
-            isActive: data.isActive !== false,
-            pointsHistory: data.pointsHistory || []
-          });
-        });
-        // Sort by member number for stable display
-        membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
-        setMembers(membersData);
-      },
-      (error) => {
-        console.error("Error listening to members collection:", error);
-      }
-    );
-    return unsubscribe;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    void auth.currentUser?.getIdToken(true)
+      .then(() => {
+        if (cancelled) return;
+        unsubscribe = onSnapshot(
+          membersRef,
+          (snapshot) => {
+            const membersData: Member[] = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              membersData.push({
+                id: doc.id,
+                memberNumber: data.memberNumber || "",
+                fullName: data.fullName || "",
+                email: data.email || "",
+                phone: data.phone || "",
+                photoUrl: data.photoUrl || "",
+                authProvider: data.authProvider || "email",
+                isMember: data.isMember !== false,
+                memberSince: data.memberSince || "",
+                rewardsPoints: data.rewardsPoints || 0,
+                tier: data.tier || "standard",
+                isActive: data.isActive !== false,
+                pointsHistory: data.pointsHistory || []
+              });
+            });
+            // Sort by member number for stable display
+            membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
+            setMembers(membersData);
+          },
+          (error) => {
+            console.error("Error listening to members collection:", error);
+          }
+        );
+      })
+      .catch((refreshErr) => {
+        console.error("Failed to force-refresh ID token for members listener:", refreshErr);
+      });
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUser]);
 
   const updateMemberPoints = async (

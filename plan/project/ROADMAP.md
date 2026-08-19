@@ -1,8 +1,10 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 19, 2026 (operator-reported bug verification pass — see `## Open Operator-Reported Bugs — Verification 2026-08-19` below. 11 of the 20 actionable items in the operator's manual test-case dump are already fixed; 7 need new fix branches; 1 needs an admin role-gate on the UI; 2 are environmental / need operator repro. No code changes in this pass — docs only.)
+> Last updated: August 19, 2026 — one fix shipped: `fix/admin-listener-and-permission-gates` (decisions #220, v0.274.6 → v0.274.7). Closed #20/#21 + RM-05. Still open: BK-05, B-10/B-10c, #11, #22/Q-03, #18, #1 (hero-token micro-nit). Per-fix updates live in the LIVE FIXES TRACKED block below.
 >
-> Last ship: August 15, 2026 (DSC-04 — option (a) full atomic server endpoint landed on `dev` @ `6cb75e9`, v0.268.0 → v0.269.0; the `apply-reservation-discount` endpoint closes the partial-failure UX gap where the admin client's per-room loop left a reservation half-discounted when room N failed after rooms 1..N-1 succeeded).
+> Last ship: August 19, 2026 (decisions #220 — Members page token refresh + Delete Room admin gate; merged via `chore(merge)` @ `e4fa1bd`).
+>
+> Previous ship: August 15, 2026 (DSC-04 — option (a) full atomic server endpoint landed on `dev` @ `6cb75e9`, v0.268.0 → v0.269.0; the `apply-reservation-discount` endpoint closes the partial-failure UX gap where the admin client's per-room loop left a reservation half-discounted when room N failed after rooms 1..N-1 succeeded).
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -412,8 +414,12 @@ Once the booking is one doc with one lifecycle, the next round of features is mu
 
 ---
 
-## Open Operator-Reported Bugs — Verification 2026-08-19 (REVISED)
+### Open Operator-Reported Bugs — Verification 2026-08-19 (REVISED + LIVE FIXES TRACKED)
 > Source: the operator's Spark-Inn-Manual-Test-Cases bug dump (Guest App Tests, Admin App Tests, Other Bugs Found tabs), 2026-08-19. The agent + 3 leaf subagents (delegation `deleg_894e86c0`) walked each item against current `dev` HEAD source. **Of the 20 actionable items, 8 are already fixed, 1 is environmental/config, 1 is admin-UI-only (role gate), and 10 are still open real bugs.** Subagent cross-checking surfaced 4 corrections to the agent's first-pass verdicts: BK-05 (cancel reason), #11 (confirmation email), #18 (wordmark overlap), Q-03/#22 (detached `<a>` download) — see the **🔁 Revision log** at the bottom of this section for the row-level deltas. All findings carry the file:line ref + the verbatim code excerpt that proves the verdict.
+
+#### ✅ Live fix shipped (2026-08-19, decisions #220)
+
+- **#20 + #21 + RM-05** — Members page token refresh + Delete Room admin gate (shipped 2026-08-19 on `fix/admin-listener-and-permission-gates` @ `ff832db`, merged via `chore(merge)` @ `e4fa1bd`, v0.274.6 → v0.274.7). The Members listener at `admin-app/src/context/AdminContext.tsx:2985-3019` now mirrors the reservations listener shape (line 1820-1832) — `void auth.currentUser?.getIdToken(true).then(() => { if (cancelled) return; unsubscribe = onSnapshot(...) })` with `cancelled` race guard for the unmount-mid-refresh case + `.catch` for refresh-token failures. The Delete Room button in `RoomsPage.tsx` is now disabled for non-admin staff with an "Only administrators can delete rooms." tooltip; `deleteRoom` in `AdminContext.tsx:1282` short-circuits BEFORE the room-existence check (so no partial storage cleanup / Firestore writes) when `currentUser?.role !== "admin"`. Three-layer regressions: 1 new test file (`rooms-delete-admin-only.test.ts`, 7 source-text guards) + updated `admin-members-listener.test.ts` to pin the new cleanup-arrow shape + the MRB-15-09 wrapper presence + updated `phase-11.8-room-crud.test.ts` to pin the role gate + tooltip. 1438/1438 admin-app tests pass; tsc clean.
 
 ### 🟢 Already fixed — verification only
 

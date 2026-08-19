@@ -34,10 +34,22 @@ describe("AdminContext.tsx — members useState<Member[]> mock removed (SEV-1 #5
     expect(src).toMatch(/onSnapshot\(\s*membersRef\s*,/);
   });
 
-  it("returns the unsubscribe from useEffect for proper cleanup", () => {
-    // The pattern is: useEffect(() => { if (!currentUser) return; ...; return unsubscribe; }, [currentUser])
-    expect(src).toMatch(/useEffect\(\(\)\s*=>\s*\{\s*if\s*\(!currentUser\)\s*return;[^}]*onSnapshot\(\s*membersRef/);
-    expect(src).toMatch(/return\s+unsubscribe;\s*\}\s*,\s*\[currentUser\]\)/);
+  it("returns the cleanup arrow from useEffect for proper cleanup (MRB-15-09 shape)", () => {
+    // The shape changed at decision #220 (2026-08-19). The pre-#220
+    // listeners returned `unsubscribe` directly. The new shape
+    // (mirroring `AdminContext.tsx:1820-1832` for reservations) returns
+    // a cleanup arrow that flips a `cancelled` flag before invoking
+    // the unsubscribe — the `unsubscribe` is now assigned INSIDE the
+    // `.then` callback, so the cleanup must tolerate it still being
+    // `undefined` (the unmount-during-refresh race).
+    const membersEffectMatch = src.match(
+      /const membersRef = collection\(db, "members"\);[\s\S]*?\}, \[currentUser\]\);/
+    );
+    expect(membersEffectMatch).not.toBeNull();
+    const membersEffect = membersEffectMatch![0];
+    expect(membersEffect).toMatch(/return\s*\(\s*\)\s*=>\s*\{/);
+    expect(membersEffect).toMatch(/cancelled\s*=\s*true/);
+    expect(membersEffect).toMatch(/if\s*\(\s*unsubscribe\s*\)\s*unsubscribe\(\)/);
   });
 
   it("guards the members listener behind currentUser (permission-denied fix)", () => {
@@ -55,5 +67,25 @@ describe("AdminContext.tsx — members useState<Member[]> mock removed (SEV-1 #5
     expect(membersEffectMatch).not.toBeNull();
     const membersEffect = membersEffectMatch![0];
     expect(membersEffect).toMatch(/\(error\)\s*=>\s*\{\s*console\.error\(/);
+  });
+
+  it("force-refreshes the ID token before attaching the snapshot (MRB-15-09 / decision #220)", () => {
+    // Per MRB-15-09: a fresh sign-in / long-idle session / first load
+    // after a role mint attaches the listener with a stale SDK token
+    // and the `isStaff()` rule on `/members/{userId}` returns
+    // `Missing or insufficient permissions`. The fix awaits
+    // `auth.currentUser?.getIdToken(true)` BEFORE calling `onSnapshot`,
+    // with a `cancelled` race guard for the unmount-mid-refresh case
+    // and a `.catch` for refresh-token failures. Mirrors the
+    // reservations listener at `AdminContext.tsx:1832`.
+    const membersEffectMatch = src.match(
+      /const membersRef = collection\(db, "members"\);[\s\S]*?\}, \[currentUser\]\);/
+    );
+    expect(membersEffectMatch).not.toBeNull();
+    const membersEffect = membersEffectMatch![0];
+    expect(membersEffect).toMatch(/auth\.currentUser\?\.getIdToken\(true\)/);
+    expect(membersEffect).toMatch(/\.then\(\s*\(\)\s*=>\s*\{[\s\S]{0,200}onSnapshot\(/);
+    expect(membersEffect).toMatch(/if\s*\(cancelled\)\s*return/);
+    expect(membersEffect).toMatch(/\.catch\(\s*\(refreshErr\)/);
   });
 });
