@@ -1,10 +1,16 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 19, 2026 — one fix shipped: `fix/admin-listener-and-permission-gates` (decisions #220, v0.274.6 → v0.274.7). Closed #20/#21 + RM-05. Still open: BK-05, B-10/B-10c, #11, #22/Q-03, #18, #1 (hero-token micro-nit). Per-fix updates live in the LIVE FIXES TRACKED block below.
+> Last updated: August 19, 2026 — four fixes shipped today (decisions #220, #221, #222, #223, v0.274.7 → v0.274.10). Closed #20/#21 + RM-05 + BK-05 + #1 + B-10 + B-10c. Still open: #11 (email silent-swallow), #22/Q-03 (QR mobile — Safari `<a>` + window.open), #18 (admin wordmark overlaps bell). Per-fix updates live in the LIVE FIXES TRACKED block below.
 >
-> Last ship: August 19, 2026 (decisions #220 — Members page token refresh + Delete Room admin gate; merged via `chore(merge)` @ `e4fa1bd`).
+> Last ship: August 19, 2026 (decisions #223 — `fix/booking-uploads-upload-timeout`; shared 566/566 + admin 1444/1444 + guest-app tsc clean; merged via `chore(merge)` @ `98a2873`).
 >
-> Previous ship: August 15, 2026 (DSC-04 — option (a) full atomic server endpoint landed on `dev` @ `6cb75e9`, v0.268.0 → v0.269.0; the `apply-reservation-discount` endpoint closes the partial-failure UX gap where the admin client's per-room loop left a reservation half-discounted when room N failed after rooms 1..N-1 succeeded).
+> Previous ship: August 19, 2026 (decisions #222 — `fix/hero-images-size-token`; merged via `chore(merge)` @ `5f7a863`).
+>
+> Earlier ship: August 19, 2026 (decisions #221 — `fix/bookings-cancel-reason-required`; merged via `chore(merge)` @ `5867f29`).
+>
+> Earliest today: August 19, 2026 (decisions #220 — `fix/admin-listener-and-permission-gates`; merged via `chore(merge)` @ `2112ca4`).
+>
+> August 15, 2026 (DSC-04 — option (a) full atomic server endpoint landed on `dev` @ `6cb75e9`, v0.268.0 → v0.269.0; the `apply-reservation-discount` endpoint closes the partial-failure UX gap where the admin client's per-room loop left a reservation half-discounted when room N failed after rooms 1..N-1 succeeded).
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
