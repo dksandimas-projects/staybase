@@ -986,6 +986,19 @@ export interface IntercomMessage {
   // duration is a client-relative measurement that doesn't need
   // a server round-trip to compute.
   callDuration?: number;
+  // Per decision #206 (2026-08-19): the staff display name
+  // attributed to the `call-answered` system message — mirrors
+  // the `calls/{roomId}.acceptedBy.name` field that the
+  // `runTransaction` claim in `AdminContext.acceptCall` writes
+  // when the first staff to click Accept commits. `null` on
+  // pre-#206 messages, on `call-missed` / `call-declined` (no
+  // claim committed), or when the staff member's display name
+  // was unavailable at message-write time. The free-text `text`
+  // field still carries the human-readable line ("Call answered
+  // by Maria at 2:14 PM · 3m 22s") for legacy readers; this
+  // structured field lets future renderers style the name
+  // distinctly without parsing the line.
+  callAnsweredByName?: string | null;
 }
 
 export interface IntercomThread {

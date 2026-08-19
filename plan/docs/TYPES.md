@@ -920,6 +920,19 @@ StoreConfig {
 ```
 WebRTCCallStatus = "ringing" | "active" | "ended"
 
+// Per decision #214 (2026-08-19): the staff attribution written
+// atomically by the `runTransaction` claim in `AdminContext.acceptCall`.
+// The first staff to commit the claim wins; every subsequent staff
+// that tries the same room hits `data.status !== "ringing"` and the
+// transaction aborts. Pre-#214 docs have `acceptedBy === null` (the
+// field never existed) — the snapshot mapper normalizes to `null` so
+// the legacy "Connected" UI keeps working on legacy data.
+CallAcceptedBy {
+  uid: string
+  name: string
+  claimedAt?: Date | null
+}
+
 WebRTCCall {
   roomId: string            // document ID = roomId
   offer: RTCSessionDescriptionInit
@@ -928,6 +941,17 @@ WebRTCCall {
   guestName: string
   startedAt: Date
   endedAt: Date | null
+  // Per decision #94 (W2.6): a new call displaced this one
+  // ("superseded-by-other-call"); per decision #214: the claim
+  // committed but getUserMedia / createAnswer / answer write failed
+  // ("accept-failed"); per the guest's natural hangup
+  // ("cancelled"). Null while the call is alive.
+  endedReason?: "superseded-by-other-call" | "accept-failed" | "cancelled" | null
+  // Per decision #214 (2026-08-19): the staff claim. Set by the
+  // `runTransaction` in `acceptCall`; null on pre-#214 calls and on
+  // the sub-second window between `triggerIncomingCall` and the
+  // first claim.
+  acceptedBy?: CallAcceptedBy | null
 }
 
 IceCandidate {

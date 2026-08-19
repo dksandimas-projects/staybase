@@ -177,6 +177,32 @@ Every chat-thread message is stored here, including the system's own audit trail
 
 ---
 
+### `calls/{roomNumber}` *(Per decision #214, 2026-08-19)*
+
+Transient per-room WebRTC signaling state for the intercom voice call feature (`plan/features/INTERCOM-GUEST.md §Voice Call` + `INTERCOM-INBOX.md`). The doc is the single source of truth for the call lifecycle (status flip + SDP offer/answer + the staff claim audit). Doc ID is the room number (same as `intercoms/{roomNumber}`), so a 1:1 lookup by room number is implicit.
+
+| Field | Type | Notes |
+|---|---|---|
+| `offer` | `RTCSessionDescriptionInit \| null` | The guest's SDP offer. Written when the guest taps "Call Front Desk" and creates the `RTCPeerConnection`. Null until the guest calls. |
+| `answer` | `RTCSessionDescriptionInit \| null` | The staff's SDP answer. Written by `acceptCall` AFTER the claim transaction (the claim is the gate; the answer is the post-claim second write). Null until a staff member accepts. |
+| `status` | enum | `"ringing"` \| `"active"` \| `"ended"`. The lifecycle: `ringing` is set by `triggerIncomingCall` (the guest's first write) and stays until either a staff claim commits (atomically flips to `active`) or the call times out / guest hangs up (flips to `ended`). `active` is set inside the claim `runTransaction`; `ended` is set by `declineCall`, the call timeout, the post-claim accept-failed catch, or the second-call-wins supersede (decision #94). |
+| `guestName` | string | Display name for the admin inbox banner. |
+| `startedAt` | timestamp | `serverTimestamp()` at the moment the guest initiated the call (when the doc is first written). |
+| `endedAt` | timestamp \| null | `serverTimestamp()` when status transitions to `ended`. Null while `ringing` or `active`. |
+| `endedReason` | string \| null | Audit stamp: `"superseded-by-other-call"` (decision #94 — a new call displaced this one), `"accept-failed"` (decision #214 — claim committed but `getUserMedia` / `createAnswer` / answer write failed), `"cancelled"` (guest hung up before staff accepted), or null while the call is alive. |
+| `acceptedBy` | object \| null | **Decision #214 (2026-08-19).** The staff attribution written by the `runTransaction` claim in `acceptCall`. `{ uid: string, name: string, claimedAt: Timestamp }` — `uid` is the staff Firebase Auth UID, `name` is `displayName || email || "Front Desk"`, `claimedAt` is `serverTimestamp()` at the claim commit. The snapshot listener hydrates the field for every admin tab so the loser's inbox banner can render "Already answered by {Name}" instead of a Connect/Mute surface. Null on pre-#214 docs (legacy calls) and on the brief sub-second window between `triggerIncomingCall` and the first claim. |
+
+**Subcollections:**
+- `calls/{roomId}/iceCandidates/{id}` — each side's `RTCIceCandidate` plus `from: "guest" | "staff"` + `createdAt`. The admin `acceptCall` subscribes to this subcollection to add the guest's ICE candidates to its local `RTCPeerConnection` (and vice versa on the guest side).
+
+> **Lifecycle:** The collection is fully open (`firebase/firestore.rules:406-408` — `allow read, write: if true;`), the same trust model as `intercoms` per the guest no-login + per-room scan shape. The `acceptedBy` field is staff-writeable by any caller; future hardening (after the consent + per-room occupancy gate lands) could narrow writes to `isStaff()` while keeping reads public for the guest-side SDP handshake.
+
+> **Retention:** Transient — the doc is GC'd by future retention rules after `endedAt + 7 days`. The chat-thread audit trail (the `intercoms/{roomNumber}/messages` `call-answered` / `call-missed` / `call-declined` system messages, see `intercoms` schema above) is the durable record; `calls` is the live signaling state.
+
+> **Why the claim is a `runTransaction` and not a plain `updateDoc`:** the pre-#214 surface was a best-effort last-write-wins race that let two front-desk staff both build a peer connection to the same guest. The `runTransaction` is the only primitive that gives "first commit wins" atomically — the body reads `tx.get(callRef)`, checks `data.status === "ringing"`, and writes `status: "active" + endedAt: null + acceptedBy: { … }` in one commit. Every subsequent staff that tries the same room hits `data.status !== "ringing"` and the transaction aborts. See decision #214 for the full implementation record + the reads-before-writes contract (FOL-03 pattern).
+
+---
+
 ### `settings/{settingId}`
 
 Single-document collections holding dynamic configuration:
