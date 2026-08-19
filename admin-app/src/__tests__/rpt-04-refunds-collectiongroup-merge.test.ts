@@ -58,8 +58,12 @@ describe("RPT-04 — Reports page reads refunds collectionGroup + merges with pa
     // `ReportPayment` shape so the resolution is
     // uniform. Pin the deps array so a future
     // accidental drop of `rawRefunds` from the deps
-    // shows up as a test failure.
-    expect(reports).toMatch(/\[rawPayments, rawRefunds, bookingDisplayById\]/);
+    // shows up as a test failure. Per RPT-07
+    // (2026-08-19), the deps array now also carries
+    // `reservationMetaById` for the reservation-level
+    // payment fallback — the regex allows the deps
+    // to grow while still pinning the required keys.
+    expect(reports).toMatch(/\[rawPayments, rawRefunds, bookingDisplayById[^\]]*\]/);
   });
 
   it("resolves new-reservation refunds to the per-room child `bookingId` for display", () => {
