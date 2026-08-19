@@ -314,10 +314,23 @@ describe("Phase 11.8 — Room CRUD (create + delete)", () => {
       expect(roomsPageSrc).toMatch(/Delete Room/);
     });
 
-    it("disables the delete button when active bookings exist", () => {
-      // The button's disabled attribute should be tied to hasActiveBookings
-      expect(roomsPageSrc).toMatch(/disabled=\{hasActiveBookings\(selectedRoom\.id\)\s*>\s*0\}/);
-    });
+    it("disables the delete button when active bookings exist OR role !== admin (RM-05 / decision #220)", () => {
+          // The button's disabled attribute should be tied to BOTH
+          // hasActiveBookings AND currentUser?.role !== "admin" per
+          // decision #220. Front Desk would hit a server
+          // `permission-denied` (rule at `firestore.rules:23` only
+          // allows `delete` for `isAdmin()`) — wasted round trip +
+          // confusing toast. Gate the affordance on the current user's
+          // role instead and surface a tooltip explaining the
+          // restriction.
+          expect(roomsPageSrc).toMatch(/hasActiveBookings\(selectedRoom\.id\)\s*>\s*0/);
+          expect(roomsPageSrc).toMatch(/currentUser\?\.role\s*!==\s*["']admin["']/);
+          // The tooltip switches based on role first, then active
+          // bookings — the role gate is the primary affordance
+          // restriction (RM-05), the bookings block is secondary
+          // (existing W3.6 contract).
+          expect(roomsPageSrc).toMatch(/Only administrators can delete rooms/);
+        });
 
     it("uses ConfirmForm with reasonRequired for the destructive delete confirmation", () => {
       expect(roomsPageSrc).toMatch(/variant=["']danger["']/);

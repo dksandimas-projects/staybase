@@ -30,7 +30,16 @@ export function RoomsPage() {
     deleteRoom,
     hasActiveBookings,
     roomTypes,
-    roomsLoading
+    roomsLoading,
+    // Per RM-05 / decision #220 (2026-08-19): gate the Delete Room
+    // button in the edit drawer on the current user's role. The
+    // server rule (`firestore.rules:23` `allow delete: if isAdmin()`)
+    // still rejects Front Desk, but the wasted round-trip + the
+    // misleading "Failed to delete room" toast (which surfaced as
+    // `Missing or insufficient permissions`) is the operator-visible
+    // bug. Showing a disabled tooltip for non-admin staff is the
+    // correct UX — destructive affordances belong to admins only.
+    currentUser
   } = useAdmin();
   const toast = useToast();
 
@@ -318,9 +327,22 @@ export function RoomsPage() {
               <button
                 type="button"
                 onClick={() => requestDelete(selectedRoom)}
-                disabled={hasActiveBookings(selectedRoom.id) > 0}
+                // Per RM-05 / decision #220 (2026-08-19): the
+                // Delete Room button is destructive. Front Desk
+                // would hit a server `permission-denied` (the
+                // rule at `firestore.rules:23` only allows
+                // `delete` for `isAdmin()`) — wasted round trip
+                // + confusing toast. Gate the affordance on the
+                // current user's role instead and surface a
+                // tooltip explaining the restriction.
+                disabled={
+                  hasActiveBookings(selectedRoom.id) > 0 ||
+                  currentUser?.role !== "admin"
+                }
                 title={
-                  hasActiveBookings(selectedRoom.id) > 0
+                  currentUser?.role !== "admin"
+                    ? "Only administrators can delete rooms"
+                    : hasActiveBookings(selectedRoom.id) > 0
                     ? "Resolve active bookings before deleting"
                     : "Delete this room"
                 }
