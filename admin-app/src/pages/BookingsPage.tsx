@@ -6469,7 +6469,18 @@ export function BookingsPage() {
                         ? `This will cancel every room in reservation ${selectedReservationContext.reservationRef || "—"} (${selectedReservationContext.roomCount} rooms total). Cancellation is permanent and the guest will be notified by email. The booking records are kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action.`
                         : "Cancellation is permanent and the guest will be notified by email. The booking record is kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action."
                     }
-                    reasonLabel="Cancellation reason (optional)"
+                    // Per BK-05 / decision #221 (2026-08-19): every
+                    // cancellation in /bookings now requires a reason
+                    // — the `ConfirmForm` shipped with a default
+                    // `reasonRequired = false` and the booking-cancel
+                    // call sites never passed `reasonRequired={true}`,
+                    // so empty-reason cancellations slipped through.
+                    // UCO/CLS-01 covered the checkout path but did not
+                    // touch these three surfaces. Server-side
+                    // enforcement (next commit) mirrors the UCO pattern
+                    // (`UNPAID_REASON_REQUIRED` → 400 + retry).
+                    reasonRequired={true}
+                    reasonLabel="Cancellation reason (required)"
                     reasonPlaceholder="e.g. guest requested, no-show, double-booked"
                     confirmLabel={
                       selectedReservationContext && bookingCancelScope === "reservation"
@@ -6719,7 +6730,14 @@ export function BookingsPage() {
                   <ConfirmForm
                     title="Cancel this order?"
                     message={`Order ${selectedOrder.orderRef} will be marked as cancelled. The guest will be notified by email.`}
-                    reasonLabel="Cancellation reason (optional)"
+                    // Per BK-05 / decision #221 (2026-08-19): store-order
+                    // cancellations require a reason too. The same
+                    // `ConfirmForm` default `reasonRequired = false`
+                    // was the leak path — UCO/CLS-01 didn't cover the
+                    // store surface. Mirror the booking-cancel fix:
+                    // explicit `reasonRequired={true}` + label flip.
+                    reasonRequired={true}
+                    reasonLabel="Cancellation reason (required)"
                     reasonPlaceholder="e.g. out of stock, guest requested, wrong address"
                     confirmLabel="Cancel order"
                     cancelLabel="Back"
@@ -6754,7 +6772,14 @@ export function BookingsPage() {
                   <ConfirmForm
                     title="Cancel this order?"
                     message={`Order ${selectedOrder.orderRef} will be marked as cancelled. The guest will be notified by email.`}
-                    reasonLabel="Cancellation reason (optional)"
+                    // Per BK-05 / decision #221 (2026-08-19): store-order
+                    // cancellations require a reason too. The same
+                    // `ConfirmForm` default `reasonRequired = false`
+                    // was the leak path — UCO/CLS-01 didn't cover the
+                    // store surface. Mirror the booking-cancel fix:
+                    // explicit `reasonRequired={true}` + label flip.
+                    reasonRequired={true}
+                    reasonLabel="Cancellation reason (required)"
                     reasonPlaceholder="e.g. out of stock, guest requested, wrong address"
                     confirmLabel="Cancel order"
                     cancelLabel="Back"

@@ -6008,6 +6008,27 @@ export async function handleCancelBooking(req: any, res: any) {
     ? String(req.staff.uid)
     : "guest";
 
+  // Per BK-05 / decision #221 (2026-08-19): staff cancellations
+  // require a non-empty reason. Mirrors the UCO pattern at the
+  // checkout handler (`UNPAID_REASON_REQUIRED` — `bookings.ts:9643`)
+  // which CLS-01 surfaced. The admin client (`BookingsPage.tsx`)
+  // also gates the UI with `reasonRequired={true}` on all three
+  // cancel `ConfirmForm`s (booking + 2 store-order call sites).
+  // Guest cancellations are NOT gated here — they go through
+  // `guestCancelSchema` in `apiRouter.ts` with their own
+  // min-length validation. Defense-in-depth: even if a future
+  // client refactor drops the prop, the server still rejects
+  // empty-reason staff cancels with a 400 + the canonical
+  // `CANCELLATION_REASON_REQUIRED` code.
+  if (isStaffCancellation && !validReason.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: "CANCELLATION_REASON_REQUIRED",
+      message:
+        "A non-empty cancellation reason is required for staff cancellations."
+    });
+  }
+
   try {
     let bookingDocumentRef: any;
     let bookingData: any;

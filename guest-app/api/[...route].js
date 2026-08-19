@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.274.3";
+    VERSION2 = "0.274.7";
   }
 });
 
@@ -230837,6 +230837,13 @@ async function handleCancelBooking(req, res) {
   const isStaffCancellation = Boolean(req.staff?.uid);
   const cancellationSource = isStaffCancellation ? "staff" : "guest";
   const cancelledBy = isStaffCancellation ? String(req.staff.uid) : "guest";
+  if (isStaffCancellation && !validReason.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: "CANCELLATION_REASON_REQUIRED",
+      message: "A non-empty cancellation reason is required for staff cancellations."
+    });
+  }
   try {
     let bookingDocumentRef;
     let bookingData2;
