@@ -71,9 +71,9 @@ Zero-cost peer-to-peer audio between guest browser and front desk browser. No th
 ### Checklist
 - [x] `Permissions-Policy` allows the microphone for the app's own origin — `microphone=(self)` in **all three** `vercel.json` files (root, guest-app, admin-app). `microphone=()` blocks `getUserMedia` outright and kills the call in production only (per BI-06, booking-intercom audit 2026-07-06; see `plan/docs/GOTCHAS.md §Intercom`)
 - [x] `RTCPeerConnection` created with public STUN servers (Google's free STUN: `stun:stun.l.google.com:19302`) — no TURN server needed for same-network/LAN use; add free TURN (Metered.ca free tier) for cross-network reliability
-- [x] Firestore signaling: `calls/{roomId}` document — offer, answer, status; `calls/{roomId}/iceCandidates/{id}` subcollection
+- [x] Firestore signaling: `calls/{roomId}` document — offer, answer, status, `acceptedBy` (decision #214, 2026-08-19); `calls/{roomId}/iceCandidates/{id}` subcollection
 - [x] Guest side: creates offer → writes to Firestore → listens for answer → listens for ICE candidates
-- [x] Front desk side (admin-app): listens on `calls/{roomId}` for `status: "ringing"` → shows notification → on accept, creates answer → writes back
+- [x] Front desk side (admin-app): listens on `calls/{roomId}` for `status: "ringing"` → shows notification → on accept, **`runTransaction` claims the call + writes `acceptedBy: { uid, name, claimedAt }` atomically** (decision #214) → creates answer → writes back. The guest's peer connection is unchanged by the claim — it still pairs with the first SDP answer that arrives at `calls/{roomId}.answer`, regardless of which staff member won the race.
 - [x] Both sides: add ICE candidates as they arrive via `onSnapshot`
 - [x] Mute toggle: `audioTrack.enabled = false/true` — no renegotiation needed
 - [x] Hang up: `peerConnection.close()` + update `calls/{roomId}.status = "ended"` + stop all tracks
@@ -90,6 +90,8 @@ calls/{roomId}
   guestName: string
   startedAt: Timestamp
   endedAt: Timestamp | null
+  endedReason: "superseded-by-other-call" | "accept-failed" | "cancelled" | null  // Per decision #214
+  acceptedBy: { uid: string, name: string, claimedAt: Timestamp } | null  // Per decision #214 (2026-08-19)
 
 calls/{roomId}/iceCandidates/{id}
   candidate: RTCIceCandidateInit

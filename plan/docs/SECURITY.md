@@ -152,6 +152,10 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 ### `intercoms`
 - Read/Write: open (no auth — anonymous QR chat)
 - Mitigation: room ID required in URL (physical QR gate), no sensitive PII should be stored here
+
+### `calls`
+- Read/Write: open (`allow read, write: if true;` — same trust model as `intercoms`; the guest's SDP offer + the staff's SDP answer + ICE candidates all need public write so the peer-to-peer handshake can complete without auth)
+- The `acceptedBy` field (decision #214, 2026-08-19) is staff-attribution data written by the `runTransaction` claim in `AdminContext.acceptCall` — currently any caller can write any `acceptedBy` payload. **Future hardening (filed in decision #214's "Security rule gap" paragraph):** narrow writes to `isStaff()` after the consent checkbox + per-room occupancy gate lands, while keeping reads public for the guest-side SDP handshake. Until then, the audit-trail value (knowing which staff took a call) is honoured by the chat thread's `call-answered` system message with `callAnsweredByName` — the rule layer is not the gate.
 - Staff trained not to share PII (booking refs, payment details) via intercom chat
 
 ---

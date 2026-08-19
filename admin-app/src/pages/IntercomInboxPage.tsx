@@ -36,7 +36,13 @@ export function IntercomInboxPage() {
     // (the local MediaStream lives there). See feature/INTERCOM-AUDIO-
     // ROUTING.md §"Call mute" for the lifecycle contract.
     isMicMuted,
-    toggleMicMute
+    toggleMicMute,
+    // Per decision #206 (2026-08-19): the current staff UID is
+    // needed to compare against `incomingCall.acceptedBy.uid` so
+    // the banner can render "Connected" (we accepted) vs
+    // "Already answered by {Name}" (another staff claimed the
+    // call first).
+    currentUser
   } = useAdmin();
   const { isMobile } = useBreakpoint();
 
@@ -400,7 +406,57 @@ export function IntercomInboxPage() {
       </header>
 
       {/* WebRTC Signaling Call Banner Overlay */}
-      {incomingCall && (
+      {incomingCall && (() => {
+        // Per decision #206 (2026-08-19): the call banner has three
+        // states, not two. The pre-#206 banner had only "ringing"
+        // (Accept / Ignore) and "active" (Mute / Disconnect). The
+        // new "claimed by another staff" state appears when the
+        // runTransaction claim in `acceptCall` committed for a
+        // different staff member — this tab's snapshot will see
+        // `status: "active" + acceptedBy.uid !== currentUser.uid`
+        // and the banner needs to render an informational surface
+        // (no Accept/Ignore/Mute/Disconnect buttons) so the loser
+        // doesn't click through to a half-built WebRTC connection.
+        // The banner auto-dismisses when the winner ends the call
+        // (the snapshot listener clears incomingCall on status
+        // flip to "ended" via the activeCalls filter).
+        const isClaimedByOtherStaff =
+          incomingCall.status === "active" &&
+          !!incomingCall.acceptedBy &&
+          !!currentUser?.uid &&
+          incomingCall.acceptedBy.uid !== currentUser.uid;
+
+        if (isClaimedByOtherStaff) {
+          return (
+            <div
+              data-testid="call-already-claimed-banner"
+              className="rounded-xl border border-gray-200 bg-gray-50 p-6 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 animate-fade-in z-20"
+            >
+              <div className="flex items-center gap-4">
+                <div className="h-14 w-14 rounded-full flex items-center justify-center text-gray-500 bg-gray-200 shrink-0">
+                  <PhoneOff size={24} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+                    Call Already Answered
+                  </span>
+                  <h2 className="font-heading text-xl text-gray-700 lowercase mt-1">
+                    Room {incomingCall.roomId} ({incomingCall.guestName})
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-1.5 font-bold">
+                    Answered by{" "}
+                    <span className="text-gray-800">
+                      {incomingCall.acceptedBy?.name ?? "another staff member"}
+                    </span>
+                    . This banner clears when they hang up.
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-6 shadow-sm ring-4 ring-primary/10 flex flex-col md:flex-row justify-between items-center gap-6 animate-fade-in z-20">
           <div className="flex items-center gap-4">
             <div className={`h-14 w-14 rounded-full flex items-center justify-center text-white shrink-0 ${
@@ -408,7 +464,7 @@ export function IntercomInboxPage() {
             }`}>
               <Phone size={24} />
             </div>
-            
+
             <div>
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
@@ -501,7 +557,8 @@ export function IntercomInboxPage() {
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Main Inbox layout */}
       <div className="grid gap-6 lg:grid-cols-[280px_1fr] min-h-[500px]">

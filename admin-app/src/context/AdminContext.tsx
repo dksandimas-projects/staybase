@@ -106,6 +106,16 @@ async function resolvePrivateStorageUrl(path: string): Promise<string> {
 interface AdminUser {
   uid: string;
   email: string;
+  // Per decision #214 (2026-08-19): the staff's Firebase Auth
+  // `displayName`, surfaced on `AdminUser` so the intercom call
+  // claim transaction can write the staff attribution to
+  // `calls/{roomId}.acceptedBy.name` and the call-answered system
+  // message can prefix the audit trail with "Call answered by
+  // {Name}". Falls through to email when the Firebase user has no
+  // display name set (the common case for staff whose Google
+  // account has no public name — the booking inbox still shows
+  // their email which is equally identifiable).
+  displayName: string | null;
   role: StaffRole;
 }
 
@@ -467,6 +477,15 @@ export interface IntercomMessage {
   messageType?: "call-answered" | "call-missed" | "call-declined";
   callStartedAt?: string;
   callDuration?: number;
+  // Per decision #206 (2026-08-19): the staff display name for
+  // `messageType === "call-answered"` system messages. Mirrors the
+  // `calls/{roomId}.acceptedBy.name` written by the claim
+  // transaction so future renderers can surface "Answered by
+  // {Name}" without parsing the free-text `text` field. Null on
+  // pre-#206 messages, on missed/declined (no claim committed), or
+  // when the staff member's display name was not available at
+  // message-write time.
+  callAnsweredByName?: string | null;
 }
 
 export interface IntercomThread {
@@ -478,11 +497,26 @@ export interface IntercomThread {
   currentStayId?: string;
 }
 
+// Per decision #206 (2026-08-19): when two front-desk staff race to
+// accept the same incoming call, the first one to commit the
+// `runTransaction` claim wins and writes `acceptedBy` to the call doc.
+// The snapshot mapper hydrates `acceptedBy` for every tab so the
+// loser's UI can render "Already answered by {Name}" instead of letting
+// them click through to a half-built WebRTC connection. Absent on
+// pre-#206 calls (the field never existed; harmless fallback is
+// `null`).
+export interface CallAcceptedBy {
+  uid: string;
+  name: string;
+  claimedAt?: Date | null;
+}
+
 export interface IncomingCall {
   roomId: string;
   guestName: string;
   status: "ringing" | "active" | "ended";
   offer?: RTCSessionDescriptionInit;
+  acceptedBy?: CallAcceptedBy | null;
 }
 
 export interface StoreOrderItem {
@@ -901,6 +935,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         setCurrentUser({
           uid: firebaseUser.uid,
           email: firebaseUser.email ?? "",
+          displayName: firebaseUser.displayName ?? null,
           role
         });
       } catch {
@@ -956,6 +991,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       setCurrentUser({
         uid: credential.user.uid,
         email: credential.user.email ?? email,
+        displayName: credential.user.displayName ?? null,
         role
       });
     } finally {
@@ -3331,7 +3367,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               isStoreOrder: !!data.isStoreOrder,
               orderRef: data.orderRef || undefined,
               isEarlyCheckInRequest: !!data.isEarlyCheckInRequest,
-              currentStayId: data.currentStayId || undefined
+              currentStayId: data.currentStayId || undefined,
+              // Per FOL-02 (2026-08-07) and decision #206
+              // (2026-08-19): the snapshot mapper must preserve
+              // every field the `IntercomMessage` contract
+              // guarantees. `messageType`, `callStartedAt`, and
+              // `callDuration` are pre-existing drops (the
+              // call-history-messages write path emits them but
+              // the read path here silently strips them — the
+              // chat panel can't render the centered "Call
+              // answered" footer row without `messageType`; the
+              // audit ticket is filed separately as the
+              // call-history-messages read-side completion).
+              // `callAnsweredByName` is the new #206 field.
+              messageType: data.messageType || undefined,
+              callStartedAt: data.callStartedAt?.toMillis
+                ? new Date(data.callStartedAt.toMillis()).toISOString()
+                : undefined,
+              callDuration: typeof data.callDuration === "number" ? data.callDuration : undefined,
+              callAnsweredByName: typeof data.callAnsweredByName === "string"
+                ? data.callAnsweredByName
+                : null
             };
           });
 
@@ -3457,7 +3513,19 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       const clockStr = fmtClock(startedAtMs);
 
       if (outcome === "call-answered") {
-        text = `Call answered at ${clockStr} · ${fmtDuration(durationMsSafe)}`;
+        // Per decision #206 (2026-08-19): when this tab is the
+        // claimer, prefix the system message with the staff's
+        // display name so the chat thread audit-trail tells the
+        // desk who answered. Falls through to the legacy
+        // un-attributed text when the ref is false (older call
+        // docs without an acceptedBy stamp, or staff not signed
+        // in at hangup time).
+        const staffName = adminCallLocalAcceptRef.current
+          ? (currentUser?.displayName || currentUser?.email || "Front Desk")
+          : null;
+        text = staffName
+          ? `Call answered by ${staffName} at ${clockStr} · ${fmtDuration(durationMsSafe)}`
+          : `Call answered at ${clockStr} · ${fmtDuration(durationMsSafe)}`;
       } else if (outcome === "call-missed") {
         text = `Missed call at ${clockStr} · rang ${fmtDuration(durationMsSafe)}`;
       } else {
@@ -3491,7 +3559,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         // The Firestore rules cap timestamp==request.time, but
         // they do NOT cap number-valued optional fields, so we can
         // send duration in seconds without a Timestamp shim.
-        callDuration: durationSec
+        callDuration: durationSec,
+        // Per decision #206 (2026-08-19): the staff display name
+        // for `call-answered` messages, so future renderers can
+        // surface "Answered by Maria" without parsing the free-
+        // text `text` field. Mirrors the claim transaction's
+        // `acceptedBy.name` — null when this tab did not claim
+        // (older call docs) so the renderer can fall back to the
+        // un-attributed text.
+        callAnsweredByName: outcome === "call-answered" && adminCallLocalAcceptRef.current
+          ? (currentUser?.displayName || currentUser?.email || "Front Desk")
+          : null
       });
     } catch (error) {
       // Best-effort — never let the audit-trail write break the
@@ -3662,6 +3740,19 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // write to, even after `incomingCall` has been cleared.
   const adminCallRoomIdRef = useRef<string | null>(null);
 
+  // Per decision #206 (2026-08-19): tracks whether THIS tab is the
+  // staff member that won the `runTransaction` claim for the current
+  // call. Set to `true` the instant the claim transaction commits —
+  // BEFORE getUserMedia — so the inbox banner can keep rendering the
+  // "Connected · {duration}" UI even if the local mic permission fails
+  // and the catch path forces the call to "ended". Reset to `false`
+  // on every cleanup (next call starts clean) and on every snapshot
+  // tick that lands on a different roomId. The IntercomInboxPage
+  // banner reads this through `incomingCall` state shape to decide
+  // which surface to render: "Connected" (we claimed) vs
+  // "Already answered by {Name}" (someone else did).
+  const adminCallLocalAcceptRef = useRef<boolean>(false);
+
   // Per-call microphone mute flag. `false` = mic hot, `true` =
   // track.enabled = false on the local outbound audio. Auto-resets
   // to false on every new call (acceptCall, status → active) and on
@@ -3778,6 +3869,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     adminCallExplicitDeclineRef.current = false;
     adminCallRingingStartedAtRef.current = null;
     adminCallRoomIdRef.current = null;
+    // Per decision #206 (2026-08-19): the "this tab is the claimer"
+    // flag is reset on every cleanup. If a future call arrives and
+    // a different staff claims it, this tab's ref stays false so
+    // the inbox banner correctly shows "Already answered by {Name}"
+    // instead of the "Connected" surface. The new claim (if any)
+    // sets the ref back to true at the moment its runTransaction
+    // commits.
+    adminCallLocalAcceptRef.current = false;
   };
 
   useEffect(() => {
@@ -3793,11 +3892,30 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         const activeCalls = snapshot.docs
           .map((docSnap): IncomingCall & { startedAt: number } => {
             const data = docSnap.data();
+            // Per decision #206 (2026-08-19): when the call doc carries
+            // `acceptedBy` (the runTransaction claim in `acceptCall`
+            // wrote it), surface it on the mapped IncomingCall so the
+            // IntercomInboxPage banner can render "Already answered
+            // by {Name}" for the staff member that lost the race. The
+            // field is absent on pre-#206 docs and on calls that
+            // haven't been claimed yet (status === "ringing"); both
+            // map to `null` so the rest of the render path can
+            // treat it as a single shape.
+            const rawAcceptedBy = data.acceptedBy;
+            const acceptedBy: CallAcceptedBy | null =
+              rawAcceptedBy && typeof rawAcceptedBy === "object" && typeof rawAcceptedBy.uid === "string"
+                ? {
+                    uid: rawAcceptedBy.uid,
+                    name: typeof rawAcceptedBy.name === "string" ? rawAcceptedBy.name : "Front Desk",
+                    claimedAt: rawAcceptedBy.claimedAt?.toMillis ? new Date(rawAcceptedBy.claimedAt.toMillis()) : null
+                  }
+                : null;
             return {
               roomId: docSnap.id,
               guestName: data.guestName || "Guest",
               status: data.status || "ended",
               offer: data.offer || undefined,
+              acceptedBy,
               startedAt: data.startedAt?.toMillis ? data.startedAt.toMillis() : 0
             };
           })
@@ -3874,37 +3992,98 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
 
   const acceptCall = async () => {
     if (!incomingCall) return;
+    const roomId = incomingCall.roomId;
+    const callRef = doc(db, "calls", roomId);
+
+    // Per decision #206 (2026-08-19): the call claim is the FIRST step
+    // of acceptCall. Two front-desk staff may both click Accept within
+    // the same ~200ms getUserMedia window, and the pre-#206
+    // `updateDoc` write was a best-effort last-write-wins race that
+    // left the wrong staff with a half-built peer connection. The
+    // `runTransaction` claim atomically reads the call doc, checks
+    // `status === "ringing"`, and writes `status: "active"` plus
+    // `acceptedBy: { uid, name, claimedAt }` in one commit. The first
+    // staff to commit wins; every subsequent staff that tries the
+    // same room hits the `data.status !== "ringing"` branch and the
+    // transaction aborts with `FirebaseError: Transaction failed all
+    // retries.` — we catch and surface a friendly toast instead of
+    // silently no-op-ing the half-built peer connection.
+    let claimCommitted = false;
+    try {
+      await runTransaction(db, async (transaction) => {
+        const callSnap = await transaction.get(callRef);
+        const data = callSnap.data();
+        if (!data || data.status !== "ringing") {
+          // Either the call doc disappeared (guest hung up before we
+          // could accept) or another staff already claimed it. Either
+          // way, we lose — the snapshot listener will surface the new
+          // state to the inbox banner via `acceptedBy`. The thrown
+          // error aborts the transaction (no writes), the outer
+          // `catch` toasts the staff, and we return without building
+          // a WebRTC connection.
+          throw new Error("call-already-claimed");
+        }
+        transaction.update(callRef, {
+          status: "active",
+          endedAt: null,
+          acceptedBy: {
+            uid: currentUser?.uid ?? "unknown",
+            name: currentUser?.displayName || currentUser?.email || "Front Desk",
+            claimedAt: serverTimestamp()
+          }
+        });
+      });
+      claimCommitted = true;
+      // Set the local-accept ref IMMEDIATELY after the claim commits
+      // — BEFORE any async work (getUserMedia) — so even if a later
+      // step throws, the inbox state still attributes the call to
+      // this tab. The ref is also useful for the call-history
+      // message write (it carries `staffName`).
+      adminCallLocalAcceptRef.current = true;
+    } catch (claimError) {
+      // The claim transaction is the gate — if it didn't commit,
+      // nothing else runs. The toast tells the staff they lost the
+      // race; the snapshot listener will follow up with the
+      // `acceptedBy` payload for the "Already answered by {Name}"
+      // banner.
+      const existingName = incomingCall.acceptedBy?.name;
+      if (existingName) {
+        notify.info("Call taken", `Already answered by ${existingName}.`);
+      } else {
+        notify.info("Call no longer available", "The guest hung up or another staff member answered first.");
+      }
+      void claimError; // already logged by Firestore SDK
+      return;
+    }
 
     try {
-      const callRef = doc(db, "calls", incomingCall.roomId);
-
       if (!incomingCall.offer) {
-        await updateDoc(callRef, {
-          status: "active",
-          endedAt: null
-        });
         // No peer connection is built in this branch (the call
-        // doc has no offer). For call-history, treat this branch
-        // as if the staff moved straight to "active" without
-        // audio — mark answered + record the start. The next
-        // declineCall / hang-up will write the "call-answered"
-        // system message with whatever the actual elapsed time
-        // turns out to be (probably <1s; still useful as a
-        // "staff pressed accept but no audio" audit trail).
+        // doc has no offer). The claim transaction already flipped
+        // status to "active" + stamped acceptedBy; the no-offer
+        // branch just needs to mark the local answered refs so
+        // recordCallHistory writes the "call-answered" audit message
+        // with whatever elapsed time the eventual hangup reports
+        // (probably <1s; still useful as a "staff pressed accept
+        // but no audio" audit trail).
         adminCallAnsweredRef.current = true;
         adminCallStartedAtRef.current = Date.now();
-        adminCallRoomIdRef.current = incomingCall.roomId;
+        adminCallRoomIdRef.current = roomId;
         return;
       }
 
       cleanupAdminCall();
       // Per-call-history-messages: re-pin the room + started-at
       // for THIS new accepted call (cleanupAdminCall cleared all
-      // five refs at its tail; we need to re-set the room and
-      // started-at BEFORE the next cleanup so the dispatcher
-      // can attribute the future call-answered message to this
-      // call, not to whatever the previous one was).
-      adminCallRoomIdRef.current = incomingCall.roomId;
+      // six refs at its tail, including the new local-accept ref
+      // — we need to re-set the room, the answered flag, AND the
+      // local-accept flag so the dispatcher can attribute the
+      // future call-answered message to this call, not to whatever
+      // the previous one was). Set adminCallLocalAcceptRef back to
+      // true here even though the claim transaction already set it
+      // — cleanupAdminCall's tail reset it.
+      adminCallLocalAcceptRef.current = true;
+      adminCallRoomIdRef.current = roomId;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       adminMediaStreamRef.current = stream;
 
@@ -3927,7 +4106,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
 
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) return;
-        void addDoc(collection(db, "calls", incomingCall.roomId, "iceCandidates"), {
+        void addDoc(collection(db, "calls", roomId, "iceCandidates"), {
           candidate: event.candidate.toJSON(),
           from: "staff",
           createdAt: serverTimestamp()
@@ -3955,7 +4134,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       await peerConnection.setLocalDescription(answer);
 
       adminIceUnsubscribeRef.current = onSnapshot(
-        collection(db, "calls", incomingCall.roomId, "iceCandidates"),
+        collection(db, "calls", roomId, "iceCandidates"),
         (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type !== "added") return;
@@ -3969,21 +4148,37 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         }
       );
 
+      // Per decision #206: the claim transaction already set
+      // `status: "active" + endedAt: null + acceptedBy`. This final
+      // write only carries the SDP answer — no need to re-flip
+      // status (the transaction already did, atomically). The
+      // `endedAt: null` re-stamp is also redundant; kept out so the
+      // call doc reflects the claim transaction as the single source
+      // of truth for the active state.
       await updateDoc(callRef, {
         answer: {
           type: answer.type,
           sdp: answer.sdp
-        },
-        status: "active",
-        endedAt: null
+        }
       });
     } catch (error) {
       console.error("Error accepting WebRTC call:", error);
       cleanupAdminCall();
-      await updateDoc(doc(db, "calls", incomingCall.roomId), {
-        status: "ended",
-        endedAt: serverTimestamp()
-      });
+      // If the claim committed but a later step (getUserMedia,
+      // createAnswer, writeDoc) failed, we have to end the call for
+      // the guest too — otherwise the call would be stuck at
+      // `status: "active"` with no working peer connection. The
+      // `acceptedBy` field stays on the call doc as the audit
+      // trail of who tried to answer; recordCallHistory will
+      // dispatch a `call-missed` system message because
+      // `adminCallAnsweredRef` is still false at this point.
+      if (claimCommitted) {
+        await updateDoc(callRef, {
+          status: "ended",
+          endedAt: serverTimestamp(),
+          endedReason: "accept-failed"
+        }).catch(() => undefined);
+      }
     }
   };
 
