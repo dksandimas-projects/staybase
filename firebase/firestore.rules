@@ -373,15 +373,24 @@ service cloud.firestore {
             "orderRef",
             "isEarlyCheckInRequest",
             "currentStayId",
-            // Per `feat/call-history-messages`: three new optional
-            // fields on system messages that surface the call
-            // outcome in the chat thread. `messageType` drives the
-            // distinct render; `callStartedAt` + `callDuration`
-            // carry the answered-call telemetry. All three are
-            // optional so existing chat messages are unaffected.
+            // Per `feat/call-history-messages` + decision #214
+            // (2026-08-19): four optional fields on system messages
+            // that surface the call outcome in the chat thread.
+            // `messageType` drives the distinct render;
+            // `callStartedAt` + `callDuration` carry the
+            // answered-call telemetry; `callAnsweredByName` is the
+            // staff attribution written by the `runTransaction`
+            // claim in `AdminContext.acceptCall` and surfaces in
+            // the chat thread as "Call answered by {Name} at
+            // {clock} · {duration}". All four are optional so
+            // existing chat messages are unaffected. See
+            // `firebase/tests/intercoms-messages-call-history-
+            // rules.emulator.test.ts` for the contract pin + the
+            // negative case (a non-allowlisted key is rejected).
             "messageType",
             "callStartedAt",
-            "callDuration"
+            "callDuration",
+            "callAnsweredByName"
           ])
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 1000
