@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.274.7";
+    VERSION2 = "0.274.9";
   }
 });
 
@@ -223806,6 +223806,31 @@ var init_cancellation = __esm({
   }
 });
 
+// ../shared/utils/uploads.ts
+async function raceUploadWithTimeout(uploadPromise, timeoutMs, label = "Upload") {
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_2, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(
+        new Error(
+          `${label} timed out after ${Math.round(timeoutMs / 1e3)}s. Please check your connection and retry.`
+        )
+      );
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([uploadPromise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== void 0) clearTimeout(timeoutHandle);
+  }
+}
+var DEFAULT_UPLOAD_TIMEOUT_MS;
+var init_uploads = __esm({
+  "../shared/utils/uploads.ts"() {
+    DEFAULT_UPLOAD_TIMEOUT_MS = 9e4;
+  }
+});
+
 // ../shared/index.ts
 var shared_exports = {};
 __export(shared_exports, {
@@ -223831,6 +223856,7 @@ __export(shared_exports, {
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
   DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
+  DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
   GuestDetailsSchema: () => GuestDetailsSchema,
@@ -223957,6 +223983,7 @@ __export(shared_exports, {
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   parseCheckInTime: () => parseCheckInTime,
+  raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
   recordSweepResult: () => recordSweepResult,
@@ -224019,6 +224046,7 @@ var init_shared = __esm({
     init_failureBackoff();
     init_financeInvariants();
     init_cancellation();
+    init_uploads();
   }
 });
 
