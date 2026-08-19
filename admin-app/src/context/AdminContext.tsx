@@ -3473,7 +3473,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // produces).
   const recordCallHistory = async (
     roomId: string,
-    outcome: "call-answered" | "call-missed" | "call-declined",
+    outcome: "call-answered" | "call-missed" | "call-declined" | "call-failed",
     durationMs: number | null
   ) => {
     try {
@@ -3530,6 +3530,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           : `Call answered at ${clockStr} · ${fmtDuration(durationMsSafe)}`;
       } else if (outcome === "call-missed") {
         text = `Missed call at ${clockStr} · rang ${fmtDuration(durationMsSafe)}`;
+      } else if (outcome === "call-failed") {
+        // Per decision #217 (2026-08-19): staff pressed Accept and
+        // the claim transaction committed, but the post-claim
+        // audio plumbing (getUserMedia / createAnswer / writeDoc)
+        // failed. The call-failed system message surfaces this in
+        // the chat thread so the audit trail says "the staff TRIED
+        // to answer" instead of "the staff MISSED it". durationMs
+        // is the wall-clock from ringing start to failure, which
+        // is typically <500ms (mic permission denial is instant);
+        // the duration is omitted from the text because the
+        // failure happened during connect, not during a
+        // sustained call. If durationMs is 0 or null, drop the
+        // "after Ns" clause.
+        text = durationMsSafe > 0
+          ? `Call failed at ${clockStr} · after ${fmtDuration(durationMsSafe)}`
+          : `Call failed at ${clockStr}`;
       } else {
         text = `Call declined at ${clockStr}`;
       }
@@ -3755,6 +3771,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // "Already answered by {Name}" (someone else did).
   const adminCallLocalAcceptRef = useRef<boolean>(false);
 
+  // Per decision #217 (2026-08-19): gates the cleanupAdminCall IIFE
+  // dispatch so it fires EXACTLY ONCE per call lifecycle, not twice.
+  // Without this gate, React 18 StrictMode double-invokes effect
+  // cleanups in dev (and any future double-call to cleanupAdminCall
+  // from non-terminal paths would double-dispatch). Set to true the
+  // moment the IIFE calls recordCallHistory; reset to false at the
+  // tail of cleanupAdminCall so the NEXT call lifecycle starts fresh.
+  const adminCallHistoryDispatchedRef = useRef<boolean>(false);
+
   // Per-call microphone mute flag. `false` = mic hot, `true` =
   // track.enabled = false on the local outbound audio. Auto-resets
   // to false on every new call (acceptCall, status → active) and on
@@ -3808,12 +3833,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // room we have no thread to attach the message to. That can
     // happen if the snapshot effect clears the room before any
     // ringing happened (e.g. race on logout). Skip silently.
+    //
+    // Per decision #217 (2026-08-19): gate the IIFE dispatch with
+    // adminCallHistoryDispatchedRef so it fires EXACTLY ONCE per
+    // call lifecycle. Without this gate, React 18 StrictMode
+    // double-invokes effect cleanups in dev (and any future
+    // double-call to cleanupAdminCall from non-terminal paths
+    // would double-dispatch a "call-missed" / "call-answered" /
+    // "call-declined" message into the chat thread). The flag
+    // is reset at the tail of cleanupAdminCall so the NEXT call
+    // lifecycle starts fresh.
     (async () => {
+      if (adminCallHistoryDispatchedRef.current) return;
       const roomId = adminCallRoomIdRef.current;
       if (!roomId) return;
       const answered = adminCallAnsweredRef.current === true;
       const explicitDecline = adminCallExplicitDeclineRef.current === true;
-      let outcome: "call-answered" | "call-missed" | "call-declined" | null = null;
+      let outcome: "call-answered" | "call-missed" | "call-declined" | "call-failed" | null = null;
       let durationMs: number | null = null;
       if (answered) {
         outcome = "call-answered";
@@ -3825,12 +3861,31 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         // ringing duration on the decline system message (the
         // text is just "Call declined at HH:MM" — no duration).
         durationMs = null;
+      } else if (adminCallLocalAcceptRef.current) {
+        // Per decision #217 (2026-08-19): the claim transaction
+        // committed (adminCallLocalAcceptRef === true) but
+        // adminCallAnsweredRef was never set because
+        // getUserMedia / createAnswer / updateDoc threw. The
+        // staff tried to answer but couldn't connect — that's
+        // a "call-failed" outcome, not a "call-missed" one
+        // (the staff DIDN'T miss it, the audio plumbing failed).
+        // Record a call-failed system message so the chat
+        // thread audit trail reflects what actually happened.
+        // durationMs is the time from claim → failure, which
+        // is typically <500ms; included for telemetry.
+        outcome = "call-failed";
+        const start = adminCallRingingStartedAtRef.current;
+        durationMs = start === null ? 0 : Math.max(0, Date.now() - start);
       } else {
         outcome = "call-missed";
         const start = adminCallRingingStartedAtRef.current;
         durationMs = start === null ? 0 : Math.max(0, Date.now() - start);
       }
       if (!outcome) return;
+      // Mark dispatched BEFORE the await so a synchronous re-entry
+      // (e.g. StrictMode's second cleanup invoke) is a no-op even
+      // before recordCallHistory's first await yields.
+      adminCallHistoryDispatchedRef.current = true;
       await recordCallHistory(roomId, outcome, durationMs);
     })().catch((err) => {
       // The async IIFE above already catches its own errors
@@ -3878,6 +3933,57 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // instead of the "Connected" surface. The new claim (if any)
     // sets the ref back to true at the moment its runTransaction
     // commits.
+    adminCallLocalAcceptRef.current = false;
+    // Per decision #217 (2026-08-19): reset the dispatch-once gate
+    // so the NEXT call lifecycle can fire its call-history system
+    // message. The gate was set true at the moment recordCallHistory
+    // was called inside the IIFE above.
+    adminCallHistoryDispatchedRef.current = false;
+  };
+
+  // Per decision #217 (2026-08-19): clearCallRefsOnly is the
+  // NON-DISPATCHING sibling of cleanupAdminCall. It zeroes the
+  // outcome refs and tears down the peer connection without firing
+  // the call-history system message. It exists because
+  // cleanupAdminCall's dispatch hook fires exactly-once per call
+  // lifecycle (gated by adminCallHistoryDispatchedRef), and the
+  // accept path needs to clear stale refs from any prior call
+  // without consuming the dispatch slot for the NEW call.
+  //
+  // Use cases:
+  //   1. acceptCall (before setting the new call's refs) — was the
+  //      source of decision #217. Before #217 this site called
+  //      cleanupAdminCall, which dispatched a "call-missed" message
+  //      against the in-flight ringing call's refs (answered=false),
+  //      producing a phantom "Missed call at HH:MM · rang 2s" entry
+  //      in the chat thread on EVERY accepted call.
+  //   2. Future call-site additions that need to reset refs
+  //      without writing a system message (e.g. test harnesses,
+  //      state reconciliation paths).
+  //
+  // Do NOT use this for terminal lifecycle states (operator
+  // disconnect, guest hang up, second-call-wins supersede, explicit
+  // decline, logout) — those still go through cleanupAdminCall so
+  // the call-history system message is written.
+  const clearCallRefsOnly = () => {
+    adminIceUnsubscribeRef.current?.();
+    adminIceUnsubscribeRef.current = null;
+    adminProcessedIceIdsRef.current.clear();
+    adminPeerConnectionRef.current?.close();
+    adminPeerConnectionRef.current = null;
+    adminMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    adminMediaStreamRef.current = null;
+    if (adminRemoteAudioRef.current) {
+      adminRemoteAudioRef.current.pause();
+      adminRemoteAudioRef.current.srcObject = null;
+      adminRemoteAudioRef.current = null;
+    }
+    setIsMicMuted(false);
+    adminCallAnsweredRef.current = false;
+    adminCallStartedAtRef.current = null;
+    adminCallExplicitDeclineRef.current = false;
+    adminCallRingingStartedAtRef.current = null;
+    adminCallRoomIdRef.current = null;
     adminCallLocalAcceptRef.current = false;
   };
 
@@ -4074,16 +4180,34 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         return;
       }
 
-      cleanupAdminCall();
+      // Per decision #217 (2026-08-19): clearCallRefsOnly is the
+      // non-dispatching sibling of cleanupAdminCall. We use it here
+      // (instead of cleanupAdminCall) so the call-history system
+      // message dispatch hook does NOT fire at the moment the staff
+      // clicks Accept. The dispatch hook is gated by
+      // adminCallHistoryDispatchedRef and is reserved for TERMINAL
+      // lifecycle events (operator disconnect, guest hangup, second-
+      // call-wins supersede, explicit decline, logout). The accept
+      // path is a LIFECYCLE BEGIN event — the call-history message
+      // for it lands at the terminal event, not here.
+      //
+      // Pre-#217 this line called cleanupAdminCall(), which
+      // dispatched a "call-missed" system message against the
+      // ringing call's refs (adminCallAnsweredRef was still false,
+      // because line 4106 hasn't run yet). Every accepted call
+      // produced a phantom "Missed call at HH:MM · rang Ns"
+      // entry in the chat thread (operator-reported 2026-08-19
+      // with screenshot showing paired Missed + Answered messages).
+      clearCallRefsOnly();
       // Per-call-history-messages: re-pin the room + started-at
-      // for THIS new accepted call (cleanupAdminCall cleared all
+      // for THIS new accepted call (clearCallRefsOnly cleared all
       // six refs at its tail, including the new local-accept ref
       // — we need to re-set the room, the answered flag, AND the
       // local-accept flag so the dispatcher can attribute the
       // future call-answered message to this call, not to whatever
       // the previous one was). Set adminCallLocalAcceptRef back to
       // true here even though the claim transaction already set it
-      // — cleanupAdminCall's tail reset it.
+      // — clearCallRefsOnly's tail reset it.
       adminCallLocalAcceptRef.current = true;
       adminCallRoomIdRef.current = roomId;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -4165,15 +4289,31 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       });
     } catch (error) {
       console.error("Error accepting WebRTC call:", error);
+      // Per decision #217 (2026-08-19): cleanupAdminCall now
+      // dispatches a "call-failed" (not "call-missed") system
+      // message for this path. The previous wording was wrong:
+      // the staff DID press Accept, the claim transaction
+      // committed (adminCallLocalAcceptRef === true), but the
+      // post-claim audio plumbing (getUserMedia / createAnswer /
+      // writeDoc) failed. The new "call-failed" outcome
+      // distinguishes "the staff tried to answer and the audio
+      // stack failed" from "the call rang and no one pressed
+      // Accept" — both produce a system message but with
+      // semantically different content. The chat thread audit
+      // trail now says "Call failed at HH:MM" instead of
+      // "Missed call at HH:MM · rang 2s" when the operator's
+      // mic permission was denied.
       cleanupAdminCall();
       // If the claim committed but a later step (getUserMedia,
       // createAnswer, writeDoc) failed, we have to end the call for
       // the guest too — otherwise the call would be stuck at
       // `status: "active"` with no working peer connection. The
       // `acceptedBy` field stays on the call doc as the audit
-      // trail of who tried to answer; recordCallHistory will
-      // dispatch a `call-missed` system message because
-      // `adminCallAnsweredRef` is still false at this point.
+      // trail of who tried to answer; recordCallHistory dispatched
+      // the "call-failed" system message in the cleanup IIFE above
+      // because `adminCallLocalAcceptRef.current === true` AND
+      // `adminCallAnsweredRef.current === false` at the moment
+      // the IIFE resolved the outcome.
       if (claimCommitted) {
         await updateDoc(callRef, {
           status: "ended",

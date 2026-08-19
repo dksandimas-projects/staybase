@@ -155,6 +155,46 @@ describe("intercoms/{roomId}/messages — call-history fields in the create allo
     );
   });
 
+  // Per decision #217 (2026-08-19): the new "call-failed" outcome
+  // joins the enum. The closed-enum rule
+  // (`messageType in ["call-answered", "call-missed", "call-declined", "call-failed"]`)
+  // must accept it. Without this test, a future refactor that
+  // forgets to add "call-failed" to the rule's enum list would
+  // silently break the accept-failed audit trail (the same shape
+  // of bug as decision #216).
+  it("admin can create a system call-failed message with the full payload", async () => {
+    await assertSucceeds(
+      addDoc(
+        collection(adminCtx().firestore(), "intercoms", "room-207", "messages"),
+        {
+          ...callHistoryMessage("room-207"),
+          text: "Call failed at 2:14 PM",
+          messageType: "call-failed" as const,
+          callStartedAt: null, // call-failed has no connected timestamp
+          callDuration: 0,     // 0ms — claim committed but audio plumbing failed instantly
+          callAnsweredByName: null, // null: the staff never actually answered
+        }
+      )
+    );
+  });
+
+  // Per decision #217 (2026-08-19): the rule rejects a messageType
+  // outside the closed enum. This is the regression-in-reverse for
+  // the new "call-failed" outcome — a future typo on the client
+  // (e.g. "call-fail" or "callFailed") is caught by the rule, not
+  // silently written as a malformed audit-trail doc.
+  it("rejects a system message with a messageType outside the closed enum", async () => {
+    await assertFails(
+      addDoc(
+        collection(adminCtx().firestore(), "intercoms", "room-208", "messages"),
+        {
+          ...callHistoryMessage("room-208"),
+          messageType: "call-typo" as any, // intentional typo
+        }
+      )
+    );
+  });
+
   it("rejects a system message with a non-allowlisted key (the cross-file contract is enforced, not just declared)", async () => {
     // A staff member tries to sneak a `role: "admin"` field
     // into a system call-history message (a privilege-

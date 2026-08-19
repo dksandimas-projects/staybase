@@ -938,8 +938,8 @@ export type IntercomSender = "guest" | "front-desk" | "system";
 
 // Per `feat/call-history-messages`: call lifecycle events now
 // surface as system messages in the chat thread so the front
-// desk has a permanent record. The three outcomes map directly
-// to the three values staff see on screen:
+// desk has a permanent record. The four outcomes map directly
+// to the values staff see on screen:
 //
 //   "call-answered" — staff accepted via Accept Voice;
 //                     duration is recorded
@@ -947,8 +947,15 @@ export type IntercomSender = "guest" | "front-desk" | "system";
 //                     connecting (guest hung up, network drop,
 //                     or the call timed out before staff picked up)
 //   "call-declined" — staff explicitly pressed Ignore
+//   "call-failed"   — staff pressed Accept, the claim transaction
+//                     committed, but the post-claim audio plumbing
+//                     failed (getUserMedia denied, createAnswer
+//                     failed, writeDoc rejected). The staff TRIED
+//                     to answer — the chat thread says so
+//                     explicitly so the audit trail is accurate.
+//                     Per decision #217 (2026-08-19).
 //
-// All three produce a `intercoms/{roomNumber}/messages` doc with
+// All four produce a `intercoms/{roomNumber}/messages` doc with
 // `sender: "system"`, formatted `text`, and (for answered) call-
 // duration metadata. Future-proofing: an undefined messageType
 // means the doc is a regular guest/staff chat message — old clients
@@ -957,6 +964,7 @@ export type IntercomMessageType =
   | "call-answered"
   | "call-missed"
   | "call-declined"
+  | "call-failed"
   | undefined;
 
 export interface IntercomMessage {
@@ -981,10 +989,12 @@ export interface IntercomMessage {
   // When messageType === "call-answered": the call duration in
   // seconds (connected → hung up). When messageType ===
   // "call-missed": how long the call rang before it ended.
-  // Computed at write time from `Date.now()` on the dispatcher's
-  // clock, not from Firestore server time, because the
-  // duration is a client-relative measurement that doesn't need
-  // a server round-trip to compute.
+  // When messageType === "call-failed": how long the call rang
+  // before the post-claim audio plumbing failed (typically
+  // <500ms). Computed at write time from `Date.now()` on the
+  // dispatcher's clock, not from Firestore server time, because
+  // the duration is a client-relative measurement that doesn't
+  // need a server round-trip to compute.
   callDuration?: number;
   // Per decision #206 (2026-08-19): the staff display name
   // attributed to the `call-answered` system message — mirrors

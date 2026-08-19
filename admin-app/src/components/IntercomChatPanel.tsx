@@ -180,16 +180,33 @@ export function IntercomChatPanel({
             // written by recordCallHistory, so we don't reconstruct
             // the line here — we just pick the right icon.
             if (msg.sender === "system" && msg.messageType) {
-              const icon = msg.messageType === "call-answered"
-                ? Phone
-                : msg.messageType === "call-missed"
-                  ? PhoneMissed
-                  : PhoneOff;
-              const toneClass = msg.messageType === "call-missed"
-                ? "text-amber-600"
-                : msg.messageType === "call-declined"
-                  ? "text-gray-400"
-                  : "text-primary";
+              // Per decision #217 (2026-08-19): the four
+              // messageType values map to four distinct icons and
+              // tone classes. New outcomes must be added to the
+              // dispatch tables below — the fallthrough is
+              // narrowed to the remaining values by TypeScript
+              // so the order of checks matters.
+              const callIconByType: Record<"call-answered" | "call-missed" | "call-declined" | "call-failed", typeof Phone> = {
+                "call-answered": Phone,
+                "call-missed": PhoneMissed,
+                "call-declined": PhoneOff,
+                "call-failed": PhoneOff
+              };
+              const callToneByType: Record<"call-answered" | "call-missed" | "call-declined" | "call-failed", string> = {
+                "call-answered": "text-primary",
+                // amber: the call rang and no one picked up —
+                // the caller's attempt went to voicemail.
+                "call-missed": "text-amber-600",
+                // gray: the staff explicitly chose to ignore.
+                "call-declined": "text-gray-400",
+                // orange: distinct from missed (amber) and
+                // declined (gray). Staff TRIED to answer — the
+                // audio stack failed (mic permission denial,
+                // createAnswer throw, writeDoc rejection).
+                "call-failed": "text-orange-600"
+              };
+              const icon = callIconByType[msg.messageType];
+              const toneClass = callToneByType[msg.messageType];
               return (
                 <div
                   key={msg.id}
