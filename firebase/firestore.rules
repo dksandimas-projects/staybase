@@ -400,12 +400,21 @@ service cloud.firestore {
           && request.resource.data.timestamp == request.time
           && (!("currentStayId" in request.resource.data.keys()) || request.resource.data.currentStayId == null || request.resource.data.currentStayId is string)
           // When sender === "system", the messageType must be one
-          // of the three documented call outcomes (or absent for
+          // of the four documented call outcomes (or absent for
           // future-proofing). No ad-hoc "system" docs without a
           // type — keeps the audit trail structured.
+          // Per decision #217 (2026-08-19): "call-failed" joins the
+          // enum. The pre-#217 enum was 3 values; the post-#217
+          // enum is 4. The enum is closed (no fallback to
+          // anything-else) so a typo on the client side is
+          // rejected by the rule instead of silently writing
+          // a malformed audit-trail doc. See
+          // `shared/types/index.ts §IntercomMessageType` for the
+          // matching TypeScript union — the two must stay in
+          // sync.
           && (request.resource.data.sender != "system"
               || (request.resource.data.keys().hasAny(["messageType"])
-                  && request.resource.data.messageType in ["call-answered", "call-missed", "call-declined"]));
+                  && request.resource.data.messageType in ["call-answered", "call-missed", "call-declined", "call-failed"]));
         allow update: if isStaff()
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead"]);
         allow delete: if isStaff();

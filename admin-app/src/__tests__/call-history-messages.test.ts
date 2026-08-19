@@ -197,7 +197,7 @@ describe("call-history-messages — chat audit trail for WebRTC call lifecycle",
       /sender != "system"/
     );
     expect(firestoreRules).toMatch(
-      /messageType in \["call-answered", "call-missed", "call-declined"\]/
+      /messageType in \["call-answered", "call-missed", "call-declined", "call-failed"\]/
     );
   });
 
@@ -214,19 +214,24 @@ describe("call-history-messages — chat audit trail for WebRTC call lifecycle",
     // The system-message branch reads msg.messageType and picks
     // the icon by outcome.
     expect(inboxPage).toMatch(/sender\s*===\s*"system"\s*&&\s*msg\.messageType/);
-    expect(inboxPage).toMatch(/messageType\s*===\s*"call-answered"/);
-    expect(inboxPage).toMatch(/messageType\s*===\s*"call-missed"/);
-    // The icon ternary falls through to PhoneOff for "call-declined"
-    // and any unexpected value. The matched expression is the
-    // fallthrough arm so the source contract is "PhoneOff is
-    // assigned to the default branch".
-    expect(inboxPage).toMatch(/:\s*PhoneOff\b/);
+    // Per decision #217 (2026-08-19): the icon + tone dispatch
+    // tables replace the pre-#217 chained ternaries. The four
+    // outcomes must all appear in BOTH tables with distinct
+    // mappings. The `Record<...>` shape forces TypeScript to
+    // complain if a future messageType is added without a table
+    // entry — the source-text tests below mirror that gate.
+    expect(inboxPage).toMatch(/"call-answered":\s*Phone/);
+    expect(inboxPage).toMatch(/"call-missed":\s*PhoneMissed/);
+    expect(inboxPage).toMatch(/"call-declined":\s*PhoneOff/);
+    expect(inboxPage).toMatch(/"call-failed":\s*PhoneOff/);
     // data-testid pin per outcome so cypress can target each.
     expect(inboxPage).toMatch(
       /data-testid=\{`call-system-message-\$\{msg\.messageType\}`\}/
     );
     // Tone differentiation per outcome (so missed stands out as
-    // amber even at a glance).
+    // amber, declined is gray, failed is orange — at a glance).
     expect(inboxPage).toMatch(/call-missed.*text-amber|text-amber-600/);
+    expect(inboxPage).toMatch(/call-declined.*text-gray-400|text-gray-400/);
+    expect(inboxPage).toMatch(/call-failed.*text-orange-600|text-orange-600/);
   });
 });
