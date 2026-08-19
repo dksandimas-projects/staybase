@@ -35,8 +35,16 @@ export function IntercomInboxPage() {
     // Per-call microphone mute state + toggle. Owned by AdminContext
     // (the local MediaStream lives there). See feature/INTERCOM-AUDIO-
     // ROUTING.md §"Call mute" for the lifecycle contract.
-    isMicMuted,
+    // `isMicMuted` is intentionally NOT destructured here. Per
+    // decision #219 (2026-08-19): the displayed state derives from
+    // `getActualMicMuted()` (the live `track.enabled` flag), not
+    // from the React `isMicMuted` state. The React state is still
+    // exposed on the context for any future consumer that wants
+    // the user's last-intent hint (e.g. an analytics event or a
+    // different surface that doesn't need live-track accuracy),
+    // but this banner reads the truth, not the hint.
     toggleMicMute,
+    getActualMicMuted,
     // Per decision #206 (2026-08-19): the current staff UID is
     // needed to compare against `incomingCall.acceptedBy.uid` so
     // the banner can render "Connected" (we accepted) vs
@@ -407,6 +415,23 @@ export function IntercomInboxPage() {
 
       {/* WebRTC Signaling Call Banner Overlay */}
       {incomingCall && (() => {
+        // Per decision #219 (2026-08-19): the displayed mic state
+        // is derived from the LIVE `track.enabled` (read at every
+        // render via `getActualMicMuted()`), NOT from the React
+        // `isMicMuted` state. Pre-#219 the pill and button read
+        // `isMicMuted` which could drift from `track.enabled` if
+        // the track was mutated outside `toggleMicMute` (WebRTC
+        // renegotiation, browser tab mute, OS-level audio
+        // subsystem, stale closure in an early render). Operator
+        // reported 2026-08-19: the pill said "MIC OPEN" but the
+        // audio was muted. The displayed state and the actual
+        // audio must converge — the track is the truth. The
+        // `actualMicMuted` local below is captured once per
+        // render (the IIFE re-runs on every state change so the
+        // capture is fresh) and drives the pill text, the dot
+        // colour, the button label, the aria-pressed, the title,
+        // and the button colour — every visual surface.
+        const actualMicMuted = getActualMicMuted();
         // Per decision #206 (2026-08-19): the call banner has three
         // states, not two. The pre-#206 banner had only "ringing"
         // (Accept / Ignore) and "active" (Mute / Disconnect). The
@@ -521,7 +546,7 @@ export function IntercomInboxPage() {
                 <div
                   data-testid={`call-mic-status-pill-${incomingCall.roomId}`}
                   className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border ${
-                    isMicMuted
+                    actualMicMuted
                       ? "border-red-200 bg-red-50 text-red-700"
                       : "border-emerald-200 bg-emerald-50 text-emerald-700"
                   }`}
@@ -529,10 +554,10 @@ export function IntercomInboxPage() {
                   <span
                     aria-hidden="true"
                     className={`inline-block h-1.5 w-1.5 rounded-full ${
-                      isMicMuted ? "bg-red-500" : "bg-emerald-500"
+                      actualMicMuted ? "bg-red-500" : "bg-emerald-500"
                     }`}
                   />
-                  {isMicMuted ? "Mic muted" : "Mic open"}
+                  {actualMicMuted ? "Mic muted" : "Mic open"}
                 </div>
 
                 {/*
@@ -558,20 +583,20 @@ export function IntercomInboxPage() {
                 <button
                   type="button"
                   onClick={() => void toggleMicMute()}
-                  aria-label={isMicMuted ? "Unmute microphone" : "Mute microphone"}
-                  aria-pressed={isMicMuted}
-                  title={isMicMuted
+                  aria-label={actualMicMuted ? "Unmute microphone" : "Mute microphone"}
+                  aria-pressed={actualMicMuted}
+                  title={actualMicMuted
                     ? "Mic is muted. The guest can't hear you. Click to unmute."
                     : "Mic is open. The guest can hear you. Click to mute."}
                   data-testid={`call-mute-toggle-${incomingCall.roomId}`}
                   className={`min-h-[44px] px-5 rounded-lg border text-xs font-bold shadow-sm transition flex items-center gap-1.5 ${
-                    isMicMuted
+                    actualMicMuted
                       ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
                       : "border-primary/30 bg-primary-light text-primary-dark hover:bg-primary/10"
                   }`}
                 >
-                  {isMicMuted ? <MicOff size={14} /> : <Mic size={14} />}
-                  {isMicMuted ? "Unmute" : "Mute"}
+                  {actualMicMuted ? <MicOff size={14} /> : <Mic size={14} />}
+                  {actualMicMuted ? "Unmute" : "Mute"}
                 </button>
 
                 {/*

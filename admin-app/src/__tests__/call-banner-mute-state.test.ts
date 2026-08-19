@@ -144,7 +144,10 @@ describe("IntercomInboxPage — active-call banner (decision #218)", () => {
     });
 
     it("the mute toggle button still has the Mic / MicOff icon swap", () => {
-      expect(inboxSrc).toMatch(/isMicMuted\s*\?\s*<MicOff/);
+      // Per decision #219 (2026-08-19): the conditional reads from
+      // `actualMicMuted` (derived from getActualMicMuted()) rather
+      // than `isMicMuted`. Pin the new symbol.
+      expect(inboxSrc).toMatch(/actualMicMuted\s*\?\s*<MicOff/);
     });
 
     it("the mute toggle button label is still 'Mute' / 'Unmute' (the action, not the state)", () => {
@@ -152,7 +155,7 @@ describe("IntercomInboxPage — active-call banner (decision #218)", () => {
       // pill above. Together they read as
       // "Mic open · Mute" / "Mic muted · Unmute" which is
       // unambiguous even on first read.
-      expect(inboxSrc).toMatch(/isMicMuted\s*\?\s*"Unmute"\s*:\s*"Mute"/);
+      expect(inboxSrc).toMatch(/actualMicMuted\s*\?\s*"Unmute"\s*:\s*"Mute"/);
     });
 
     it("the disconnect button still has the PhoneOff icon + 'Disconnect Call' label", () => {

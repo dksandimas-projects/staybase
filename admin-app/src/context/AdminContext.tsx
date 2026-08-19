@@ -723,6 +723,12 @@ export interface AdminContextType {
   // the `toggleMicMute` and lifecycle reset below.
   isMicMuted: boolean;
   toggleMicMute: () => void;
+  // Per decision #219 (2026-08-19): returns the LIVE `track.enabled`
+  // state (the single source of truth for the mic). The banner
+  // reads this on every render so the pill + button can never
+  // disagree with the audio. `isMicMuted` is kept as a hint for
+  // `toggleMicMute` but is no longer the displayed state.
+  getActualMicMuted: () => boolean;
 
   // Per-staff intercom audio routing (see `plan/features/INTERCOM-AUDIO-ROUTING.md`).
   // The hook lives in `AdminProvider` so every consumer (call audio,
@@ -3809,12 +3815,58 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return;
     }
     const tracks = stream.getAudioTracks();
-    const nextEnabled = !isMicMuted;
+    // Per decision #219 (2026-08-19): the next-enabled value is
+    // derived from the CURRENT TRACK STATE (`track.enabled`),
+    // not from the React `isMicMuted` state. Pre-#219 the code
+    // read `!isMicMuted` which could drift from `track.enabled`
+    // if the track was replaced mid-call (WebRTC renegotiation
+    // can swap the outbound track — the new track arrives with
+    // `enabled = true` by default but the operator's previous
+    // Mute click left the OLD track at `enabled = false`; the
+    // new track's `enabled = true` made the audio audible but
+    // `isMicMuted` still read `true` from the prior render, so
+    // the next Mute click would set the new track to `false`
+    // (silencing it again) and the displayed state would lag
+    // reality by one click). Reading from `track.enabled` makes
+    // the displayed state and the actual track state converge
+    // to the same source of truth.
+    const currentTrackEnabled =
+      tracks.length > 0 ? tracks[0].enabled : true;
+    const nextEnabled = !currentTrackEnabled;
     tracks.forEach((track) => {
       track.enabled = nextEnabled;
     });
-    setIsMicMuted(nextEnabled);
-  }, [isMicMuted]);
+    setIsMicMuted(!nextEnabled);
+  }, []);
+
+  // Per decision #219 (2026-08-19): the UI label MUST be driven
+  // by the actual `track.enabled` state, NOT by the React
+  // `isMicMuted` state. Operator-reported 2026-08-19 (post-#218):
+  // the pill said "MIC OPEN" but the audio was muted. Root cause:
+  // something OTHER than `toggleMicMute` set `track.enabled =
+  // false` (WebRTC track renegotiation, browser tab mute, the
+  // OS audio subsystem, or a stale closure in an early render)
+  // and `isMicMuted` didn't follow. The displayed state and
+  // the actual audio desynced, so the operator saw "Mic open"
+  // but the guest heard silence. The fix: every render of the
+  // banner reads the live `track.enabled` value, so the pill
+  // and the button can never disagree with the audio. `useState`
+  // is no longer the source of truth for the displayed state —
+  // it's only a hint to `toggleMicMute` about the user's last
+  // intent (so double-clicks don't oscillate). The track is
+  // the truth.
+  const getActualMicMuted = useCallback((): boolean => {
+    const stream = adminMediaStreamRef.current;
+    if (!stream) return false;
+    const tracks = stream.getAudioTracks();
+    if (tracks.length === 0) return false;
+    // The convention: muted = track.enabled === false. Read the
+    // FIRST audio track's state — getUserMedia requests a single
+    // audio track today, so tracks[0] is the only outbound track
+    // in practice. Multi-track callers would need a per-track UI
+    // surface (out of scope for this fix).
+    return !tracks[0].enabled;
+  }, []);
 
   const cleanupAdminCall = () => {
     // Per-call-history-messages: dispatch the system message
@@ -6614,6 +6666,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         declineCall,
         isMicMuted,
         toggleMicMute,
+        getActualMicMuted,
         audioRouting: audioRoutingState.routing,
         audioRoutingLoading: audioRoutingState.loading,
         audioRoutingError: audioRoutingState.error,

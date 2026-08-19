@@ -674,17 +674,20 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(adminContext).toMatch(
       /track\.enabled\s*=\s*nextEnabled/
     );
-    // And it must compute the new flag from the CURRENT
-    // isMicMuted (not stale closure) so rapid double-clicks don't
-    // get lost to batching — guard against any future regression
-    // that drops back to `setIsMicMuted(!isMicMuted)` from a
-    // stale ref. The branch with a live MediaStream must use the
-    // computed `nextEnabled`.
+    // Per decision #219 (2026-08-19): the toggle computes
+    // `nextEnabled` from the LIVE `track.enabled` (the single
+    // source of truth) rather than from the React `isMicMuted`
+    // state. Pre-#219 the code read `!isMicMuted` which could
+    // drift from `track.enabled` if the track was mutated outside
+    // `toggleMicMute` (WebRTC renegotiation, browser tab mute,
+    // OS-level audio subsystem, stale closure in an early render).
+    // Pin the live-track read.
     const block = adminContext.match(
-      /const toggleMicMute\s*=\s*useCallback\([\s\S]+?}\s*,\s*\[isMicMuted\]\);/
+      /const toggleMicMute\s*=\s*useCallback\([\s\S]+?}\s*,\s*\[\]\);/
     );
     expect(block, "toggleMicMute useCallback block must exist").toBeTruthy();
-    expect(block![0]).toMatch(/const nextEnabled\s*=\s*!isMicMuted/);
+    expect(block![0]).toMatch(/const currentTrackEnabled[\s\S]+?tracks\[0\]\.enabled/);
+    expect(block![0]).toMatch(/const nextEnabled\s*=\s*!currentTrackEnabled/);
     expect(block![0]).toMatch(/tracks\.forEach\(\(track\)\s*=>\s*\{?\s*track\.enabled/);
   });
 
@@ -716,30 +719,39 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     );
   });
 
-  it("IntercomInboxPage active-call banner shows a Mute / Unmute toggle bound to isMicMuted + toggleMicMute", () => {
-    // The button must live inside the active-call banner — staff
-    // can only mute during a call, not on the inbox idle state.
-    // Find the banner's button block by slicing the source between
-    // the "Live mic status pill" comment (per decision #218,
-    // 2026-08-19; was "Voice connected indicators" pre-#218) and
-    // the next disconnect-call button.
-    const indicators = inboxPage.indexOf("Live mic status pill");
-    expect(indicators).toBeGreaterThan(0);
-    const disconnect = inboxPage.indexOf("Disconnect Call", indicators);
-    expect(disconnect).toBeGreaterThan(indicators);
-    const banner = inboxPage.slice(indicators, disconnect + "Disconnect Call".length);
+  it("IntercomInboxPage active-call banner shows a Mute / Unmute toggle bound to getActualMicMuted + toggleMicMute", () => {
+      // The button must live inside the active-call banner — staff
+      // can only mute during a call, not on the inbox idle state.
+      // Find the banner's button block by slicing the source between
+      // the actualMicMuted capture (per decision #219, 2026-08-19;
+      // was the isMicMuted read pre-#219) and the next disconnect-call
+      // button. The actualMicMuted capture is OUTSIDE the pill
+      // block (it lives at the top of the IIFE), so anchoring on
+      // "Live mic status pill" would slice inside it and miss the
+      // capture declaration.
+      const actualIdx = inboxPage.indexOf("const actualMicMuted = getActualMicMuted()");
+      expect(actualIdx).toBeGreaterThan(0);
+      const disconnect = inboxPage.indexOf("Disconnect Call", actualIdx);
+      expect(disconnect).toBeGreaterThan(actualIdx);
+      const banner = inboxPage.slice(actualIdx, disconnect + "Disconnect Call".length);
 
-    // The button is wired to toggleMicMute and reads isMicMuted.
-    expect(banner).toMatch(/onClick=\{\(\)\s*=>\s*void\s+toggleMicMute\(\)\}/);
-    expect(banner).toMatch(/aria-pressed=\{isMicMuted\}/);
+      // The button is wired to toggleMicMute and reads the LIVE
+      // track state via getActualMicMuted() (per decision #219,
+      // 2026-08-19). The pill text, button label, aria-pressed,
+      // title, and styling are all derived from `actualMicMuted`
+      // — the IIFE captures `getActualMicMuted()` once at the top
+      // of the render. Pin that capture + the wiring.
+      expect(banner).toMatch(/const actualMicMuted\s*=\s*getActualMicMuted\(\)/);
+      expect(banner).toMatch(/onClick=\{\(\)\s*=>\s*void\s+toggleMicMute\(\)\}/);
+      expect(banner).toMatch(/aria-pressed=\{actualMicMuted\}/);
 
-    // It renders a clear label that swaps with the muted state —
-    // the JSX text is rendered as
-    //   `{isMicMuted ? "Unmute" : "Mute"}`
-    // inside the Mute-Unmute toggle button. Just match the literal
-    // labels (the `?:` flips them at runtime; the source must
-    // mention both).
-    expect(banner).toMatch(/\?\s*"Unmute"\s*:\s*"Mute"/);
+      // It renders a clear label that swaps with the muted state —
+      // the JSX text is rendered as
+      //   `{actualMicMuted ? "Unmute" : "Mute"}`
+      // inside the Mute-Unmute toggle button. Just match the literal
+      // labels (the `?:` flips them at runtime; the source must
+      // mention both).
+      expect(banner).toMatch(/\?\s*"Unmute"\s*:\s*"Mute"/);
 
     // The live mic status pill alternates "Mic open" / "Mic muted"
     // so a sighted operator at a glance sees whether the mic is hot.
@@ -761,6 +773,6 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(banner).toMatch(/min-h-\[44px\]/);
 
     // The icon must swap between Mic (idle) and MicOff (muted).
-    expect(banner).toMatch(/\{isMicMuted\s*\?\s*<MicOff/);
+    expect(banner).toMatch(/\{actualMicMuted\s*\?\s*<MicOff/);
   });
 });
