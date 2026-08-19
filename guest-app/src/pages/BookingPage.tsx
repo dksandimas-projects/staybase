@@ -40,7 +40,16 @@ import {
   calculateVoucherBase,
   calculateBreakfastAddOn,
   calculateExtraBedAddOn,
-  requiredExtraBedsFor
+  requiredExtraBedsFor,
+  // Per B-10 / B-10c / decision #223 (2026-08-19): the
+  // upload-timeout helper. Wraps `uploadBytes(...)` on Firebase
+  // Storage in a `Promise.race` so a hung connection (mobile
+  // 3G with auth-in-flight) doesn't leave the staff/guest
+  // staring at a permanent "Uploading..." spinner. See
+  // `shared/utils/uploads.ts` for the rationale + the
+  // 90s default.
+  raceUploadWithTimeout,
+  DEFAULT_UPLOAD_TIMEOUT_MS
 } from "@spark-inn/shared";
 // Per CHD-11 (2026-08-04, per decision #184): the per-type
 // capacity-fit indicator derivation. The helper is the
@@ -1311,7 +1320,16 @@ export function BookingPage() {
         const compressed = await compressImageFile(file, DISCOUNT_ID_COMPRESSION_OPTIONS);
         const safeFileName = createPrivateUploadFileName(compressed.file.name);
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${safeFileName}`);
-        const uploadResult = await uploadBytes(storageRef, compressed.file);
+        // Per B-10c / decision #223 (2026-08-19): same
+        // race-with-timeout protection as the payment-proof
+        // upload (line 1354). Without this, a hung mobile
+        // connection leaves the "Uploading ID photo..." spinner
+        // up indefinitely on the senior/PWD step.
+        const uploadResult = await raceUploadWithTimeout(
+          uploadBytes(storageRef, compressed.file),
+          DEFAULT_UPLOAD_TIMEOUT_MS,
+          "Discount ID upload"
+        );
         const previewUrl = URL.createObjectURL(compressed.file);
         // Per BF-30: single state record so the name + url
         // are always written together (no desync race).
@@ -1342,7 +1360,18 @@ export function BookingPage() {
         const compressed = await compressImageFile(file);
         const safeFileName = createPrivateUploadFileName(compressed.file.name);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${safeFileName}`);
-        const uploadResult = await uploadBytes(storageRef, compressed.file);
+        // Per B-10 / decision #223 (2026-08-19): race the upload
+        // against a 90s timeout. Without this, Firebase Storage
+        // direct uploads on a hung mobile connection leave the
+        // user staring at "Uploading..." forever (the `finally`
+        // block runs but `uploadBytes` never resolves). The
+        // timeout throws an Error that the catch below formats
+        // into the existing "Receipt upload failed..." UI.
+        const uploadResult = await raceUploadWithTimeout(
+          uploadBytes(storageRef, compressed.file),
+          DEFAULT_UPLOAD_TIMEOUT_MS,
+          "Receipt upload"
+        );
         const previewUrl = URL.createObjectURL(compressed.file);
         // Per BF-30: single state record.
         setPaymentProofUpload({ name: file.name, path: uploadResult.ref.fullPath, previewUrl });
