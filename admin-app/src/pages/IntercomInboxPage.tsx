@@ -503,14 +503,36 @@ export function IntercomInboxPage() {
               </>
             ) : (
               <>
-                {/* Voice connected indicators */}
-                <div className="hidden lg:flex items-center gap-1 bg-white/60 rounded px-2.5 py-1 border border-gray-150 text-[10px] text-gray-500 font-semibold">
-                  {isMicMuted ? (
-                    <MicOff size={10} className="text-amber-600" />
-                  ) : (
-                    <Mic size={10} className="text-primary" />
-                  )}
-                  {isMicMuted ? "Mic Muted" : "Audio Stream: Active"}
+                {/* Live mic status pill — always visible so the
+                 * operator can see the current mic state at a
+                 * glance, not just the action label of the toggle
+                 * button below. Pre-#218 the indicator was
+                 * `hidden lg:flex` (desktop only) and the toggle
+                 * button label was the only status cue on
+                 * mobile/tablet — that made the post-accept
+                 * "Mute" label read as "I'm muted" even when the
+                 * mic was open (operator-reported 2026-08-19).
+                 * The pill now shows on every breakpoint with a
+                 * green/red dot + a clear state label
+                 * ("Mic open" / "Mic muted"). The toggle button
+                 * below keeps the action label ("Mute" /
+                 * "Unmute") so the two surfaces don't compete.
+                 */}
+                <div
+                  data-testid={`call-mic-status-pill-${incomingCall.roomId}`}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border ${
+                    isMicMuted
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`inline-block h-1.5 w-1.5 rounded-full ${
+                      isMicMuted ? "bg-red-500" : "bg-emerald-500"
+                    }`}
+                  />
+                  {isMicMuted ? "Mic muted" : "Mic open"}
                 </div>
 
                 {/*
@@ -526,6 +548,12 @@ export function IntercomInboxPage() {
                  *   Mute (idle / unmuted)    → primary-on-light chip
                  *   Unmute (mid-call mute)   → amber-on-light chip
                  * The amber draws the eye without screaming "error".
+                 *
+                 * The button label is the ACTION ("Mute" = click to
+                 * mute), not the current state — the live status
+                 * pill above carries the current state. Together
+                 * they read as "Mic open · Mute" / "Mic muted ·
+                 * Unmute" which is unambiguous even on first read.
                  */}
                 <button
                   type="button"
@@ -534,7 +562,7 @@ export function IntercomInboxPage() {
                   aria-pressed={isMicMuted}
                   title={isMicMuted
                     ? "Mic is muted. The guest can't hear you. Click to unmute."
-                    : "Mute mic. The guest will not hear you while muted."}
+                    : "Mic is open. The guest can hear you. Click to mute."}
                   data-testid={`call-mute-toggle-${incomingCall.roomId}`}
                   className={`min-h-[44px] px-5 rounded-lg border text-xs font-bold shadow-sm transition flex items-center gap-1.5 ${
                     isMicMuted
@@ -546,9 +574,26 @@ export function IntercomInboxPage() {
                   {isMicMuted ? "Unmute" : "Mute"}
                 </button>
 
+                {/*
+                 * Per-call disconnect. Calls declineCall() which
+                 * sets adminCallExplicitDeclineRef=true and routes
+                 * through cleanupAdminCall — the terminal event
+                 * that fires the "call-answered" audit message (the
+                 * `answered` branch wins the if/else over explicit
+                 * decline because the answer ref is already set at
+                 * this point in the lifecycle).
+                 *
+                 * Pre-#218 the className used `bg-red-650` which is
+                 * not in the Tailwind palette (the standard scale
+                 * jumps 600 → 700) so the button rendered with NO
+                 * background and was effectively invisible against
+                 * the white card. Fixed to `bg-red-600` + the
+                 * standard `hover:bg-red-700` (operator-reported
+                 * 2026-08-19).
+                 */}
                 <button
                   onClick={() => void declineCall()}
-                  className="min-h-[44px] px-6 rounded-lg bg-red-650 hover:bg-red-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
+                  className="min-h-[44px] px-6 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
                 >
                   <PhoneOff size={14} />
                   Disconnect Call

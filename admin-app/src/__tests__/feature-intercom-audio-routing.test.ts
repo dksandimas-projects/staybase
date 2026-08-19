@@ -720,9 +720,10 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     // The button must live inside the active-call banner — staff
     // can only mute during a call, not on the inbox idle state.
     // Find the banner's button block by slicing the source between
-    // the "Voice connected indicators" comment and the next
-    // disconnect-call button.
-    const indicators = inboxPage.indexOf("Voice connected indicators");
+    // the "Live mic status pill" comment (per decision #218,
+    // 2026-08-19; was "Voice connected indicators" pre-#218) and
+    // the next disconnect-call button.
+    const indicators = inboxPage.indexOf("Live mic status pill");
     expect(indicators).toBeGreaterThan(0);
     const disconnect = inboxPage.indexOf("Disconnect Call", indicators);
     expect(disconnect).toBeGreaterThan(indicators);
@@ -740,10 +741,15 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     // mention both).
     expect(banner).toMatch(/\?\s*"Unmute"\s*:\s*"Mute"/);
 
-    // The chip line alternates "Audio Stream: Active" / "Mic Muted"
+    // The live mic status pill alternates "Mic open" / "Mic muted"
     // so a sighted operator at a glance sees whether the mic is hot.
-    expect(banner).toMatch(/Audio Stream:\s*Active/);
-    expect(banner).toMatch(/Mic Muted/);
+    // Per decision #218 (2026-08-19): the pill is now always
+    // visible (was `hidden lg:flex` in pre-#218, desktop only) and
+    // the text was shortened from "Audio Stream: Active" to
+    // "Mic open" so the mobile/tablet/smaller-laptop view also
+    // sees the current state.
+    expect(banner).toMatch(/Mic open/);
+    expect(banner).toMatch(/Mic muted/);
 
     // data-testid pin for e2e + stability.
     expect(banner).toMatch(
