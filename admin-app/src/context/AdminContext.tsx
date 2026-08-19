@@ -3368,18 +3368,20 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               orderRef: data.orderRef || undefined,
               isEarlyCheckInRequest: !!data.isEarlyCheckInRequest,
               currentStayId: data.currentStayId || undefined,
-              // Per FOL-02 (2026-08-07) and decision #206
-              // (2026-08-19): the snapshot mapper must preserve
-              // every field the `IntercomMessage` contract
-              // guarantees. `messageType`, `callStartedAt`, and
-              // `callDuration` are pre-existing drops (the
-              // call-history-messages write path emits them but
-              // the read path here silently strips them — the
-              // chat panel can't render the centered "Call
-              // answered" footer row without `messageType`; the
-              // audit ticket is filed separately as the
-              // call-history-messages read-side completion).
-              // `callAnsweredByName` is the new #206 field.
+              // Per FOL-02 (2026-08-07, per `GOTCHAS.md` line 30) and
+              // decision #214 (2026-08-19): the snapshot mapper must
+              // preserve every field the `IntercomMessage` contract
+              // guarantees. The pre-#214 surface silently dropped
+              // `messageType`, `callStartedAt`, and `callDuration` —
+              // the chat panel couldn't render the centered "Call
+              // answered" footer row without `messageType`. The #214
+              // fix closed the drops alongside adding the new
+              // `callAnsweredByName` field; the per-field test pins
+              // (one per field) live in
+              // `admin-app/src/__tests__/call-staff-claim-transaction.test.ts`
+              // so a future refactor that drops any of the four
+              // breaks the test instead of silently regressing
+              // (FOL-02 contract enforcement pattern).
               messageType: data.messageType || undefined,
               callStartedAt: data.callStartedAt?.toMillis
                 ? new Date(data.callStartedAt.toMillis()).toISOString()
