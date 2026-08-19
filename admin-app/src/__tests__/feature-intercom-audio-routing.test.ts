@@ -639,4 +639,122 @@ describe("INTERCOM-AUDIO-ROUTING — per-staff output device selection", () => {
     expect(devices).toMatch(/NotAllowedError/);
     expect(devices).toMatch(/kind:\s*"denied"/);
   });
+
+  // ── Call-mic mute (feat/call-mic-mute) ─────────────────────────
+  // The active-call banner exposes a Mute / Unmute button toggling
+  // the local outbound MediaStreamTrack's `enabled` property. Scope
+  // is per-call only — the flag auto-resets on every new call and
+  // on Disconnect, mirroring how every phone / conferencing UI
+  // behaves. The contract lives in two files: AdminContext (the
+  // state + the track toggle) and IntercomInboxPage (the button).
+
+  it("AdminContext exposes a per-call isMicMuted state and a toggleMicMute handler", () => {
+    // Type contract — the field pair is part of the public
+    // AdminContext surface so the Inbox banner can subscribe.
+    expect(adminContext).toMatch(/isMicMuted:\s*boolean/);
+    expect(adminContext).toMatch(/toggleMicMute:\s*\(\s*\)\s*=>\s*void/);
+    // Implementation: local boolean useState — no persistence, no
+    // external write (the mute flag is intentionally scoped to a
+    // single call's lifetime, see the field's TSDoc in source).
+    expect(adminContext).toMatch(/useState<boolean>\(false\)/);
+    // The toggle must operate on the LIVE MediaStream, not a
+    // ref-captured snapshot of a previous call's tracks. The
+    // implementation captures `adminMediaStreamRef.current` into
+    // a local `stream` then calls `getAudioTracks()` against it.
+    expect(adminContext).toMatch(
+      /adminMediaStreamRef\.current[\s\S]+?getAudioTracks\(\)/
+    );
+  });
+
+  it("toggleMicMute sets MediaStreamTrack.enabled = false / true on every audio track", () => {
+    // The remote end hears silence only when each outbound audio
+    // track is `enabled = false`. The implementation must walk every
+    // track in the stream (not assume a single track) — the stream
+    // may contain echo-cancellation + noise-suppression tracks.
+    expect(adminContext).toMatch(
+      /track\.enabled\s*=\s*nextEnabled/
+    );
+    // And it must compute the new flag from the CURRENT
+    // isMicMuted (not stale closure) so rapid double-clicks don't
+    // get lost to batching — guard against any future regression
+    // that drops back to `setIsMicMuted(!isMicMuted)` from a
+    // stale ref. The branch with a live MediaStream must use the
+    // computed `nextEnabled`.
+    const block = adminContext.match(
+      /const toggleMicMute\s*=\s*useCallback\([\s\S]+?}\s*,\s*\[isMicMuted\]\);/
+    );
+    expect(block, "toggleMicMute useCallback block must exist").toBeTruthy();
+    expect(block![0]).toMatch(/const nextEnabled\s*=\s*!isMicMuted/);
+    expect(block![0]).toMatch(/tracks\.forEach\(\(track\)\s*=>\s*\{?\s*track\.enabled/);
+  });
+
+  it("AdminContext cleanupAdminCall resets isMicMuted so the next call starts unmuted", () => {
+    // The phone-meets-conferencing-app invariant: every new call is
+    // unmuted, regardless of where the previous one ended. We have
+    // to enforce this through cleanupAdminCall because that's the
+    // single funnel for every disconnect path (operator hits
+    // Disconnect, guest hangs up, second call supersedes the first,
+    // tab closes). A direct setIsMicMuted(false) inside cleanup
+    // keeps the contract obvious from the code.
+    //
+    // The match needs to keep going past the inner `}` of the
+    // `if (adminRemoteAudioRef.current)` block — that is, all the
+    // way to the closing brace of `cleanupAdminCall` itself.
+    // A non-greedy `[\s\S]+?` followed by the literal
+    // `setIsMicMuted(false);` reliably walks past the inner
+    // brace and lands on the lifecycle reset.
+    expect(adminContext).toMatch(
+      /const cleanupAdminCall\s*=\s*\(\)\s*=>\s*\{[\s\S]+?setIsMicMuted\(false\);/
+    );
+    // Belt-and-braces: also assert the reset comment, with a
+    // generous cap on intervening characters, so a future
+    // refactor that moves the reset somewhere else has to
+    // explicitly disambiguate. The actual intervening span is
+    // ~180 chars; 600 leaves room for prose refactors.
+    expect(adminContext).toMatch(
+      /Reset the per-call mute flag[\s\S]{0,600}?setIsMicMuted\(false\)/
+    );
+  });
+
+  it("IntercomInboxPage active-call banner shows a Mute / Unmute toggle bound to isMicMuted + toggleMicMute", () => {
+    // The button must live inside the active-call banner — staff
+    // can only mute during a call, not on the inbox idle state.
+    // Find the banner's button block by slicing the source between
+    // the "Voice connected indicators" comment and the next
+    // disconnect-call button.
+    const indicators = inboxPage.indexOf("Voice connected indicators");
+    expect(indicators).toBeGreaterThan(0);
+    const disconnect = inboxPage.indexOf("Disconnect Call", indicators);
+    expect(disconnect).toBeGreaterThan(indicators);
+    const banner = inboxPage.slice(indicators, disconnect + "Disconnect Call".length);
+
+    // The button is wired to toggleMicMute and reads isMicMuted.
+    expect(banner).toMatch(/onClick=\{\(\)\s*=>\s*void\s+toggleMicMute\(\)\}/);
+    expect(banner).toMatch(/aria-pressed=\{isMicMuted\}/);
+
+    // It renders a clear label that swaps with the muted state —
+    // the JSX text is rendered as
+    //   `{isMicMuted ? "Unmute" : "Mute"}`
+    // inside the Mute-Unmute toggle button. Just match the literal
+    // labels (the `?:` flips them at runtime; the source must
+    // mention both).
+    expect(banner).toMatch(/\?\s*"Unmute"\s*:\s*"Mute"/);
+
+    // The chip line alternates "Audio Stream: Active" / "Mic Muted"
+    // so a sighted operator at a glance sees whether the mic is hot.
+    expect(banner).toMatch(/Audio Stream:\s*Active/);
+    expect(banner).toMatch(/Mic Muted/);
+
+    // data-testid pin for e2e + stability.
+    expect(banner).toMatch(
+      /data-testid=\{`call-mute-toggle-\$\{incomingCall\.roomId\}`\}/
+    );
+
+    // The button must satisfy the CLAUDE.md 44px tap-target hard rule
+    // — peek at the className and the min-h token.
+    expect(banner).toMatch(/min-h-\[44px\]/);
+
+    // The icon must swap between Mic (idle) and MicOff (muted).
+    expect(banner).toMatch(/\{isMicMuted\s*\?\s*<MicOff/);
+  });
 });

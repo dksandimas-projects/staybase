@@ -9,7 +9,7 @@ import { StoreOrderMessageCard } from "../components/StoreOrderMessageCard";
 import { ArrowLeft } from "lucide-react";
 import {
   MessageSquare, Send, PhoneOff, Phone,
-  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink,
+  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, MicOff, ShoppingBag, ExternalLink,
   Bell, BellOff, Headphones
 } from "lucide-react";
 import config from "@config";
@@ -31,7 +31,12 @@ export function IntercomInboxPage() {
     hotelConfig,
     storeOrders,
     applyAudioSink,
-    audioRouting
+    audioRouting,
+    // Per-call microphone mute state + toggle. Owned by AdminContext
+    // (the local MediaStream lives there). See feature/INTERCOM-AUDIO-
+    // ROUTING.md §"Call mute" for the lifecycle contract.
+    isMicMuted,
+    toggleMicMute
   } = useAdmin();
   const { isMobile } = useBreakpoint();
 
@@ -444,10 +449,47 @@ export function IntercomInboxPage() {
               <>
                 {/* Voice connected indicators */}
                 <div className="hidden lg:flex items-center gap-1 bg-white/60 rounded px-2.5 py-1 border border-gray-150 text-[10px] text-gray-500 font-semibold">
-                  <Mic size={10} className="text-primary" />
-                  Audio Stream: Active
+                  {isMicMuted ? (
+                    <MicOff size={10} className="text-amber-600" />
+                  ) : (
+                    <Mic size={10} className="text-primary" />
+                  )}
+                  {isMicMuted ? "Mic Muted" : "Audio Stream: Active"}
                 </div>
-                
+
+                {/*
+                 * Per-call mic mute toggle. Owned by AdminContext so
+                 * it sees the local MediaStream and reads/writes its
+                 * audio track's `enabled` property. The toggle is
+                 * purely client-side — the remote end hears silence
+                 * only while muted, and the flag auto-resets on the
+                 * next call (or on Disconnect), so a stale mute can't
+                 * surprise the operator on the next guest.
+                 *
+                 * Visual states mirror the conventions:
+                 *   Mute (idle / unmuted)    → primary-on-light chip
+                 *   Unmute (mid-call mute)   → amber-on-light chip
+                 * The amber draws the eye without screaming "error".
+                 */}
+                <button
+                  type="button"
+                  onClick={() => void toggleMicMute()}
+                  aria-label={isMicMuted ? "Unmute microphone" : "Mute microphone"}
+                  aria-pressed={isMicMuted}
+                  title={isMicMuted
+                    ? "Mic is muted. The guest can't hear you. Click to unmute."
+                    : "Mute mic. The guest will not hear you while muted."}
+                  data-testid={`call-mute-toggle-${incomingCall.roomId}`}
+                  className={`min-h-[44px] px-5 rounded-lg border text-xs font-bold shadow-sm transition flex items-center gap-1.5 ${
+                    isMicMuted
+                      ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                      : "border-primary/30 bg-primary-light text-primary-dark hover:bg-primary/10"
+                  }`}
+                >
+                  {isMicMuted ? <MicOff size={14} /> : <Mic size={14} />}
+                  {isMicMuted ? "Unmute" : "Mute"}
+                </button>
+
                 <button
                   onClick={() => void declineCall()}
                   className="min-h-[44px] px-6 rounded-lg bg-red-650 hover:bg-red-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"

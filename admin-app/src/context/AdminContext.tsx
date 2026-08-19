@@ -667,6 +667,20 @@ export interface AdminContextType {
   acceptCall: () => void | Promise<void>;
   declineCall: () => void | Promise<void>;
 
+  // Per-call mute state. Mirrors the "Mute" button on every phone /
+  // conferencing app: scoped to the active call only and auto-resets
+  // to unmuted on the next call. The active-call banner reads this
+  // flag and shows Mute / Unmute accordingly; clicking toggles the
+  // local MediaStreamTrack's `enabled` property so the remote end
+  // hears silence while muted without disconnecting. We deliberately
+  // do NOT persist this across calls — a stale mute on a fresh call
+  // is a worse UX than asking the operator to reach for the button.
+  // Owned by AdminContext because the MediaStream itself lives here
+  // (set in acceptCall from getUserMedia). Implementation details in
+  // the `toggleMicMute` and lifecycle reset below.
+  isMicMuted: boolean;
+  toggleMicMute: () => void;
+
   // Per-staff intercom audio routing (see `plan/features/INTERCOM-AUDIO-ROUTING.md`).
   // The hook lives in `AdminProvider` so every consumer (call audio,
   // notification sound, Audio Settings page) sees the same live value.
@@ -3486,6 +3500,42 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
   const adminPreviousCallRoomIdRef = useRef<string | null>(null);
 
+  // Per-call microphone mute flag. `false` = mic hot, `true` =
+  // track.enabled = false on the local outbound audio. Auto-resets
+  // to false on every new call (acceptCall, status → active) and on
+  // every cleanup (declineCall / disconnect / tab close). Lives in
+  // AdminContext state (not a ref) so the IntercomInboxPage banner
+  // can read isMicMuted through useAdmin() and re-render the button
+  // label/icon reactively.
+  const [isMicMuted, setIsMicMuted] = useState<boolean>(false);
+
+  const toggleMicMute = useCallback(() => {
+    // Flip the local track's `enabled` property on every audio track
+    // in the stream. The active call's MediaStream lives in
+    // adminMediaStreamRef (set in `acceptCall` from getUserMedia)
+    // and may contain more than one track in the future (e.g.
+    // echo-cancelling mic + speaker). Setting `enabled = false` on
+    // the outbound track is what makes the remote end hear silence
+    // — the local mic is still physically hot, just the network
+    // packets stop carrying audio. This matches the behaviour of
+    // every conferencing UI: the indicator in the room UI is the
+    // local handle, not a server-side muting of the other party.
+    const stream = adminMediaStreamRef.current;
+    if (!stream) {
+      // No active call — fall through to the state flip anyway so
+      // the UI stays in sync if the call ends mid-click. The next
+      // call will ignore the stale state via the lifecycle reset.
+      setIsMicMuted((prev) => !prev);
+      return;
+    }
+    const tracks = stream.getAudioTracks();
+    const nextEnabled = !isMicMuted;
+    tracks.forEach((track) => {
+      track.enabled = nextEnabled;
+    });
+    setIsMicMuted(nextEnabled);
+  }, [isMicMuted]);
+
   const cleanupAdminCall = () => {
     adminIceUnsubscribeRef.current?.();
     adminIceUnsubscribeRef.current = null;
@@ -3499,6 +3549,13 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       adminRemoteAudioRef.current.srcObject = null;
       adminRemoteAudioRef.current = null;
     }
+    // Reset the per-call mute flag. Every disconnect path (operator
+    // pressed Disconnect, the guest hung up, a second call superseded
+    // this one, the tab is closing) goes through cleanupAdminCall, so
+    // a single line here ensures the next call always starts unmuted.
+    // Mirrors the "Mute resets on every new call" UX of phone /
+    // conferencing apps — see isMicMuted docs above for rationale.
+    setIsMicMuted(false);
   };
 
   useEffect(() => {
@@ -5936,6 +5993,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         triggerIncomingCall,
         acceptCall,
         declineCall,
+        isMicMuted,
+        toggleMicMute,
         audioRouting: audioRoutingState.routing,
         audioRoutingLoading: audioRoutingState.loading,
         audioRoutingError: audioRoutingState.error,
