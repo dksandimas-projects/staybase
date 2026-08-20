@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleVerifyAndRecordPayment } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -13,7 +13,7 @@ import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
-import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
+import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
@@ -667,6 +667,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleApplyBookingDiscount(req, res);
   }
 
+  // Per DSC-04 (2026-08-15): apply-reservation-discount is
+  // the atomic sibling of apply-discount. The admin client's
+  // reservation-scope path uses this endpoint instead of
+  // looping apply-discount, so partial-failure (room 1
+  // succeeds, room 2 fails) can't leave the reservation
+  // half-discounted. Same staff-auth posture as apply-discount.
+  if (domain === "bookings" && action === "apply-reservation-discount" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleApplyReservationDiscount(req, res);
+  }
+
+  // Per VOU-02 (2026-08-14): remove-voucher is the missing
+  // half of the apply-discount symmetry. Senior/PWD has
+  // handleRejectDiscount; vouchers had no equivalent.
+  // Staff-only (mirrors apply-discount's auth posture) —
+  // guest-facing "Remove" link in VOUCHERS.md:44 is a
+  // separate future endpoint.
+  if (domain === "bookings" && action === "remove-voucher" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleRemoveVoucher(req, res);
+  }
+
+  // Per LOW-1 (reports audit 2026-08-10) +
+  // `DECISIONS-FEATURES.md #99` (LOU workflow):
+  // the staff-toggled LOU (Letter of Undertaking) flag
+  // for corporate chargeback bookings. Staff-only
+  // (mirrors the auth posture of `apply-discount` +
+  // `reject-discount` + `reject-payment`). Rate-limited
+  // at 30/min/IP — same bucket as the other staff
+  // tap-and-confirm booking mutations.
+  if (domain === "bookings" && action === "set-lou-received" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-lou:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many LOU updates. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleSetLouReceived(req, res);
+  }
+
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 60000)) {
       return res.status(429).json({ success: false, error: "Too many confirm requests. Please try again in a minute." });
@@ -1253,8 +1303,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
     }
 
-    
+
     return await handleCreateStoreOrder(req, res);
+  }
+
+  // Per STR-01 (2026-08-14): confirm-order is the missing
+  // staff-authenticated endpoint that decrements stock +
+  // stamps `stockDecrementedAt` + flips status to "confirmed".
+  // The cancel-order endpoint reads `stockDecrementedAt`
+  // before restoring, so this is the writer half of the
+  // create-then-confirm-then-cancel state machine.
+  if (domain === "store" && action === "confirm-order" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleConfirmStoreOrder(req, res);
   }
 
   if (domain === "store" && action === "cancel-order" && req.method === "POST") {

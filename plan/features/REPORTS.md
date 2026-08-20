@@ -6,17 +6,34 @@
 
 ## Overview
 
-The `/reports` page gives staff visibility into hotel performance and sales over time. Organized into two tabs: **Performance** (occupancy, bookings by source) and **Sales** (all revenue streams consolidated). Both tabs are exportable as PDF and XLSX. Accessible to both Front Desk and Admin roles.
+The `/reports` page gives staff visibility into hotel performance and sales over time. Organized into four tabs: **Performance** (occupancy, bookings by source, ADR/RevPAR), **Sales** (all revenue streams consolidated, including VAT, receivables, corporate invoicing, loyalty liability, and the Finance & Reports Sales XLSX), **Daily Close** (end-of-shift cash reconciliation — the only tab front desk can see), and **Liability** (cancellation-liability queue + refund-state projection, admin-only). Performance / Sales / Daily Close are exportable as PDF; the page-level CSV is the generic bookings ledger; the Sales XLSX is the multi-sheet financial export; the admin-only Full Backup bundles Bookings + StoreOrders + every other operator surface.
+
+## Role-Based Access
+
+Per RPT-04 (2026-08-10): the page-level route (`/reports`) is open to both staff roles, but the four tabs are gated — three are admin-only, one is shared.
+
+| Role | Tabs visible | Exports available |
+|---|---|---|
+| Front Desk | **Daily Close** only | Page-level CSV (bookings ledger), Print |
+| Admin | All four: Performance, Sales, Daily Close, Liability | Page-level CSV, Print, PDF, Sales XLSX, Full Backup XLSX |
+
+Rationale: front desk only acts on the data surfaced on this page through the Daily Close tab (end-of-shift reconciliation). The other three tabs are managerial / financial / refund-queue data whose underlying actions (refunds, points redemption, full backup) are already admin-only — collapsing the view to match the action surface removes a PII / financial-data leak that didn't serve any front-desk workflow.
+
+Implementation: in `admin-app/src/pages/ReportsPage.tsx`, the `useState<ReportTab>(...)` initializer branches on `currentUser?.role === "admin"` (defaults Performance for admin, Daily Close for front desk). The three admin-only tab buttons (`Performance`, `Sales`, `Liability`) are wrapped in `{currentUser?.role === "admin" && (...)}` so they don't render for front desk. The Backup button is unchanged (already admin-gated). Regression test: `admin-app/src/__tests__/rpt-04-front-desk-daily-close-only.test.ts` (source-text guards).
+
+## Pre-RPT-04 history
+
+Before 2026-08-10 the spec line read "Accessible to both Front Desk and Admin roles" — front desk could see all four tabs and every action button except the Backup export, but the refund / points / full-backup actions those tabs lead to were already admin-gated. The split fixed a view / action mismatch (front desk could *see* refund state but couldn't *act* on it).
 
 ### Export CSV Button (page header, both tabs)
 
 - [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Guests, Adults, Children, Total Price, Status, Source, Payment Method, and latest Payment Reference.
 - [x] **Adult/child occupancy split (CHD-08)** — every booking-oriented CSV/XLSX row keeps the historical `Guests` total and adds separate `Adults` + `Children` columns. This covers the page CSV, Sales XLSX Bookings and Breakfast sheets, and Full Backup Bookings sheet. Legacy or inconsistent rows fall back to `Adults = numGuests`, `Children = 0`; no migration is required. Occupancy, ADR, and RevPAR remain room-night based and are unchanged.
-- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and the **latest `transactionReference`** on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields` — the previous top-level `b.paymentReferenceNumber` is retired; see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`).
+- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and the **latest `transactionReference`** on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields` — the previous top-level `b.paymentReferenceNumber` is retired; see BOOKING-FLOW / BOOKINGS-MANAGEMENT §Payment Reference Semantics).
 
 ### Custom Date Range (owner request 2026-07-09)
 
-**Current state:** the page-header date selector (`dateRange` state, `ReportsPage.tsx` ~line 77, 644-655) is a single `<select>` with only three fixed options — Last 7 Days / Last 30 Days / Last Quarter. `periodStart` is always computed as "today minus N days" and `periodEnd` is always "today, end of day" (~lines 99-110) — there is no way to pick an arbitrary start and end date, or a range not ending today (e.g. "last month" or a specific week in the past). This affects every report and export on the page, since `periodStart`/`periodEnd` gate all the filtered data.
+**Current state:** the page-header date selector (`dateRange` state, `ReportsPage.tsx` ~line 77, 644-655) is a single `<select>` with only three fixed options — Last 7 Days / Last 30 Days / Last Quarter. `periodStart` is always computed as "today minus N days" and `periodEnd` is always "today, end of day" (~lines 99-110) — there is no way to pick an arbitrary start and end date, or a range not ending today. This affects every report and export on the page, since `periodStart`/`periodEnd` gate all the filtered data.
 
 **Target behavior — keep the dropdown, add a custom option alongside it:**
 
@@ -35,6 +52,9 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 - [x] Most common action is reachable in ≤ 2 clicks from the sidebar
 - [x] Loading state uses skeleton, not spinner
 - [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] **RPT-04 role-based access** — front-desk staff land on the Daily Close tab and only see the Daily Close tab + the page-level CSV / Print actions; the Performance, Sales, and Liability tabs and the Full Backup action are admin-only. See §Role-Based Access below.
+- [x] **RPT-06 reservation-scope payment display** — the `payments` collectionGroup listener at `ReportsPage.tsx:306-356` resolves reservation-scope payments (post-MRB-01 path: `reservations/{reservationId}/payments/{paymentId}`) to the per-room `bookingId` via the `data.bookingId` stamp written at `bookings.ts:7647`, mirroring the `refunds` listener's `isReservationRefund` pattern. Without this, the Daily Close Transactions Ledger's "Booking" + "GUEST / ROOM" columns rendered the raw `reservationId` UUID (a Firestore auto-id, not the human-readable `SI-YYYYMMDD-NNNNN` `bookingRef`) and an empty room/guest cell — every post-MRB-01 walk-in or online booking appeared as a GUID on the front desk's reconciliation. Regression test: `admin-app/src/__tests__/rpt-06-payments-show-booking-ref.test.ts` (source-text guards on the `paymentDoc.ref.path.startsWith("reservations/")` check + the `data.bookingId || parentDocumentId` fallback).
+- [x] **RPT-07 reservation-level payment display** — sibling of RPT-06 for the path where `data.bookingId` is **`null`** (per the MRB-04 Phase 2.x attribution contract at `bookings.ts:7638-7640` — *"per-room attribution — `null` for reservation-level payments; non-null when the staff ties a payment to a specific room's add-on"*). The RPT-06 fallback to `parentDocumentId` (the `reservationId`) still rendered the raw UUID for those rows. The Reports `payments` join now consults a `reservationMetaById` map (built from AdminContext's `reservations` slice per MRB-12's `subscribeToReservations` listener) as a second-tier fallback: the public `R-YYYYMMDD-NNNNN` `reservationRef` + the `leadGuestName` (per the MRB-02 contract) are rendered in the "Booking" + "GUEST / ROOM" columns respectively. The `!display ? reservationMetaById.get(bookingId) : null` guard prevents a per-room bookingId from being shadowed by the reservation map (defensive — the two id shapes differ so a collision is impossible). Regression test: `admin-app/src/__tests__/rpt-07-reservation-level-payment-display.test.ts` (6 source-text guards: context destructure, map builder, `R-` ref fallback, `leadGuestName` fallback, `!display` precedence guard, deps array).
 - [x] Every error state has a plain-language message and a next step — no dead ends
 - [x] Destructive actions have a single confirmation step — not buried in menus
 - [x] Empty states explain why data is missing and what to do
@@ -90,7 +110,8 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [x] **FL-13 reconciliation basis** — Billed and Collected are comparable to-date snapshots for booking folios touching the selected hotel-date range plus direct-paid store orders delivered in range. Billed includes full booking totals, all net incidentals, and delivered billed-to-room orders; Collected includes every matching payment/refund even when recorded before the selected range. Gross Collections and Refunds remain period cash-flow totals.
 - [x] **FL-14 retained no-show money** — the retained-payments table includes both cancelled bookings and past `confirmed` no-shows, with an explicit status plus gross paid, refunded, and still-retained totals.
 - [x] **FL-15 hotel-day windows** — preset/custom report membership, booking overlap/proration, no-show cutoffs, and export date labels use `config.timezone` calendar days rather than browser-local midnight or UTC slicing.
-- [x] **CRL-08 cancellation liability queue + refund-state email** — shipped 2026-08-03 (decision #174). A new "Liability" tab in `ReportsPage.tsx` mounts the `LiabilityTab` component which self-fetches every `cancellationLiability` snapshot via the dual-source read (collectionGroup on `reservations` for new reservations + per-booking read for legacy) and sums the refunds subcollection per liability to project the live state. Headline metrics: pending count (sum of `pending-processing` + `partially-processed`), pending amount (sum of `outstandingAmount`), partials (count of `partially-processed`), processed total in range, retained cancellation revenue in range (when `retentionAmount > 0`). Age distribution bucketed into under-7d / 7-30d / over-30d for the pending items. The pending list is sorted oldest-first. Exports + Daily Close continue to derive actual cash movement from the payment ledger, never from `approvedAmount` (per #173's "derived from immutable ledger entries" rule). The refund-state email fires from `handleAddRefund` when a successful commit changes the liability state — both the cancellation + the refund-processed emails render the financial breakdown via the `liabilityProjection` field on the email view. Spec: `plan/docs/DECISIONS-FEATURES.md #174`. Behavioural tests + staging rehearsal follow in CRL-09.
+- [x] **CRL-08 cancellation liability queue + refund-state email** — shipped 2026-08-03 (decision #174). New "Liability" tab in `ReportsPage.tsx` mounts `LiabilityTab` which self-fetches every `cancellationLiability` snapshot (dual-source: collectionGroup on `reservations` for new reservations + per-booking read for legacy) and uses the refunds subcollection to project the live state. Headline metrics: pending count, pending amount, partials, processed total in range, retained cancellation revenue in range. Age distribution bucketed into under-7d / 7-30d / over-30d for pending items, sorted oldest-first. Exports + Daily Close continue to derive actual cash movement from the payment ledger, never from `approvedAmount` (per #173's "derived from immutable ledger entries" rule). The refund-state email fires from `handleAddRefund` when a commit changes the liability state; the cancellation + refund-processed emails render the breakdown via `liabilityProjection`. Spec: `plan/docs/DECISIONS-FEATURES.md #174`.
+- [x] **RPT-03 reports display + permissions fixes** — shipped 2026-08-07. New `match /{path=**}/refunds/{refundId}` rule so `LiabilityTab`'s `collectionGroup(db, "refunds")` no longer errors. Daily Close ledger splits `Ref` into `Booking` + `Transaction Ref`; Sales `Staff` resolves via `staffNameMap`. Pinned by `rpt-03-…`
 
 ### Receivables & Aging *(FIN-04 shipped 2026-07-11)*
 
@@ -296,163 +317,15 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 
 ---
 
-### Sheet: Bookings
+### Sheet column lists
 
-| Column | Source |
-|---|---|
-| Booking Ref | `bookingRef` |
-| Guest Name | `guestName` |
-| Guest Email | `guestEmail` |
-| Guest Phone | `guestPhone` |
-| Room Number | `roomNumber` |
-| Room Type | `roomType` |
-| Check-In | `checkIn` (YYYY-MM-DD) |
-| Check-Out | `checkOut` (YYYY-MM-DD) |
-| Nights | computed |
-| Guests | `numGuests` |
-| Adults | `numAdults` when the stored split is valid; otherwise `numGuests` |
-| Children | `numChildren` when the stored split is valid; otherwise `0` |
-| Has Breakfast | `hasBreakfast` |
-| Rate/Night | `ratePerNight` |
-| Breakfast Rate | `breakfastRate` |
-| Discount Type | `discountType` |
-| Discount % | `discountPct` |
-| Discount Verified | `discountVerified` |
-| Voucher Code | `voucherCode` |
-| Voucher Discount | `voucherDiscount` |
-| Points Redeemed | `pointsRedeemed` |
-| Points Value | `pointsRedeemedValue` |
-| Total Price | `totalPrice` |
-| Total Collected Onsite | sum of `payments[]` subcollection |
-| Outstanding Balance | `totalPrice − totalCollected` |
-| Payment Method | `paymentMethod` |
-| Reference Number | Latest `transactionReference` on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields`; see `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`) |
-| Source | `source` |
-| Status | `status` |
-| Is Corporate | `isCorporate` |
-| Corporate Code | `corporateCode` |
-| Company Name | `companyName` |
-| Member ID | `memberId` |
-| Notes | `notes` |
-| Created At | `createdAt` (YYYY-MM-DD HH:mm) |
-| Updated At | `updatedAt` (YYYY-MM-DD HH:mm) |
-
----
-
-### Sheet: Payments
-
-| Column | Source |
-|---|---|
-| Booking Ref | joined from `bookings` |
-| Amount | `amount` |
-| Method | `method` |
-| Note | `note` |
-| Recorded By | `recordedBy` (staff UID) |
-| Recorded At | `recordedAt` (YYYY-MM-DD HH:mm) |
-
----
-
-### Sheet: Members
-
-| Column | Source |
-|---|---|
-| Member Number | `memberNumber` |
-| Full Name | `fullName` |
-| Email | `email` |
-| Phone | `phone` |
-| Auth Provider | `authProvider` |
-| Member Since | `memberSince` (YYYY-MM-DD) |
-| Points Balance | `rewardsPoints` |
-| Tier | `tier` |
-| Is Active | `isActive` |
-| Created At | `createdAt` (YYYY-MM-DD) |
-
----
-
-### Sheet: Store Orders
-
-| Column | Source |
-|---|---|
-| Order Ref | `orderRef` |
-| Room Number | `roomNumber` |
-| Booking ID | `bookingId` |
-| Guest Name | `guestName` |
-| Items | `items[].name × qty` joined as comma-separated string |
-| Total Amount | `totalAmount` |
-| Payment Method | `paymentMethod` |
-| Status | `status` |
-| Is Billed | `isBilled` |
-| Notes | `notes` |
-| Created At | `createdAt` (YYYY-MM-DD HH:mm) |
-
----
-
-### Sheet: Store Catalog
-
-| Column | Source |
-|---|---|
-| Item Name | `name` |
-| Description | `description` |
-| Price | `price` |
-| Stock | `stock` (blank = unlimited) |
-| Is Active | `isActive` |
-| Created At | `createdAt` (YYYY-MM-DD) |
-
----
-
-### Sheet: Breakfast Selections
-
-| Column | Source |
-|---|---|
-| Booking Ref | joined from `bookings` |
-| Room Number | `roomNumber` |
-| Date | `date` |
-| Guest Index | `guestIndex` |
-| Guest Name | `guestName` |
-| Silog | `silogName` |
-| Entered By | `enteredBy` (staff UID) |
-| Created At | `createdAt` (YYYY-MM-DD HH:mm) |
-
----
-
-### Sheet: Vouchers
-
-| Column | Source |
-|---|---|
-| Code | `code` |
-| Discount Type | `discountType` |
-| Discount Value | `discountValue` |
-| Usage Cap | `usageCap` (blank = unlimited) |
-| Usage Count | `usageCount` |
-| Expires At | `expiresAt` (YYYY-MM-DD, blank = no expiry) |
-| Applicable Room Types | `applicableRoomTypes` joined comma-separated (blank = all) |
-| Is Active | `isActive` |
-| Created At | `createdAt` (YYYY-MM-DD) |
-
----
-
-### Sheet: Corporate Inquiries
-
-| Column | Source |
-|---|---|
-| Company Name | `companyName` |
-| Contact Person | `contactPerson` |
-| Email | `email` |
-| Phone | `phone` |
-| Rooms | `numRooms` |
-| Preferred From | `preferredDates.from` (YYYY-MM-DD) |
-| Preferred To | `preferredDates.to` (YYYY-MM-DD) |
-| Requirements | `specialRequirements` |
-| Status | `status` |
-| Access Code ID | `accessCodeId` |
-| Created At | `createdAt` (YYYY-MM-DD HH:mm) |
-
----
+> **Compaction (2026-08-14).** The per-sheet column lists (Bookings / Payments / Members / Store Orders / Store Catalog / Breakfast Selections / Vouchers / Corporate Inquiries) moved to `plan/project/archive/REPORTS-SHEET-COLUMNS-ARCHIVE-2026-08-14.md`. The live SheetBuilder helpers in `admin-app/src/utils/` are the canonical source going forward — update the helpers when a new column is added, then sync the archive if the change is permanent. The per-sheet header-row + format + filename rules below still apply.
 
 ### Implementation Notes
 - [x] Use SheetJS (`xlsx` npm package) — client-side, no API route needed
 - [x] All 8 Firestore queries run in parallel via `Promise.all()` — do not run sequentially
-- [x] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId
+- [x] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId. **Plus (RPT-05, 2026-08-14):** a `getDocs(collectionGroup(db, "payments"))` catch for `reservations/{id}/payments/{paymentId}` docs (path starts with `"reservations/"`) — same dual-collectionGroup pattern the Reports page applies (per MRB-04 Phase 2.x / decision #159). Without this, the Payments sheet is missing every payment entry for every N>1 reservation.
+- [x] Charges sheet: `collectionGroup(db, "charges")` catches both `bookings/{id}/charges/` (legacy) and `reservations/{id}/charges/` (post-MRB-01). **Resolution update (RPT-05, 2026-08-14):** for reservation-scope charges, prefer the stamped `data.bookingId` over the path's parent id (which is the reservationId, not a bookingId) so the Booking Ref + Room cells resolve correctly.
 - [x] Filename: `spark-inn-full-backup-{YYYY-MM-DD}.xlsx`
 - [x] Sheet tab names match the names in the Sheets table above exactly
 - [x] First row of each sheet is a bold header row
@@ -489,25 +362,5 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 ---
 
 ## Aggregate `paymentStatus` Derivation (MRB-15-03, MRB-15-08)
-> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03 + MRB-15-08 sub-items, shipped v0.250.0 + v0.255.0). The `paymentStatus` field on `reservations/{id}` is now derived from the actual child statuses (not a hardcoded literal). Reports queries that aggregate by `paymentStatus` now use the correct aggregate for N>1 mixed states.
 
-### Pre-MRB-15-03 bug (the driving fix)
-
-`handleCheckinBooking` + `handleCheckoutBooking` updated the booking's own `status` but never recomputed the header's `paymentStatus` — the field was a hardcoded `["checked-in"]` / `["checked-out"]` array literal. For N=1, the literal happened to match the single child's status. For N>1, the literal was wrong: a 2-room reservation that fully checked in showed `paymentStatus: "checked-in"` on the header even though only one child had checked in (the other was still `confirmed`).
-
-### Post-MRB-15-03 contract
-
-The header's `paymentStatus` is now `computeReservationAggregatePaymentStatus(postStatuses)` where `postStatuses` is the array of child statuses read in the same `runTransaction` as the status flip. The aggregate now correctly reflects N>1 mixed states:
-
-| Child statuses | Aggregate `paymentStatus` |
-|---|---|
-| All `confirmed` | `pending` |
-| All `payment-confirmed` | `partial` |
-| Some `checked-in`, some `confirmed` | `partial` |
-| All `checked-in` | `checked-in` |
-| All `checked-out` | `checked-out` |
-| Any `cancelled` (full cancel) | `cancelled` |
-
-### Test coverage
-
-`guest-app/tests/api/mrb-15-03-transactional-counters.test.ts` (13 tests) — pins the aggregate `paymentStatus` derivation for N>1 mixed states.
+Per `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03 + MRB-15-08 sub-items, shipped v0.250.0 + v0.255.0): the header's `paymentStatus` is now derived from the actual child statuses via `computeReservationAggregatePaymentStatus(postStatuses)`. The pre-MRB-15-03 bug was a hardcoded `["checked-in"]` / `["checked-out"]` array literal that was wrong for N>1 mixed states — see `BACKEND.md §Reservation Aggregate Counter Ownership` for the post-fix counter ownership contract. Pinned by `guest-app/tests/api/mrb-15-03-transactional-counters.test.ts` (13 tests).

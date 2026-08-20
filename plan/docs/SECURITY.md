@@ -113,6 +113,7 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 ### `guests`
 - Read: owner (matching UID) or staff/admin
 - Write: owner or admin only
+- **Self-write allowlist (per `features/INTERCOM-AUDIO-ROUTING.md`):** the owner's `update` branch may only touch `fullName`, `displayName`, `phone`, `photoUrl`, `address`, `dateOfBirth`, `emergencyContact`, `preferences`, `audioRouting`, `audioRoutingUpdatedAt`, and `updatedAt`. `role`, `isActive`, `email`, and the staff-audit fields are reserved for admin / server. A non-admin user writing a missing `audioRouting` field is permitted; writing to anything else in the same call fails.
 
 ### `settings/hotelConfig` + `settings/websiteContent`
 - Read: public (needed for guest site content)
@@ -151,6 +152,10 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 ### `intercoms`
 - Read/Write: open (no auth — anonymous QR chat)
 - Mitigation: room ID required in URL (physical QR gate), no sensitive PII should be stored here
+
+### `calls`
+- Read/Write: open (`allow read, write: if true;` — same trust model as `intercoms`; the guest's SDP offer + the staff's SDP answer + ICE candidates all need public write so the peer-to-peer handshake can complete without auth)
+- The `acceptedBy` field (decision #214, 2026-08-19) is staff-attribution data written by the `runTransaction` claim in `AdminContext.acceptCall` — currently any caller can write any `acceptedBy` payload. **Future hardening (filed in decision #214's "Security rule gap" paragraph):** narrow writes to `isStaff()` after the consent checkbox + per-room occupancy gate lands, while keeping reads public for the guest-side SDP handshake. Until then, the audit-trail value (knowing which staff took a call) is honoured by the chat thread's `call-answered` system message with `callAnsweredByName` — the rule layer is not the gate.
 - Staff trained not to share PII (booking refs, payment details) via intercom chat
 
 ---
@@ -321,6 +326,7 @@ Configured in `vercel.json` for both apps. Purpose: prevent XSS by restricting w
 Key directives:
 - `script-src 'self'` + explicit allowlist: Firebase SDK CDN, Cloudflare Turnstile, Sentry
 - `frame-ancestors 'none'` — prevents clickjacking
+- `media-src 'self' blob: data:` — required by the admin app's per-staff audio routing (Test tone + call ringtone). Both code paths build a `Blob` from a generated WAV `ArrayBuffer` and assign the URL to an `<audio>` element via `URL.createObjectURL`. Without an explicit `media-src`, the CSP falls back to `default-src 'self'`, which rejects `blob:` URLs with `Refused to load media from 'blob:...' because it violates the directive: "default-src 'self'"`. Regression test pinned in `admin-app/src/__tests__/feature-intercom-audio-routing.test.ts`.
 - `X-Frame-Options: DENY` — legacy browser support
 - `X-Content-Type-Options: nosniff` — prevents MIME-type sniffing
 - `Referrer-Policy: strict-origin-when-cross-origin`

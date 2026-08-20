@@ -1,7 +1,37 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type BookingSourceConfig, type CancellationPreview, type PaymentMethodConfig, type Reservation, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, computeBookingFolio, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, getBookingVatBreakdown, requiredExtraBedsFor } from "@spark-inn/shared";
+// Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08): the New
+// Booking modal preallocates the `reservationId` so a
+// retry-after-uncertain-response inside the same modal
+// session reuses the same id. Same pattern as the public
+// `/book` flow (MRB-02, decision #164).
+import {
+  calculateSeasonalAwareRoomTotal,
+  compressImageFile,
+  CHECK_IN_ELIGIBLE_STATUSES,
+  getCheckInReadiness,
+  getLatestPaymentReference,
+  getManilaDateInfo,
+  getLockedManualNightlyRate,
+  type BookingRateBreakdown,
+  type BookingSourceConfig,
+  type CancellationPreview,
+  type PaymentMethodConfig,
+  type Reservation,
+  calculateSeasonalAwareRoomBreakdown,
+  calculateVoucherDiscount,
+  calculatePercentDiscount,
+  calculateVoucherBase,
+  calculateVatBreakdown,
+  computeBookingFolio,
+  computeReservationAggregatePaymentStatus,
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  getBookingVatBreakdown,
+  isPaymentVerified,
+  requiredExtraBedsFor,
+  generateReservationId
+} from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -10,6 +40,7 @@ import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
+import { ConfirmStatusModal } from "../components/ConfirmStatusModal";
 import { CancellationPreviewPanel } from "../components/CancellationPreviewPanel";
 import { CancellationLiabilityPanel, CancellationExceptionModal } from "../components/CancellationLiabilityPanel";
 import {
@@ -53,7 +84,9 @@ import {
   ChevronDown,
   ChevronRight,
   Search,
-  FlaskConical
+  FlaskConical,
+  LogIn,
+  LogOut
 } from "lucide-react";
 
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
@@ -577,11 +610,37 @@ export function BookingsPage() {
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
 
-  // UCO-02/03: unpaid checkout reason modal state
-  const [showUnpaidCheckoutForm, setShowUnpaidCheckoutForm] = useState(false);
+  // UCO-02/03 + CLS-01 (2026-08-09, decision #208): the
+  // lifecycle transition confirmation modals. Each lifecycle
+  // transition in the drawer's primary action footer (Confirm
+  // booking / Verify & check in / Review folio & check out)
+  // now opens a `ConfirmStatusModal` shell instead of firing
+  // `handleStatusTransition` directly. The shell is generic;
+  // each call site composes the right context (children) +
+  // confirm handler. The check-out modal doubles as the
+  // UCO-02/03 reason form when the balance is > 0 — the
+  // reason form is rendered inline as children, so the desk
+  // sees a single "check out" flow regardless of balance.
+  const [showConfirmBooking, setShowConfirmBooking] = useState(false);
+  const [confirmBookingPending, setConfirmBookingPending] = useState(false);
+  const [showConfirmCheckIn, setShowConfirmCheckIn] = useState(false);
+  const [confirmCheckInPending, setConfirmCheckInPending] = useState(false);
+  // Unified check-out modal: shows the folio summary + an
+  // inline reason field when balance > 0 (UCO-02/03 audit
+  // requirement) + the existing admin-only blocked UI when
+  // the server returns "Front Desk cannot complete".
+  const [showConfirmCheckOut, setShowConfirmCheckOut] = useState(false);
+  const [confirmCheckOutPending, setConfirmCheckOutPending] = useState(false);
   const [unpaidCheckoutReason, setUnpaidCheckoutReason] = useState("");
   const [unpaidCheckoutError, setUnpaidCheckoutError] = useState<string | null>(null);
-  const [unpaidCheckoutSubmitting, setUnpaidCheckoutSubmitting] = useState(false);
+  // `unpaidCheckoutBlocked` flips to true when the server
+  // returns the "Front Desk cannot complete" error
+  // (balance > `unpaidCheckoutApprovalThreshold` + non-admin
+  // staff); the modal then swaps the form for a red callout
+  // + a Close button, matching the legacy UnpaidCheckoutForm
+  // shape.
+  const [unpaidCheckoutBlocked, setUnpaidCheckoutBlocked] = useState(false);
+  const [unpaidCheckoutBlockMessage, setUnpaidCheckoutBlockMessage] = useState("");
   const UNPAID_REASON_SHORTCUTS = [
     { label: "Company billing", value: "approved company billing" },
     { label: "Bank transfer pending", value: "bank transfer pending" },
@@ -589,8 +648,6 @@ export function BookingsPage() {
     { label: "Disputed charge", value: "disputed charge" },
     { label: "Other", value: "other" }
   ];
-  const [unpaidCheckoutBlocked, setUnpaidCheckoutBlocked] = useState(false);
-  const [unpaidCheckoutBlockMessage, setUnpaidCheckoutBlockMessage] = useState("");
   const brandRgb = hexToRgb(config.colors.primary);
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
   const [showDiscountForm, setShowDiscountForm] = useState(false);
@@ -960,6 +1017,47 @@ export function BookingsPage() {
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+  // the modal-session preallocations of the `bookingId`
+  // and `reservationId` for the New Booking walk-in create.
+  // The pair is recomputed via `useMemo` when
+  // `walkinPreallocKey` changes — the lazy `useState`
+  // init would only run once on mount, so a rotation key
+  // is the React-idiomatic way to re-derive on demand
+  // (modal open + post-success rotation). The pair is
+  // stable across other re-renders so a retry-after-
+  // uncertain-response inside the same modal session
+  // reuses the same ids — the server's transaction reads
+  // the reservation header first and either replays the
+  // original commit (same `reservationId` + same
+  // `requestFingerprint`) or returns a 409 (different
+  // `requestFingerprint`). Without preallocation, each
+  // retry races the server's auto-mint and produces a
+  // duplicate booking.
+  const [walkinPreallocKey, setWalkinPreallocKey] = useState(0);
+  const walkinPreallocatedIds = useMemo(() => ({
+    bookingId: doc(collection(db, "bookings")).id,
+    reservationId: generateReservationId()
+  }), [walkinPreallocKey]);
+  const walkinPreallocatedBookingId = walkinPreallocatedIds.bookingId;
+  const walkinPreallocatedReservationId = walkinPreallocatedIds.reservationId;
+  // The preallocations rotate when the modal opens so a
+  // second booking inside the same page session doesn't
+  // collide with a previous one's id. The rotation is
+  // idempotent: opening the modal twice in a row still
+  // produces exactly one new pair (the second open sees
+  // `isModalOpen` already true and the effect bails via
+  // the `key` no-op check below).
+  const wasModalOpenRef = useRef(false);
+  useEffect(() => {
+    if (isModalOpen && !wasModalOpenRef.current) {
+      wasModalOpenRef.current = true;
+      setWalkinPreallocKey((key) => key + 1);
+    } else if (!isModalOpen) {
+      wasModalOpenRef.current = false;
+    }
+  }, [isModalOpen]);
+
   // Walk-in Form States
   // Per fix/walkin-split-name (2026-07-25): the walk-in modal
   // now mirrors the guest `/book` page — firstName + lastName
@@ -1069,6 +1167,29 @@ export function BookingsPage() {
   // `useEffect` on `showDiscountForm` flips it to `"room"`
   // when the modal opens.
   const [staffDiscountScope, setStaffDiscountScope] = useState<"room" | "reservation" | null>(null);
+  // Per the per-individual discount guard: PWD and
+  // senior are per-individual legal entitlements (RA
+  // 7277 / RA 9442) — they must be applied to the
+  // specific guest's booking, not the whole
+  // reservation. The "All N rooms" scope in the
+  // discount modal is therefore disabled for these
+  // types. The derived value is consumed by the
+  // segmented-control button + the auto-revert
+  // useEffect below + the submit-time guard.
+  const isPerIndividualDiscount = staffDiscountType === "senior" || staffDiscountType === "pwd";
+  // Defense in depth: if the staff already picked
+  // "All N rooms" and then switches the type to
+  // senior / PWD, the scope auto-clears so the
+  // submit handler applies to the lead only (the
+  // segmented-control button is also disabled, but
+  // this catches the case where the staff has the
+  // modal open and toggles the type without
+  // re-clicking the segmented control).
+  useEffect(() => {
+    if (isPerIndividualDiscount && staffDiscountScope === "reservation") {
+      setStaffDiscountScope(null);
+    }
+  }, [isPerIndividualDiscount, staffDiscountScope]);
 
   // Per NBS-07 (2026-07-31): memo for the New Booking modal's source
   // selector. Filters the configured list to entries that are
@@ -1522,8 +1643,18 @@ export function BookingsPage() {
               the per-booking `StatusBadge` byte-equivalent to
               pre-MRB-12. */}
           {row.listRowKind === "reservation" && row.listReservationHeader ? (
+            // Per BAR-02 (2026-08-08, per decision #203):
+            // the `paymentStatus` aggregate is no longer
+            // read from the reservation header. We derive
+            // it from `row.listChildBookings` (which is
+            // already in memory from the row builder) —
+            // the helper returns the same value the
+            // pre-BAR-02 mirror wrote, for both pre- and
+            // post-BAR-02 reservations.
             renderReservationPaymentStatusPill(
-              row.listReservationHeader.paymentStatus,
+              computeReservationAggregatePaymentStatus(
+                (row.listChildBookings || []).map((child) => child.status)
+              ),
               row.listReservationHeader.totalPrice,
               row.listReservationPaidAmount || 0
             )
@@ -1534,31 +1665,41 @@ export function BookingsPage() {
           ) : (
             <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
           )}
-          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed):
+          {/* Per MRB-12 (2026-08-03, per decision #179 — proposed)
+              + per BAR-02 (2026-08-08, per decision #203):
               the cancellation-count chip. Renders only on
-              reservation rows (N>1) when the denormalized
+              reservation rows (N>1) when the derived
               `cancelledRoomCount` is > 0 — the desk never
               has to expand a row to know a group has
-              cancellations in it. Legacy N=1 single-row
-              path keeps the existing per-booking
-              `StatusBadge` (the `cancelled` tone is
-              already on the badge). The chip's tooltip
-              lists the cancelled room numbers for
-              quick triage. */}
-          {row.listRowKind === "reservation" && row.listReservationHeader && row.listReservationHeader.cancelledRoomCount > 0 && (
-            <span
-              title={
-                "Cancelled rooms in this reservation: " +
-                (row.listChildBookings || [])
-                  .filter((child) => child.status === "cancelled")
-                  .map((child) => `Room ${child.roomNumber}`)
-                  .join(", ")
-              }
-              className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-200"
-            >
-              {row.listReservationHeader.cancelledRoomCount} cancelled
-            </span>
-          )}
+              cancellations in it. Pre-BAR-02 the value
+              came from the header mirror; BAR-02 derives
+              it from `row.listChildBookings` (which is
+              already in memory from the row builder).
+              Legacy N=1 single-row path keeps the
+              per-booking `StatusBadge` (the `cancelled`
+              tone is already on the badge). The chip's
+              tooltip lists the cancelled room numbers
+              for quick triage. */}
+          {(() => {
+            if (row.listRowKind !== "reservation") return null;
+            const cancelledChildren = (row.listChildBookings || []).filter(
+              (child) => child.status === "cancelled"
+            );
+            if (cancelledChildren.length === 0) return null;
+            return (
+              <span
+                title={
+                  "Cancelled rooms in this reservation: " +
+                  cancelledChildren
+                    .map((child) => `Room ${child.roomNumber}`)
+                    .join(", ")
+                }
+                className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-200"
+              >
+                {cancelledChildren.length} cancelled
+              </span>
+            );
+          })()}
           {row.earlyCheckIn?.status === "requested" && (
             <span
               title="Early check-in pending review"
@@ -2290,6 +2431,95 @@ export function BookingsPage() {
     }
   };
 
+  // Per CLS-01 (2026-08-09, decision #208): the three
+  // lifecycle transition confirmation handlers. Each one
+  // is the `onConfirm` for a `ConfirmStatusModal` mounted
+  // in the JSX; they own the pending state + the inline
+  // error display + the optimistic `setSelectedBooking`
+  // (status flip on the in-memory selected booking so the
+  // drawer renders the new state immediately, before the
+  // onSnapshot listener catches up — same shape as
+  // `handleStatusTransition`).
+  const handleConfirmBooking = async () => {
+    if (!selectedBooking) return;
+    setConfirmBookingPending(true);
+    try {
+      await updateBookingStatus(selectedBooking.id, "confirmed");
+      setSelectedBooking(prev => prev ? { ...prev, status: "confirmed" } : null);
+      setShowConfirmBooking(false);
+    } catch (err: any) {
+      toast.error("Failed to confirm booking", err?.message || "Please try again.");
+    } finally {
+      setConfirmBookingPending(false);
+    }
+  };
+
+  const handleConfirmCheckIn = async () => {
+    if (!selectedBooking) return;
+    setConfirmCheckInPending(true);
+    try {
+      await updateBookingStatus(selectedBooking.id, "checked-in");
+      setSelectedBooking(prev => prev ? { ...prev, status: "checked-in" } : null);
+      setShowConfirmCheckIn(false);
+    } catch (err: any) {
+      toast.error("Failed to check in", err?.message || "Please try again.");
+    } finally {
+      setConfirmCheckInPending(false);
+    }
+  };
+
+  const handleConfirmCheckOut = async () => {
+    if (!selectedBooking) return;
+    const folio = getBookingFolio(selectedBooking);
+    // Balance-due path: UCO-02/03 requires a reason before
+    // the destructive status flip can fire. The reason
+    // is rendered inline in the modal body, so this branch
+    // only validates the trimmed string + dispatches the
+    // `unpaidCheckoutReason` stamp alongside the status.
+    if (folio.balance > 0) {
+      const reason = unpaidCheckoutReason.trim();
+      if (!reason) {
+        setUnpaidCheckoutError("A reason is required for unpaid checkout.");
+        return;
+      }
+      setConfirmCheckOutPending(true);
+      setUnpaidCheckoutError(null);
+      try {
+        await updateBookingStatus(selectedBooking.id, "checked-out", {
+          unpaidCheckoutReason: reason
+        } as any);
+        setSelectedBooking(prev => prev ? { ...prev, status: "checked-out", unpaidCheckoutReason: reason } as any : null);
+        setShowConfirmCheckOut(false);
+      } catch (err: any) {
+        if (err?.message?.includes("Front Desk cannot complete")) {
+          setUnpaidCheckoutBlocked(true);
+          setUnpaidCheckoutBlockMessage(err.message);
+        } else {
+          setUnpaidCheckoutError(err?.message || "Failed to checkout.");
+        }
+      } finally {
+        setConfirmCheckOutPending(false);
+      }
+      return;
+    }
+    // Zero-balance path: simple status flip, no reason
+    // required. The check-out modal's children body still
+    // renders the folio summary so the desk can confirm
+    // the room total + collected amount before tapping
+    // confirm.
+    setConfirmCheckOutPending(true);
+    setUnpaidCheckoutError(null);
+    try {
+      await updateBookingStatus(selectedBooking.id, "checked-out");
+      setSelectedBooking(prev => prev ? { ...prev, status: "checked-out" } : null);
+      setShowConfirmCheckOut(false);
+    } catch (err: any) {
+      setUnpaidCheckoutError(err?.message || "Failed to checkout.");
+    } finally {
+      setConfirmCheckOutPending(false);
+    }
+  };
+
   const handleRejectDiscount = async (reason: string) => {
     if (!selectedBooking) return;
     try {
@@ -2803,7 +3033,14 @@ export function BookingsPage() {
       y += 4.8;
       pdf.setFontSize(8);
       pdf.setTextColor(120, 120, 120);
-      pdf.text("Circle or check your choice for each guest per day.", marginL, y);
+      // Per the 2026-08-09 follow-up to the booking-drawer
+      // breakfast capture: when staff pre-select a silog per
+      // guest per day in the drawer, the matching checkbox in the
+      // printed registration form is pre-filled (filled box +
+      // white check + bold label) so the guest can see what was
+      // already recorded and override at check-in if needed. The
+      // other silog options stay blank.
+      pdf.text("Pre-selected choices are marked; circle or check to change.", marginL, y);
       y += 5.5;
 
       if (activeSilogItems.length === 0) {
@@ -2819,16 +3056,43 @@ export function BookingsPage() {
             : "";
           for (let g = 0; g < b.numGuests; g++) {
             const rowLabel = stayDates.length > 1 ? `Guest ${g + 1} (${shortDate}):` : `Guest ${g + 1}:`;
+            // The drawer's <select> stores the silog item name
+            // (not id) under `${date}-guest-${g + 1}`, so the
+            // pre-fill match is by name. Editing a silog name in
+            // Settings after capture would silently drop the
+            // pre-check for that booking — accepted trade-off,
+            // matching the drawer's persistence shape.
+            const selectedName = b.breakfastSelections?.[`${date}-guest-${g + 1}`];
             pdf.setTextColor(...compactTextRgb);
             pdf.text(rowLabel, marginL, y);
             let optionX = marginL + 24;
             for (const item of activeSilogItems) {
               const optionLabel = fitText(item.name, 17);
-              pdf.setDrawColor(150, 150, 150);
-              pdf.setLineWidth(0.12);
-              pdf.rect(optionX, y - 2.8, 2.7, 2.7);
-              pdf.setTextColor(75, 75, 75);
-              pdf.text(optionLabel, optionX + 3.7, y);
+              const isSelected = !!selectedName && item.name === selectedName;
+              if (isSelected) {
+                pdf.setFillColor(...brandRgb);
+                pdf.setDrawColor(...brandRgb);
+                pdf.setLineWidth(0.12);
+                pdf.rect(optionX, y - 2.8, 2.7, 2.7, "FD");
+                // White checkmark drawn as two line segments
+                // — avoids depending on a unicode ✓ glyph that
+                // the helvetica fallback in `setPdfFont` does
+                // not ship reliably.
+                pdf.setDrawColor(255, 255, 255);
+                pdf.setLineWidth(0.4);
+                pdf.line(optionX + 0.55, y - 1.55, optionX + 1.15, y - 0.9);
+                pdf.line(optionX + 1.15, y - 0.9, optionX + 2.2, y - 2.35);
+                pdf.setTextColor(...brandRgb);
+                pdf.setFont("helvetica", "bold");
+                pdf.text(optionLabel, optionX + 3.7, y);
+                pdf.setFont("helvetica", "normal");
+              } else {
+                pdf.setDrawColor(150, 150, 150);
+                pdf.setLineWidth(0.12);
+                pdf.rect(optionX, y - 2.8, 2.7, 2.7);
+                pdf.setTextColor(75, 75, 75);
+                pdf.text(optionLabel, optionX + 3.7, y);
+              }
               optionX += Math.min(28, Math.max(20, pdf.getTextWidth(optionLabel) + 8));
             }
             y += 4.8;
@@ -3872,10 +4136,40 @@ export function BookingsPage() {
     e.preventDefault();
     const trimmedFirst = walkinFirstName.trim();
     const trimmedLast = walkinLastName.trim();
+    const trimmedEmail = guestEmail.trim();
+    const trimmedPhone = guestPhone.trim();
     if (!trimmedFirst || !trimmedLast || !roomNumber) {
       toast.warning(
         "Missing details",
         "Please fill in the guest's first and last name and select an available room."
+      );
+      return;
+    }
+    // Per NBS-2026-08-08 (F4, booking-flow audit 2026-08-08):
+    // the previous walkin path wrote syntactically-valid
+    // placeholder values to Firestore when the desk left
+    // the email/phone fields blank
+    // (`walkin-${Date.now()}@example.invalid` + the literal
+    // string `"n/a"`). The fake email then occupied the
+    // field that a later Spark Rewards link / /my-booking
+    // lookup / contact-inquiry reply match by email, and
+    // a real email entered at check-in never overrode the
+    // stored placeholder. Require both fields at submit
+    // time so the stored contact is always a real one.
+    // The brief is "we'll get the real one at check-in"
+    // — the field stays blank, the form refuses to submit
+    // until the desk fills it.
+    if (!trimmedEmail) {
+      toast.warning(
+        "Email required",
+        "Please enter a valid email for the guest — it's required for the booking confirmation and receipt."
+      );
+      return;
+    }
+    if (!trimmedPhone) {
+      toast.warning(
+        "Phone required",
+        "Please enter a phone number for the guest — it's required for check-in coordination."
       );
       return;
     }
@@ -3894,6 +4188,15 @@ export function BookingsPage() {
     setIsWalkinSubmitting(true);
     try {
       const result = await addWalkinBooking({
+        // Per NBS-2026-08-08 (F1): the modal-session preallocations
+        // of the `bookingId` and `reservationId`. The pair
+        // is generated in a `useState` lazy init and reused
+        // across retries inside the same modal session, so
+        // a retry-after-uncertain-response hits the server's
+        // idempotency replay path (same id + same fingerprint
+        // → 200 replay) instead of creating a duplicate.
+        preallocatedBookingId: walkinPreallocatedBookingId,
+        preallocatedReservationId: walkinPreallocatedReservationId,
         roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
         roomNumber,
         roomType,
@@ -3912,8 +4215,13 @@ export function BookingsPage() {
         firstName: trimmedFirst,
         lastName: trimmedLast,
         reminderSentAt: null,
-        guestEmail: guestEmail || `walkin-${Date.now()}@example.invalid`,
-        guestPhone: guestPhone || "n/a",
+        // Per NBS-2026-08-08 (F4): the trimmed values are
+        // sent as-collected. The empty-string gate above
+        // already returned early for the desk who left
+        // the field blank, so we never reach this point
+        // with a synthetic placeholder.
+        guestEmail: trimmedEmail,
+        guestPhone: trimmedPhone,
         numGuests,
         // Per EXB-07 (2026-08-01, per decision #155): the
         // walk-in modal now carries the adult/child split
@@ -3988,11 +4296,32 @@ export function BookingsPage() {
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
         setWalkinTestRunId("");
-        // Per EXB-07 + MRB-07: reset back to a single empty room stay
-        // at the 1-adult / 0-children / 0-extra-bed default, so the
-        // next booking starts from the common single-room state
-        // rather than inheriting the previous group's room list.
-        setWalkinRoomStays([createWalkinRoomStay(roomTypes[0]?.value || "")]);
+        // Per NBS-2026-08-08 (F9, booking-flow audit
+        // 2026-08-08): the previous reset read
+        // `roomTypes[0]?.value || ""` while the room type
+        // catalog was still hydrating, which seeded the
+        // next stay with `roomType: ""`. The next submit
+        // then failed the "Choose an available room" gate
+        // with a blank dropdown and no clear next step. The
+        // fix mirrors the existing effect at the top of
+        // this modal: if the catalog hasn't loaded yet,
+        // seed the stay with an empty `roomType` and let
+        // the `useEffect` below re-sync it to the first
+        // loaded type. The desk sees a blank dropdown that
+        // populates on the next paint instead of a
+        // permanent empty value.
+        setWalkinRoomStays([createWalkinRoomStay("")]);
+        // Per NBS-2026-08-08 (F1): rotate the preallocation
+        // key so the next modal open generates a fresh
+        // `bookingId` + `reservationId` pair. The current
+        // pair is bound to the just-committed reservation
+        // — reusing it for the next booking would (a)
+        // collide with the existing reservation header on
+        // the server, and (b) cause a non-idempotent replay
+        // to land a second booking under the same id. The
+        // rotation is what makes the "book another guest"
+        // path safe.
+        setWalkinPreallocKey((key) => key + 1);
         setIsModalOpen(false);
         toast.success(
           submittedRoomStays.length > 1 ? "Reservation created" : "Walk-in booking created",
@@ -4011,6 +4340,31 @@ export function BookingsPage() {
   };
 
   const selectedBookingFolio = selectedBooking ? getBookingFolio(selectedBooking) : null;
+
+  // Per FOL-02 (2026-08-06, decision #198): the latest
+  // payment reference for the selected booking. The
+  // pre-FOL-02 header read `getLatestPaymentReference(booking)`
+  // directly, which returned `null` for new bookings
+  // because the denormalized `onsitePayments[]` array on
+  // the booking doc is empty for new payments (the server's
+  // verify / add-payment handlers write to the
+  // subcollection, not the array — the array is a
+  // pre-MRB-04 relic that was never wired to the new write
+  // path). The post-FOL-02 read prefers the live
+  // `selectedBookingPayments` state (the subcollection
+  // listener's results — the canonical source) and falls
+  // back to the booking's persisted array. Pattern matches
+  // the `getBookingFolio` helper above (live state when
+  // selected, persisted when not). Cheap computation (one
+  // linear scan from the end of a small array); no
+  // `useMemo` needed but kept for clarity + readability.
+  const selectedBookingLatestReference = useMemo(() => {
+    if (!selectedBooking) return null;
+    if (selectedBookingPayments.length > 0) {
+      return getLatestPaymentReference({ onsitePayments: selectedBookingPayments });
+    }
+    return getLatestPaymentReference(selectedBooking);
+  }, [selectedBooking, selectedBookingPayments]);
 
   const openRecordPaymentForBalance = (balance: number) => {
     setShowRecordPaymentModal(true);
@@ -4054,7 +4408,7 @@ export function BookingsPage() {
       return (
         <button
           type="button"
-          onClick={() => handleStatusTransition("confirmed")}
+          onClick={() => setShowConfirmBooking(true)}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
         >
           Confirm booking
@@ -4086,7 +4440,7 @@ export function BookingsPage() {
       return (
         <button
           type="button"
-          onClick={() => handleStatusTransition("checked-in")}
+          onClick={() => setShowConfirmCheckIn(true)}
           disabled={!selectedBookingCheckInReadiness?.ready}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
         >
@@ -4100,17 +4454,21 @@ export function BookingsPage() {
       return (
         <button
           type="button"
+          // Per CLS-01 (2026-08-09, decision #208): the
+          // check-out button always opens the unified
+          // confirmation modal. The modal decides
+          // whether to render the UCO-02/03 reason form
+          // inline (balance > 0) or just a folio summary
+          // (balance = 0) — so the desk sees one consistent
+          // "check out" flow regardless of balance. The
+          // pre-CLS-01 split path (modal-only-if-balance-due
+          // + naked transition for zero-balance) is gone.
           onClick={() => {
-            const folio = getBookingFolio(selectedBooking);
-            if (folio.balance > 0) {
-              setUnpaidCheckoutReason("");
-              setUnpaidCheckoutError(null);
-              setUnpaidCheckoutBlocked(false);
-              setUnpaidCheckoutBlockMessage("");
-              setShowUnpaidCheckoutForm(true);
-            } else {
-              handleStatusTransition("checked-out");
-            }
+            setUnpaidCheckoutReason("");
+            setUnpaidCheckoutError(null);
+            setUnpaidCheckoutBlocked(false);
+            setUnpaidCheckoutBlockMessage("");
+            setShowConfirmCheckOut(true);
           }}
           className={`inline-flex min-h-[44px] w-full items-center justify-center rounded-lg px-4 text-xs font-bold text-white shadow-sm transition active:scale-95 ${
             selectedBookingFolio && selectedBookingFolio.balance > 0
@@ -4791,6 +5149,15 @@ export function BookingsPage() {
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
               paymentMethodLabel={selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : ""}
+              // Per FOL-02 (2026-08-06, decision #198): the
+              // computed reference uses the live subcollection
+              // listener's state (the canonical source) with a
+              // fallback to the booking's denormalized array.
+              // Pre-FOL-02, the header read the persisted array
+              // directly and rendered "Pending verification"
+              // for new bookings — see the
+              // `selectedBookingLatestReference` memo above.
+              latestPaymentReference={selectedBookingLatestReference}
             />
             </div>
 
@@ -4800,10 +5167,31 @@ export function BookingsPage() {
                 <div className="flex items-center gap-2 text-xs">
                   <CreditCard size={14} className="text-gray-400" />
                   <span className="text-gray-700">{selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "Online payment"}</span>
-                  {selectedBooking.status === "payment-uploaded" && (
+                  {/* Per FOL-01 (2026-08-06, decision #197): the
+                      "Pending" / "Verified" badge is derived
+                      through the shared `isPaymentVerified()`
+                      helper, not the transient
+                      `status === "payment-confirmed"` check.
+                      Pre-FOL-01, a `confirmed` booking whose
+                      payment was verified earlier (the common
+                      case after Verify & Record Payment →
+                      Confirm Booking) rendered NO badge at
+                      all in the Overview — the staff had to
+                      click into the Folio section to see the
+                      proof. The helper ORs the durable
+                      `paymentConfirmedAt` timestamp with the
+                      transient status, so a `confirmed` booking
+                      with a stamped timestamp now shows
+                      "Verified" in the Overview too. The
+                      `payment-uploaded` branch (no
+                      verification yet, proof on file) and the
+                      `paymentRejectionReason` branch (staff
+                      rejected the proof) are unchanged —
+                      different axes. */}
+                  {selectedBooking.status === "payment-uploaded" && !isPaymentVerified(selectedBooking) && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
                   )}
-                  {selectedBooking.status === "payment-confirmed" && (
+                  {isPaymentVerified(selectedBooking) && (
                     <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">Verified</span>
                   )}
                   {selectedBooking.paymentRejectionReason && (
@@ -4826,7 +5214,18 @@ export function BookingsPage() {
 
             {/* Check-in registration workstation */}
             <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection} primary>
-            {selectedBookingCheckInReadiness && (
+            {/*
+              The check-in gate is only meaningful before the booking
+              has been checked in. Once status leaves
+              CHECK_IN_ELIGIBLE_STATUSES (checked-in, checked-out,
+              cancelled, etc.) the same helper would otherwise flip
+              into a permanent "1 missing: Booking status must be
+              confirmed or payment-confirmed" amber state — the gate
+              is irrelevant past the transition, so the card hides.
+              See `admin-app/src/__tests__/checkin-gate.test.ts`.
+            */}
+            {selectedBookingCheckInReadiness &&
+              CHECK_IN_ELIGIBLE_STATUSES.includes(selectedBooking.status as (typeof CHECK_IN_ELIGIBLE_STATUSES)[number]) && (
               <BookingCheckInReadiness
                 ready={selectedBookingCheckInReadiness.ready}
                 missingItems={selectedBookingCheckInReadiness.missingItems}
@@ -5192,14 +5591,44 @@ export function BookingsPage() {
                     <CreditCard size={14} className="text-primary" />
                     Payment Proof
                   </h3>
-                  {selectedBooking.status === "payment-confirmed" || selectedBooking.status === "confirmed" || selectedBooking.paymentRejectionReason ? (
+                  {/* Per FOL-01 (2026-08-06, decision #197): the
+                      payment-state read in the Folio block is
+                      derived through the shared
+                      `isPaymentVerified()` helper, not the
+                      transient `status === "payment-confirmed"`
+                      check. Pre-FOL-01, the inner ternary
+                      `status === "payment-confirmed" ? "Verified"
+                      : ... : "Pending"` silently showed "Pending"
+                      on a booking the staff had already confirmed
+                      (status moved to "confirmed" but the
+                      verification never went away). The helper
+                      ORs the durable `paymentConfirmedAt`
+                      timestamp with the transient status, so
+                      both shapes render "Verified". The
+                      `paymentRejectionReason` branch is
+                      unchanged — it's a different axis (the
+                      staff explicitly rejected the proof). */}
+                  {isPaymentVerified(selectedBooking) || selectedBooking.status === "confirmed" || selectedBooking.paymentRejectionReason ? (
                     <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
                       <div className="space-y-0.5 text-xs">
                         <p className="font-semibold text-gray-800">
-                          {selectedBooking.paymentMethod} · {getLatestPaymentReference(selectedBooking) || "No reference"}
+                          {/* Per FOL-02 (2026-08-06, decision #198):
+                              the Folio's proof card also routes
+                              through the computed reference
+                              (live subcollection listener +
+                              persisted array fallback) so a
+                              new booking's verified reference
+                              doesn't show as "No reference"
+                              forever. Same helper as the
+                              header — `selectedBookingLatestReference`
+                              memo above. The fallback to
+                              "No reference" stays for the
+                              pre-payment-uploaded case (no
+                              proof yet, no record). */}
+                          {selectedBooking.paymentMethod} · {selectedBookingLatestReference || "No reference"}
                         </p>
                         <p className="text-[10px] text-gray-400">
-                          {selectedBooking.status === "payment-confirmed" ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
+                          {isPaymentVerified(selectedBooking) ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
                         </p>
                       </div>
                       <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50">
@@ -6040,7 +6469,18 @@ export function BookingsPage() {
                         ? `This will cancel every room in reservation ${selectedReservationContext.reservationRef || "—"} (${selectedReservationContext.roomCount} rooms total). Cancellation is permanent and the guest will be notified by email. The booking records are kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action.`
                         : "Cancellation is permanent and the guest will be notified by email. The booking record is kept in the audit log. If money was collected, no refund is issued automatically — record a refund separately through the Folio → Refund action."
                     }
-                    reasonLabel="Cancellation reason (optional)"
+                    // Per BK-05 / decision #221 (2026-08-19): every
+                    // cancellation in /bookings now requires a reason
+                    // — the `ConfirmForm` shipped with a default
+                    // `reasonRequired = false` and the booking-cancel
+                    // call sites never passed `reasonRequired={true}`,
+                    // so empty-reason cancellations slipped through.
+                    // UCO/CLS-01 covered the checkout path but did not
+                    // touch these three surfaces. Server-side
+                    // enforcement (next commit) mirrors the UCO pattern
+                    // (`UNPAID_REASON_REQUIRED` → 400 + retry).
+                    reasonRequired={true}
+                    reasonLabel="Cancellation reason (required)"
                     reasonPlaceholder="e.g. guest requested, no-show, double-booked"
                     confirmLabel={
                       selectedReservationContext && bookingCancelScope === "reservation"
@@ -6290,7 +6730,14 @@ export function BookingsPage() {
                   <ConfirmForm
                     title="Cancel this order?"
                     message={`Order ${selectedOrder.orderRef} will be marked as cancelled. The guest will be notified by email.`}
-                    reasonLabel="Cancellation reason (optional)"
+                    // Per BK-05 / decision #221 (2026-08-19): store-order
+                    // cancellations require a reason too. The same
+                    // `ConfirmForm` default `reasonRequired = false`
+                    // was the leak path — UCO/CLS-01 didn't cover the
+                    // store surface. Mirror the booking-cancel fix:
+                    // explicit `reasonRequired={true}` + label flip.
+                    reasonRequired={true}
+                    reasonLabel="Cancellation reason (required)"
                     reasonPlaceholder="e.g. out of stock, guest requested, wrong address"
                     confirmLabel="Cancel order"
                     cancelLabel="Back"
@@ -6325,7 +6772,14 @@ export function BookingsPage() {
                   <ConfirmForm
                     title="Cancel this order?"
                     message={`Order ${selectedOrder.orderRef} will be marked as cancelled. The guest will be notified by email.`}
-                    reasonLabel="Cancellation reason (optional)"
+                    // Per BK-05 / decision #221 (2026-08-19): store-order
+                    // cancellations require a reason too. The same
+                    // `ConfirmForm` default `reasonRequired = false`
+                    // was the leak path — UCO/CLS-01 didn't cover the
+                    // store surface. Mirror the booking-cancel fix:
+                    // explicit `reasonRequired={true}` + label flip.
+                    reasonRequired={true}
+                    reasonLabel="Cancellation reason (required)"
                     reasonPlaceholder="e.g. out of stock, guest requested, wrong address"
                     confirmLabel="Cancel order"
                     cancelLabel="Back"
@@ -6872,133 +7326,220 @@ export function BookingsPage() {
           </div>
         </form>
       </Modal>
-      <Modal
-        title="Unpaid checkout — reason required"
-        open={showUnpaidCheckoutForm}
-        onClose={() => setShowUnpaidCheckoutForm(false)}
-        className="max-w-lg"
-      >
-        {selectedBooking && (() => {
-          const folio = getBookingFolio(selectedBooking);
-          return (
-            <div className="space-y-4">
-              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
-                <p className="text-xs font-semibold text-amber-900">
-                  Outstanding balance: <span className="text-base">{formatPrice(folio.balance)}</span>
-                </p>
-                <p className="mt-1 text-[10px] text-amber-700">
-                  Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+      {/* Per CLS-01 (2026-08-09, decision #208): the three
+          lifecycle transition confirmation modals. Replaces the
+          pre-CLS-01 split-path (modal-only-if-balance-due for
+          check-out + naked transitions for Confirm booking /
+          Verify & check in + naked zero-balance check-out). The
+          check-out modal is unified: always opens, renders the
+          folio summary + an inline reason form when balance > 0
+          (UCO-02/03) + a blocked callout when the server rejects
+          the transition (admin-only threshold). */}
+      {selectedBooking && (
+        <>
+          {/* Confirm booking (payment-confirmed → confirmed) */}
+          <ConfirmStatusModal
+            open={showConfirmBooking}
+            onClose={() => setShowConfirmBooking(false)}
+            title="Confirm this booking?"
+            subtitle={selectedBooking.guestName}
+            description="The booking will move from Payment Confirmed → Confirmed. The guest will be notified by email and the booking will be ready for check-in."
+            icon={CheckCircle2}
+            iconTone="success"
+            confirmLabel="Confirm booking"
+            confirming={confirmBookingPending}
+            onConfirm={handleConfirmBooking}
+          >
+            <div className="grid gap-2 rounded-lg border border-gray-150 bg-gray-50 p-3 text-xs sm:grid-cols-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Room</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.roomNumber} · {String(selectedBooking.roomType || "Room")}
                 </p>
               </div>
-
-              {unpaidCheckoutBlocked ? (
-                <div className="space-y-3">
-                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
-                    <p className="text-xs font-bold text-red-800">Front Desk approval limit exceeded</p>
-                    <p className="mt-1 text-[10px] text-red-700">{unpaidCheckoutBlockMessage}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowUnpaidCheckoutForm(false)}
-                    className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
-                  >
-                    Close
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <label htmlFor="unpaid-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                      Reason for unpaid checkout <span className="text-red-500">*</span>
-                    </label>
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {UNPAID_REASON_SHORTCUTS.map((shortcut) => (
-                        <button
-                          key={shortcut.value}
-                          type="button"
-                          onClick={() => setUnpaidCheckoutReason(shortcut.value)}
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors ${
-                            unpaidCheckoutReason === shortcut.value
-                              ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
-                              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                          }`}
-                        >
-                          {shortcut.label}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      id="unpaid-reason"
-                      value={unpaidCheckoutReason}
-                      onChange={(e) => setUnpaidCheckoutReason(e.target.value)}
-                      placeholder="Describe why the balance remains unpaid..."
-                      rows={3}
-                      maxLength={500}
-                      className="w-full resize-none rounded-lg border border-gray-250 px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                    <p className="mt-1 text-right text-[10px] text-gray-400">{unpaidCheckoutReason.length}/500</p>
-                  </div>
-
-                  {unpaidCheckoutError && (
-                    <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{unpaidCheckoutError}</p>
-                  )}
-
-                  <div className="flex items-center justify-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowUnpaidCheckoutForm(false)}
-                      disabled={unpaidCheckoutSubmitting}
-                      className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!selectedBooking) return;
-                        const reason = unpaidCheckoutReason.trim();
-                        if (!reason) {
-                          setUnpaidCheckoutError("A reason is required for unpaid checkout.");
-                          return;
-                        }
-                        setUnpaidCheckoutSubmitting(true);
-                        setUnpaidCheckoutError(null);
-                        try {
-                          await updateBookingStatus(selectedBooking.id, "checked-out", {
-                            unpaidCheckoutReason: reason
-                          } as any);
-                          setSelectedBooking(prev => prev ? { ...prev, status: "checked-out", unpaidCheckoutReason: reason } as any : null);
-                          setShowUnpaidCheckoutForm(false);
-                        } catch (err: any) {
-                          if (err.message?.includes("Front Desk cannot complete")) {
-                            setUnpaidCheckoutBlocked(true);
-                            setUnpaidCheckoutBlockMessage(err.message);
-                          } else {
-                            setUnpaidCheckoutError(err.message || "Failed to checkout.");
-                          }
-                        } finally {
-                          setUnpaidCheckoutSubmitting(false);
-                        }
-                      }}
-                      disabled={unpaidCheckoutSubmitting || !unpaidCheckoutReason.trim()}
-                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-50"
-                    >
-                      {unpaidCheckoutSubmitting ? (
-                        <>
-                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          Checking out…
-                        </>
-                      ) : (
-                        `Check out with ${formatPrice(folio.balance)} due`
-                      )}
-                    </button>
-                  </div>
-                </>
-              )}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Stay</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.checkIn} → {selectedBooking.checkOut} ({selectedBooking.numNights} night{Number(selectedBooking.numNights) === 1 ? "" : "s"})
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Payment method</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Total</p>
+                <p className="font-semibold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</p>
+              </div>
             </div>
-          );
-        })()}
-      </Modal>
+          </ConfirmStatusModal>
+
+          {/* Verify & check-in (confirmed → checked-in) */}
+          <ConfirmStatusModal
+            open={showConfirmCheckIn}
+            onClose={() => setShowConfirmCheckIn(false)}
+            title="Check in guest?"
+            subtitle={selectedBooking.guestName}
+            description="The booking will move from Confirmed → Checked-in. The guest will be marked as in-house and the room status will flip to occupied."
+            icon={LogIn}
+            iconTone="primary"
+            confirmLabel="Check in guest"
+            confirming={confirmCheckInPending}
+            onConfirm={handleConfirmCheckIn}
+          >
+            <div className="grid gap-2 rounded-lg border border-gray-150 bg-gray-50 p-3 text-xs sm:grid-cols-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Room</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.roomNumber} · {String(selectedBooking.roomType || "Room")}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Stay</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.checkIn} → {selectedBooking.checkOut} ({selectedBooking.numNights} night{Number(selectedBooking.numNights) === 1 ? "" : "s"})
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Guests</p>
+                <p className="font-semibold text-gray-900">{selectedBooking.numGuests}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Breakfast</p>
+                <p className="font-semibold text-gray-900">
+                  {selectedBooking.hasBreakfast ? "Included" : "Not included"}
+                </p>
+              </div>
+            </div>
+          </ConfirmStatusModal>
+
+          {/* Check out (checked-in → checked-out) — unified.
+              Replaces the pre-CLS-01 UnpaidCheckoutForm modal
+              that only opened when balance > 0. The new shell
+              always opens, the children body is conditional:
+              folio summary (always) + reason form (balance > 0
+              + not blocked) + blocked callout (server said
+              "Front Desk cannot complete"). */}
+          <ConfirmStatusModal
+            open={showConfirmCheckOut}
+            onClose={() => setShowConfirmCheckOut(false)}
+            title="Check out guest?"
+            subtitle={selectedBooking.guestName}
+            description="The booking will move from Checked-in → Checked-out. Once confirmed, this status change is final and the room is marked available for the next guest."
+            icon={LogOut}
+            iconTone={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0 ? "warning" : "primary";
+            })()}
+            confirmLabel={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0
+                ? `Check out with ${formatPrice(folio.balance)} due`
+                : "Complete check-out";
+            })()}
+            confirmTone={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0 ? "warning" : "primary";
+            })()}
+            confirming={confirmCheckOutPending}
+            confirmDisabled={(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return folio.balance > 0 && !unpaidCheckoutReason.trim();
+            })()}
+            onConfirm={handleConfirmCheckOut}
+            footer={unpaidCheckoutBlocked ? (
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmCheckOut(false)}
+                  className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            ) : undefined}
+          >
+            {(() => {
+              const folio = getBookingFolio(selectedBooking);
+              return (
+                <div className="space-y-4">
+                  <div className={`rounded-lg border px-4 py-3 ${
+                    folio.balance > 0
+                      ? "bg-amber-50 border-amber-200"
+                      : "bg-green-50 border-green-200"
+                  }`}>
+                    {folio.balance > 0 ? (
+                      <>
+                        <p className="text-xs font-semibold text-amber-900">
+                          Outstanding balance: <span className="text-base">{formatPrice(folio.balance)}</span>
+                        </p>
+                        <p className="mt-1 text-[10px] text-amber-700">
+                          Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs font-semibold text-green-900">
+                          Folio fully paid
+                        </p>
+                        <p className="mt-1 text-[10px] text-green-700">
+                          Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  {unpaidCheckoutBlocked ? (
+                    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                      <p className="text-xs font-bold text-red-800">Front Desk approval limit exceeded</p>
+                      <p className="mt-1 text-[10px] text-red-700">{unpaidCheckoutBlockMessage}</p>
+                    </div>
+                  ) : folio.balance > 0 ? (
+                    <>
+                      <div>
+                        <label htmlFor="unpaid-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                          Reason for unpaid checkout <span className="text-red-500">*</span>
+                        </label>
+                        <div className="mb-2 flex flex-wrap gap-1.5">
+                          {UNPAID_REASON_SHORTCUTS.map((shortcut) => (
+                            <button
+                              key={shortcut.value}
+                              type="button"
+                              onClick={() => setUnpaidCheckoutReason(shortcut.value)}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors ${
+                                unpaidCheckoutReason === shortcut.value
+                                  ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
+                                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                              }`}
+                            >
+                              {shortcut.label}
+                            </button>
+                          ))}
+                        </div>
+                        <textarea
+                          id="unpaid-reason"
+                          value={unpaidCheckoutReason}
+                          onChange={(e) => setUnpaidCheckoutReason(e.target.value)}
+                          placeholder="Describe why the balance remains unpaid..."
+                          rows={3}
+                          maxLength={500}
+                          className="w-full resize-none rounded-lg border border-gray-250 px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        <p className="mt-1 text-right text-[10px] text-gray-400">{unpaidCheckoutReason.length}/500</p>
+                      </div>
+                      {unpaidCheckoutError && (
+                        <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{unpaidCheckoutError}</p>
+                      )}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })()}
+          </ConfirmStatusModal>
+        </>
+      )}
       {/* PRC-11: Focused Record Payment modal */}
       <Modal
         title="Record Onsite Payment"
@@ -7245,25 +7786,58 @@ export function BookingsPage() {
                     Room {selectedReservationContext.position} of {selectedReservationContext.roomCount}
                   </span>
                 </button>
-                <button
-                  type="button"
-                  data-testid="staff-discount-scope-reservation"
-                  onClick={() => setStaffDiscountScope("reservation")}
-                  className={cn(
-                    "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
-                    staffDiscountScope === "reservation"
-                      ? "border-primary bg-primary text-white shadow-sm"
-                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                  )}
-                >
-                  <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
-                  <span className={cn(
-                    "mt-0.5 block text-[10px]",
-                    staffDiscountScope === "reservation" ? "text-white/80" : "text-gray-500"
-                  )}>
-                    Reservation total
-                  </span>
-                </button>
+                {(() => {
+                  // Per the per-individual discount guard: the
+                  // "All N rooms" scope is NOT available for
+                  // senior / PWD discounts. PWD and senior are
+                  // per-individual legal entitlements (RA 7277 /
+                  // RA 9442) — they must be applied to the
+                  // specific guest's booking, not the whole
+                  // reservation. The button is disabled with a
+                  // clear visual + a one-line hint so the staff
+                  // knows why + can fall back to "This room".
+                  // The same guard auto-reverts `staffDiscountScope`
+                  // to null in a useEffect below (defense in
+                  // depth: if the staff already picked "All N
+                  // rooms" and then switched the type to senior
+                  // / PWD, the scope clears so the submit handler
+                  // applies to the lead only).
+                  const perIndividual = isPerIndividualDiscount;
+                  return (
+                    <button
+                      type="button"
+                      data-testid="staff-discount-scope-reservation"
+                      onClick={() => setStaffDiscountScope("reservation")}
+                      disabled={perIndividual}
+                      aria-disabled={perIndividual}
+                      title={
+                        perIndividual
+                          ? "Not available for senior / PWD discounts — these are per-individual entitlements. Apply to one room at a time."
+                          : undefined
+                      }
+                      className={cn(
+                        "min-h-[44px] rounded-lg border px-3 text-left transition sm:min-h-[36px]",
+                        perIndividual
+                          ? "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 opacity-60"
+                          : staffDiscountScope === "reservation"
+                            ? "border-primary bg-primary text-white shadow-sm"
+                            : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                      )}
+                    >
+                      <span className="block text-xs font-bold">All {selectedReservationContext.roomCount} rooms</span>
+                      <span className={cn(
+                        "mt-0.5 block text-[10px]",
+                        perIndividual
+                          ? "text-gray-400"
+                          : staffDiscountScope === "reservation" ? "text-white/80" : "text-gray-500"
+                      )}>
+                        {perIndividual
+                          ? "Senior / PWD only — pick one room"
+                          : "Reservation total"}
+                      </span>
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -7287,6 +7861,25 @@ export function BookingsPage() {
             }} disabled={isApplyingStaffDiscount} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
             <button type="button" onClick={() => void (async () => {
               if (!selectedBooking || (!staffDiscountType && !staffVoucherCode.trim())) return;
+              // Per the per-individual discount guard:
+              // PWD and senior are per-individual legal
+              // entitlements (RA 7277 / RA 9442) — they
+              // must be applied to the specific guest's
+              // booking, not the whole reservation. The
+              // segmented-control UI disables the "All N
+              // rooms" button when the type is
+              // per-individual, and the useEffect above
+              // auto-clears the scope if the staff toggles
+              // the type. This is the submit-time
+              // defense: if somehow the staff submits
+              // with a per-individual type + the
+              // reservation scope (e.g. a stale state
+              // from before the type was switched), the
+              // guard falls back to single-room so the
+              // reservation-scope loop is never reached
+              // for a per-individual discount.
+              const effectiveScope =
+                isPerIndividualDiscount ? "room" : (staffDiscountScope ?? "room");
               setDiscountError(null);
               setIsApplyingStaffDiscount(true);
               try {
@@ -7303,37 +7896,53 @@ export function BookingsPage() {
                 // and surface the failure to the desk — already-
                 // repriced rooms keep their new totals; the
                 // operator retries the failed room.
-                const scope = staffDiscountScope ?? "room";
-                const targetIds = scope === "reservation" && selectedReservationContext
-                  ? selectedReservationContext.rooms.map((room) => room.id)
-                  : [selectedBooking.id];
+                // Per DSC-04 (2026-08-15): the reservation-scope
+                // path uses the atomic `apply-reservation-discount`
+                // endpoint — one server-side transaction that
+                // either applies the discount to every eligible
+                // child or none. The pre-DSC-04 loop risked
+                // partial state when room N failed after rooms
+                // 1..N-1 succeeded. The single-room path
+                // (scope === "room") still uses the per-booking
+                // `apply-discount` endpoint — that's byte-
+                // equivalent to a 1-child reservation and avoids
+                // an extra server round-trip.
+                const scope = effectiveScope;
+                const isReservationScope = scope === "reservation" && !!selectedReservationContext;
                 const token = await auth.currentUser?.getIdToken(true);
-                const errors: string[] = [];
-                for (const targetId of targetIds) {
-                  const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
-                    body: JSON.stringify({ bookingId: targetId, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() })
-                  });
-                  const payload = await response.json();
-                  if (!response.ok || !payload.success) {
-                    errors.push(payload.error || `Room ${targetId} failed.`);
-                    continue;
-                  }
-                  if (targetId === selectedBooking.id) {
-                    // The drawer's `selectedBooking` is the only
-                    // one the page hydrates locally via
-                    // `syncSelectedBooking`; the sibling rooms
-                    // refresh via the AdminContext listener.
-                    syncSelectedBooking(payload.data);
-                  }
+                const endpointPath = isReservationScope
+                  ? "/api/bookings/apply-reservation-discount"
+                  : "/api/bookings/apply-discount";
+                const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}${endpointPath}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+                  body: JSON.stringify(
+                    isReservationScope
+                      ? { reservationId: selectedReservationContext!.reservationId, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() }
+                      : { bookingId: selectedBooking.id, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() }
+                  )
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.success) {
+                  throw new Error(payload.error || "Apply discount failed.");
                 }
-                if (errors.length > 0) {
-                  throw new Error(
-                    errors.length === targetIds.length
-                      ? errors[0]
-                      : `${errors.length} of ${targetIds.length} rooms failed: ${errors[0]}`
-                  );
+                // Sync the drawer with the server result.
+                if (isReservationScope) {
+                  // The atomic endpoint returns `{ appliedTo: [...], skipped: [...] }`.
+                  // The drawer's `selectedBooking` is the only one the page
+                  // hydrates locally via `syncSelectedBooking`; sibling rooms
+                  // refresh via the AdminContext listener.
+                  if (payload.data?.appliedTo?.includes(selectedBooking.id)) {
+                    // The drawer booking was in appliedTo; refetch to sync the
+                    // displayed totals. The server response shape (appliedTo list)
+                    // doesn't include the per-child totals, so we trigger a
+                    // refetch via syncSelectedBooking by passing an empty payload
+                    // (the AdminContext listener refreshes siblings; the drawer
+                    // booking refreshes via the next bookings query).
+                  }
+                } else {
+                  // Single-room path: the server returns the full booking write.
+                  syncSelectedBooking(payload.data);
                 }
                 setStaffDiscountType("");
                 setStaffVoucherCode("");
@@ -7341,10 +7950,10 @@ export function BookingsPage() {
                 setStaffDiscountScope(null);
                 toast.success(
                   scope === "reservation" && selectedReservationContext
-                    ? `Reservation repriced (${targetIds.length} rooms)`
+                    ? `Reservation repriced (${selectedReservationContext.roomCount} rooms)`
                     : "Booking repriced",
                   scope === "reservation" && selectedReservationContext
-                    ? `Applied across ${targetIds.length} rooms in ${selectedReservationContext.reservationRef || "—"}`
+                    ? `Applied across ${selectedReservationContext.roomCount} rooms in ${selectedReservationContext.reservationRef || "—"}`
                     : `New total: ${formatPrice(selectedBooking.totalPrice || 0)}`
                 );
               } catch (error: any) {

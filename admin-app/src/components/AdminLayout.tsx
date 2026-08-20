@@ -136,18 +136,37 @@ export function AdminLayout() {
             )}
           </div>
 
-          {/* Center zone — mobile wordmark per Stitch design */}
+          {/* Center zone — mobile wordmark per Stitch design.
+                Per #18 / decision #224 (2026-08-19): capped
+                `max-w-[calc(100vw-7rem)] truncate` (the 7rem ≈ 112
+                px is the sum of the left + right zone widths —
+                hamburger 44 + right zone 132 + 2 × safe-area
+                16 ≈ 112, conservatively rounded up) and pinned
+                `truncate` so a long `config.brandName` or a
+                narrow viewport doesn't overflow past the safe-
+                area-inset-right boundary and visually bleed
+                under the NotificationBell. The `data-testid`
+                marker pins the contract for the e2e suite. */}
           {isMobile && (
             <span
-              className="pointer-events-none absolute left-1/2 -translate-x-1/2 font-heading text-lg font-semibold text-primary"
+              data-testid="brand-wordmark"
+              className="pointer-events-none absolute left-1/2 -translate-x-1/2 max-w-[calc(100vw-7rem)] truncate text-center font-heading text-lg font-semibold text-primary"
               aria-hidden="true"
             >
               {config.brandName}
             </span>
           )}
 
-          {/* Right zone */}
-          <div className="flex items-center gap-2 sm:gap-4">
+          {/* Right zone — per #18 / decision #224 (2026-08-19): the
+                wrapper is `shrink-0` so the NotificationBell + mute
+                button + signout avatar (3 × 44 px = 132 px + gap)
+                can't be squeezed by flexbox when the absolute
+                wordmark overflows from the centre zone on a
+                narrow viewport (<375 px) with a long
+                `config.brandName`. Pre-#224 the right zone's
+                flex child had no `shrink-0` and the bell could
+                compress under the wordmark visually. */}
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
             {/* Per Phase 12 — Notification Center (decision
                 #120): the bell is reachable from every admin
                 page (lives in the shared header) and surfaces

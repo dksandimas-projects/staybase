@@ -82,7 +82,13 @@ export const WalkinRoomLineSchema = z.object({
   roomId: z.string().trim().min(1).max(64),
   numAdults: z.coerce.number().int().min(0).max(100),
   numChildren: z.coerce.number().int().min(0).max(100),
-  extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0)
+  extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
+  // Per EXB-12 (2026-08-06, per decision #199): whether the
+  // walk-in guest wants breakfast for the extra-bed occupant(s).
+  // Optional — when absent, the server treats it as `false`.
+  // The server validates the invariant: `extraBedBreakfast`
+  // can only be `true` when `extraBedCount > 0`.
+  extraBedBreakfast: z.boolean().optional()
 }).strict();
 
 export const WalkinBookingSchema = z.object({
@@ -124,6 +130,14 @@ export const WalkinBookingSchema = z.object({
   // server snapshots the room type's `extraBedRate` onto the
   // booking doc alongside this field.
   extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): whether the
+  // guest wants breakfast for the extra-bed occupant(s). When
+  // `true`, all `extraBedCount` beds in this room are counted
+  // toward the breakfast total. Optional — when absent, the
+  // server treats it as `false` (no breakfast for extra beds).
+  // The server validates the invariant: `extraBedBreakfast`
+  // can only be `true` when `extraBedCount > 0`.
+  extraBedBreakfast: z.boolean().optional(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: z.string().trim().min(1).max(80),
   // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
@@ -212,6 +226,26 @@ export const RescheduleBookingSchema = z.object({
 export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;
 export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;
 export type WalkinRoomLineInput = z.infer<typeof WalkinRoomLineSchema>;
+
+// Per LOW-1 (reports audit 2026-08-10) +
+// `DECISIONS-FEATURES.md #99` (LOU workflow):
+// the staff-toggled LOU (Letter of Undertaking) flag
+// for corporate chargeback bookings. The schema lives
+// in the shared package (not co-located with the
+// handler) so a future `setLouReceived` call site —
+// or a future client-side preview / display — can
+// import the same shape. The schema is `.strict()` so
+// a client can't add unknown fields (matches the
+// discipline of every other staff-mutation schema in
+// this file). The handler enforces the
+// `isCorporate + paymentMethod === "pay-at-hotel"`
+// guard separately.
+export const SetLouReceivedSchema = z.object({
+  bookingId: z.string().trim().min(1).max(64),
+  louReceived: z.boolean()
+}).strict();
+
+export type SetLouReceivedInput = z.infer<typeof SetLouReceivedSchema>;
 
 // Per MRB-14 (2026-08-03, per decision #180 — proposed):
 // the add-room surface. Staff adds a room to an existing

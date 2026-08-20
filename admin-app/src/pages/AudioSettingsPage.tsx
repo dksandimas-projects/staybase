@@ -1,0 +1,660 @@
+// `plan/features/INTERCOM-AUDIO-ROUTING.md`
+//
+// Per-staff intercom audio routing. Surfaces two output-device pickers
+// (one for the call audio, one for notification sounds + ringtones) so
+// the front desk can route voice calls to a USB headset and still hear
+// ringtones through the built-in speaker. Settings persist on
+// `guests/{uid}.audioRouting` — see useAudioRouting.ts for the
+// read/write contract.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Headphones, Info, RefreshCcw, Save, Volume2, VolumeX, AlertTriangle, Check } from "lucide-react";
+import { useAdmin } from "../context/AdminContext";
+import { useToast } from "../components/Toast";
+// Per-staff audio routing state lives in AdminContext (mounted once
+// at the provider level — see plan/features/INTERCOM-AUDIO-ROUTING.md
+// §"Live subscription"). The page consumes the live value via
+// `useAdmin()` so we don't open a second Firestore listener on
+// `guests/{uid}`.
+import {
+  audioDeviceLabelsUnlocked,
+  audioOutputApiSupported,
+  listAudioOutputDevices,
+  selectAudioOutputSafe,
+  setSinkIdSafe,
+  unlockAudioDeviceLabels
+} from "../utils/audioOutputDevices";
+import { cn } from "../utils/cn";
+
+const SYSTEM_DEFAULT_DEVICE_ID = "default";
+// 440 Hz sine, 0.3s, mono, 16-bit, 44.1 kHz — generated at module load
+// and cached as a Blob URL so the "Test" button works offline without
+// bundling an audio file. The CSP at `vercel.json` declares an explicit
+// `media-src 'self' blob: data:` (see `plan/docs/SECURITY.md §Content
+// Security Policy`), so the Blob URL loaded via `URL.createObjectURL`
+// is permitted. Without that directive, the CSP falls back to
+// `default-src 'self'` and rejects every `blob:` URL with
+// `Refused to load media from 'blob:...' because it violates the
+// directive: "default-src 'self'"` — see the regression test in
+// `__tests__/feature-intercom-audio-routing.test.ts` for the guard.
+// Same pattern as the call ringtone in `utils/renderRingtoneWav.ts`.
+// Short enough not to be annoying, with a 10ms fade in/out envelope to
+// avoid the click that a hard attack/release produces.
+let cachedTestToneUrl: string | null = null;
+function getTestToneUrl(): string {
+  if (cachedTestToneUrl) return cachedTestToneUrl;
+  const sampleRate = 44100;
+  const duration = 0.3;
+  const numSamples = Math.floor(sampleRate * duration);
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  // RIFF header (ASCII markers written as big-endian uint32)
+  view.setUint32(0, 0x52494646, false); // "RIFF"
+  view.setUint32(4, 36 + dataSize, true); // file size - 8, little-endian
+  view.setUint32(8, 0x57415645, false); // "WAVE"
+  // fmt chunk
+  view.setUint32(12, 0x666d7420, false); // "fmt "
+  view.setUint32(16, 16, true); // subchunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  // data chunk
+  view.setUint32(36, 0x64617461, false); // "data"
+  view.setUint32(40, dataSize, true);
+
+  // Samples — 440Hz sine at 30% volume, with a 10ms fade in/out to
+  // avoid the click that a hard attack produces on some audio stacks.
+  const fadeSamples = Math.min(numSamples / 2, Math.floor(sampleRate * 0.01));
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    let envelope = 1;
+    if (i < fadeSamples) envelope = i / fadeSamples;
+    else if (i > numSamples - fadeSamples) envelope = (numSamples - i) / fadeSamples;
+    const sample = Math.sin(2 * Math.PI * 440 * t) * 0.3 * envelope;
+    view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+
+  const blob = new Blob([buffer], { type: "audio/wav" });
+  cachedTestToneUrl = URL.createObjectURL(blob);
+  return cachedTestToneUrl;
+}
+
+type Surface = "call" | "ringtone";
+
+interface DeviceRowProps {
+  surface: Surface;
+  surfaceLabel: string;
+  surfaceHint: string;
+  value: string | null;
+  onChange: (next: string | null) => void;
+  disabled: boolean;
+  apiSupported: boolean;
+  onAfterTest: (ok: boolean) => void;
+}
+
+function DeviceRow({
+  surface,
+  surfaceLabel,
+  surfaceHint,
+  value,
+  onChange,
+  disabled,
+  apiSupported,
+  onAfterTest
+}: DeviceRowProps) {
+  const [devices, setDevices] = useState<{ deviceId: string; label: string }[]>([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<"ok" | "fail" | null>(null);
+  // Inline banner shown when the most-recent Pick… attempt can't
+  // open the native picker (runtime supports setSinkId but not
+  // selectAudioOutput). Lifecycle:
+  //   undefined → no banner
+  //   "unsupported" → permanent; surfaces why the staff won't see
+  //                   labelled devices
+  //   "error" → transient; dismissed on the next Pick… click
+  //   "cancelled" → silent (the OS picker's own UI is feedback)
+  const [pickResult, setPickResult] = useState<
+    "unsupported" | "denied" | "error" | "cancelled" | null
+  >(null);
+  // Chrome returns an empty (or single "default") list from
+  // `enumerateDevices()` until the user grants permission via the
+  // native OS picker (`selectAudioOutput()`). Track whether the staff
+  // has triggered the picker on this row so the dropdown can show a
+  // discoverable hint explaining the empty state. The flag flips on
+  // the FIRST successful `selectAudioOutputSafe()` call (the user
+  // may pick the system default — either path grants permission),
+  // OR when the runtime is detected as permanently unsupported
+  // (no point nagging the staff to try again).
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const testAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Fresh AudioContext created INSIDE the click handler so the user
+  // gesture is on the stack. Kept here (not in AdminContext) because
+  // the /audio page may be the very first interactive surface the
+  // staff hits, and we want Test to play on first click without a
+  // prior interaction elsewhere in the dashboard.
+  const testCtxRef = useRef<AudioContext | null>(null);
+
+  const refreshDevices = useCallback(async () => {
+    if (!apiSupported) return;
+    setIsLoadingDevices(true);
+    try {
+      const list = await listAudioOutputDevices();
+      // Chrome's `enumerateDevices()` returns the system default as
+      // a row with `deviceId: ""` and (pre-permission) an empty
+      // `label`. With our label-substitution helper that single
+      // entry becomes { deviceId: "", label: "System default" } —
+      // indistinguishable from the synthetic default we unshift in
+      // the old code, which is why the dropdown used to show
+      // "System default, System default" with the permission hint
+      // never appearing (devices.length === 2 never satisfied
+      // the `<= 1` guard). Now we only insert the synthetic
+      // default when Chrome's enumeration is completely empty —
+      // permission state is now reflected accurately and there's
+      // never a duplicate label.
+      const merged = list.length > 0
+        ? list
+        : [{ deviceId: SYSTEM_DEFAULT_DEVICE_ID, label: "System default" }];
+      setDevices(merged);
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  }, [apiSupported]);
+
+  useEffect(() => {
+    void refreshDevices();
+    // If the origin already holds a media permission (the staff took an
+    // intercom call earlier, or granted it on a previous visit), device
+    // labels are already visible — don't nag them to click Pick....
+    let cancelled = false;
+    void audioDeviceLabelsUnlocked().then((unlocked) => {
+      if (!cancelled && unlocked) setPermissionGranted(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshDevices]);
+
+  const handleTest = useCallback(async () => {
+    if (!apiSupported) {
+      onAfterTest(false);
+      return;
+    }
+    setIsTesting(true);
+    setTestResult(null);
+    try {
+      const audio = testAudioRef.current ?? new Audio(getTestToneUrl());
+      testAudioRef.current = audio;
+      const ok = await setSinkIdSafe(audio, value);
+      if (!ok) {
+        setTestResult("fail");
+        onAfterTest(false);
+        return;
+      }
+      // Chrome autoplay policy rejects `audio.play()` if no
+      // user gesture is on the stack OR no AudioContext has been
+      // resumed in this page session. The button click itself is a
+      // gesture for the element, but the helper contexts we use for
+      // setSinkId aren't. Build a one-shot AudioContext inside this
+      // click handler, resume it (synchronously within the gesture),
+      // play, then close. The element's `play()` is what actually
+      // produces sound — the AudioContext is here purely to satisfy
+      // the autoplay gate and to throw away with no leaks.
+      try {
+        const Ctor =
+          (window as unknown as { AudioContext?: typeof AudioContext })
+            .AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+        if (Ctor) {
+          testCtxRef.current ??= new Ctor();
+          const ctx = testCtxRef.current;
+          if (ctx.state === "suspended") {
+            await ctx.resume();
+          }
+        }
+      } catch {
+        // If we can't construct an AudioContext (e.g. very old Safari),
+        // fall through to audio.play() and let the browser decide.
+        // The failure mode is a silent test, not a crash.
+      }
+      audio.currentTime = 0;
+      try {
+        await audio.play();
+        setTestResult("ok");
+        onAfterTest(true);
+      } catch {
+        setTestResult("fail");
+        onAfterTest(false);
+      }
+    } finally {
+      setIsTesting(false);
+    }
+  }, [apiSupported, value, onAfterTest]);
+
+  const handleGrantPermission = useCallback(async () => {
+    // Two-step unlock, in preference order.
+    //
+    // STEP 1 — the native OS output picker
+    // (`navigator.mediaDevices.selectAudioOutput()`). Best UX when it
+    // exists, but it is NOT shipped in stable Chrome or Edge: it sits
+    // behind `chrome://flags/#enable-experimental-web-platform-features`
+    // and only Firefox ships it unflagged. So on the browser the front
+    // desk actually uses, this step returns "unsupported" every time —
+    // which is exactly what the staff saw as "clicking Pick… does
+    // nothing but show a warning".
+    //
+    // STEP 2 — the portable fallback: ask for microphone permission via
+    // `getUserMedia({ audio: true })` and stop the track immediately.
+    // Until the origin holds a media permission, `enumerateDevices()`
+    // hands back a single anonymised `audiooutput` row with an empty
+    // deviceId and an empty label. The grant unlocks the FULL labelled
+    // list, which is all this page needs — the routing itself is done
+    // by `setSinkId`, not by the picker. Staff already grant the same
+    // permission when they accept an intercom call.
+    //
+    // Outcomes surfaced to the staff:
+    //   ok          → picker or fallback succeeded; device list refreshes
+    //   cancelled   → OS picker dismissed (AbortError). Silent — the
+    //                 picker was its own feedback.
+    //   denied      → microphone permission refused (or blocked by
+    //                 policy). Banner explains how to re-enable it.
+    //   unsupported → neither API exists on this runtime.
+    //   error       → unexpected runtime throw.
+    const result = await selectAudioOutputSafe();
+    console.info("[audio-routing] selectAudioOutput result:", result);
+
+    if (result.kind === "ok") {
+      setPickResult(null);
+      setPermissionGranted(true);
+      const id = result.deviceId;
+      if (id !== SYSTEM_DEFAULT_DEVICE_ID) {
+        onChange(id);
+        setTestResult(null);
+      }
+      void refreshDevices();
+      return;
+    }
+
+    if (result.kind === "cancelled") {
+      // The staff saw the OS picker and dismissed it — no banner.
+      setPickResult("cancelled");
+      void refreshDevices();
+      return;
+    }
+
+    // Step 2: no native picker on this runtime (the normal Chrome/Edge
+    // case) — fall back to the microphone-permission unlock so the
+    // dropdown can still show real device names.
+    const unlock = await unlockAudioDeviceLabels();
+    console.info("[audio-routing] device-label unlock result:", unlock);
+    if (unlock.kind === "ok") {
+      setPickResult(null);
+      setPermissionGranted(true);
+    } else {
+      setPickResult(unlock.kind);
+      // "unsupported" is permanent — stop nagging the staff to retry.
+      if (unlock.kind === "unsupported") setPermissionGranted(true);
+    }
+    void refreshDevices();
+  }, [onChange, refreshDevices]);
+
+  const selectValue = value ?? SYSTEM_DEFAULT_DEVICE_ID;
+
+  return (
+    <div
+      className={cn(
+        "rounded-card border border-gray-150 bg-white p-5 transition",
+        disabled && "opacity-60"
+      )}
+    >
+      <div className="flex items-start gap-4">
+        <div className="rounded-lg bg-primary-light p-2.5 text-primary-dark" aria-hidden="true">
+          {surface === "call" ? <Headphones size={20} /> : <Volume2 size={20} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between gap-2">
+            <label htmlFor={`audio-${surface}`} className="text-sm font-bold text-gray-900">
+              {surfaceLabel}
+            </label>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              {surface === "call" ? "WebRTC" : "Notifications + ringtones"}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5">{surfaceHint}</p>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <select
+              id={`audio-${surface}`}
+              value={selectValue}
+              disabled={disabled || !apiSupported}
+              onChange={(e) => {
+                const v = e.target.value;
+                onChange(v === SYSTEM_DEFAULT_DEVICE_ID ? null : v);
+                setTestResult(null);
+              }}
+              className="min-h-[44px] flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
+            >
+              {!devices.length && <option value={SYSTEM_DEFAULT_DEVICE_ID}>System default</option>}
+              {devices.map((d) => (
+                <option key={d.deviceId || SYSTEM_DEFAULT_DEVICE_ID} value={d.deviceId || SYSTEM_DEFAULT_DEVICE_ID}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void handleTest()}
+              disabled={disabled || !apiSupported || isTesting}
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed"
+              aria-label={`Test ${surfaceLabel.toLowerCase()}`}
+            >
+              {isTesting ? <RefreshCcw size={14} className="animate-spin" /> : <Volume2 size={14} />}
+              Test
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleGrantPermission()}
+              disabled={disabled || !apiSupported}
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed"
+              title="Open the system device picker"
+            >
+              <Headphones size={14} />
+              Pick…
+            </button>
+          </div>
+
+          {/*
+           * Discoverability hint: Chrome's `enumerateDevices()` returns
+           * a single unnamed row (system default) until the staff has
+           * triggered `selectAudioOutput()` once. Without this hint,
+           * they see a dropdown that looks empty + a Test that fails,
+           * with no clue why. The hint points at the existing Pick…
+           * button, which doubles as the permission-grant CTA.
+           */}
+          {!permissionGranted && devices.length <= 1 && (
+            <p
+              data-testid={`audio-permission-hint-${surface}`}
+              className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-700"
+            >
+              <AlertTriangle size={12} />
+              Click <span className="font-bold">Pick…</span> above and allow microphone access — browsers hide audio device names until this origin holds a media permission. The mic is released immediately; it is only used to reveal the device list.
+            </p>
+          )}
+
+          {/*
+           * Pick result banner — surfaces WHY the staff clicked
+           * Pick… and nothing happened, so they can self-diagnose
+           * instead of opening a ticket. Distinct copy per kind:
+           *   "unsupported" → permanent fallback banner (runtime
+           *                   supports setSinkId but not
+           *                   selectAudioOutput)
+           *   "error"       → transient banner (call the picker
+           *                   failed at runtime)
+           * "cancelled" is intentionally silent — the OS picker
+           * was its own feedback.
+           */}
+          {pickResult === "unsupported" && (
+            <p
+              role="alert"
+              data-testid={`audio-pick-unsupported-${surface}`}
+              className="mt-2 inline-flex items-start gap-1.5 text-[11px] font-medium text-amber-800"
+            >
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>
+                This browser can&apos;t list audio devices — it has neither the native output picker nor microphone access. The system default will keep working for calls + ringtones. Use the DevTools console (filter <code className="rounded bg-amber-100 px-1">[audio-routing]</code>) for the runtime detection result.
+              </span>
+            </p>
+          )}
+          {/*
+           * Microphone permission was refused. Chrome/Edge do not ship
+           * `selectAudioOutput()`, so the mic grant is the ONLY way to
+           * get labelled device names — without it the dropdown is
+           * stuck on the single anonymous "System default" row.
+           */}
+          {pickResult === "denied" && (
+            <p
+              role="alert"
+              data-testid={`audio-pick-denied-${surface}`}
+              className="mt-2 inline-flex items-start gap-1.5 text-[11px] font-medium text-amber-800"
+            >
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>
+                Microphone access was blocked, so device names stay hidden. Click the padlock in the address bar → allow the microphone for this site, then click <span className="font-bold">Pick…</span> again. The mic is released the moment permission is granted — it is only used to reveal the device list.
+              </span>
+            </p>
+          )}
+          {pickResult === "error" && (
+            <p
+              role="alert"
+              data-testid={`audio-pick-error-${surface}`}
+              className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-red-700"
+            >
+              <AlertTriangle size={12} />
+              Couldn&apos;t open the audio device picker. Try again or pick another browser.
+            </p>
+          )}
+
+          {testResult === "ok" && (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-700">
+              <Check size={12} /> Heard it? Great — that device is now routed.
+            </p>
+          )}
+          {testResult === "fail" && (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-700">
+              <AlertTriangle size={12} /> Couldn't play through that device. Try a different one.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AudioSettingsPage() {
+  const {
+    audioRouting: routing,
+    audioRoutingLoading: loading,
+    audioRoutingError: error,
+    updateAudioRouting: updateRouting,
+    resetAudioRouting: resetToDefault
+  } = useAdmin();
+  const toast = useToast();
+  const [apiSupported] = useState<boolean>(() => audioOutputApiSupported());
+  const [draftEnabled, setDraftEnabled] = useState<boolean>(routing.enabled);
+  const [draftCall, setDraftCall] = useState<string | null>(routing.callOutputDeviceId);
+  const [draftRingtone, setDraftRingtone] = useState<string | null>(routing.ringtoneOutputDeviceId);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync the draft with the live Firestore value when it changes
+  // (e.g. another tab saved, or initial load).
+  useEffect(() => {
+    setDraftEnabled(routing.enabled);
+    setDraftCall(routing.callOutputDeviceId);
+    setDraftRingtone(routing.ringtoneOutputDeviceId);
+  }, [routing.enabled, routing.callOutputDeviceId, routing.ringtoneOutputDeviceId]);
+
+  const isDirty = useMemo(
+    () =>
+      draftEnabled !== routing.enabled ||
+      draftCall !== routing.callOutputDeviceId ||
+      draftRingtone !== routing.ringtoneOutputDeviceId,
+    [draftEnabled, draftCall, draftRingtone, routing]
+  );
+
+  const handleSave = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      await updateRouting({
+        enabled: draftEnabled,
+        callOutputDeviceId: draftEnabled ? draftCall : null,
+        ringtoneOutputDeviceId: draftEnabled ? draftRingtone : null
+      });
+      toast.success("Audio routing saved.");
+    } catch {
+      toast.error("Couldn't save audio routing. Try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [draftEnabled, draftCall, draftRingtone, updateRouting, toast]);
+
+  const handleReset = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      await resetToDefault();
+      toast.success("Audio routing reset to system default.");
+    } catch {
+      toast.error("Couldn't reset audio routing. Try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [resetToDefault, toast]);
+
+  if (!apiSupported) {
+    return (
+      <div className="space-y-8 font-body">
+        <header>
+          <h1 className="font-heading text-3xl text-gray-950 lowercase">audio routing</h1>
+          <p className="text-xs text-gray-500 mt-1">
+            Route intercom call audio to a headset and keep notification sounds on the built-in speaker.
+          </p>
+        </header>
+        <div className="rounded-card border border-amber-200 bg-amber-50 p-5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={20} className="text-amber-700 shrink-0" aria-hidden="true" />
+            <div>
+              <h2 className="text-sm font-bold text-amber-900">Output device selection isn't supported in this browser</h2>
+              <p className="text-xs text-amber-800 mt-1">
+                This browser doesn't expose the Audio Output Devices API, so we can't pin the call or
+                ringtone audio to a specific speaker or headset. The intercom will continue to play
+                through your system default. Try Chrome, Edge, or recent Safari on macOS.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 font-body">
+      <header className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="font-heading text-3xl text-gray-950 lowercase">audio routing</h1>
+          <p className="text-xs text-gray-500 mt-1">
+            Route intercom call audio to a headset and keep notification sounds on the built-in speaker.
+            Settings apply to this staff account across devices that can honour them.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleReset()}
+            disabled={isSaving || loading}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed"
+          >
+            Reset to default
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={isSaving || loading || !isDirty}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Save size={14} />
+            {isSaving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </header>
+
+      <section
+        className={cn(
+          "rounded-card border bg-white p-5 transition",
+          draftEnabled ? "border-primary/40 bg-primary-light/40" : "border-gray-150"
+        )}
+      >
+        <div className="flex items-start gap-4">
+          <div className="rounded-lg bg-primary-light p-2.5 text-primary-dark" aria-hidden="true">
+            {draftEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-bold text-gray-900">Route intercom audio</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              When on, calls go to your chosen call device and notification sounds go to the ringtone device. When off, the system
+              default output is used for everything.
+            </p>
+            <label className="mt-3 inline-flex min-h-[44px] cursor-pointer items-center gap-2 text-xs font-bold text-gray-700">
+              <input
+                type="checkbox"
+                checked={draftEnabled}
+                onChange={(e) => setDraftEnabled(e.target.checked)}
+                className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              Route intercom audio by surface
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <DeviceRow
+          surface="call"
+          surfaceLabel="Call device"
+          surfaceHint="Where the live call audio plays. Pick a USB headset or the speakers you wear during a shift."
+          value={draftCall}
+          onChange={setDraftCall}
+          disabled={!draftEnabled}
+          apiSupported={apiSupported}
+          onAfterTest={(ok) => {
+            if (ok) toast.success("Heard it? Great — that's your call device.");
+          }}
+        />
+        <DeviceRow
+          surface="ringtone"
+          surfaceLabel="Notification device"
+          surfaceHint="Where incoming chat chimes and call ringtones play. Usually the built-in speaker so you notice new activity even while wearing a headset."
+          value={draftRingtone}
+          onChange={setDraftRingtone}
+          disabled={!draftEnabled}
+          apiSupported={apiSupported}
+          onAfterTest={(ok) => {
+            if (ok) toast.success("Heard it? Great — that's your notification device.");
+          }}
+        />
+      </section>
+
+      <section className="rounded-card border border-gray-150 bg-gray-50/40 p-5">
+        <div className="flex items-start gap-3">
+          <Info size={18} className="text-gray-500 shrink-0" aria-hidden="true" />
+          <div className="text-xs text-gray-600 space-y-1">
+            <p>
+              The Audio Output Devices API is supported in Chrome, Edge, and recent Safari on macOS. It is not
+              available in Firefox or on iOS Safari — on those browsers, audio always follows the system default
+              output, so plugging in headphones will route both calls and ringtones through the headset.
+            </p>
+            <p>
+              Device IDs are tied to the physical output. If a saved device disappears (headset unplugged), the
+              routing falls back to the system default on the next page load and a one-time warning is logged to the
+              browser console. Open this page to pick a new device.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {error && (
+        <div className="rounded-card border border-red-200 bg-red-50 p-4 text-xs text-red-800">
+          Couldn't load audio routing: {error}
+        </div>
+      )}
+    </div>
+  );
+}

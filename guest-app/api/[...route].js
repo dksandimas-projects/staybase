@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.264.2";
+    VERSION2 = "0.275.0";
   }
 });
 
@@ -221478,7 +221478,7 @@ var init_references = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, AddRoomBookingSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     init_zod();
@@ -221528,7 +221528,13 @@ var init_booking = __esm({
       roomId: external_exports.string().trim().min(1).max(64),
       numAdults: external_exports.coerce.number().int().min(0).max(100),
       numChildren: external_exports.coerce.number().int().min(0).max(100),
-      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0)
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
+      // Per EXB-12 (2026-08-06, per decision #199): whether the
+      // walk-in guest wants breakfast for the extra-bed occupant(s).
+      // Optional — when absent, the server treats it as `false`.
+      // The server validates the invariant: `extraBedBreakfast`
+      // can only be `true` when `extraBedCount > 0`.
+      extraBedBreakfast: external_exports.boolean().optional()
     }).strict();
     WalkinBookingSchema = external_exports.object({
       bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
@@ -221569,6 +221575,14 @@ var init_booking = __esm({
       // server snapshots the room type's `extraBedRate` onto the
       // booking doc alongside this field.
       extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
+      // Per EXB-12 (2026-08-06, per decision #199): whether the
+      // guest wants breakfast for the extra-bed occupant(s). When
+      // `true`, all `extraBedCount` beds in this room are counted
+      // toward the breakfast total. Optional — when absent, the
+      // server treats it as `false` (no breakfast for extra beds).
+      // The server validates the invariant: `extraBedBreakfast`
+      // can only be `true` when `extraBedCount > 0`.
+      extraBedBreakfast: external_exports.boolean().optional(),
       guestDetails: WalkinGuestDetailsSchema,
       paymentMethod: external_exports.string().trim().min(1).max(80),
       // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
@@ -221627,6 +221641,10 @@ var init_booking = __esm({
       // explicitly provided — a defensive path for a
       // future migration tool).
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+    }).strict();
+    SetLouReceivedSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(1).max(64),
+      louReceived: external_exports.boolean()
     }).strict();
     AddRoomBookingSchema = external_exports.object({
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX),
@@ -222097,6 +222115,29 @@ function computeReservationAggregatePaymentStatus(childStatuses) {
   }
   return "in-house";
 }
+function deriveReservationCounters(children) {
+  const roomCount = children.length;
+  let cancelledRoomCount = 0;
+  let checkedInRoomCount = 0;
+  let checkedOutRoomCount = 0;
+  for (const child of children) {
+    const status = child.status;
+    if (status === "cancelled") {
+      cancelledRoomCount++;
+    } else if (status === "checked-in" || status === "in-house") {
+      checkedInRoomCount++;
+    } else if (status === "checked-out" || status === "completed") {
+      checkedOutRoomCount++;
+    }
+  }
+  return {
+    roomCount,
+    activeRoomCount: Math.max(roomCount - cancelledRoomCount, 0),
+    cancelledRoomCount,
+    checkedInRoomCount,
+    checkedOutRoomCount
+  };
+}
 function round2(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -222245,6 +222286,10 @@ function calculateBreakfastAddOn(input) {
     effectiveOccupancy = numAdults + (includesChildren ? numChildren : 0);
   } else {
     effectiveOccupancy = Number(input.numGuests) || 0;
+  }
+  if (input.extraBedBreakfast) {
+    const extraBedCount = Number(input.extraBedCount) || 0;
+    effectiveOccupancy += extraBedCount;
   }
   if (effectiveOccupancy === 0) return 0;
   return rate * effectiveOccupancy * nights;
@@ -222749,6 +222794,35 @@ var init_points = __esm({
   }
 });
 
+// ../shared/utils/paymentMethodLabel.ts
+function resolvePaymentMethodLabel(methodKey, paymentMethods) {
+  if (typeof methodKey !== "string" || methodKey.length === 0) {
+    return "";
+  }
+  if (Array.isArray(paymentMethods)) {
+    const match = paymentMethods.find(
+      (m2) => m2 && typeof m2.method === "string" && m2.method === methodKey
+    );
+    if (match && typeof match.label === "string" && match.label.length > 0) {
+      return match.label;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(LEGACY_PAYMENT_METHOD_LABELS, methodKey)) {
+    return LEGACY_PAYMENT_METHOD_LABELS[methodKey];
+  }
+  return methodKey;
+}
+var LEGACY_PAYMENT_METHOD_LABELS;
+var init_paymentMethodLabel = __esm({
+  "../shared/utils/paymentMethodLabel.ts"() {
+    LEGACY_PAYMENT_METHOD_LABELS = {
+      gcash: "Digital Wallet (GCash/Maya)",
+      bank: "Bank Transfer (Direct Deposit)",
+      "pay-at-hotel": "Pay at Hotel"
+    };
+  }
+});
+
 // ../shared/utils/paymentReference.ts
 function getLatestPaymentReference(booking) {
   const payments = booking?.onsitePayments;
@@ -222761,6 +222835,21 @@ function getLatestPaymentReference(booking) {
 }
 var init_paymentReference = __esm({
   "../shared/utils/paymentReference.ts"() {
+  }
+});
+
+// ../shared/utils/paymentVerification.ts
+function isPaymentVerified(booking) {
+  if (!booking) return false;
+  if (booking.status === "payment-confirmed") return true;
+  const stamp = booking.paymentConfirmedAt;
+  if (stamp === null || stamp === void 0) return false;
+  if (typeof stamp === "string") return stamp.trim().length > 0;
+  if (stamp instanceof Date) return !Number.isNaN(stamp.getTime());
+  return false;
+}
+var init_paymentVerification = __esm({
+  "../shared/utils/paymentVerification.ts"() {
   }
 });
 
@@ -223280,6 +223369,9 @@ function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options =
     effectiveNow = /* @__PURE__ */ new Date();
     requestedUses = now?.requestedUses ?? 1;
   }
+  if (Number.isNaN(effectiveNow.getTime())) {
+    effectiveNow = /* @__PURE__ */ new Date();
+  }
   if (!Number.isFinite(requestedUses) || requestedUses < 1) {
     requestedUses = 1;
   }
@@ -223714,6 +223806,31 @@ var init_cancellation = __esm({
   }
 });
 
+// ../shared/utils/uploads.ts
+async function raceUploadWithTimeout(uploadPromise, timeoutMs, label = "Upload") {
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_2, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(
+        new Error(
+          `${label} timed out after ${Math.round(timeoutMs / 1e3)}s. Please check your connection and retry.`
+        )
+      );
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([uploadPromise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== void 0) clearTimeout(timeoutHandle);
+  }
+}
+var DEFAULT_UPLOAD_TIMEOUT_MS;
+var init_uploads = __esm({
+  "../shared/utils/uploads.ts"() {
+    DEFAULT_UPLOAD_TIMEOUT_MS = 9e4;
+  }
+});
+
 // ../shared/index.ts
 var shared_exports = {};
 __export(shared_exports, {
@@ -223739,6 +223856,7 @@ __export(shared_exports, {
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
   DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
+  DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
   GuestDetailsSchema: () => GuestDetailsSchema,
@@ -223746,6 +223864,7 @@ __export(shared_exports, {
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
   KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
+  LEGACY_PAYMENT_METHOD_LABELS: () => LEGACY_PAYMENT_METHOD_LABELS,
   LegacyPaymentMethodConfigSchema: () => LegacyPaymentMethodConfigSchema,
   MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
   MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
@@ -223774,6 +223893,7 @@ __export(shared_exports, {
   STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
   SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
   SeoPublishSchema: () => SeoPublishSchema,
+  SetLouReceivedSchema: () => SetLouReceivedSchema,
   TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
   TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
   UNSUPPORTED_PAYMENT_METHODS: () => UNSUPPORTED_PAYMENT_METHODS,
@@ -223819,6 +223939,7 @@ __export(shared_exports, {
   createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
   createFailureBackoffState: () => createFailureBackoffState,
   datesOverlap: () => datesOverlap,
+  deriveReservationCounters: () => deriveReservationCounters,
   deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
@@ -223848,6 +223969,7 @@ __export(shared_exports, {
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
+  isPaymentVerified: () => isPaymentVerified,
   isValidBookingRef: () => isValidBookingRef,
   isValidLookupToken: () => isValidLookupToken,
   isValidReservationId: () => isValidReservationId,
@@ -223861,10 +223983,12 @@ __export(shared_exports, {
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   parseCheckInTime: () => parseCheckInTime,
+  raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
   recordSweepResult: () => recordSweepResult,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
+  resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   runBackfill: () => runBackfill,
   scaleIn: () => scaleIn,
   slideInBottom: () => slideInBottom,
@@ -223906,7 +224030,9 @@ var init_shared = __esm({
     init_dates();
     init_images();
     init_points();
+    init_paymentMethodLabel();
     init_paymentReference();
+    init_paymentVerification();
     init_pricing();
     init_publicSiteCache();
     init_references();
@@ -223920,6 +224046,7 @@ var init_shared = __esm({
     init_failureBackoff();
     init_financeInvariants();
     init_cancellation();
+    init_uploads();
   }
 });
 
@@ -224186,8 +224313,18 @@ function buildReservationEmailView(reservation, children) {
     reservationRef: String(reservation.reservationRef || ""),
     reservationId: String(reservation.id || ""),
     isReservation: true,
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `activeRoomCount` is no longer read from the
+    // reservation header — it is always derived from
+    // the children. Pre-BAR-02 the header mirror was
+    // maintained transactionally; BAR-02 makes the
+    // derivation the canonical answer. `roomCount` was
+    // already a derivation over `children.length`.
     roomCount: children.length,
-    activeRoomCount: Number(reservation.activeRoomCount ?? children.length),
+    activeRoomCount: Math.max(
+      children.length - children.filter((c2) => c2.status === "cancelled").length,
+      0
+    ),
     rooms: roomProjections,
     roomTypeLabels,
     // Per MRB-14 (2026-08-03, per decision #180): the
@@ -224225,6 +224362,13 @@ function buildReservationEmailView(reservation, children) {
   };
 }
 function lookupUrl(booking) {
+  const reservationRef = String(booking.reservationRef || "").trim();
+  const leadGuestEmail = String(booking.guestEmail || "").trim();
+  if (reservationRef && leadGuestEmail) {
+    return siteUrl(
+      `/my-booking?reservationRef=${encodeURIComponent(reservationRef)}&email=${encodeURIComponent(leadGuestEmail.toLowerCase())}`
+    );
+  }
   const ref = encodeURIComponent(booking.bookingRef || "");
   const token2 = encodeURIComponent(booking.lookupToken || "");
   if (!ref || !token2) return siteUrl("/my-booking");
@@ -226951,6 +227095,37 @@ init_notifications();
 init_shared();
 init_shared();
 init_shared();
+
+// server/handlers/reservationScopeTransition.ts
+async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId2, map2) {
+  if (bookingReservationId2.length === 0) return [];
+  const childrenForFlip = await transaction.get(
+    adminDb2.collection("bookings").where("reservationId", "==", bookingReservationId2)
+  );
+  return childrenForFlip.docs.map(map2);
+}
+function applyReservationScopePaymentTransition(transaction, adminDb2, bookingReservationId2, targetBookingId, children, rule, updatedAt) {
+  const postUpdateChildStatuses = [];
+  const siblingFlips = [];
+  for (const child of children) {
+    const decision = rule(child);
+    const newStatus = decision ? decision.newStatus : child.status;
+    postUpdateChildStatuses.push(newStatus);
+    if (decision && child.id !== targetBookingId) {
+      siblingFlips.push({ id: child.id, fromStatus: child.status, toStatus: newStatus });
+      transaction.update(adminDb2.collection("bookings").doc(child.id), decision.write);
+    }
+  }
+  if (bookingReservationId2.length > 0 && children.length > 0) {
+    transaction.update(adminDb2.collection("reservations").doc(bookingReservationId2), { updatedAt });
+  }
+  return {
+    siblingFlippedCount: siblingFlips.length,
+    postUpdateChildStatuses
+  };
+}
+
+// server/handlers/bookings.ts
 init_booking();
 init_shared();
 init_zod();
@@ -227085,7 +227260,14 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
       hasBreakfast: booking.hasBreakfast,
       breakfastRate: booking.breakfastRate,
       numGuests: booking.numGuests,
-      numNights: nights
+      numNights: nights,
+      // Per EXB-12 (2026-08-06, per decision #199):
+      // pass the extra-bed breakfast fields from
+      // the booking doc so the rebuild matches the
+      // create-time total. Nullish → no extra-bed
+      // breakfast (back-compat with older docs).
+      extraBedCount: booking.extraBedCount,
+      extraBedBreakfast: booking.extraBedBreakfast === true
     })
   }] : [];
   const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
@@ -227095,7 +227277,10 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
       hasBreakfast: booking.hasBreakfast,
       breakfastRate: booking.breakfastRate,
       numGuests: booking.numGuests,
-      numNights: originalNights
+      numNights: originalNights,
+      // Per EXB-12: same as above.
+      extraBedCount: booking.extraBedCount,
+      extraBedBreakfast: booking.extraBedBreakfast === true
     })
   }] : []);
   const originalPricing = composeRateBreakdown({
@@ -227194,9 +227379,17 @@ function buildCreateEmailView(args) {
     corporateCode: args.corporateCode,
     companyName: args.companyName,
     paymentMethod: args.paymentMethod,
-    paymentStatus: args.paymentStatus,
-    activeRoomCount: args.finalRooms.length,
-    cancelledRoomCount: 0
+    paymentStatus: args.paymentStatus
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `activeRoomCount` and `cancelledRoomCount`
+    // are not stamped onto the synthetic reservation
+    // object either. The downstream email view
+    // (and the page that renders it) derives
+    // the count from the in-memory `children` array.
+    // Pre-BAR-02 the synthetic object's
+    // `activeRoomCount: args.finalRooms.length` was
+    // a stub for the same value the helper now
+    // computes directly.
   };
   const children = args.finalRooms.map((room, index) => {
     const typeEntry = args.roomTypes.find((type) => type && type.value === room.roomType);
@@ -227561,7 +227754,18 @@ var publicRoomSelectionSchema = external_exports.object({
   numChildren: external_exports.coerce.number().int().min(0).max(100),
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
   hasBreakfast: external_exports.boolean(),
-  breakfastIncludesChildren: external_exports.boolean().optional()
+  breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // per-room opt-in for breakfast on the extra-bed
+  // occupant(s). The client sends this from the
+  // per-type toggle in the Extras sub-section (or
+  // always, even when false — the strict schema
+  // would otherwise reject every booking because
+  // EXB-12's body always includes the field).
+  // The server enforces the invariant
+  // `extraBedBreakfast implies extraBedCount > 0`
+  // in the `validatedRoomStays` loop below.
+  extraBedBreakfast: external_exports.boolean().optional()
 }).strict().superRefine((selection, ctx) => {
   if (selection.numAdults + selection.numChildren < 1) {
     ctx.addIssue({
@@ -227617,6 +227821,17 @@ var createBookingSchema = external_exports.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // top-level extra-bed breakfast toggle. The client
+  // always sends it (defaults to `false` from
+  // `bookingRoomCart.ts:63`), so the strict schema
+  // must accept the field. The server-side
+  // authoritative value lives on each
+  // `roomSelections[i].extraBedBreakfast` (per-room
+  // pricing + invariant enforcement); this top-level
+  // field is accepted for wire back-compat with the
+  // EXB-12 client shape and otherwise unused.
+  extraBedBreakfast: external_exports.boolean().optional(),
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -227677,6 +227892,19 @@ var createBookingSchema = external_exports.object({
   // the write boundary. Pre-MRB-11 callers omit it; the
   // server fills it in.
   revenueAllocation: BookingRevenueAllocationSchema.optional(),
+  // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+  // the LOU (Letter of Undertaking) flag for corporate
+  // chargeback bookings. The guest never sets this — the
+  // field is staff-toggled post-creation via
+  // `/api/bookings/set-lou-received` once the LOU arrives.
+  // The schema accepts `true` (the rare case where the
+  // corporate client supplied the LOU up-front and the
+  // staff walks it in pre-marked) and `false` (the common
+  // case — the booking is `pending` until the LOU workflow
+  // resolves it). The field defaults to `false` so a
+  // missing value matches the "LOU not yet received"
+  // state.
+  louReceived: external_exports.boolean().optional().default(false),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
 async function handleCreateBooking(req, res) {
@@ -228143,6 +228371,7 @@ async function handleCreateBooking(req, res) {
             requestedRoomSelections?.length ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra bed(s), but only ${extraBedCount2} selected.` : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount2} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
+        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount2 > 0;
         return {
           ...assignedRoom,
           numAdults: numAdults2,
@@ -228150,6 +228379,11 @@ async function handleCreateBooking(req, res) {
           numGuests: numAdults2 + numChildren2,
           extraBedCount: extraBedCount2,
           extraBedRate: extraBedCount2 > 0 ? Math.max(0, Number(selectionType.extraBedRate) || 0) : 0,
+          // Per EXB-12: snapshot the breakfast-for-extra-beds
+          // toggle onto the validated stay. The pricing loop
+          // reads this to count the extra beds toward the
+          // breakfast total (same rate as adult breakfast).
+          extraBedBreakfast,
           breakfastIncludesChildren: selection.breakfastIncludesChildren !== void 0 ? selection.breakfastIncludesChildren : breakfastIncludesChildrenDefault
         };
       });
@@ -228277,7 +228511,18 @@ async function handleCreateBooking(req, res) {
           numAdults: stay.numAdults,
           numChildren: stay.numChildren,
           numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren
+          breakfastIncludesChildren: stay.breakfastIncludesChildren,
+          // Per EXB-12 (2026-08-06, per decision #199):
+          // when the guest opts in to breakfast for the
+          // extra-bed occupant(s), the helper counts
+          // `extraBedCount` toward the breakfast total
+          // (priced as `breakfastRate × extraBedCount ×
+          // numNights`). The toggle is per-type, snapshotted
+          // onto the validated stay above. The invariant
+          // `extraBedBreakfast implies extraBedCount > 0`
+          // is enforced above.
+          extraBedCount: stay.extraBedCount,
+          extraBedBreakfast: stay.extraBedBreakfast === true
         });
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
@@ -228320,6 +228565,7 @@ async function handleCreateBooking(req, res) {
       let appliedVoucherCode = "";
       let voucherUsageUpdate = null;
       if (voucherCode && !corporateDetails2.isCorporate) {
+        const childrenWithVoucherCount = resolvedRoomSelections2.length;
         const formattedCode = voucherCode.trim().toUpperCase();
         let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         let voucherDoc = await transaction.get(voucherRef);
@@ -228357,7 +228603,7 @@ async function handleCreateBooking(req, res) {
             voucherUsageUpdate = {
               ref: voucherRef,
               data: {
-                usageCount: (vData.usageCount || 0) + 1,
+                usageCount: (vData.usageCount || 0) + childrenWithVoucherCount,
                 updatedAt: /* @__PURE__ */ new Date()
               }
             };
@@ -228589,6 +228835,18 @@ async function handleCreateBooking(req, res) {
         // is null for normal bookings; the convert-to-booking UI (per
         // audit 1.4 SEV-1 #2) will populate it.
         linkedInquiryId: linkedInquiryId || null,
+        // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+        // the LOU (Letter of Undertaking) flag for corporate
+        // chargeback bookings. Stamped from the request body
+        // (rare — the LOU usually arrives later and the desk
+        // toggles via `/api/bookings/set-lou-received`). Default
+        // `false`. The field exists on every booking doc; the
+        // `corporate.flat-rate / with-code` paths that arrive
+        // via the public flow set it to the body value, the
+        // walkin + convert-inquiry paths leave it at `false`
+        // (chargeback doesn't apply to those surfaces).
+        louReceived: body.louReceived === true,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
         // Per BI-11 (booking-intercom audit 2026-07-06): the
         // corporate flow collects `designation`,
         // `companyAddress`, `purposeOfStay`, and
@@ -228725,11 +228983,13 @@ async function handleCreateBooking(req, res) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: termsConsentVersion,
-        roomCount: assignedRooms.length,
-        activeRoomCount: assignedRooms.length,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 these were the
+        // create-time init for the header's denormalized
+        // counter mirror.
         holdExpiresAt: newBooking.holdExpiresAt ? newBooking.holdExpiresAt : null,
         requestFingerprint: reservationRequestFingerprint,
         // Per MRB-14 (2026-08-03, per decision #180 —
@@ -228792,6 +229052,14 @@ async function handleCreateBooking(req, res) {
             breakfastIncludesChildren: pricingForRoom.finalHasBreakfast ? pricingForRoom.breakfastIncludesChildren : false,
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
+            // Per EXB-12 (2026-08-06, per decision #199):
+            // snapshot the extra-bed breakfast toggle onto
+            // the booking doc. The invariant
+            // `extraBedBreakfast implies extraBedCount > 0`
+            // is enforced in the validatedRoomStays loop
+            // above. Absent → `false` (no breakfast for extra
+            // beds) for back-compat with older booking docs.
+            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
@@ -229542,7 +229810,7 @@ async function handleCreateWalkin(req, res) {
         }, voucherBase));
         voucherUsageUpdate = {
           ref: voucherRef,
-          data: { usageCount: Number(voucherData.usageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
+          data: { usageCount: Number(voucherData.usageCount || 0) + walkinRoomCount, updatedAt: /* @__PURE__ */ new Date() }
         };
       }
       const hasManualOverride = totalPriceOverride !== void 0 && totalPriceOverride !== null;
@@ -229827,15 +230095,14 @@ async function handleCreateWalkin(req, res) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: DEFAULT_TERMS_VERSION,
-        // Per MRB-07 (2026-08-02, per decision #159): the aggregate
-        // counters reflect the N room stays this reservation actually
-        // created, so the admin reservation row can show room count,
-        // status and balance without fanning out to the children.
-        roomCount: walkinRoomCount,
-        activeRoomCount: walkinRoomCount,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: status === "checked-in" ? walkinRoomCount : 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 the walkin path mirrored
+        // the public create path's init (the "all
+        // checked-in" branch was the historical quirk
+        // for instant-walkin check-in).
         // Walk-ins have no auto-expiry hold (the staff is
         // creating the booking, not waiting on a guest
         // action) — `null` mirrors the public path's
@@ -230100,6 +230367,256 @@ async function handleApplyBookingDiscount(req, res) {
     return res.status(status).json({ success: false, error: message });
   }
 }
+async function handleApplyReservationDiscount(req, res) {
+  const reservationId = String(req.body?.reservationId || "").trim();
+  const requestedDiscountType = req.body?.discountType;
+  const requestedVoucherCode = String(req.body?.voucherCode || "").trim().toUpperCase();
+  if (!reservationId) {
+    return res.status(400).json({ success: false, error: "Reservation ID is required." });
+  }
+  if (!requestedDiscountType && !requestedVoucherCode) {
+    return res.status(400).json({ success: false, error: "Choose a government discount or enter a voucher code." });
+  }
+  if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
+    return res.status(400).json({ success: false, error: "Invalid government discount type." });
+  }
+  const staffUid = String(req.staff?.uid || "staff");
+  let childRefs = [];
+  try {
+    const childSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationId).get();
+    childRefs = childSnap.docs.map((doc) => doc.ref);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || "Unable to query children." });
+  }
+  if (childRefs.length === 0) {
+    return res.status(404).json({ success: false, error: "Reservation has no bookings." });
+  }
+  try {
+    let result = { appliedTo: [], skipped: [] };
+    await adminDb.runTransaction(async (transaction) => {
+      const reservationRef = adminDb.collection("reservations").doc(reservationId);
+      const reservationSnap = await transaction.get(reservationRef);
+      if (!reservationSnap.exists) throw new Error("Reservation not found.");
+      const childSnapshots = [];
+      for (const ref of childRefs) {
+        const snap = await transaction.get(ref);
+        if (!snap.exists) {
+          throw new Error(`Booking ${ref.id} not found.`);
+        }
+        childSnapshots.push({ id: ref.id, ref, data: snap.data() });
+      }
+      const eligibleStatuses = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+      const eligible = [];
+      const skipped = [];
+      for (const child of childSnapshots) {
+        if (!eligibleStatuses.includes(child.data.status)) {
+          skipped.push(child.id);
+          continue;
+        }
+        if (child.data.discountType || child.data.voucherCode) {
+          skipped.push(child.id);
+          continue;
+        }
+        eligible.push(child);
+      }
+      if (eligible.length === 0) {
+        throw new Error("No eligible bookings in this reservation (all already have a discount or voucher, or are checked-out/cancelled).");
+      }
+      let voucherRef = null;
+      let voucherData = null;
+      if (requestedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(requestedVoucherCode);
+        let snap = await transaction.get(voucherRef);
+        if (!snap.exists) {
+          const querySnap = await transaction.get(
+            adminDb.collection("vouchers").where("code", "==", requestedVoucherCode).limit(1)
+          );
+          if (!querySnap.empty) {
+            snap = querySnap.docs[0];
+            voucherRef = snap.ref;
+          }
+        }
+        if (!snap.exists) throw new Error("Voucher is invalid or no longer available.");
+        voucherData = snap.data();
+        const expiresAt = toDateOrNull(voucherData.expiresAt);
+        const applicableRoomTypes = voucherData.applicableRoomTypes || [];
+        const capAllows = voucherData.usageCap == null || Number(voucherData.usageCount || 0) + eligible.length <= Number(voucherData.usageCap);
+        const roomsApply = applicableRoomTypes.length === 0 || eligible.every((c2) => applicableRoomTypes.includes(c2.data.roomType));
+        const valid = voucherData.isActive !== false && (!expiresAt || expiresAt >= /* @__PURE__ */ new Date()) && capAllows && roomsApply;
+        if (!valid) throw new Error("Voucher is invalid or no longer available.");
+      }
+      const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
+      const discountPct = discountType ? 20 : 0;
+      for (const child of eligible) {
+        const booking = child.data;
+        const breakdown = booking.rateBreakdown;
+        const storedOriginalTotal = Number(booking.originalTotalPrice);
+        const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0) + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+        const storedTotalPrice = Number(booking.totalPrice);
+        const subtotal = booking.originalTotalPrice !== null && booking.originalTotalPrice !== void 0 && Number.isFinite(storedOriginalTotal) && storedOriginalTotal >= 0 ? storedOriginalTotal : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0 ? breakdownSubtotal : storedTotalPrice;
+        if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
+        const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+        const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
+        let voucherDiscount = 0;
+        let voucherCode = "";
+        if (requestedVoucherCode && voucherData) {
+          voucherCode = requestedVoucherCode;
+          voucherDiscount = Math.round(calculateVoucherDiscount({
+            discountType: voucherData.discountType === "percent" ? "percent" : "flat",
+            discountValue: Number(voucherData.discountValue) || 0
+          }, voucherBase));
+        }
+        const afterVoucher = calculateVoucherBase(voucherBase, voucherDiscount);
+        const memberDiscountPct = Number(booking.memberDiscountPct || 0);
+        const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
+        const pointsValue = Number(booking.pointsRedeemedValue || 0);
+        const totalPrice = Math.max(afterVoucher - memberDiscount - pointsValue, 0);
+        const rateBreakdown = buildRateBreakdown({
+          roomLines: breakdown?.roomLines || [],
+          roomSubtotal: Number(breakdown?.roomSubtotal || subtotal),
+          breakfastTotal: (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
+          discountType,
+          discountPct,
+          voucherDiscount,
+          memberDiscountPct,
+          pointsRedeemedValue: pointsValue,
+          finalTotal: totalPrice
+        });
+        const updates = {
+          originalTotalPrice: subtotal,
+          discountType,
+          discountPct,
+          discountVerified: Boolean(discountType),
+          discountVerifiedBy: discountType ? staffUid : null,
+          discountRejected: false,
+          discountRejectedBy: null,
+          discountRejectionReason: "",
+          voucherCode,
+          voucherDiscount,
+          totalPrice,
+          rateBreakdown,
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        transaction.update(child.ref, updates);
+      }
+      let voucherUsageCount;
+      if (voucherRef && voucherData) {
+        voucherUsageCount = Number(voucherData.usageCount || 0) + eligible.length;
+        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
+      }
+      result = {
+        appliedTo: eligible.map((c2) => c2.id).sort(),
+        skipped: skipped.sort(),
+        voucherUsageCount
+      };
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "Unable to apply the discount or voucher.";
+    let status = 400;
+    if (message === "Reservation not found." || message.startsWith("Booking ") && message.endsWith(" not found.")) {
+      status = 404;
+    } else if (message === "Reservation has no bookings.") {
+      status = 404;
+    }
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+async function handleRemoveVoucher(req, res) {
+  const bookingId = String(req.body?.bookingId || "").trim();
+  const reason = String(req.body?.reason || "").trim();
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid booking id." });
+  }
+  const staffUid = String(req.staff?.uid || "staff");
+  try {
+    let result = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+      const bookingData2 = bookingDoc.data();
+      const existingVoucherCode = String(bookingData2.voucherCode || "").trim();
+      if (!existingVoucherCode) {
+        result = { idempotentReplay: true, bookingId };
+        return;
+      }
+      const voucherRef = adminDb.collection("vouchers").doc(existingVoucherCode);
+      const voucherDoc = await transaction.get(voucherRef);
+      const originalTotalPrice = bookingData2.originalTotalPrice;
+      if (originalTotalPrice === null || originalTotalPrice === void 0) {
+        throw new Error("Original total price not stored on booking.");
+      }
+      const memberDiscountPct = Number(bookingData2.memberDiscountPct || 0);
+      const rawPointsRedeemedValue = Number(bookingData2.pointsRedeemedValue || 0);
+      const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
+      const removeChain = calculateDiscountChain({
+        roomTotal: Number(originalTotalPrice) || 0,
+        breakfastTotal: 0,
+        extraBedTotal: 0,
+        seniorPct: 0,
+        // Per the VOU-02 fix: voucher is being removed,
+        // so the chain sees voucherAmount: 0. The
+        // member-discount base widens to include the
+        // voucher-amount range (the guest pays more
+        // after removal, member discount applies to
+        // the larger pre-voucher base).
+        voucherAmount: 0,
+        memberPct: memberDiscountPct,
+        scope: normalizeDiscountScope(bookingData2.discountScopeSnapshot),
+        round: true
+      });
+      const restoredTotalPrice = Math.max(removeChain.total - pointsRedeemedValue, 0);
+      const rateBreakdown = rebuildRateBreakdown({
+        // Strip `voucherCode` before spreading — it's
+        // not part of the `RebuildableBooking` type
+        // (the type only carries `voucherDiscount`).
+        // The clear is intentional (we're removing
+        // the voucher) so a stray `voucherCode`
+        // leaking through the spread would be
+        // semantically wrong.
+        ...(() => {
+          const { voucherCode: _omit, ...rest } = bookingData2;
+          return rest;
+        })(),
+        voucherCode: "",
+        voucherDiscount: 0,
+        pointsRedeemedValue,
+        totalPrice: restoredTotalPrice
+      }, {
+        pointsRedeemedValue,
+        finalTotal: restoredTotalPrice
+      });
+      const updates = {
+        voucherCode: "",
+        voucherDiscount: 0,
+        staffRemovedVoucherBy: staffUid,
+        staffRemovedVoucherReason: reason,
+        staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
+        totalPrice: restoredTotalPrice,
+        ...rateBreakdown ? { rateBreakdown } : {},
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      if (voucherDoc.exists) {
+        const voucherData = voucherDoc.data() || {};
+        transaction.update(voucherRef, {
+          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+      }
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "Unable to remove the voucher.";
+    const status = message === "Booking not found." ? 404 : 400;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 async function handleRejectDiscount(req, res) {
   const { bookingId, reason } = req.body;
   if (!bookingId) {
@@ -230170,6 +230687,53 @@ async function handleRejectDiscount(req, res) {
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }
+async function handleSetLouReceived(req, res) {
+  const { bookingId, louReceived } = req.body || {};
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (typeof louReceived !== "boolean") {
+    return res.status(400).json({ success: false, error: "louReceived must be a boolean (true or false)." });
+  }
+  try {
+    let result = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(String(bookingId).trim());
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("Booking not found.");
+      }
+      const booking = bookingSnap.data();
+      if (booking.isCorporate !== true) {
+        throw new Error("LOU flag only applies to corporate chargeback bookings (isCorporate: true).");
+      }
+      if (booking.paymentMethod !== "pay-at-hotel") {
+        throw new Error("LOU flag only applies to chargeback bookings (paymentMethod: 'pay-at-hotel').");
+      }
+      const staffUid = req.staff?.uid || "staff";
+      const now = /* @__PURE__ */ new Date();
+      const updates = {
+        louReceived,
+        ...louReceived ? {
+          louReceivedAt: now,
+          louReceivedBy: staffUid
+        } : {
+          louReceivedAt: null,
+          louReceivedBy: null
+        },
+        updatedAt: now
+      };
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "An unexpected error occurred while updating the LOU flag.";
+    const status = message === "Booking not found." ? 404 : 400;
+    console.error("Set LOU handler error:", error);
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 var MAX_PAYMENT_REJECTION_REASON_LENGTH = 500;
 async function handleRejectPayment(req, res) {
   const { bookingId, reason } = req.body || {};
@@ -230182,6 +230746,7 @@ async function handleRejectPayment(req, res) {
   }
   const paymentRejectedBy = req.staff?.uid || "staff";
   let bookingData2 = null;
+  let siblingRejectedCount = 0;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const updatedAt = /* @__PURE__ */ new Date();
@@ -230195,11 +230760,24 @@ async function handleRejectPayment(req, res) {
         throw new Error("Booking not found.");
       }
       const data = bookingDoc.data();
-      if (data.status !== "payment-uploaded") {
+      const isTargetInPaymentUploaded = data.status === "payment-uploaded";
+      const bookingReservationId2 = String(data.reservationId || "").trim();
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        (d) => ({
+          id: d.id,
+          status: String((d.data() || {}).status || "")
+        })
+      );
+      const hasRejectableSiblings = siblingChildBookings.some(
+        (c2) => c2.id !== bookingId && c2.status === "payment-uploaded"
+      );
+      if (!isTargetInPaymentUploaded && !hasRejectableSiblings) {
         throw new Error(`Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`);
       }
       bookingData2 = data;
-      const bookingReservationId2 = String(data.reservationId || "").trim();
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
       const holdWindowHours = normalizePaymentHoldWindowHours(
@@ -230210,28 +230788,49 @@ async function handleRejectPayment(req, res) {
       paymentRejectedAt = updatedAt;
       paymentRejectedBy2 = paymentRejectedBy2;
       freshHoldExpiresAt = newDeadline;
-      transaction.update(bookingRef, {
-        status: "pending",
-        paymentRejectionReason: safeReason,
-        paymentRejectedAt: updatedAt,
-        paymentRejectedBy: paymentRejectedBy2,
-        // Per PEX-04 (2026-08-01, per decision #147): a fresh
-        // snapshotted deadline. The retained `paymentProofPath` /
-        // legacy `paymentProofUrl` are audit evidence only and
-        // do NOT exempt this booking — the `holdExpiresAt` is
-        // the only expiry authority. If the guest does not
-        // re-upload, the daily cron (PEX-06) retires the booking
-        // at this deadline.
-        holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
-        // Per the implementation plan: stale proof state is
-        // kept for audit. The re-upload is guest-driven via
-        // the existing `pending` UI on the lookup page.
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingRejectedCount } = applyReservationScopePaymentTransition(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        bookingId,
+        siblingChildBookings,
+        (child) => {
+          if (child.status === "payment-uploaded") {
+            const decision = {
+              write: {
+                status: "pending",
+                paymentRejectionReason: safeReason,
+                paymentRejectedAt: updatedAt,
+                paymentRejectedBy: paymentRejectedBy2,
+                holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+                updatedAt
+              },
+              newStatus: "pending"
+            };
+            return decision;
+          }
+          return null;
+        },
         updatedAt
-      });
-      if (bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        transaction.update(reservationRef, {
-          paymentStatus: mapBookingStatusToReservationPaymentStatus("pending"),
+      );
+      siblingRejectedCount = helperSiblingRejectedCount;
+      if (isTargetInPaymentUploaded) {
+        transaction.update(bookingRef, {
+          status: "pending",
+          paymentRejectionReason: safeReason,
+          paymentRejectedAt: updatedAt,
+          paymentRejectedBy: paymentRejectedBy2,
+          // Per PEX-04 (2026-08-01, per decision #147): a fresh
+          // snapshotted deadline. The retained `paymentProofPath` /
+          // legacy `paymentProofUrl` are audit evidence only and
+          // do NOT exempt this booking — the `holdExpiresAt` is
+          // the only expiry authority. If the guest does not
+          // re-upload, the daily cron (PEX-06) retires the booking
+          // at this deadline.
+          holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+          // Per the implementation plan: stale proof state is
+          // kept for audit. The re-upload is guest-driven via
+          // the existing `pending` UI on the lookup page.
           updatedAt
         });
       }
@@ -230243,7 +230842,12 @@ async function handleRejectPayment(req, res) {
         paymentRejectionReason,
         paymentRejectedAt,
         paymentRejectedBy: paymentRejectedBy2,
-        holdExpiresAt: freshHoldExpiresAt
+        holdExpiresAt: freshHoldExpiresAt,
+        // Per FOL-05 (2026-08-07, per decision #201):
+        // the sibling-rejection count for symmetry with
+        // `handleVerifyAndRecordPayment`. Zero for the
+        // N=1 case or when no flippable siblings.
+        siblingRejectedCount
       }
     });
   } catch (error) {
@@ -230261,6 +230865,13 @@ async function handleCancelBooking(req, res) {
   const isStaffCancellation = Boolean(req.staff?.uid);
   const cancellationSource = isStaffCancellation ? "staff" : "guest";
   const cancelledBy = isStaffCancellation ? String(req.staff.uid) : "guest";
+  if (isStaffCancellation && !validReason.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: "CANCELLATION_REASON_REQUIRED",
+      message: "A non-empty cancellation reason is required for staff cancellations."
+    });
+  }
   try {
     let bookingDocumentRef;
     let bookingData2;
@@ -230366,6 +230977,7 @@ async function handleCancelBooking(req, res) {
           cancellableIds.add(child.id);
         }
         const cancelledCount = cancellableIds.size;
+        const reservationCancellationPolicySnapshotForLiability = reservationData && reservationData.cancellationPolicySnapshot || null;
         const cancellableChildren = children.filter((c2) => cancellableIds.has(c2.id)).map((c2) => ({
           id: c2.id,
           bookingRef: String(c2.data.bookingRef || ""),
@@ -230373,7 +230985,7 @@ async function handleCancelBooking(req, res) {
           roomType: String(c2.data.roomType || ""),
           totalPrice: Number(c2.data.totalPrice) || 0,
           reservationPosition: Number(c2.data.reservationPosition) || null,
-          cancellationPolicySnapshot: c2.data.cancellationPolicySnapshot || null
+          cancellationPolicySnapshot: c2.data.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
         }));
         const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
           transaction,
@@ -230387,7 +230999,7 @@ async function handleCancelBooking(req, res) {
               roomType: String(bookingData2.roomType || ""),
               totalPrice: Number(bookingData2.totalPrice) || 0,
               reservationPosition: Number(bookingData2.reservationPosition) || null,
-              cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
             },
             reservation: {
               id: lookedUpReservationId,
@@ -230464,18 +231076,7 @@ async function handleCancelBooking(req, res) {
             });
           }
         }
-        const newActiveRoomCount = Math.max(
-          (Number(reservationData.activeRoomCount) || 0) - cancelledCount,
-          0
-        );
-        const newCancelledRoomCount = (Number(reservationData.cancelledRoomCount) || 0) + cancelledCount;
-        const postStatuses = children.map(
-          (c2) => cancellableIds.has(c2.id) ? "cancelled" : String(c2.data.status || "")
-        );
         const reservationHeaderUpdate = {
-          cancelledRoomCount: newCancelledRoomCount,
-          activeRoomCount: newActiveRoomCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postStatuses),
           updatedAt: now
         };
         if (liabilitySnapshot) {
@@ -230537,6 +231138,23 @@ async function handleCancelBooking(req, res) {
           }
         }
         const bookingReservationIdForLiability = String(freshBooking.reservationId || "").trim();
+        let perChildReservationCancellationPolicySnapshot = null;
+        if (bookingReservationIdForLiability.length > 0) {
+          const perChildReservationRef = adminDb.collection("reservations").doc(bookingReservationIdForLiability);
+          const perChildReservationDoc = await transaction.get(perChildReservationRef);
+          if (perChildReservationDoc.exists) {
+            perChildReservationCancellationPolicySnapshot = (perChildReservationDoc.data() || {}).cancellationPolicySnapshot || null;
+          }
+        }
+        const perChildLegacyFallbackSnapshot = !bookingReservationIdForLiability && freshBooking.checkIn ? {
+          cutoffHours: 48,
+          refundPctBefore: 100,
+          refundPctAfter: 0,
+          policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+          scheduledCheckInTime: (freshBooking.checkIn.toDate ? freshBooking.checkIn.toDate() : new Date(freshBooking.checkIn)).toISOString(),
+          source: "legacy-fallback"
+        } : null;
+        const perChildEffectiveSnapshot = freshBooking.cancellationPolicySnapshot || perChildReservationCancellationPolicySnapshot || perChildLegacyFallbackSnapshot;
         const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
           transaction,
           {
@@ -230549,7 +231167,7 @@ async function handleCancelBooking(req, res) {
               roomType: String(freshBooking.roomType || ""),
               totalPrice: Number(freshBooking.totalPrice) || 0,
               reservationPosition: Number(freshBooking.reservationPosition) || null,
-              cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot: perChildEffectiveSnapshot
             },
             // For per-child cancel, the helper needs
             // the reservation context (the folio read
@@ -230570,7 +231188,7 @@ async function handleCancelBooking(req, res) {
               roomType: String(freshBooking.roomType || ""),
               totalPrice: Number(freshBooking.totalPrice) || 0,
               reservationPosition: Number(freshBooking.reservationPosition) || null,
-              cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot: perChildEffectiveSnapshot
             }]
           }
         );
@@ -230604,7 +231222,6 @@ async function handleCancelBooking(req, res) {
         if (bookingReservationId2.length > 0) {
           const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
           transaction.update(reservationRef, {
-            paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
             updatedAt: now
           });
         }
@@ -230756,6 +231373,7 @@ async function handleCancelPreview(req, res) {
     let reservation = null;
     let cancellableChildren = [];
     let allocationSubtotal = Math.max(Number(bookingData2.totalPrice) || 0, 0);
+    let reservationCancellationPolicySnapshot = null;
     if (hasReservation) {
       const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
       const [reservationDoc, childrenSnap] = await Promise.all([
@@ -230771,6 +231389,7 @@ async function handleCancelPreview(req, res) {
         reservationRef: String(reservationSnapshot.reservationRef || ""),
         totalPrice: Number(reservationSnapshot.totalPrice) || 0
       };
+      reservationCancellationPolicySnapshot = reservationSnapshot.cancellationPolicySnapshot || null;
       const eligibleChildren = childrenSnap.docs.map((d) => {
         const data = d.data() || {};
         const status = String(data.status || "");
@@ -230785,7 +231404,7 @@ async function handleCancelPreview(req, res) {
           roomType: String(data.roomType || ""),
           totalPrice: Number(data.totalPrice) || 0,
           reservationPosition: Number(data.reservationPosition) || null,
-          cancellationPolicySnapshot: data.cancellationPolicySnapshot || null
+          cancellationPolicySnapshot: data.cancellationPolicySnapshot || reservationCancellationPolicySnapshot
         };
       }).filter(Boolean);
       allocationSubtotal = eligibleChildren.reduce(
@@ -230794,6 +231413,14 @@ async function handleCancelPreview(req, res) {
       );
       cancellableChildren = isReservationScope ? eligibleChildren : eligibleChildren.filter((child) => child.id === bookingDocumentRef.id);
     } else {
+      const legacyFallbackSnapshot = bookingData2.checkIn ? {
+        cutoffHours: 48,
+        refundPctBefore: 100,
+        refundPctAfter: 0,
+        policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+        scheduledCheckInTime: (bookingData2.checkIn.toDate ? bookingData2.checkIn.toDate() : new Date(bookingData2.checkIn)).toISOString(),
+        source: "legacy-fallback"
+      } : null;
       cancellableChildren = [{
         id: bookingDocumentRef.id,
         bookingRef: String(bookingData2.bookingRef || ""),
@@ -230801,7 +231428,7 @@ async function handleCancelPreview(req, res) {
         roomType: String(bookingData2.roomType || ""),
         totalPrice: Number(bookingData2.totalPrice) || 0,
         reservationPosition: Number(bookingData2.reservationPosition) || null,
-        cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+        cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || legacyFallbackSnapshot
       }];
     }
     let reservationNetCollected = 0;
@@ -230824,6 +231451,14 @@ async function handleCancelPreview(req, res) {
         0
       );
     }
+    const legacyFallbackSnapshotForAnchor = !hasReservation && bookingData2.checkIn ? {
+      cutoffHours: 48,
+      refundPctBefore: 100,
+      refundPctAfter: 0,
+      policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+      scheduledCheckInTime: (bookingData2.checkIn.toDate ? bookingData2.checkIn.toDate() : new Date(bookingData2.checkIn)).toISOString(),
+      source: "legacy-fallback"
+    } : null;
     const lookedUpBookingForHelper = {
       id: bookingDocumentRef.id,
       bookingRef: String(bookingData2.bookingRef || ""),
@@ -230831,7 +231466,7 @@ async function handleCancelPreview(req, res) {
       roomType: String(bookingData2.roomType || ""),
       totalPrice: Number(bookingData2.totalPrice) || 0,
       reservationPosition: Number(bookingData2.reservationPosition) || null,
-      cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || null
+      cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || (hasReservation ? reservationCancellationPolicySnapshot : legacyFallbackSnapshotForAnchor)
     };
     const preview = evaluateCancelPreview({
       scope: requestedScope,
@@ -230888,6 +231523,7 @@ async function handleAddPayment(req, res) {
   let bookingDataSnapshot = null;
   let loyaltyPointsAwarded = 0;
   let idempotentReplay = false;
+  let siblingFlippedCount = 0;
   const now = /* @__PURE__ */ new Date();
   try {
     await adminDb.runTransaction(async (transaction) => {
@@ -230929,11 +231565,50 @@ async function handleAddPayment(req, res) {
         return;
       }
       totalPaid = existingPaid + numericAmount;
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        (d) => {
+          const childData = d.data() || {};
+          return {
+            id: d.id,
+            status: String(childData.status || ""),
+            totalPrice: Number(childData.totalPrice || 0)
+          };
+        }
+      );
       totalPrice = Number(bookingData2.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
       isConfirmableStatus = bookingData2.status === "pending" || bookingData2.status === "payment-uploaded";
       hadPaymentProof = !!(bookingData2.paymentProofPath || bookingData2.paymentProofUrl);
       staffPaymentMarkerMissing = !bookingData2.emailNotificationsSent?.staffNewPayment;
+      const { siblingFlippedCount: helperSiblingFlippedCount } = applyReservationScopePaymentTransition(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        bookingId,
+        siblingChildBookings,
+        (child) => {
+          const coversChild = child.totalPrice > 0 && totalPaid >= child.totalPrice;
+          const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+          if (isFlippableStatus && coversChild) {
+            const decision = {
+              write: {
+                status: "payment-confirmed",
+                paymentConfirmedAt: now,
+                handledBy: staffUid,
+                updatedAt: now
+              },
+              newStatus: "payment-confirmed"
+            };
+            return decision;
+          }
+          return null;
+        },
+        now
+      );
+      siblingFlippedCount = helperSiblingFlippedCount;
       const pendingLoyaltyPoints = Math.max(Number(bookingData2.pendingLoyaltyPoints || 0), 0);
       const settlesCheckedOutFolio = bookingData2.status === "checked-out" && bookingData2.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData2.checkedOutFolioTotal || 0);
       const loyaltyMemberRef = settlesCheckedOutFolio && bookingData2.memberId ? adminDb.collection("members").doc(String(bookingData2.memberId)) : null;
@@ -230947,6 +231622,7 @@ async function handleAddPayment(req, res) {
         Object.assign(bookingUpdates, {
           status: "payment-confirmed",
           handledBy: staffUid,
+          paymentConfirmedAt: now,
           updatedAt
         });
         transitionedToPaymentConfirmed = true;
@@ -230982,13 +231658,6 @@ async function handleAddPayment(req, res) {
       }
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
-      }
-      if (transitionedToPaymentConfirmed && bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        transaction.update(reservationRef, {
-          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingDataSnapshot.status),
-          updatedAt: now
-        });
       }
       const newPaymentRef = paymentsRef.doc(paymentId);
       const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
@@ -231034,6 +231703,16 @@ async function handleAddPayment(req, res) {
       roomNumber: bookingDataSnapshot.roomNumber || null,
       bookingRef: bookingDataSnapshot.bookingRef || null
     });
+    if (siblingFlippedCount > 0) {
+      await writeNotification({
+        type: "payment",
+        title: `${siblingFlippedCount} more room${siblingFlippedCount === 1 ? "" : "s"} cleared \u2014 ${bookingDataSnapshot.bookingRef || bookingId}`,
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: bookingDataSnapshot.roomNumber || null,
+        bookingRef: bookingDataSnapshot.bookingRef || null
+      });
+    }
   }
   return res.status(200).json({
     success: true,
@@ -231042,7 +231721,12 @@ async function handleAddPayment(req, res) {
       totalPaid,
       status: bookingDataSnapshot?.status || null,
       loyaltyPointsAwarded,
-      idempotentReplay
+      idempotentReplay,
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // the sibling-flip count for symmetry with
+      // `handleVerifyAndRecordPayment`. Zero for the
+      // N=1 case.
+      siblingFlippedCount
     }
   });
 }
@@ -231451,6 +232135,7 @@ async function handleVerifyAndRecordPayment(req, res) {
     let totalPrice = 0;
     let fullyPaid = false;
     let idempotentReplay = false;
+    let siblingFlippedCount = 0;
     const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
@@ -231463,6 +232148,19 @@ async function handleVerifyAndRecordPayment(req, res) {
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         return sum + Number(docSnap.data().amount || 0);
       }, 0);
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        (d) => {
+          const childData = d.data() || {};
+          return {
+            id: d.id,
+            status: String(childData.status || ""),
+            totalPrice: Number(childData.totalPrice || 0)
+          };
+        }
+      );
       const existingPayment = paymentsSnapshot.docs.find((docSnap) => docSnap.id === paymentId);
       if (existingPayment) {
         const existingData = existingPayment.data();
@@ -231474,13 +232172,17 @@ async function handleVerifyAndRecordPayment(req, res) {
         fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
         return;
       }
-      if (data.status === "payment-confirmed" || data.status === "confirmed") {
+      const hasFlippableSiblings = siblingChildBookings.some(
+        (c2) => c2.id !== bookingId && (c2.status === "pending" || c2.status === "payment-uploaded")
+      );
+      const targetAlreadyPastMoneyGate = data.status === "payment-confirmed" || data.status === "confirmed";
+      if (!hasFlippableSiblings && targetAlreadyPastMoneyGate) {
         throw new Error("ALREADY_CONFIRMED");
       }
-      if (data.status !== "payment-uploaded" && data.status !== "pending") {
+      if (!targetAlreadyPastMoneyGate && data.status !== "payment-uploaded" && data.status !== "pending") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
-      if (method !== "pay-at-hotel" && method !== "add-to-bill") {
+      if (!targetAlreadyPastMoneyGate && method !== "pay-at-hotel" && method !== "add-to-bill") {
         const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
         const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
         const paymentMethodsArr = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
@@ -231492,7 +232194,34 @@ async function handleVerifyAndRecordPayment(req, res) {
       }
       totalPrice = Number(data.totalPrice || 0);
       totalCollected = existingPaid + numericAmount;
-      fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingFlippedCount } = applyReservationScopePaymentTransition(
+        transaction,
+        adminDb,
+        bookingReservationId2,
+        bookingId,
+        siblingChildBookings,
+        (child) => {
+          const coversChild = child.totalPrice > 0 && totalCollected >= child.totalPrice;
+          const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+          if (isFlippableStatus && coversChild) {
+            const decision = {
+              write: {
+                status: "payment-confirmed",
+                paymentConfirmedAt: now,
+                handledBy: staffUid,
+                updatedAt: now
+              },
+              newStatus: "payment-confirmed"
+            };
+            return decision;
+          }
+          return null;
+        },
+        now
+      );
+      siblingFlippedCount = helperSiblingFlippedCount;
+      const targetPostStatus = siblingChildBookings.length > 0 ? postUpdateChildStatuses[siblingChildBookings.findIndex((c2) => c2.id === bookingId)] : totalCollected >= totalPrice && totalPrice > 0 ? "payment-confirmed" : data.status;
+      fullyPaid = targetPostStatus === "payment-confirmed" && !targetAlreadyPastMoneyGate;
       const paymentRecord = {
         type: "payment",
         amount: numericAmount,
@@ -231510,20 +232239,15 @@ async function handleVerifyAndRecordPayment(req, res) {
       const bookingUpdates = {
         updatedAt: now
       };
-      if (fullyPaid) {
-        bookingUpdates.status = "payment-confirmed";
+      if (targetPostStatus !== data.status) {
+        bookingUpdates.status = targetPostStatus;
         bookingUpdates.handledBy = staffUid;
         bookingUpdates.paymentConfirmedAt = now;
       }
-      transaction.update(bookingRef, bookingUpdates);
-      bookingData2 = { ...data, ...bookingUpdates };
-      if (fullyPaid && bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        transaction.update(reservationRef, {
-          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingUpdates.status),
-          updatedAt: now
-        });
+      if (Object.keys(bookingUpdates).length > 0) {
+        transaction.update(bookingRef, bookingUpdates);
       }
+      bookingData2 = { ...data, ...bookingUpdates };
     });
     if (idempotentReplay) {
       return res.status(200).json({
@@ -231533,7 +232257,8 @@ async function handleVerifyAndRecordPayment(req, res) {
           paymentId,
           totalCollected,
           status: bookingData2?.status || null,
-          fullyPaid
+          fullyPaid,
+          siblingFlippedCount
         }
       });
     }
@@ -231549,6 +232274,16 @@ async function handleVerifyAndRecordPayment(req, res) {
         roomNumber: bookingData2?.roomNumber || null,
         bookingRef: bookingData2?.bookingRef || null
       });
+      if (siblingFlippedCount > 0) {
+        await writeNotification({
+          type: "payment",
+          title: `${siblingFlippedCount} more room${siblingFlippedCount === 1 ? "" : "s"} cleared \u2014 ${bookingData2?.bookingRef || bookingId}`,
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: bookingData2?.roomNumber || null,
+          bookingRef: bookingData2?.bookingRef || null
+        });
+      }
     } catch (sideEffectErr) {
       console.error("Verify-and-record side effect error:", sideEffectErr);
     }
@@ -231562,7 +232297,15 @@ async function handleVerifyAndRecordPayment(req, res) {
         recordedBy: staffUid,
         totalCollected,
         status: fullyPaid ? "payment-confirmed" : "payment-uploaded",
-        fullyPaid
+        fullyPaid,
+        // Per FOL-05 (2026-08-07, per decision #201):
+        // the sibling-flip count surfaces to the admin UI
+        // so the post-verify success modal can show a
+        // "X rooms cleared" breadcrumb alongside the
+        // per-target `isFullPayment` math. Zero for the
+        // N=1 case (the single child either flipped via
+        // the target path or didn't flip at all).
+        siblingFlippedCount
       }
     });
   } catch (error) {
@@ -231572,7 +232315,7 @@ async function handleVerifyAndRecordPayment(req, res) {
     if (error?.message === "ALREADY_CONFIRMED") {
       return res.status(200).json({
         success: true,
-        data: { alreadyConfirmed: true, status: bookingData?.status || "payment-confirmed" }
+        data: { alreadyConfirmed: true, status: bookingData?.status || "payment-confirmed", siblingFlippedCount: 0 }
       });
     }
     if (error?.message?.startsWith("INVALID_STATUS:")) {
@@ -231630,7 +232373,6 @@ async function handleConfirmBooking(req, res) {
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -231725,7 +232467,6 @@ async function handleConfirmBookingWithBalance(req, res) {
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -231847,6 +232588,15 @@ async function handleCheckinBooking(req, res) {
         throw new Error("Assigned room is already occupied by another checked-in booking.");
       }
       const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
+      let postUpdateChildStatuses = [];
+      if (bookingReservationId2.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map(
+          (d) => d.id === bookingId ? "checked-in" : String(d.data()?.status || "")
+        );
+      }
       transaction.update(bookingRef, {
         status: "checked-in",
         checkedInAt: now,
@@ -231859,14 +232609,7 @@ async function handleCheckinBooking(req, res) {
       });
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
-        );
-        const childStatuses = childrenForCount.docs.map((d) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s4) => s4 === "checked-in").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }
@@ -232014,6 +232757,15 @@ async function handleCheckoutBooking(req, res) {
         pointsAwardedAt: awardNow ? now : null
       });
       const bookingReservationId2 = String(freshBookingData.reservationId || "").trim();
+      let postUpdateChildStatuses = [];
+      if (bookingReservationId2.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map(
+          (d) => d.id === bookingId ? "checked-out" : String(d.data()?.status || "")
+        );
+      }
       transaction.update(bookingRef, bookingUpdate);
       if (bookingData2.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
@@ -232034,16 +232786,7 @@ async function handleCheckoutBooking(req, res) {
       }
       if (bookingReservationId2.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
-        );
-        const childStatuses = childrenForCount.docs.map((d) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s4) => s4 === "checked-in").length;
-        const newCheckedOutCount = childStatuses.filter((s4) => s4 === "checked-out").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          checkedOutRoomCount: newCheckedOutCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }
@@ -232151,11 +232894,6 @@ async function handleLookupBooking(req, res) {
           return res.status(404).json({ success: false, error: "Booking not found." });
         }
         return await enrichAndRespond(res, { id: match.id, ...match });
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: "Please provide your booking email or lookup token along with the reservation reference."
-        });
       }
       const firstChildSnap = await adminDb.collection("bookings").where("reservationId", "==", reservation.id).orderBy("reservationPosition", "asc").limit(1).get();
       if (firstChildSnap.empty) {
@@ -232377,9 +233115,21 @@ function buildReservationLookupView(reservation, children, anchorRoomData, ancho
     // each room and the aggregate status for the
     // header.
     status: reservation.paymentStatus || "pending",
-    roomCount: Number(reservation.roomCount || rooms.length),
-    activeRoomCount: Number(reservation.activeRoomCount || rooms.length),
-    cancelledRoomCount: Number(reservation.cancelledRoomCount || 0),
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // three counter fields are no longer read from the
+    // reservation header. They are always derived from
+    // the `rooms` array (already in memory at this
+    // point). Pre-BAR-02 the header mirror was
+    // maintained transactionally; the new code is
+    // byte-equivalent for both pre- and post-BAR-02
+    // reservations because the derivation is the same
+    // calculation the pre-BAR-02 write performed.
+    roomCount: rooms.length,
+    activeRoomCount: Math.max(
+      rooms.length - rooms.filter((r3) => r3.status === "cancelled").length,
+      0
+    ),
+    cancelledRoomCount: rooms.filter((r3) => r3.status === "cancelled").length,
     rooms,
     // The "active room" data is what the cancel +
     // resend flows use as the server credential. The
@@ -232482,13 +233232,15 @@ async function handleRescheduleBooking(req, res) {
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
+    let bookingReservationId2 = null;
+    let existingReservationData = null;
     const expiredHoldRetirements = [];
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
-      const bookingReservationId2 = (() => {
+      bookingReservationId2 = (() => {
         const stored = String(booking.reservationId || "").trim();
         if (stored.length > 0) return stored;
         if (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId)) {
@@ -232497,14 +233249,29 @@ async function handleRescheduleBooking(req, res) {
         return null;
       })();
       const reservationDocRef = bookingReservationId2 ? adminDb.collection("reservations").doc(bookingReservationId2) : null;
-      let existingReservationData2 = null;
+      let rescheduleChildrenDates = null;
       if (reservationDocRef) {
         const existingReservationSnap = await transaction.get(reservationDocRef);
         if (existingReservationSnap.exists) {
-          existingReservationData2 = existingReservationSnap.data() || {};
+          existingReservationData = existingReservationSnap.data() || {};
         } else {
           throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
         }
+        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
+        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
+        rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
+          if (docSnap.id === String(bookingId)) {
+            return {
+              checkIn: checkInDate,
+              checkOut: checkOutDate
+            };
+          }
+          const childData = docSnap.data();
+          return {
+            checkIn: toDateOrNull(childData.checkIn) || checkInDate,
+            checkOut: toDateOrNull(childData.checkOut) || checkOutDate
+          };
+        });
       }
       if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
         throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
@@ -232662,12 +233429,15 @@ async function handleRescheduleBooking(req, res) {
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
+      const preservedExtraBedBreakfast = booking.extraBedBreakfast === true;
       const breakfastTotal = manualNightlyRate === null ? calculateBreakfastAddOn({
         hasBreakfast: booking.hasBreakfast,
         breakfastRate,
         numGuests: booking.numGuests,
         numNights,
-        breakfastIncludesChildren: booking.breakfastIncludesChildren
+        breakfastIncludesChildren: booking.breakfastIncludesChildren,
+        extraBedCount: preservedExtraBedCount,
+        extraBedBreakfast: preservedExtraBedBreakfast
       }) : 0;
       const extraBedTotal = manualNightlyRate === null ? calculateExtraBedAddOn({
         extraBedCount: preservedExtraBedCount,
@@ -232724,6 +233494,21 @@ async function handleRescheduleBooking(req, res) {
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the addOns array must include the "Extra bed
+        // add-on" line on reschedule so the receipt PDF
+        // + email + admin drawer surfaces render the
+        // term. Pre-v0.264.8 the reschedule dropped these
+        // three fields, leaving the addOns array with
+        // only the breakfast line — the extra bed was
+        // invisible on every downstream surface even
+        // though the `extraBedTotal` was correctly
+        // computed by `calculateExtraBedAddOn` two
+        // blocks above. Same shape as the create +
+        // walkin + add-room `buildRateBreakdown` calls.
+        extraBedTotal,
+        extraBedCount: preservedExtraBedCount,
+        extraBedRate: preservedExtraBedRate,
         discountType: booking.discountType || "",
         discountPct,
         voucherDiscount,
@@ -232796,26 +233581,11 @@ async function handleRescheduleBooking(req, res) {
         transaction.update(roomRef, { status: "occupied" });
       }
       transaction.update(bookingRef, updatedBooking);
-      if (reservationDocRef && existingReservationData2) {
-        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
-        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
-        const rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
-          const childData = docSnap.data();
-          if (docSnap.id === String(bookingId)) {
-            return {
-              checkIn: checkInDate,
-              checkOut: checkOutDate
-            };
-          }
-          return {
-            checkIn: childData.checkIn,
-            checkOut: childData.checkOut
-          };
-        });
+      if (reservationDocRef && existingReservationData) {
         const rescheduleActualDateRange = computeReservationActualDateRange(
-          existingReservationData2.checkIn,
-          existingReservationData2.checkOut,
-          rescheduleChildrenDates
+          existingReservationData.checkIn,
+          existingReservationData.checkOut,
+          rescheduleChildrenDates || []
         );
         const rescheduleFingerprint = computeRequestFingerprint({
           reservationId: bookingReservationId2,
@@ -232838,8 +233608,8 @@ async function handleRescheduleBooking(req, res) {
           voucherCode: String(booking.voucherCode || "").trim().toUpperCase(),
           memberDiscountPct: Math.max(0, Math.floor(Number(booking.memberDiscountPct) || 0)),
           discountScope: normalizeDiscountScope(booking.discountScopeSnapshot),
-          termsVersion: String(existingReservationData2.termsVersion || DEFAULT_TERMS_VERSION),
-          privacyVersion: String(existingReservationData2.privacyVersion || DEFAULT_TERMS_VERSION)
+          termsVersion: String(existingReservationData.termsVersion || DEFAULT_TERMS_VERSION),
+          privacyVersion: String(existingReservationData.privacyVersion || DEFAULT_TERMS_VERSION)
         });
         transaction.update(reservationDocRef, {
           // Per MRB-14 (2026-08-03, per decision #180
@@ -232969,7 +233739,7 @@ async function handleRescheduleBooking(req, res) {
         // empty strings (the booking was created before
         // MRB-02, so it has no header to echo).
         ...updatedBooking,
-        reservationId: bookingReservationId || "",
+        reservationId: bookingReservationId2 || "",
         reservationRef: String(existingReservationData?.reservationRef || "")
       }
     });
@@ -233112,6 +233882,25 @@ async function handleAddRoomToReservation(req, res) {
       }
       const typeBaseRate = Number(targetTypeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(targetTypeEntry.weekendRate) || typeBaseRate;
+      if (extraBedCount > 0) {
+        const addRoomExtraBedOverlapQuery = adminDb.collection("bookings").where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const addRoomExtraBedOverlapSnapshot = await transaction.get(addRoomExtraBedOverlapQuery);
+        const addRoomExtraBedInUse = countExtraBedsInUse(
+          addRoomExtraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          headerCheckIn,
+          headerCheckOut
+        );
+        const addRoomInventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          addRoomExtraBedInUse,
+          extraBedCount
+        );
+        if (!addRoomInventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${addRoomExtraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${addRoomExtraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
+      }
       const isCorporateReservation = Boolean(reservation.isCorporate);
       const corporateCode = String(reservation.corporateCode || "").trim().toUpperCase();
       const perRoomTypeCorporateRate = (() => {
@@ -233121,6 +233910,11 @@ async function handleAddRoomToReservation(req, res) {
       })();
       const activeBaseRate = perRoomTypeCorporateRate > 0 ? perRoomTypeCorporateRate : typeBaseRate;
       const activeWeekendRate = perRoomTypeCorporateRate > 0 ? perRoomTypeCorporateRate : typeWeekendRate;
+      let corporateCodeDocForUpdate = null;
+      if (isCorporateReservation && corporateCode) {
+        const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        corporateCodeDocForUpdate = await transaction.get(corpRef);
+      }
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides || []);
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: headerCheckIn,
@@ -233237,6 +234031,33 @@ async function handleAddRoomToReservation(req, res) {
         extraBedCount,
         extraBedRate,
         extraBedTotal,
+        // Per CHD-10 (2026-07-31, per CVQ-01): the
+        // snapshotted `breakfastIncludesChildren`
+        // value the new child inherits from the
+        // header (the per-room override is out of
+        // scope for MRB-14 v1). `true` is the safe
+        // default for legacy reservations that
+        // pre-date the CHD-10 snapshot — matches the
+        // historical "children pay the full rate"
+        // math. The create + walkin paths write the
+        // same field; the add-room path pre-v0.264.8
+        // silently dropped it (silent data loss for
+        // any future read site that checks
+        // `booking.breakfastIncludesChildren === true`).
+        breakfastIncludesChildren: Boolean(reservation.breakfastIncludesChildren ?? true),
+        // Per EXB-12 (2026-08-06, per decision #199):
+        // the snapshotted `extraBedBreakfast` toggle
+        // the new child inherits. The current
+        // add-room admin UI doesn't expose the
+        // toggle yet (consistent with the walkin
+        // admin surface per the EXB-12 spec — a
+        // future UX work item), so the value is
+        // `false` for every new child created via
+        // add-room until the UI is updated. The
+        // create + walkin paths write the same
+        // field; the add-room path pre-v0.264.8
+        // silently dropped it.
+        extraBedBreakfast: false,
         checkIn: Timestamp.fromDate(headerCheckIn),
         checkOut: Timestamp.fromDate(headerCheckOut),
         numNights: headerNumNights,
@@ -233342,15 +234163,18 @@ async function handleAddRoomToReservation(req, res) {
       );
       const corporateUsageUpdate = (() => {
         if (!isCorporateReservation || !corporateCode) return null;
+        if (!corporateCodeDocForUpdate || !corporateCodeDocForUpdate.exists) return null;
+        const corpData = corporateCodeDocForUpdate.data() || {};
         const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
         return {
           ref: corpRef,
-          data: { usageCount: Number(reservation.corporateUsageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
+          data: {
+            usageCount: (Number(corpData.usageCount) || 0) + 1,
+            updatedAt: /* @__PURE__ */ new Date()
+          }
         };
       })();
       updatedHeader = {
-        roomCount: existingChildren.length + 1,
-        activeRoomCount: existingChildren.length + 1,
         subtotal: newSubtotal,
         totalPrice: newTotalPrice,
         aggregateRevenueAllocation: newAggregateRevenueAllocation,
@@ -235724,6 +236548,116 @@ async function handleCreateStoreOrder(req, res) {
     });
   }
 }
+async function handleConfirmStoreOrder(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const body = req.body || {};
+  if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
+    return res.status(400).json({ success: false, error: "Missing required confirmation fields." });
+  }
+  const orderId = String(body.orderId).trim();
+  const roomNumber = String(body.roomNumber).trim();
+  const orderRef = String(body.orderRef).trim();
+  if (orderId.length === 0 || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid order id." });
+  }
+  if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid room number." });
+  }
+  if (orderRef.length === 0 || orderRef.length > MAX_ORDER_REF_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid order reference." });
+  }
+  const staffUid = String(req.staff?.uid || "staff");
+  try {
+    let confirmedOrder = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRefDoc = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRefDoc);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+      const orderData = orderDoc.data();
+      if (String(orderData.roomNumber || "").trim() !== roomNumber) {
+        throw new Error("ORDER_ROOM_MISMATCH");
+      }
+      if (String(orderData.orderRef || "").trim() !== orderRef) {
+        throw new Error("ORDER_REF_MISMATCH");
+      }
+      if (orderData.status !== "placed") {
+        throw new Error("ORDER_NOT_CONFIRMABLE");
+      }
+      if (orderData.stockDecrementedAt) {
+        confirmedOrder = orderData;
+        return;
+      }
+      const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
+      const itemRefs = orderItems.map((item) => adminDb.collection("storeItems").doc(item.itemId));
+      const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+      for (let index = 0; index < orderItems.length; index++) {
+        const item = orderItems[index];
+        const itemDoc = itemDocs[index];
+        if (!itemDoc.exists) continue;
+        const itemData = itemDoc.data();
+        if (itemData.stock === null || itemData.stock === void 0) continue;
+        const currentStock = Number(itemData.stock || 0);
+        const requestedQuantity = Number(item.quantity || 0);
+        const newStock = currentStock - requestedQuantity;
+        if (newStock < 0) {
+          throw new Error("OUT_OF_STOCK");
+        }
+        transaction.update(itemRefs[index], {
+          stock: newStock,
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+      }
+      transaction.update(orderRefDoc, {
+        status: "confirmed",
+        stockDecrementedAt: /* @__PURE__ */ new Date(),
+        handledBy: staffUid,
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+      confirmedOrder = { ...orderData, status: "confirmed", stockDecrementedAt: /* @__PURE__ */ new Date() };
+    });
+    if (confirmedOrder) {
+      try {
+        let guestEmail = "";
+        if (confirmedOrder.bookingId) {
+          const bookingDoc = await adminDb.collection("bookings").doc(confirmedOrder.bookingId).get();
+          if (bookingDoc.exists) {
+            guestEmail = String(bookingDoc.data()?.guestEmail || "");
+          }
+        }
+        await sendStoreOrderTrigger("store-order-confirmed", {
+          ...confirmedOrder,
+          guestEmail,
+          handledBy: staffUid
+        });
+      } catch (emailErr) {
+        console.error("Failed to send store confirmation email:", emailErr);
+      }
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        orderId,
+        status: "confirmed",
+        idempotentReplay: confirmedOrder ? !confirmedOrder.stockDecrementedAt || false : false
+      }
+    });
+  } catch (error) {
+    const message = error.message || "Unable to confirm the store order.";
+    const statusMap = {
+      ORDER_NOT_FOUND: 404,
+      ORDER_ROOM_MISMATCH: 403,
+      ORDER_REF_MISMATCH: 403,
+      ORDER_NOT_CONFIRMABLE: 400,
+      OUT_OF_STOCK: 409
+    };
+    const status = statusMap[message] || 500;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 async function handleCancelStoreOrder(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -236947,6 +237881,33 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleApplyBookingDiscount(req, res);
   }
+  if (domain === "bookings" && action === "apply-reservation-discount" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleApplyReservationDiscount(req, res);
+  }
+  if (domain === "bookings" && action === "remove-voucher" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleRemoveVoucher(req, res);
+  }
+  if (domain === "bookings" && action === "set-lou-received" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-lou:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many LOU updates. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleSetLouReceived(req, res);
+  }
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many confirm requests. Please try again in a minute." });
@@ -237350,6 +238311,14 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
     }
     return await handleCreateStoreOrder(req, res);
+  }
+  if (domain === "store" && action === "confirm-order" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleConfirmStoreOrder(req, res);
   }
   if (domain === "store" && action === "cancel-order" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`store-cancel:${ip}`, 10, 6e4)) {

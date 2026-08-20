@@ -171,7 +171,7 @@ Reservation {
   voucherCode: string                     // flat voucher applies once (per MRB-09)
   memberDiscountPct: number
 
-  paymentStatus: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled"
+  paymentStatus?: "awaiting-payment" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "in-house" | "completed" | "cancelled"   // Per BAR-02 (#203, 2026-08-08): derived at read time via `computeReservationAggregatePaymentStatus(children.map(c => c.status))`; no longer written to the reservation header. Optional for back-compat reads of pre-BAR-02 reservations.
   paymentMethod: PaymentMethod
   paymentProofUrl: string | null          // canonical "no payment proof" is null
   paymentProofPath: string | null
@@ -183,11 +183,19 @@ Reservation {
   privacyAcceptedAt: Date | null
   privacyVersion: string
 
-  roomCount: number                       // aggregate counters, denormalized for fast UI
-  activeRoomCount: number
-  cancelledRoomCount: number
-  checkedInRoomCount: number
-  checkedOutRoomCount: number
+  // Per BAR-02 (#203, 2026-08-08): the 5 aggregate
+  // counter fields are derived at read time via
+  // `deriveReservationCounters(children)` in
+  // `shared/utils/bookingFolio.ts`. No handler
+  // writes them. The fields are retained as
+  // optional `?` for back-compat reads of pre-BAR-02
+  // reservations that still carry them in
+  // Firestore (harmless dead data).
+  roomCount?: number
+  activeRoomCount?: number
+  cancelledRoomCount?: number
+  checkedInRoomCount?: number
+  checkedOutRoomCount?: number
 
   holdExpiresAt: Date | null              // unified PEX hold (no separate large-group timer, per MRB-08)
 
@@ -282,7 +290,9 @@ Booking {
   lookupToken: string
   source: BookingSource
   linkedInquiryId: string | null     // set when created from a converted corporate inquiry (per `DECISIONS-FEATURES.md #102`)
-  louReceived: boolean               // staff-toggled flag for chargeback bookings (per `DECISIONS-FEATURES.md #99`)
+  louReceived: boolean               // staff-toggled flag for chargeback bookings (per `DECISIONS-FEATURES.md #99` + LOW-1 in the 2026-08-10 reports audit)
+  louReceivedAt: Date | null         // stamp on the LOU toggle — null while pending, server timestamp when received
+  louReceivedBy: string | null       // staff UID who toggled the flag (matches the `discountVerifiedBy` / `cancelledBy` audit pattern)
   notes: string
   memberId: string | null
   pointsRedeemed: number              // points redeemed by staff (0 if none)
@@ -474,6 +484,9 @@ Staff {
   nationality: string
   role: StaffRole
   createdAt: Date
+  // Per-staff intercom audio routing — see `features/INTERCOM-AUDIO-ROUTING.md`.
+  // Optional; absence is the "system default output" equivalent.
+  audioRouting?: AudioRouting
 }
 ```
 
@@ -907,6 +920,19 @@ StoreConfig {
 ```
 WebRTCCallStatus = "ringing" | "active" | "ended"
 
+// Per decision #214 (2026-08-19): the staff attribution written
+// atomically by the `runTransaction` claim in `AdminContext.acceptCall`.
+// The first staff to commit the claim wins; every subsequent staff
+// that tries the same room hits `data.status !== "ringing"` and the
+// transaction aborts. Pre-#214 docs have `acceptedBy === null` (the
+// field never existed) — the snapshot mapper normalizes to `null` so
+// the legacy "Connected" UI keeps working on legacy data.
+CallAcceptedBy {
+  uid: string
+  name: string
+  claimedAt?: Date | null
+}
+
 WebRTCCall {
   roomId: string            // document ID = roomId
   offer: RTCSessionDescriptionInit
@@ -915,6 +941,17 @@ WebRTCCall {
   guestName: string
   startedAt: Date
   endedAt: Date | null
+  // Per decision #94 (W2.6): a new call displaced this one
+  // ("superseded-by-other-call"); per decision #214: the claim
+  // committed but getUserMedia / createAnswer / answer write failed
+  // ("accept-failed"); per the guest's natural hangup
+  // ("cancelled"). Null while the call is alive.
+  endedReason?: "superseded-by-other-call" | "accept-failed" | "cancelled" | null
+  // Per decision #214 (2026-08-19): the staff claim. Set by the
+  // `runTransaction` in `acceptCall`; null on pre-#214 calls and on
+  // the sub-second window between `triggerIncomingCall` and the
+  // first claim.
+  acceptedBy?: CallAcceptedBy | null
 }
 
 IceCandidate {

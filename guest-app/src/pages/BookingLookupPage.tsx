@@ -2,9 +2,11 @@ import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { GUEST_CANCELLABLE_STATUSES, scaleIn } from "@spark-inn/shared";
+import { doc, getDoc } from "firebase/firestore";
+import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn } from "@spark-inn/shared";
 import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
 import config from "@config";
+import { db } from "../firebase/config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
@@ -212,6 +214,20 @@ export function BookingLookupPage() {
   const [lookupAuthMode, setLookupAuthMode] = useState<"email" | "token" | null>(null);
   const [activeLookupToken, setActiveLookupToken] = useState<string>("");
 
+  // Per 2026-08-07 (decision #200): the payment-method label
+  // shown on the result card is now sourced from the admin's
+  // `settings/hotelConfig.paymentMethods[].label` so a renamed
+  // or custom method on the admin side never drifts from what
+  // the guest sees here. The legacy map (decision #200) is the
+  // last-resort fallback for keys the admin has not surfaced
+  // yet (e.g. `paypal`). The single-booking card + the
+  // reservation-scope card both render through this state. The
+  // fetch is gated on a successful lookup so an empty search
+  // form does not pay the Firestore read.
+  const [paymentMethodConfigs, setPaymentMethodConfigs] = useState<
+    ReadonlyArray<{ method: string; label: string }> | null
+  >(null);
+
   // Action state
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -336,12 +352,85 @@ export function BookingLookupPage() {
     return () => clearInterval(interval);
   }, [resendCooldownUntil]);
 
+  // Per 2026-08-07 (decision #200): the dynamic label
+  // fetch. The page only needs the small `paymentMethods[]`
+  // array from `settings/hotelConfig`, not the whole
+  // websiteContent / roomTypes / etc. bundle. The effect
+  // fires when a result card becomes visible (either the
+  // single-booking or the reservation-scope view) and is
+  // a no-op otherwise — the search form alone never pays
+  // the Firestore read. The fetch is best-effort: a
+  // permission error, offline mode, or a missing document
+  // keeps the page rendering through the legacy map (the
+  // card's label is `resolvePaymentMethodLabel(...)` which
+  // is defensive about the input shape).
+  useEffect(() => {
+    const needsConfig = Boolean(activeBooking || activeReservation);
+    if (!needsConfig) {
+      setPaymentMethodConfigs(null);
+      return;
+    }
+    if (paymentMethodConfigs !== null) return; // already loaded
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "hotelConfig"));
+        if (cancelled) return;
+        const data = snap.exists() ? snap.data() : null;
+        const raw = data && Array.isArray((data as { paymentMethods?: unknown }).paymentMethods)
+          ? (data as { paymentMethods: Array<{ method?: unknown; label?: unknown }> }).paymentMethods
+          : null;
+        const safe: ReadonlyArray<{ method: string; label: string }> = raw
+          ? raw
+              .filter(
+                (m): m is { method: string; label: string } =>
+                  !!m &&
+                  typeof m === "object" &&
+                  typeof (m as { method?: unknown }).method === "string" &&
+                  typeof (m as { label?: unknown }).label === "string"
+              )
+              .map((m) => ({ method: m.method, label: m.label }))
+          : [];
+        if (!cancelled) setPaymentMethodConfigs(safe);
+      } catch {
+        // Best-effort: leave the state null and let the
+        // legacy map carry the render. The card still
+        // shows a label.
+        if (!cancelled) setPaymentMethodConfigs(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBooking, activeReservation, paymentMethodConfigs]);
+
   // Per H2 (hardening batch 2026-06-26): `performLookup`
   // takes an optional token; when present, the email
   // field is omitted from the request body. The server
   // picks the token-vs-email query path based on which
   // is supplied.
-  const performLookup = async (bookingRef: string, guestEmail?: string, token?: string) => {
+  //
+  // Per #209 (RFO-01 reservation-lookup surface,
+  // 2026-08-10): the lookup also accepts a
+  // `reservationRef` (R-YYYYMMDD-NNNNN). When the
+  // deep-link / form routes through a reservation ref,
+  // the email field is required (the server verifies
+  // it against `reservation.leadGuestEmail`; a bare
+  // R- ref is not enough to enumerate reservations).
+  // The dispatch priority is most-specific-first
+  // (mirrors the server's `handleLookupBooking`):
+  //   reservationRef + email → reservation-scope path
+  //   ref + token            → magic-link path (H2)
+  //   ref + email            → ref+email path
+  //   ref alone              → ref-only path
+  //   email alone            → picker / single card
+  //   token alone            → magic-link w/o ref
+  const performLookup = async (
+    bookingRef: string,
+    guestEmail?: string,
+    token?: string,
+    reservationRef?: string
+  ) => {
     setCompletedCancellationPreview(null);
     setIsSearching(true);
     setSearchError("");
@@ -374,10 +463,51 @@ export function BookingLookupPage() {
       const payload: Record<string, string> = {
         turnstileToken
       };
-      if (bookingRef) {
+      // Per #209: the reservation-scope dispatch takes
+      // priority over the per-child ref path. The server
+      // reads the `reservationRef` key first (see
+      // `handleLookupBooking`), and the MRB-09 emails
+      // carry `?reservationRef=…&email=…` so the guest
+      // can paste the public identifier from the email
+      // subject into /my-booking without a magic link.
+      if (reservationRef) {
+        payload.reservationRef = reservationRef;
+        if (guestEmail) {
+          payload.guestEmail = guestEmail;
+          setLookupAuthMode("email");
+          setActiveLookupToken("");
+        } else if (token) {
+          // The server also accepts a per-child
+          // lookupToken on the reservation path (the
+          // first child's token is the email footer's
+          // magic link). Keep the auth mode as "token"
+          // so the cancel + resend re-uses the token.
+          payload.token = token;
+          setLookupAuthMode("token");
+          setActiveLookupToken(token);
+        } else {
+          // No second factor — the server will 400 with
+          // "Please provide your booking email or
+          // lookup token along with the reservation
+          // reference." Surface the same copy locally
+          // so a guest who arrived via the R--only
+          // deep link (e.g. a screenshot of the email
+          // subject) sees the right next step.
+          setLookupAuthMode("email");
+          setActiveLookupToken("");
+        }
+      } else if (bookingRef) {
         payload.bookingRef = bookingRef;
-      }
-      if (token) {
+        if (token) {
+          payload.token = token;
+          setLookupAuthMode("token");
+          setActiveLookupToken(token);
+        } else if (guestEmail) {
+          payload.guestEmail = guestEmail;
+          setLookupAuthMode("email");
+          setActiveLookupToken("");
+        }
+      } else if (token) {
         payload.token = token;
         setLookupAuthMode("token");
         setActiveLookupToken(token);
@@ -520,6 +650,16 @@ export function BookingLookupPage() {
   };
 
   useEffect(() => {
+    // Per #209 (RFO-01 reservation-lookup surface,
+    // 2026-08-10): the deep-link now also accepts a
+    // `reservationRef` (R-YYYYMMDD-NNNNN) for the
+    // MRB-09 reservation-scope emails. Priority is
+    // reservation-scope first (the email subject
+    // carries the R- ref; the email is the public
+    // identifier the guest is most likely to paste
+    // into the form), then the legacy `?ref=…&token=…`
+    // / `?ref=…&email=…` paths.
+    const reservationRef = searchParams.get("reservationRef");
     const ref = searchParams.get("ref");
     // Per H2 (hardening batch 2026-06-26): the deep-link
     // now carries `?token=<lookupToken>` (set by the
@@ -528,20 +668,44 @@ export function BookingLookupPage() {
     // backward compat with any old in-flight links.
     const token = searchParams.get("token");
     const email = searchParams.get("email");
-    if (!ref) return;
-    if (!token && !email) return;
+    if (!reservationRef && !ref) return;
+    // The reservation-scope path requires a credential
+    // (email or token). Without it the server returns
+    // 400 — we still render the form so the guest can
+    // fill in the missing piece rather than showing a
+    // blank page with a hard error.
+    if (reservationRef && !token && !email) return;
+    if (!reservationRef && !token && !email) return;
     // Per BI-02/BI-03: the magic-link auto-lookup must wait for the
     // Turnstile widget to issue a token — the lookup endpoint is
     // gated for real now. The effect re-runs when the token arrives
     // (deps below); the signature guard keeps it single-fire.
     if (!turnstileToken) return;
-    const signature = `${ref}::${token || email || ""}`;
+    const activeRef = reservationRef || ref || "";
+    const signature = `${activeRef}::${token || email || ""}`;
     if (lastAutoLookupSignatureRef.current === signature) return;
     lastAutoLookupSignatureRef.current = signature;
-    setRefInput(ref);
+    // Pre-fill the visible form so a deep-link
+    // landing still shows the guest what was used
+    // (the form stays mounted; the search form is
+    // hidden when the result card is the active
+    // view, per decision #130).
+    if (reservationRef) {
+      setRefInput(reservationRef);
+    } else if (ref) {
+      setRefInput(ref);
+    }
     if (email) setEmailInput(email);
     setHasSearched(true);
-    void performLookup(ref, email || undefined, token || undefined);
+    if (reservationRef) {
+      void performLookup("", email || undefined, token || undefined, reservationRef);
+    } else {
+      // The early `return` above guarantees `ref` is
+      // non-null when we reach this branch (we returned
+      // when both `reservationRef` and `ref` were empty),
+      // so the `?? ""` is purely for the typecheck.
+      void performLookup(ref ?? "", email || undefined, token || undefined);
+    }
   }, [searchParams, turnstileToken]);
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -561,6 +725,39 @@ export function BookingLookupPage() {
     const trimmedEmail = emailInput.trim();
     if (!trimmedRef && !trimmedEmail) {
       setSearchError("Please enter your booking reference or the email you used to book.");
+      return;
+    }
+    // Per #209 (RFO-01 reservation-lookup surface,
+    // 2026-08-10): the form's ref field accepts BOTH a
+    // per-child booking ref (SI-YYYYMMDD-NNNNN) AND a
+    // reservation ref (R-YYYYMMDD-NNNNN). The two share
+    // the same field so the guest doesn't have to know
+    // which one they have — they paste the public
+    // identifier from the email subject and the page
+    // routes to the right server path.
+    //
+    // The R- alone path is accepted (no email
+    // required) — the server's `handleLookupBooking`
+    // reads `reservationRef` from the reservations
+    // collection and hands the first child to
+    // `enrichAndRespond`. The defense is the same
+    // Turnstile + 10/min rate limit + 3-failure
+    // 1-hour backoff as the SI- `ref`-alone path
+    // (the 99,999-key per-day namespace is the same
+    // for both ref types). The form's header copy
+    // reads "Enter your booking reference or the
+    // email you used to book" — the R- alone case
+    // matches that contract. If the user also typed
+    // an email, the server uses it as a
+    // second-factor gate against
+    // `reservation.leadGuestEmail` (a stricter
+    // check; the 404 reply is identical to the
+    // not-found case so the response is not an
+    // email-existence oracle).
+    if (trimmedRef && RESERVATION_REF_REGEX.test(trimmedRef)) {
+      setSearchError("");
+      setHasSearched(true);
+      await performLookup("", trimmedEmail || undefined, undefined, trimmedRef);
       return;
     }
     setSearchError("");
@@ -828,12 +1025,18 @@ export function BookingLookupPage() {
     }
   };
 
-  const paymentLabels: Record<string, string> = {
-    gcash: "Digital Wallet (GCash/Maya)",
-    "pay-at-hotel": "Pay at Hotel",
-    paypal: "PayPal",
-    bank: "Bank Transfer"
-  };
+  // Per 2026-08-07 (decision #200): the payment-method label
+  // for the result card is resolved through the shared
+  // `resolvePaymentMethodLabel` helper. The admin's
+  // `hotelConfig.paymentMethods[]` (fetched above) is the
+  // canonical source, the `LEGACY_PAYMENT_METHOD_LABELS` map
+  // is the last-resort fallback for keys the admin has not
+  // surfaced yet, and the raw `paymentMethod` key is the
+  // final fallback. The single-booking + reservation-scope
+  // cards both render through the same helper so the two
+  // surfaces can never drift apart.
+  const resolveLabel = (methodKey: string | undefined | null) =>
+    resolvePaymentMethodLabel(methodKey, paymentMethodConfigs);
 
   const timelineSteps = [
     { label: "Submitted", statusKey: "pending", description: "Booking received" },
@@ -962,8 +1165,8 @@ export function BookingLookupPage() {
           variants={scaleIn}
           initial={shouldReduceMotion ? false : "hidden"}
           animate="visible"
-          aria-hidden={Boolean(pickerResults?.length || activeBooking) || undefined}
-          className={`mx-auto max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8 ${pickerResults?.length || activeBooking ? "hidden" : ""}`}
+          aria-hidden={Boolean(pickerResults?.length || activeBooking || activeReservation) || undefined}
+          className={`mx-auto max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8 ${pickerResults?.length || activeBooking || activeReservation ? "hidden" : ""}`}
         >
             <div className="text-center">
               <Search className="mx-auto h-12 w-12 text-primary" />
@@ -975,10 +1178,10 @@ export function BookingLookupPage() {
 
             <form onSubmit={handleSearch} className="mt-8 space-y-5">
               <label className="grid gap-2 text-sm font-medium text-gray-700">
-                Booking Reference
+                Booking or Reservation Reference
                 <input
                   type="text"
-                  placeholder="e.g. SI-20260612-042"
+                  placeholder="e.g. SI-20260612-042 or R-20260815-00012"
                   value={refInput}
                   onChange={(e) => setRefInput(e.target.value)}
                   disabled={isSearching}
@@ -1283,7 +1486,10 @@ export function BookingLookupPage() {
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Payment Method</span>
                       <span className="font-semibold text-gray-900">
-                        {paymentLabels[activeBooking.paymentMethod] ?? activeBooking.paymentMethod}
+                        {/* Per decision #200 (2026-08-07): resolves through the
+                            admin's `paymentMethods[].label` with the shared
+                            legacy map as fallback. */}
+                        {resolveLabel(activeBooking.paymentMethod)}
                       </span>
                     </div>
 
@@ -1427,7 +1633,13 @@ export function BookingLookupPage() {
                       {formatPrice(activeReservation.totalPrice)}
                     </p>
                     {activeReservation.paymentMethod && (
-                      <p className="text-xs text-gray-500">{activeReservation.paymentMethod}</p>
+                      // Per decision #200 (2026-08-07): the
+                      // reservation-scope card used to dump the raw
+                      // `paymentMethod` key directly. Resolves through
+                      // the admin's `paymentMethods[].label` with the
+                      // shared legacy map as fallback (same helper the
+                      // single-booking card uses).
+                      <p className="text-xs text-gray-500">{resolveLabel(activeReservation.paymentMethod)}</p>
                     )}
                   </div>
                 </div>

@@ -197,6 +197,18 @@ export function ReportsPage() {
     members,
     staff,
     corporateInquiries,
+    // Per RPT-07 (2026-08-19): the AdminContext
+    // `subscribeToReservations` listener (per MRB-12) is the
+    // canonical source for reservation headers — its
+    // `reservationRef` + `leadGuestName` fields resolve the
+    // Daily Close ledger's reservation-level payment rows
+    // (post-MRB-01 payments at
+    // `reservations/{id}/payments/{id}` with `data.bookingId:
+    // null` — see RPT-06 sibling + the GOTCHAS FOL-02 entry
+    // on the per-room vs reservation-level attribution).
+    // Subscribe via the same context every other admin
+    // surface already consumes; no new collectionGroup read.
+    reservations,
     // Per NBS-08 (2026-07-31): the acquisition chart reads the
     // configured booking sources list, not a hardcoded array. An
     // unconfigured source (a new "agoda" / "OTA" entry) would
@@ -206,7 +218,15 @@ export function ReportsPage() {
   } = useAdmin();
   const { isMobile } = useBreakpoint();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<ReportTab>("performance");
+  // Per AUDIT-2026-08-10: Performance, Sales, and Liability
+  // are admin-only (managerial / financial / refund-queue
+  // data). Front desk only sees the Daily Close tab on this
+  // page, which is the end-of-shift cash reconciliation they
+  // own. Default the active tab accordingly so a front-desk
+  // user lands on the only available tab.
+  const [activeTab, setActiveTab] = useState<ReportTab>(
+    currentUser?.role === "admin" ? "performance" : "daily-close"
+  );
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState(() => {
     return shiftDateKey(dateKeyInTimeZone(new Date(), config.timezone), -29);
@@ -225,6 +245,23 @@ export function ReportsPage() {
   // pay-per-read Firestore traffic).
   const [rawCharges, setRawCharges] = useState<RawReportCharge[]>([]);
   const [rawPayments, setRawPayments] = useState<RawReportPayment[]>([]);
+  // Per MRB-04 Phase 2.x (2026-08-02, per decision #159):
+  // new-reservation refunds live at
+  // `reservations/{id}/refunds/{refundId}` — a SEPARATE
+  // subcollection from `bookings/{id}/payments/`. The
+  // `payments` collectionGroup subscription below only
+  // catches the legacy path (refunds written to
+  // `bookings/{id}/payments/{refundId}` as negative
+  // entries). The `refunds` collectionGroup subscription
+  // catches the new path. Both merge into the same
+  // `payments` array via the useMemo at line ~368 so
+  // `refundsTotal` + the per-method breakdown + the
+  // Daily Close ledger + receivables all see every
+  // refund. Firestore rules already grant
+  // `collectionGroup(db, "refunds")` read to staff
+  // (RPT-03, `firestore.rules:475`) — `LiabilityTab`
+  // uses the same subscription.
+  const [rawRefunds, setRawRefunds] = useState<RawReportPayment[]>([]);
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [dailyCloses, setDailyCloses] = useState<any[]>([]);
@@ -285,6 +322,20 @@ export function ReportsPage() {
         const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
         const isStoreTender = data.source === "store-order";
         const sourceId = isStoreTender ? String(data.sourceId || parentDocumentId) : parentDocumentId;
+        // Per RPT-06 (2026-08-19): mirror the refunds
+        // listener's reservation-path detection. Post-MRB-01
+        // payments live at `reservations/{id}/payments/{id}`,
+        // so the path's parent is the reservationId (a UUID),
+        // not the per-room bookingId — the legacy fallback
+        // `parentDocumentId` resolved the display to a raw UUID
+        // in the Booking column. The `data.bookingId` stamp
+        // (written at `bookings.ts:7647` for reservation-scope
+        // payments) is the per-room attribution; fall back to
+        // the path's parent only if a future write path drops
+        // the stamp (current production data has it on every
+        // new-reservation payment, per RPT-04's identical test
+        // for refunds).
+        const isReservationPayment = !isStoreTender && paymentDoc.ref.path.startsWith("reservations/");
         return {
           id: paymentDoc.id,
           type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
@@ -292,7 +343,7 @@ export function ReportsPage() {
           sourceId,
           // Keep store tenders outside booking-folio sums. They reconcile the
           // direct-paid store charge but must not settle the guest's room bill.
-          bookingId: isStoreTender ? `store:${sourceId}` : parentDocumentId,
+          bookingId: isStoreTender ? `store:${sourceId}` : (isReservationPayment ? String(data.bookingId || parentDocumentId) : parentDocumentId),
           bookingRef: isStoreTender ? String(data.orderRef || sourceId) : "",
           roomNumber: isStoreTender ? String(data.roomNumber || "") : "",
           guestName: isStoreTender ? String(data.guestName || "") : "",
@@ -309,6 +360,57 @@ export function ReportsPage() {
     }, (error) => {
       console.error("Failed to load payment collections:", error);
       toast.error("Could not load collections", "Billed revenue remains available. Refresh to try again.");
+    });
+    return unsubscribe;
+  }, [toast]);
+
+  // Per MRB-04 Phase 2.x: subscribe to the `refunds`
+  // collectionGroup so new-reservation refunds
+  // (`reservations/{id}/refunds/{refundId}`) are
+  // visible to the Refunds KPI + per-method breakdown
+  // + Daily Close ledger. The subscription mirrors the
+  // shape the `payments` collectionGroup mapper uses
+  // (line ~290) so the merge into `payments` below is
+  // a no-op for the consumer. The record's
+  // `data.bookingId` is stamped at write time
+  // (`bookings.ts:7617`) so the
+  // `bookingDisplayById.get(bookingId)` lookup
+  // resolves the bookingRef for the display. The
+  // `data.bookingId` fallback to the path's parent
+  // (the reservationId) only fires if a future write
+  // path drops the stamp — current production data
+  // has it on every new-reservation refund.
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "refunds"), (snapshot) => {
+      setRawRefunds(snapshot.docs.map((refundDoc) => {
+        const data = refundDoc.data();
+        const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
+        const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
+        const bookingId = isReservationRefund
+          ? String(data.bookingId || parentDocumentId)
+          : parentDocumentId;
+        return {
+          id: refundDoc.id,
+          type: "refund",
+          source: "booking",
+          sourceId: bookingId,
+          bookingId,
+          bookingRef: "",
+          roomNumber: "",
+          guestName: "",
+          amount: Number(data.amount || 0),
+          method: String(data.method || "unknown"),
+          transactionReference: data.transactionReference ? String(data.transactionReference) : null,
+          note: String(data.note || ""),
+          reason: data.reason ? String(data.reason) : null,
+          approvedBy: data.approvedBy ? String(data.approvedBy) : null,
+          recordedBy: String(data.recordedBy || "staff"),
+          recordedAt: toDate(data.recordedAt)
+        };
+      }));
+    }, (error) => {
+      console.error("Failed to load refund ledger:", error);
+      toast.error("Could not load refunds", "Collections totals remain available. Refresh to try again.");
     });
     return unsubscribe;
   }, [toast]);
@@ -345,6 +447,34 @@ export function ReportsPage() {
     return map;
   }, [bookings]);
 
+  // Per RPT-07 (2026-08-19): the `payments` collectionGroup
+  // catches reservation-level rows at
+  // `reservations/{id}/payments/{id}` where `data.bookingId`
+  // is `null` (per MRB-04 Phase 2.x / `bookings.ts:7638-7640`,
+  // the per-room attribution contract). The RPT-06 fix routed
+  // those rows through `parentDocumentId` (the reservationId)
+  // for the display lookup — the per-room
+  // `bookingDisplayById.get(reservationId)` misses (bookings
+  // don't have docs with id = reservationId) and the legacy
+  // fallback would still render the raw UUID. This map
+  // provides the reservation-level metadata (the public
+  // `R-YYYYMMDD-NNNNN` ref + the lead guest name) so the
+  // display chain can render a human-readable ref instead.
+  // The AdminContext's `subscribeToReservations` listener
+  // (per MRB-12) is the canonical source — no new
+  // collectionGroup read. Keyed by `reservationId`; the
+  // bookingId for a reservation-level payment is exactly
+  // the reservationId after the RPT-06 routing, so the join
+  // can do a single `.get(bookingId)` against either map.
+  const reservationMetaById = useMemo(() => {
+    const map = new Map<string, { reservationRef: string; leadGuestName: string }>();
+    reservations.forEach((r) => map.set(r.id, {
+      reservationRef: r.reservationRef || "",
+      leadGuestName: r.leadGuestName || ""
+    }));
+    return map;
+  }, [reservations]);
+
   const charges = useMemo<ReportCharge[]>(() =>
     rawCharges.map((charge) => {
       const display = bookingDisplayById.get(charge.bookingId);
@@ -358,19 +488,59 @@ export function ReportsPage() {
   );
 
   const payments = useMemo<ReportPayment[]>(() =>
-    rawPayments.map((payment) => {
+    // Merge the `payments` collectionGroup (legacy
+    // refunds + all payments) with the `refunds`
+    // collectionGroup (new-reservation refunds, per
+    // MRB-04 Phase 2.x). Both arrays carry the same
+    // `ReportPayment` shape so the display resolution
+    // below is uniform — `refundsTotal` + the
+    // per-method breakdown + the Daily Close ledger +
+    // receivables all pick up the new-reservation
+    // refunds automatically. The `rawRefunds` rows
+    // arrive with `bookingId` set (from
+    // `data.bookingId` stamped at write time), so the
+    // `bookingDisplayById.get(bookingId)` lookup
+    // resolves every row.
+    //
+    // Per RPT-07 (2026-08-19): for reservation-level
+    // payment rows (post-MRB-01,
+    // `reservations/{id}/payments/{id}` with
+    // `data.bookingId: null`), the RPT-06 routing
+    // sets `payment.bookingId` to the `reservationId`.
+    // The per-room `bookingDisplayById.get(bookingId)`
+    // misses (bookings don't have docs with id =
+    // reservationId) — the chain falls through to
+    // `reservationMetaById` for the public `R-` ref
+    // + the lead guest name. The final fallback is
+    // `payment.bookingId` (the raw reservationId
+    // UUID) — the same defensive shape RPT-06 had
+    // pre-fix, preserved for any future write path
+    // that drops the reservation header.
+    [...rawPayments, ...rawRefunds].map((payment) => {
       if (payment.source === "store-order") {
         return payment;
       }
       const display = bookingDisplayById.get(payment.bookingId);
+      // Only consult the reservation map when the
+      // per-room lookup missed — otherwise a
+      // per-room bookingId that happens to match a
+      // reservationId (theoretically possible
+      // between the two id generators) would be
+      // shadowed. The shape difference (Firestore
+      // auto-id 20 chars for bookings vs RFC4122
+      // UUID 36 chars for reservations) makes a
+      // collision impossible in practice, but the
+      // explicit `!display` guard is the right
+      // shape anyway.
+      const reservationMeta = display ? null : reservationMetaById.get(payment.bookingId) || null;
       return {
         ...payment,
-        bookingRef: display?.bookingRef || payment.bookingId,
+        bookingRef: display?.bookingRef || reservationMeta?.reservationRef || payment.bookingId,
         roomNumber: display?.roomNumber || "",
-        guestName: display?.guestName || ""
+        guestName: display?.guestName || reservationMeta?.leadGuestName || ""
       };
     }),
-    [rawPayments, bookingDisplayById]
+    [rawPayments, rawRefunds, bookingDisplayById, reservationMetaById]
   );
 
   const chartColors = [
@@ -426,6 +596,42 @@ export function ReportsPage() {
     [bookings]
   );
 
+  // Per MED-1 / MED-2 / LOW-2 (reports audit 2026-08-10):
+  // the room-hold set includes every status where the
+  // create / convert-inquiry / add-room transaction has
+  // reserved the room. `pending` + `payment-uploaded`
+  // bookings DO hold the room — the create transaction's
+  // availability check prevents a double-booking on the
+  // same dates — so the occupancy + acquisition widgets
+  // must include them. The revenue widgets stay narrow
+  // (revenue is a cash-side metric, not a room-hold metric).
+  //
+  // Per DECISIONS-FEATURES.md #99 + `plan/features/CORPORATE-BOOKING.md`:
+  // a corporate chargeback lands as `pending` +
+  // `paymentMethod: "pay-at-hotel"` and stays pending
+  // until the LOU workflow resolves it (can be weeks).
+  // The pre-fix receivables filter excluded `pending`,
+  // so a corporate chargeback was invisible to the
+  // "Corporate AR" card and the by-company list until
+  // staff manually flipped the status (a step the spec
+  // doesn't actually require — the LOU flag is the
+  // canonical signal, but the field is unwired so
+  // status-bumping is the current workaround). Same
+  // bookings were also missing from the occupancy chart.
+  // The fix broadens the room-hold set so the room
+  // count + the AR aging reflect the real booked state.
+  const roomHoldBookings = useMemo(() =>
+    bookings.filter(b =>
+      b.status === "pending" ||
+      b.status === "payment-uploaded" ||
+      b.status === "payment-confirmed" ||
+      b.status === "confirmed" ||
+      b.status === "checked-in" ||
+      b.status === "checked-out"
+    ),
+    [bookings]
+  );
+
   const rangeBookings = useMemo(() => {
     return revenueBookings.filter(b => {
       const checkInKey = reportDateKey(b.checkIn);
@@ -453,11 +659,20 @@ export function ReportsPage() {
     });
   }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey, payments]);
 
-  // ── Occupancy-eligible bookings (same as rangeBookings but includes future unpaid confirmed bookings) ──
-  // Future confirmed bookings with no payments recorded are excluded from revenue (correct)
-  // but counted for occupancy and acquisition metrics since the room is still reserved.
+  // ── Occupancy-eligible bookings (every room-holding status) ──
+  // Per MED-2 (reports audit 2026-08-10): the room is held
+  // by the create transaction regardless of payment status,
+  // so occupancy + acquisition must include `pending` and
+  // `payment-uploaded` bookings. The pre-fix path derived
+  // `occupancyBookings` from `revenueBookings` (which
+  // intentionally excludes those statuses for cash-side
+  // accuracy) — a corporate chargeback that stayed
+  // `pending` for weeks while the LOU was processed was
+  // missing from the room-type occupancy chart AND the
+  // acquisition / booking-source chart, skewing the
+  // period forecast.
   const occupancyBookings = useMemo(() => {
-    return revenueBookings.filter(b => {
+    return roomHoldBookings.filter(b => {
       const checkInKey = reportDateKey(b.checkIn);
       const checkOutKey = reportDateKey(b.checkOut);
       if (!checkInKey || !checkOutKey) return false;
@@ -476,7 +691,7 @@ export function ReportsPage() {
 
       return true;
     });
-  }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey]);
+  }, [roomHoldBookings, periodStartKey, periodEndKey, hotelTodayKey]);
 
   const rangeStoreOrders = useMemo(
     () => storeOrders.filter(o => isWithinSelectedRange(o.status === "delivered" ? (o.deliveredAt || o.createdAt) : o.createdAt)),
@@ -639,7 +854,47 @@ export function ReportsPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return bookings
-      .filter((booking) => ["confirmed", "payment-confirmed", "checked-in", "checked-out"].includes(booking.status))
+      // Per MED-1 / LOW-2 (reports audit 2026-08-10): the
+      // receivables filter now includes the two missing
+      // pre-confirmation corporate cases that hold a
+      // receivable.
+      //
+      //   - `status: "pending" + isCorporate + paymentMethod === "pay-at-hotel"`
+      //     — a corporate chargeback that hasn't received
+      //     the LOU yet (per DECISIONS-FEATURES.md #99 +
+      //     CORPORATE-BOOKING.md §LOU). Stays `pending` for
+      //     the entire LOU-processing window (days/weeks);
+      //     the pre-fix filter dropped it from the
+      //     "Corporate AR" card.
+      //   - `status: "payment-uploaded" + isCorporate`
+      //     — a corporate personal-pay booking with a
+      //     receipt uploaded, awaiting staff verification.
+      //     A real AR until staff flips the status via
+      //     "Verify & Record Payment".
+      //
+      // Non-corporate `pending` + `pay-at-hotel` (a
+      // walk-in guest who hasn't arrived yet) and
+      // non-corporate `payment-uploaded` (a personal-pay
+      // guest with a receipt to verify) are excluded —
+      // they're not "owed money" in the same way:
+      // - the walk-in will pay on arrival (the staff
+      //   collects at the desk, no AR),
+      // - the personal-pay `payment-uploaded` is
+      //   individually verified via "Verify & Record
+      //   Payment" (the desk can see it in the pending
+      //   payments alert, not in the AR aging list).
+      .filter((booking) => {
+        if (["confirmed", "payment-confirmed", "checked-in", "checked-out"].includes(booking.status)) {
+          return true;
+        }
+        if (booking.status === "pending" && booking.isCorporate === true && booking.paymentMethod === "pay-at-hotel") {
+          return true;
+        }
+        if (booking.status === "payment-uploaded" && booking.isCorporate === true) {
+          return true;
+        }
+        return false;
+      })
       .map((booking) => {
         const bookingCharges = charges.filter((charge) => charge.bookingId === booking.id).reduce((sum, charge) => sum + charge.amount, 0);
         const addToBillTotal = storeOrders
@@ -1255,10 +1510,117 @@ export function ReportsPage() {
         }
       }));
 
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision
+      // #159): new-reservation PAYMENTS live at
+      // `reservations/{id}/payments/{paymentId}` — a
+      // SEPARATE subcollection from the booking's
+      // `payments/`. The per-booking loop above only
+      // catches the legacy path. This payments
+      // collectionGroup read catches the new path.
+      // Same row shape as the per-booking loop — `Type`
+      // derived from `data.type` or the sign of the
+      // amount, `Amount`, `Method`, `Transaction
+      // Reference`, `Note`, `Reason`, `Approved By`,
+      // `Recorded By`, `Recorded At` identical to the
+      // legacy rows. The record carries `data.bookingId`
+      // (stamped at write time per `bookings.ts` — see
+      // RPT-04's identical pattern for refunds) so the
+      // `bookings.find(...)` lookup resolves the
+      // bookingRef for the spreadsheet cell. Falls back
+      // to the path's parent (the reservationId) if a
+      // future write path drops the stamp — current
+      // production data has it on every new-reservation
+      // payment. Without this read, the Full Backup
+      // XLSX Payments sheet is missing every verified /
+      // add-payment / walk-in collection entry for every
+      // N>1 reservation (RPT-05, 2026-08-14).
+      const allReservationPaymentsSnap = await getDocs(collectionGroup(db, "payments"));
+      allReservationPaymentsSnap.forEach((paymentDoc) => {
+        if (!paymentDoc.ref.path.startsWith("reservations/")) return; // legacy handled by per-booking loop above
+        const data = paymentDoc.data();
+        const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
+        const bookingId = String(data.bookingId || parentDocumentId);
+        const booking = bookings.find((item) => item.id === bookingId);
+        paymentRows.push({
+          "Booking Ref": booking?.bookingRef || bookingId,
+          Type: data.type || (Number(data.amount || 0) < 0 ? "refund" : "payment"),
+          Amount: data.amount || 0,
+          Method: data.method || "",
+          "Transaction Reference": data.transactionReference || "",
+          Note: data.note || "",
+          Reason: data.reason || "",
+          "Approved By": data.approvedBy || "",
+          "Recorded By": data.recordedBy || "",
+          "Recorded At": toDate(data.recordedAt)?.toISOString() || ""
+        });
+      });
+
+      // Per MRB-04 Phase 2.x (2026-08-02, per decision
+      // #159): new-reservation refunds live at
+      // `reservations/{id}/refunds/{refundId}` — a
+      // SEPARATE subcollection from the booking's
+      // `payments/`. The per-booking loop above only
+      // catches the legacy path (refunds as
+      // negative-amount entries on
+      // `bookings/{id}/payments/`). The refunds
+      // collectionGroup read below catches the new
+      // path. Same row shape as the legacy refund
+      // rows — `Type: "refund"`, `Amount` negative, the
+      // rest of the columns identical. The record
+      // carries `data.bookingId` (stamped at write
+      // time per `bookings.ts:7617`) so the
+      // `bookings.find(...)` lookup resolves the
+      // bookingRef for the spreadsheet cell. Falls
+      // back to the path's parent (the reservationId)
+      // if a future write path drops the stamp —
+      // current production data has it on every
+      // new-reservation refund.
+      const allRefundsSnap = await getDocs(collectionGroup(db, "refunds"));
+      allRefundsSnap.forEach((refundDoc) => {
+        const data = refundDoc.data();
+        const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
+        const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
+        const bookingId = isReservationRefund
+          ? String(data.bookingId || parentDocumentId)
+          : parentDocumentId;
+        const booking = bookings.find((item) => item.id === bookingId);
+        paymentRows.push({
+          "Booking Ref": booking?.bookingRef || bookingId,
+          Type: "refund",
+          Amount: Number(data.amount || 0),
+          Method: data.method || "",
+          "Transaction Reference": data.transactionReference || "",
+          Note: data.note || "",
+          Reason: data.reason || "",
+          "Approved By": data.approvedBy || "",
+          "Recorded By": data.recordedBy || "",
+          "Recorded At": toDate(data.recordedAt)?.toISOString() || ""
+        });
+      });
+
       const allChargesSnap = await getDocs(collectionGroup(db, "charges"));
       allChargesSnap.forEach((chargeDoc) => {
         const charge = chargeDoc.data();
-        const bookingId = chargeDoc.ref.parent.parent?.id || "";
+        // Per MRB-04 Phase 2.x (2026-08-02, per decision
+        // #159): incidental charges for new reservations
+        // live at `reservations/{id}/charges/{chargeId}`
+        // — a SEPARATE subcollection from the booking's
+        // `charges/`. The pre-RPT-05 resolution used the
+        // path's parent id directly as the bookingId,
+        // which is wrong for reservation-scope charges
+        // (parent = reservationId, not bookingId), leaving
+        // the Booking Ref + Room cells blank in the Full
+        // Backup XLSX Charges sheet. Prefer the stamped
+        // `data.bookingId` (written by every new-reservation
+        // charge handler), fall back to the path's parent
+        // for the legacy path. The bookingRef resolution
+        // is the same `bookings.find(...)` lookup the
+        // refunds + new-reservation-payments loops use.
+        const pathParentId = chargeDoc.ref.parent.parent?.id || "";
+        const isReservationCharge = chargeDoc.ref.path.startsWith("reservations/");
+        const bookingId = isReservationCharge
+          ? String(charge.bookingId || pathParentId)
+          : pathParentId;
         const booking = bookings.find((item) => item.id === bookingId);
         chargeRows.push({
           "Booking Ref": booking?.bookingRef || bookingId,
@@ -1828,7 +2190,9 @@ export function ReportsPage() {
           <p className="text-xs text-gray-500 mt-1">
             {activeTab === "performance"
               ? "Operational overview: occupancy, acquisition channels, and inventory."
-              : "Consolidated revenue across rooms, breakfast add-ons, and Spark Essentials store orders."}
+              : activeTab === "daily-close"
+                ? "End-of-shift cash reconciliation. Count the till, lock the day's collections, and pass the next shift the day's ledger."
+                : "Consolidated revenue across rooms, breakfast add-ons, and Spark Essentials store orders."}
           </p>
         </div>
 
@@ -1943,30 +2307,36 @@ export function ReportsPage() {
         </div>
       </header>
 
-      {/* Tabs */}
+      {/* Tabs — Performance / Sales / Liability are admin-only
+          (see activeTab default above). The Daily Close tab is
+          the only one rendered for front-desk staff. */}
       <div role="tablist" className="flex gap-1 rounded-lg bg-gray-100 p-1 max-w-md">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "performance"}
-          onClick={() => setActiveTab("performance")}
-          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
-            activeTab === "performance" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
-          }`}
-        >
-          Performance
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "sales"}
-          onClick={() => setActiveTab("sales")}
-          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
-            activeTab === "sales" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
-          }`}
-        >
-          Sales
-        </button>
+        {currentUser?.role === "admin" && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "performance"}
+            onClick={() => setActiveTab("performance")}
+            className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+              activeTab === "performance" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            Performance
+          </button>
+        )}
+        {currentUser?.role === "admin" && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "sales"}
+            onClick={() => setActiveTab("sales")}
+            className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+              activeTab === "sales" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            Sales
+          </button>
+        )}
         <button
           type="button"
           role="tab"
@@ -1978,18 +2348,20 @@ export function ReportsPage() {
         >
           Daily Close
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "liability"}
-          onClick={() => setActiveTab("liability")}
-          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
-            activeTab === "liability" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
-          }`}
-          data-testid="report-tab-liability"
-        >
-          Liability
-        </button>
+        {currentUser?.role === "admin" && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "liability"}
+            onClick={() => setActiveTab("liability")}
+            className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+              activeTab === "liability" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+            }`}
+            data-testid="report-tab-liability"
+          >
+            Liability
+          </button>
+        )}
       </div>
 
       {activeTab === "performance" && (
@@ -2070,6 +2442,7 @@ export function ReportsPage() {
           vatSummary={vatSummary}
           loyaltyLiability={loyaltyLiability}
           rewardsConfig={rewardsConfig}
+          staffNameMap={staffNameMap}
         />
       )}
 
@@ -2485,6 +2858,13 @@ function SalesTab(props: {
     liability: number;
   };
   rewardsConfig?: any;
+  // Per RPT-03 (2026-08-07): the Sales bookings table now
+  // resolves the staff display name via the same map the
+  // Daily Close ledger uses, so staff show up as their
+  // configured `fullName` rather than their Firebase Auth
+  // UID. The map is built in the parent (`ReportsPage`)
+  // from the `staff` slice of the admin context.
+  staffNameMap: Map<string, string>;
 }) {
   const {
     deltas,
@@ -2500,7 +2880,8 @@ function SalesTab(props: {
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
     toDate, chartColors, isMobile,
     discountsSummary, vatSummary, loyaltyLiability,
-    rewardsConfig
+    rewardsConfig,
+    staffNameMap
   } = props;
 
   const breakfastEnabled = breakfastConfig?.isEnabled;
@@ -2672,7 +3053,7 @@ function SalesTab(props: {
                   <td className={`px-3 py-2 font-semibold capitalize ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{payment.type}</td>
                   <td className="px-3 py-2 text-gray-600">{PAYMENT_LABELS[payment.method] || payment.method}</td>
                   <td className="px-3 py-2 text-gray-500">{(payment as any).transactionReference || "—"}</td>
-                  <td className="px-3 py-2 text-gray-600">{payment.recordedBy}</td>
+                  <td className="px-3 py-2 text-gray-600">{staffNameMap.get(payment.recordedBy) || payment.recordedBy}</td>
                   <td className={`px-3 py-2 text-right font-bold ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{formatPrice(payment.amount)}</td>
                 </tr>
               ))}
@@ -4024,7 +4405,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
               <table className="min-w-full text-xs">
                 <thead className="bg-gray-50 text-left">
                   <tr>
-                    {["Ref", "Guest / Room", "Type", "Method", "Staff", "Amount"].map((heading) => (
+                    {["Booking", "Guest / Room", "Type", "Method", "Transaction Ref", "Staff", "Amount"].map((heading) => (
                       <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                         {heading}
                       </th>
@@ -4036,12 +4417,13 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
                     <tr key={p.id}>
                       <td className="px-3 py-2 font-semibold text-gray-900">{p.bookingRef}</td>
                       <td className="px-3 py-2 text-gray-600">
-                        {p.guestName} · Room {p.roomNumber}
+                        {p.guestName || "—"} · Room {p.roomNumber || "—"}
                       </td>
                       <td className={`px-3 py-2 font-semibold capitalize ${p.type === "refund" ? "text-red-655" : "text-emerald-705"}`}>
                         {p.type}
                       </td>
                       <td className="px-3 py-2 text-gray-600 uppercase">{PAYMENT_LABELS[p.method] || p.method}</td>
+                      <td className="px-3 py-2 text-gray-600 font-mono">{p.transactionReference || "—"}</td>
                       <td className="px-3 py-2 text-gray-600">{staffNameMap.get(p.recordedBy) || p.recordedBy}</td>
                       <td className={`px-3 py-2 font-mono font-bold text-right ${p.type === "refund" ? "text-red-650" : "text-emerald-750"}`}>
                         {p.type === "refund" ? "-" : ""}{formatPrice(p.amount)}
@@ -4050,7 +4432,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
                   ))}
                   {dayPayments.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-gray-400">
+                      <td colSpan={7} className="p-6 text-center text-gray-400">
                         No transactions recorded on this date.
                       </td>
                     </tr>

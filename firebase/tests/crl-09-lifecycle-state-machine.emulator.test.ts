@@ -146,10 +146,21 @@ describe("CRL-09 — the liability snapshot's data shape survives a re-read", ()
     await setDoc(doc(fs, "reservations", RESERVATION_ID), {
       reservationRef: RESERVATION_REF,
       cancellationLiability: liability,
-      totalPrice: 5000,
-      roomCount: 1,
-      activeRoomCount: 0,
-      cancelledRoomCount: 1
+      totalPrice: 5000
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the 5 aggregate counter fields
+      // (`roomCount` / `activeRoomCount` /
+      // `cancelledRoomCount` / `checkedInRoomCount` /
+      // `checkedOutRoomCount`) are no longer written
+      // to the reservation header. The pre-BAR-02
+      // shape seeded these values here as a
+      // post-cancel snapshot; BAR-02 derives them at
+      // read time via `deriveReservationCounters` over
+      // the children (which the helper under test
+      // already does). The snapshot is intentionally
+      // bare — the test exercises the dual-source
+      // read (reservation header for new reservations
+      // + booking doc for legacy null-`reservationId`).
     });
     await setDoc(doc(fs, "bookings", BOOKING_ID_N1), {
       bookingRef: "SI-20260803-00001",

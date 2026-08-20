@@ -39,6 +39,15 @@ import {
   calculatePercentDiscount,
   calculateVoucherBase,
   calculateBreakfastAddOn,
+  // Per B-10 / B-10c / decision #223 (2026-08-19): the
+  // upload-timeout helper. Wraps `uploadBytes(...)` on Firebase
+  // Storage in a `Promise.race` so a hung connection (mobile
+  // 3G with auth-in-flight) doesn't leave the staff/guest
+  // staring at a permanent "Uploading..." spinner. See
+  // `shared/utils/uploads.ts` for the rationale + the
+  // 90s default.
+  raceUploadWithTimeout,
+  DEFAULT_UPLOAD_TIMEOUT_MS,
   calculateExtraBedAddOn,
   requiredExtraBedsFor
 } from "@spark-inn/shared";
@@ -348,6 +357,25 @@ export function BookingPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // Per NBS-2026-08-08 (F2): the recovery action the
+  // sticky footer should render alongside the submit
+  // error. The catch block in `handleConfirmBooking`
+  // maps the server error to one of three actions:
+  //   - "back-to-step-1" → return to the room/date picker
+  //   - "retry" → stay on Step 3 with a "Try again" CTA
+  //   - "none" → show the message with a generic close
+  // The state is reset to "none" on every new submit
+  // attempt.
+  const [submitErrorAction, setSubmitErrorAction] = useState<"back-to-step-1" | "retry" | "none">("none");
+  // Per NBS-2026-08-08 (F11): the auto-redirect timer
+  // for the "Room no longer available" path is held on a
+  // ref so the user can cancel it by navigating manually
+  // (clicking the back CTA or the browser back button)
+  // before the 5s elapses. Without the ref the timer
+  // would fire after the navigation and clobber the URL
+  // the user already moved to. The cleanup effect
+  // below cancels any pending timer on unmount.
+  const redirectTimerRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
   const nights = Math.max(getNumNights(checkIn, checkOut), 1);
@@ -478,6 +506,28 @@ export function BookingPage() {
     && cartDistribution.unassignedAdults === 0
     && cartDistribution.unassignedChildren === 0
     && distributedRoomCart.every((room) => room.numAdults >= 1);
+  // Per the per-individual discount guard (mirrors the
+  // admin-app drawer-edit fix): PWD and senior are
+  // per-individual legal entitlements (RA 7277 / RA
+  // 9442) — they must be applied to the specific
+  // guest's booking, not the whole multi-room cart.
+  // The guard below disables the senior / PWD picker
+  // options when the cart has >1 room (the per-individual
+  // shape is single-room by definition) + auto-reverts
+  // the discount type to "none" if the cart grows past
+  // 1 while senior / PWD is selected. The single source
+  // of truth is the `isPerIndividualDiscount`
+  // derivation consumed by the picker disable + the
+  // auto-revert useEffect.
+  const isPerIndividualDiscount = discountType === "senior" || discountType === "pwd";
+  const cartIsMultiRoom = distributedRoomCart.length > 1;
+  useEffect(() => {
+    if (isPerIndividualDiscount && cartIsMultiRoom) {
+      setDiscountType("none");
+      clearDiscountIdUpload();
+      setDiscountIdUploadError("");
+    }
+  }, [isPerIndividualDiscount, cartIsMultiRoom, clearDiscountIdUpload]);
   // Per CHD-11 (2026-08-04, per decision #184): the
   // per-room cap is enforced at the submit gate, not the
   // picker. Every room in the cart must fit its per-type cap
@@ -615,7 +665,15 @@ export function BookingPage() {
     numAdults: room.numAdults,
     numChildren: room.numChildren,
     numNights: nights,
-    breakfastIncludesChildren
+    breakfastIncludesChildren,
+    // Per EXB-12 (2026-08-06, per decision #199): when the
+    // guest opts in to breakfast for the extra-bed
+    // occupant(s), the helper counts `extraBedCount` toward
+    // the breakfast total. The user opts in via the toggle
+    // on the Extras sub-section. The server validates the
+    // invariant `extraBedBreakfast implies extraBedCount > 0`.
+    extraBedCount: room.extraBedCount,
+    extraBedBreakfast: room.extraBedBreakfast === true
   }), 0);
   // Per CHD-10: the effective breakfast occupancy, exposed for
   // the rate-card per-night label. When the toggle is on, this
@@ -986,31 +1044,69 @@ export function BookingPage() {
     });
   }
 
+  // Per EXB-11.5 (2026-08-06, per decision #198): the rate
+  // option is a per-type toggle. Click to add 1 of that type
+  // to the cart (with the chosen rate); click the same rate
+  // again to remove all rooms of that type from the cart;
+  // click a different rate to switch the rate in place. The
+  // user is in full control of the room-type selection, same
+  // shape as the extra-bed toggle in EXB-11.4. The
+  // `selectedRoomType` / `rateChoice` state sync is skipped
+  // on the untick path — the `useEffect` at `BookingPage.tsx:865`
+  // picks another type (or clears) when the current selection
+  // is no longer in the cart. The `setSearchParams` call
+  // stays inside the `setRoomCart` callback to match the
+  // existing pattern (idempotent in React 18 StrictMode).
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
-    setSelectedRoomType(typeValue);
-    setRateChoice(nextRateChoice);
+    let shouldSyncSelection = false;
     setRoomCart((current) => {
-      const hasType = current.some((room) => room.roomType === typeValue);
-      const next = hasType
-        ? current.map((room) => room.roomType === typeValue
+      const existingRoom = current.find((room) => room.roomType === typeValue);
+      let next;
+      if (!existingRoom) {
+        // Type not in cart: add 1 room with the chosen rate.
+        shouldSyncSelection = true;
+        next = [
+          ...current,
+          {
+            bookingId: doc(collection(db, "bookings")).id,
+            roomType: typeValue,
+            rateChoice: nextRateChoice,
+            numAdults: 0,
+            numChildren: 0,
+            extraBedCount: 0,
+            // Per EXB-12: default to `false` — the guest opts
+            // in to breakfast for extra beds via the toggle
+            // on the Extras sub-section.
+            extraBedBreakfast: false
+          }
+        ];
+      } else if (existingRoom.rateChoice === nextRateChoice) {
+        // Type in cart with the same rate: untick (per-type
+        // toggle) — remove ALL rooms of this type. Don't
+        // sync `selectedRoomType` / `rateChoice` here; the
+        // useEffect at `BookingPage.tsx:865` will pick
+        // another type (or clear) when the current selection
+        // is no longer in the cart.
+        next = current.filter((room) => room.roomType !== typeValue);
+      } else {
+        // Type in cart with a different rate: switch the
+        // rate in place (update every room of this type).
+        shouldSyncSelection = true;
+        next = current.map((room) =>
+          room.roomType === typeValue
             ? { ...room, rateChoice: nextRateChoice }
-            : room)
-        : [
-            ...current,
-            {
-              bookingId: doc(collection(db, "bookings")).id,
-              roomType: typeValue,
-              rateChoice: nextRateChoice,
-              numAdults: 0,
-              numChildren: 0,
-              extraBedCount: 0
-            }
-          ];
+            : room
+        );
+      }
       const nextParams = new URLSearchParams(searchParams);
       nextParams.set("rooms", serializeBookingRoomCart(next));
       setSearchParams(nextParams, { replace: true });
       return next;
     });
+    if (shouldSyncSelection) {
+      setSelectedRoomType(typeValue);
+      setRateChoice(nextRateChoice);
+    }
   }
 
   function updateRoomQuantity(typeValue: string, nextQuantity: number, maxQuantity: number) {
@@ -1020,6 +1116,11 @@ export function BookingPage() {
       const matching = current.filter((room) => room.roomType === typeValue);
       const other = current.filter((room) => room.roomType !== typeValue);
       const templateChoice = matching[0]?.rateChoice ?? rateChoice;
+      // Per EXB-12: preserve the extra-bed breakfast toggle
+      // from the first matching room (the user's pick applies
+      // to every room of this type — same per-type mirror
+      // pattern as `extraBedCount` and `rateChoice`).
+      const templateExtraBedBreakfast = matching[0]?.extraBedBreakfast === true;
       const resized = Array.from({ length: safeQuantity }, (_, index) =>
         matching[index] ?? {
           bookingId: doc(collection(db, "bookings")).id,
@@ -1027,7 +1128,8 @@ export function BookingPage() {
           rateChoice: templateChoice,
           numAdults: 0,
           numChildren: 0,
-          extraBedCount: 0
+          extraBedCount: 0,
+          extraBedBreakfast: templateExtraBedBreakfast
         }
       );
       const next = [...other, ...resized];
@@ -1063,6 +1165,36 @@ export function BookingPage() {
           ? { ...room, extraBedCount: safeCount }
           : room
       );
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("rooms", serializeBookingRoomCart(next));
+      setSearchParams(nextParams, { replace: true });
+      return next;
+    });
+  }
+
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // extra-bed breakfast toggle. The user opts in to
+  // breakfast for the extra-bed occupant(s) — all
+  // `extraBedCount` beds in the room are then counted toward
+  // the breakfast total. The toggle is per-type (mirrored
+  // onto every room of the type, same pattern as the extra-
+  // bed count + rate choice). When the extra-bed count drops
+  // to 0, the toggle is forced off (no breakfast for
+  // extra beds when there are no extra beds). The user can
+  // also explicitly turn it off; both paths set
+  // `extraBedBreakfast = false`.
+  function updateExtraBedBreakfast(typeValue: string, nextEnabled: boolean) {
+    setRoomCart((current) => {
+      if (!current.some((room) => room.roomType === typeValue)) return current;
+      const next = current.map((room) => {
+        if (room.roomType !== typeValue) return room;
+        // Per EXB-12: if the extra-bed count is 0, force the
+        // toggle off. No extra beds = no extra-bed breakfast.
+        // Same invariant the server validates: `extraBedBreakfast
+        // implies extraBedCount > 0`.
+        const safeEnabled = nextEnabled && (room.extraBedCount || 0) > 0;
+        return { ...room, extraBedBreakfast: safeEnabled };
+      });
       const nextParams = new URLSearchParams(searchParams);
       nextParams.set("rooms", serializeBookingRoomCart(next));
       setSearchParams(nextParams, { replace: true });
@@ -1188,7 +1320,16 @@ export function BookingPage() {
         const compressed = await compressImageFile(file, DISCOUNT_ID_COMPRESSION_OPTIONS);
         const safeFileName = createPrivateUploadFileName(compressed.file.name);
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${safeFileName}`);
-        const uploadResult = await uploadBytes(storageRef, compressed.file);
+        // Per B-10c / decision #223 (2026-08-19): same
+        // race-with-timeout protection as the payment-proof
+        // upload (line 1354). Without this, a hung mobile
+        // connection leaves the "Uploading ID photo..." spinner
+        // up indefinitely on the senior/PWD step.
+        const uploadResult = await raceUploadWithTimeout(
+          uploadBytes(storageRef, compressed.file),
+          DEFAULT_UPLOAD_TIMEOUT_MS,
+          "Discount ID upload"
+        );
         const previewUrl = URL.createObjectURL(compressed.file);
         // Per BF-30: single state record so the name + url
         // are always written together (no desync race).
@@ -1219,7 +1360,18 @@ export function BookingPage() {
         const compressed = await compressImageFile(file);
         const safeFileName = createPrivateUploadFileName(compressed.file.name);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${safeFileName}`);
-        const uploadResult = await uploadBytes(storageRef, compressed.file);
+        // Per B-10 / decision #223 (2026-08-19): race the upload
+        // against a 90s timeout. Without this, Firebase Storage
+        // direct uploads on a hung mobile connection leave the
+        // user staring at "Uploading..." forever (the `finally`
+        // block runs but `uploadBytes` never resolves). The
+        // timeout throws an Error that the catch below formats
+        // into the existing "Receipt upload failed..." UI.
+        const uploadResult = await raceUploadWithTimeout(
+          uploadBytes(storageRef, compressed.file),
+          DEFAULT_UPLOAD_TIMEOUT_MS,
+          "Receipt upload"
+        );
         const previewUrl = URL.createObjectURL(compressed.file);
         // Per BF-30: single state record.
         setPaymentProofUpload({ name: file.name, path: uploadResult.ref.fullPath, previewUrl });
@@ -1237,6 +1389,20 @@ export function BookingPage() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError("");
+    // Per NBS-2026-08-08 (F2): reset the recovery
+    // action so a fresh submit doesn't render a stale
+    // CTA from the previous attempt.
+    setSubmitErrorAction("none");
+    // Per NBS-2026-08-08 (F11): cancel any pending
+    // auto-redirect timer from a prior failed submit
+    // (e.g. the user clicked Confirm a second time
+    // before the 5s redirect fired). Without the
+    // cancel, the timer would fire mid-second-submit
+    // and clobber the URL.
+    if (redirectTimerRef.current !== null) {
+      window.clearTimeout(redirectTimerRef.current);
+      redirectTimerRef.current = null;
+    }
 
     // Per 2026-07-24 (refactor/unify-payment-reference-fields):
     // guests no longer enter a payment reference number at booking
@@ -1268,13 +1434,25 @@ export function BookingPage() {
           // `guest-app/server/handlers/bookings.ts`.
           reservationId,
           roomType: firstRoomSelection.roomType,
-          roomCount: distributedRoomCart.length,
+          // Per BAR-02 (2026-08-08, per decision #203): the
+          // `roomCount` field is no longer written to the
+          // reservation header. Consumers derive it at
+          // read time via `deriveReservationCounters`. The
+          // field is no longer sent in the create request
+          // body — the server reads the children list
+          // directly to compute the count.
           roomSelections: distributedRoomCart.map((room, index) => ({
             bookingId: index === 0 ? bookingId : room.bookingId,
             roomType: room.roomType,
             numAdults: room.numAdults,
             numChildren: room.numChildren,
             extraBedCount: room.extraBedCount,
+            // Per EXB-12 (2026-08-06, per decision #199):
+            // whether the guest wants breakfast for the
+            // extra-bed occupant(s). The server validates
+            // the invariant `extraBedBreakfast implies
+            // extraBedCount > 0`.
+            extraBedBreakfast: room.extraBedBreakfast === true,
             hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
             breakfastIncludesChildren
           })),
@@ -1310,6 +1488,14 @@ export function BookingPage() {
           // validates against the room type's `maxExtraBeds` and
           // snapshots the rate onto the booking doc.
           extraBedCount: firstRoomSelection.extraBedCount,
+          // Per EXB-12 (2026-08-06, per decision #199): whether
+          // the guest wants breakfast for the extra-bed
+          // occupant(s). The server validates the invariant
+          // `extraBedBreakfast implies extraBedCount > 0` and
+          // counts the extra beds toward the breakfast total
+          // when truthy. Optional — when absent, the server
+          // treats it as `false` (no breakfast for extra beds).
+          extraBedBreakfast: firstRoomSelection.extraBedBreakfast === true,
           guestDetails: {
             firstName: guestDetails.firstName,
             lastName: guestDetails.lastName,
@@ -1371,23 +1557,71 @@ export function BookingPage() {
     } catch (err: any) {
       console.error("Confirm booking error:", err);
       resetTurnstile();
+      // Per NBS-2026-08-08 (F2, booking-flow audit 2026-08-08):
+      // the previous catch only auto-redirected for the
+      // "Room no longer available" message; every other 4xx
+      // (rate-limit 429, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS,
+      // discount ID missing, etc.) stranded the user on
+      // Step 3 with a generic message and no recovery
+      // affordance. The spec mandates "every error state has
+      // a plain-language message AND a next step" — the fix
+      // maps the server error to one of three recovery
+      // actions surfaced as a CTA in the sticky footer:
+      //   - "back-to-step-1" → return to the room/date picker
+      //   - "retry" → keep the user on Step 3 with a
+      //     "Try again" button (for transient errors
+      //     like the rate-limit)
+      //   - "none" → show the message and a generic
+      //     close affordance (no forced next step)
+      const errorMessage = String(err?.message || "An unexpected error occurred. Please try again.");
       if (err.message === "Room no longer available") {
         setSubmitError("Sorry, no rooms of this type are available for your selected dates. Please go back and pick another room type.");
-        // Auto redirect to Step 1 after 5 seconds
-        setTimeout(() => {
+        setSubmitErrorAction("back-to-step-1");
+        // Auto redirect to Step 1 after 5 seconds — guarded
+        // by a ref so a user-initiated nav (e.g. clicking
+        // the back CTA earlier) cancels the timer.
+        redirectTimerRef.current = window.setTimeout(() => {
           const nextParams = new URLSearchParams(searchParams);
           nextParams.delete("step");
           nextParams.delete("roomType");
           setSearchParams(nextParams);
           setSubmitError("");
+          setSubmitErrorAction("none");
           setIsSubmitting(false);
+          redirectTimerRef.current = null;
         }, 5000);
+      } else if (/maximum stay length|max.*stay.*night/i.test(errorMessage)) {
+        setSubmitError(`${errorMessage} Go back to pick a shorter stay.`);
+        setSubmitErrorAction("back-to-step-1");
+      } else if (/in advance|advance.*days/i.test(errorMessage)) {
+        setSubmitError(`${errorMessage} Go back to pick a closer check-in date.`);
+        setSubmitErrorAction("back-to-step-1");
+      } else if (/past/i.test(errorMessage) && /check-?in|date/i.test(errorMessage)) {
+        setSubmitError(`${errorMessage} Go back to pick a new check-in date.`);
+        setSubmitErrorAction("back-to-step-1");
+      } else if (/too many|rate.*limit/i.test(errorMessage)) {
+        setSubmitError(`${errorMessage} You can try again in a minute.`);
+        setSubmitErrorAction("retry");
       } else {
-        setSubmitError(err.message || "An unexpected error occurred. Please try again.");
-        setIsSubmitting(false);
+        setSubmitError(errorMessage);
+        setSubmitErrorAction("none");
       }
+      setIsSubmitting(false);
     }
   }
+
+  // Per NBS-2026-08-08 (F11): the cleanup effect
+  // cancels any pending auto-redirect timer on unmount
+  // (the user navigated away from Step 3 manually
+  // before the 5s elapsed).
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current !== null) {
+        window.clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = null;
+      }
+    };
+  }, []);
 
   function markTouched(field: GuestField) {
     setTouchedFields((current) => ({
@@ -1662,7 +1896,21 @@ export function BookingPage() {
     // until the Turnstile token has been received — submitting
     // without one is a guaranteed 400 now that the server bypass
     // is gone (BI-02).
-    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
+    // Per NBS-2026-08-08 (F5, booking-flow audit 2026-08-08):
+    // the previous `canConfirm` only read `termsConsent` (the
+    // Step 3 checkbox), but the server's `guestDetailsSchema`
+    // validates `guestDetails.consent` (the Step 2 consent
+    // field) — `handleCreateBooking:1364` throws a 400
+    // "Privacy policy consent is required." when the Step 2
+    // box is unchecked and the Step 3 box is checked. The
+    // gate now ANDs both checkboxes so the guest sees the
+    // missing-consent CTA on Step 3 instead of a server
+    // 400. The duplicate-checkbox UX (Step 2 + Step 3 both
+    // ask the same question) is a pre-existing smell — a
+    // future refactor should consolidate to a single source
+    // of truth; the fix here is the minimum that prevents
+    // the silent server 400.
+    const canConfirm = guestDetails.consent && termsConsent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
 
     return bookingShell(
       <>
@@ -1747,22 +1995,48 @@ export function BookingPage() {
               </p>
               
               {seniorPwdOnlineEnabled && <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                {(["none", "senior", "pwd"] as const).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => handleDiscountChange(type)}
-                    className={cn(
-                      "flex min-h-11 items-center justify-center rounded-lg border text-sm font-semibold transition px-4",
-                      discountType === type
-                        ? "border-primary bg-primary-light text-primary"
-                        : "border-gray-200 bg-white text-gray-700 hover:border-primary"
-                    )}
-                  >
-                    {type === "none" ? "None" : type === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
-                  </button>
-                ))}
+                {(["none", "senior", "pwd"] as const).map((type) => {
+                  // Per the per-individual discount guard:
+                  // the senior / PWD buttons are disabled
+                  // when the cart has >1 room. The same
+                  // derivation is read by the auto-revert
+                  // useEffect above (which clears the
+                  // selected type if the cart grows past
+                  // 1 while the user is on the page).
+                  const isPerIndividualType = type === "senior" || type === "pwd";
+                  const disabledByGuard = isPerIndividualType && cartIsMultiRoom;
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => handleDiscountChange(type)}
+                      disabled={disabledByGuard}
+                      aria-disabled={disabledByGuard}
+                      title={
+                        disabledByGuard
+                          ? "Senior / PWD discounts are per-individual entitlements and apply to a single room. Please book the senior / PWD guest's room separately — you can add additional rooms in a second booking."
+                          : undefined
+                      }
+                      data-testid={`guest-discount-type-${type}`}
+                      className={cn(
+                        "flex min-h-11 items-center justify-center rounded-lg border text-sm font-semibold transition px-4",
+                        disabledByGuard
+                          ? "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 opacity-60"
+                          : discountType === type
+                            ? "border-primary bg-primary-light text-primary"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-primary"
+                      )}
+                    >
+                      {type === "none" ? "None" : type === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
+                    </button>
+                  );
+                })}
               </div>}
+              {seniorPwdOnlineEnabled && cartIsMultiRoom && (
+                <p className="mt-3 text-xs text-amber-700">
+                  Senior Citizen and PWD discounts are per-individual entitlements and apply to a single room. If you need a senior or PWD discount, please book that guest's room in a separate booking — the additional rooms can be added to the same reservation from the front desk at check-in.
+                </p>
+              )}
 
               {seniorPwdOnlineEnabled && discountType !== "none" && (
                 <div className="mt-5">
@@ -2072,9 +2346,58 @@ export function BookingPage() {
             ></div>
 
             {submitError && (
-              <div className="flex gap-2 rounded-lg bg-red-50 p-4 text-sm font-medium text-red-700">
-                <Info size={16} className="mt-0.5 shrink-0" />
-                <p>{submitError}</p>
+              <div className="flex flex-col gap-3 rounded-lg bg-red-50 p-4 text-sm font-medium text-red-700">
+                <div className="flex gap-2">
+                  <Info size={16} className="mt-0.5 shrink-0" />
+                  <p>{submitError}</p>
+                </div>
+                {/* Per NBS-2026-08-08 (F2): the recovery
+                    CTA. The catch block sets
+                    `submitErrorAction` to one of
+                    "back-to-step-1" / "retry" / "none" —
+                    the matching button renders here so
+                    the user has an explicit next step
+                    instead of a stranded "An error
+                    occurred" message. The "back-to-step-1"
+                    CTA cancels any pending auto-redirect
+                    timer (F11) so the manual nav doesn't
+                    race the auto-nav. */}
+                {submitErrorAction === "back-to-step-1" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (redirectTimerRef.current !== null) {
+                        window.clearTimeout(redirectTimerRef.current);
+                        redirectTimerRef.current = null;
+                      }
+                      const nextParams = new URLSearchParams(searchParams);
+                      nextParams.delete("step");
+                      nextParams.delete("roomType");
+                      setSearchParams(nextParams);
+                      setSubmitError("");
+                      setSubmitErrorAction("none");
+                    }}
+                    className="self-start min-h-11 rounded-lg border border-red-300 bg-white px-4 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    Back to room selection
+                  </button>
+                )}
+                {submitErrorAction === "retry" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSubmitError("");
+                      setSubmitErrorAction("none");
+                      // The guest hits Confirm again —
+                      // reset isSubmitting so the sticky
+                      // footer CTA re-enables.
+                      setIsSubmitting(false);
+                    }}
+                    className="self-start min-h-11 rounded-lg border border-red-300 bg-white px-4 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    Dismiss and try again
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -2137,6 +2460,13 @@ export function BookingPage() {
                   ? "Uploading discount ID photo..."
                   : uploadingPaymentProof
                   ? "Uploading payment proof receipt..."
+                  // Per NBS-2026-08-08 (F5): surface the
+                  // missing Step 2 consent before the
+                  // missing Step 3 terms checkbox, so the
+                  // guest sees the gate they're about to
+                  // trip on the server.
+                  : !guestDetails.consent
+                  ? "Confirm your guest details consent on the previous step"
                   : !termsConsent
                   ? "Agree to terms and conditions"
                   : isIdUploadRequired
@@ -2378,7 +2708,7 @@ export function BookingPage() {
             <p className="font-semibold text-gray-950">
               {availableRoomTypes.length} {availableRoomTypes.length === 1 ? "room type" : "room types"} available
             </p>
-            <p className="text-sm text-gray-600">Select Room Only or Room + Breakfast to lock the Step 1 summary.</p>
+            <p className="text-sm text-gray-600">Click a rate to add a room. Click the same rate again to remove it.</p>
           </div>
 
           {availableRoomTypes.length > 0 ? (
@@ -2794,6 +3124,48 @@ export function BookingPage() {
                                     className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                                   />
                                 </label>
+                                {/* Per EXB-12 (2026-08-06, per
+                                    decision #199): the extra-bed
+                                    breakfast toggle. When the
+                                    guest opts in, all
+                                    `extraBedCount` beds in the
+                                    room are counted toward the
+                                    breakfast total. The toggle
+                                    is disabled when there are no
+                                    extra beds (the invariant
+                                    `extraBedBreakfast implies
+                                    extraBedCount > 0`). The
+                                    price hint (+ ₱X / bed /
+                                    night) is shown only when the
+                                    toggle is meaningful (extra
+                                    beds present + breakfast
+                                    config enabled). The toggle
+                                    only renders when the
+                                    breakfast config is enabled
+                                    (no point offering breakfast
+                                    for extra beds when
+                                    breakfast is globally off). */}
+                                {typeQuantity > 0 && breakfastConfig.isEnabled ? (
+                                  <label
+                                    className="flex items-center gap-2 text-xs text-gray-700"
+                                    data-testid={`extras-breakfast-toggle-${type.value}`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={userExtraBeds > 0 && selectedTypeRooms[0]?.extraBedBreakfast === true}
+                                      disabled={userExtraBeds === 0}
+                                      onChange={(e) => updateExtraBedBreakfast(type.value, e.target.checked)}
+                                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                    />
+                                    <span>Include breakfast for the extra bed{userExtraBeds === 1 ? "" : "s"}</span>
+                                    {userExtraBeds > 0 && typeExtraBedRate > 0 ? null : null}
+                                    {userExtraBeds > 0 && breakfastRate > 0 ? (
+                                      <span className="text-gray-500">
+                                        + {formatPrice(breakfastRate)} / bed / night
+                                      </span>
+                                    ) : null}
+                                  </label>
+                                ) : null}
                                 {/* Stay total + soft-floor
                                     warning (shared with the
                                     counter branch). The
@@ -2879,6 +3251,38 @@ export function BookingPage() {
                                   </button>
                                 </span>
                               </div>
+                              {/* Per EXB-12 (2026-08-06, per
+                                  decision #199): the extra-bed
+                                  breakfast toggle (counter
+                                  branch). Same shape as the
+                                  checkbox branch above. The
+                                  toggle is disabled when there
+                                  are no extra beds; the price
+                                  hint (+ ₱X / bed / night) is
+                                  shown only when the toggle is
+                                  meaningful. The toggle only
+                                  renders when the breakfast
+                                  config is enabled. */}
+                              {typeQuantity > 0 && breakfastConfig.isEnabled ? (
+                                <label
+                                  className="flex items-center gap-2 text-xs text-gray-700"
+                                  data-testid={`extras-breakfast-toggle-${type.value}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={userExtraBeds > 0 && selectedTypeRooms[0]?.extraBedBreakfast === true}
+                                    disabled={userExtraBeds === 0}
+                                    onChange={(e) => updateExtraBedBreakfast(type.value, e.target.checked)}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                  />
+                                  <span>Include breakfast for the extra bed{userExtraBeds === 1 ? "" : "s"}</span>
+                                  {userExtraBeds > 0 && breakfastRate > 0 ? (
+                                    <span className="text-gray-500">
+                                      + {formatPrice(breakfastRate)} / bed / night
+                                    </span>
+                                  ) : null}
+                                </label>
+                              ) : null}
                               {typeQuantity > 0 && userExtraBeds > 0 ? (
                                 <p
                                   className="text-xs text-gray-600"

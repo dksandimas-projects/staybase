@@ -268,4 +268,54 @@ describe("EXB-10 — hotel-wide rollaway-bed inventory (helper + 3 server call s
     // the row) surfaces here.
     expect(adminContextSrc).toMatch(/extraBedInventory:\s*0/);
   });
+
+  // Per v0.264.9 test-discipline retrofit: one runtime
+  // assertion that exercises the actual helper behavior
+  // behind the hotel-wide rollaway inventory check. The
+  // source-text guards above pin the *call-site contract*
+  // (the helper is wired into the create + walkin +
+  // reschedule transactions); this test pins the *helper
+  // contract* (the inventory check's over-capacity
+  // rejection, the "fits exactly" boundary, and the
+  // "0 inventory = no constraint" default). A future
+  // refactor that changes the helper's tolerance (e.g.
+  // from `<=` to `<`) would pass the regex guards but
+  // would fail this test if the boundary case flipped.
+  describe("RUNTIME — checkExtraBedInventory boundaries", () => {
+    it("accepts the boundary case (in-use + requested = inventory exactly)", async () => {
+      const { checkExtraBedInventory } = await import("@spark-inn/shared");
+      // 1 in-use + 1 requested = 2 inventory. The helper's
+      // comparison is inclusive (`<=`), so this fits.
+      const result = checkExtraBedInventory(2, 1, 1);
+      expect(result.ok).toBe(true);
+      expect(result.inUse).toBe(1);
+      expect(result.available).toBe(1);
+    });
+
+    it("rejects the over-by-1 case (in-use + requested = inventory + 1)", async () => {
+      const { checkExtraBedInventory } = await import("@spark-inn/shared");
+      // 2 in-use + 1 requested = 3, but inventory is 2. Off
+      // by 1 — the next available is 0. A tolerance change
+      // from `<=` to `<` would silently pass this case.
+      const result = checkExtraBedInventory(2, 2, 1);
+      expect(result.ok).toBe(false);
+      expect(result.available).toBe(0);
+    });
+
+    it("inventory=0 short-circuits to ok=true (the 'no constraint' default)", async () => {
+      const { checkExtraBedInventory } = await import("@spark-inn/shared");
+      // The historical "any number" behavior — absent or 0
+      // inventory means no cap. A pre-EXB-10 caller must
+      // continue to work even if the field is absent
+      // (the in-memory snapshot reads as 0).
+      const result = checkExtraBedInventory(0, 100, 50);
+      expect(result.ok).toBe(true);
+      // `available` is POSITIVE_INFINITY (the helper
+      // returns the unsigned remainder; 0 inventory
+      // means no constraint). The exact value isn't
+      // part of the public contract — the `ok: true`
+      // is the load-bearing assertion.
+      expect(result.ok).toBe(true);
+    });
+  });
 });

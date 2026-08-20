@@ -66,6 +66,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Special requests (optional, textarea)
 - [x] Corporate fields (shown only on `/corporate/book` flow): company name (required), designation, company address, number of rooms, purpose of stay, preferred billing arrangement
 - [x] Privacy and terms consent checkbox — "I agree to the [Privacy Policy] and [Terms of Service] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` and `/terms` in new tabs
+  - [x] **Per NBS-2026-08-08 (F5, booking-flow audit 2026-08-08):** the Step 3 `canConfirm` gate now ANDs both checkboxes (`guestDetails.consent` from Step 2 + `termsConsent` from Step 3) because the server's `guestDetailsSchema.consent: z.boolean()` validates Step 2's value, not Step 3's. A guest who only ticked Step 3 hit a silent server 400 "Privacy policy consent is required." before the fix. The duplicate-checkbox UX is a pre-existing smell (both ask the same question); the F5 fix is the minimum that prevents the silent 400. A future refactor should consolidate to a single source of truth.
 - [x] Back button to Step 1, Next button to Step 3
 - [x] Inline Zod validation — errors shown per field on blur
 - [x] Next button disabled until consent checkbox is checked
@@ -167,6 +168,8 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Network error on booking creation — show error, do not create duplicate booking
 - [x] Invalid booking reference format caught server-side
 - [x] Back navigation between steps preserves form state
+- [x] **Per NBS-2026-08-08 (F2, booking-flow audit 2026-08-08): every server-side 4xx surfaces a matching recovery CTA on the Step 3 sticky footer.** The previous catch only auto-redirected for the "Room no longer available" message; every other 4xx (rate-limit 429, `MAX_STAY_NIGHTS`, `MAX_ADVANCE_DAYS`, past-checkin, etc.) stranded the user on Step 3 with a generic message and no next step. The fix maps the server error to one of three recovery actions via a `submitErrorAction: "back-to-step-1" | "retry" | "none"` discriminator: `back-to-step-1` for the stay/date-validation cases (room not available, max stay length, advance window, past check-in); `retry` for transient cases (rate limit, network); `none` for everything else (with a Dismiss button). The auto-redirect for the "Room no longer available" path now holds its timer on a `useRef` so a user-initiated nav (clicking the back CTA or the browser back button) cancels the timer (F11).
+- [x] **Per NBS-2026-08-08 (F11, booking-flow audit 2026-08-08): the 5s auto-redirect for "Room no longer available" is cancellable.** The previous bare `setTimeout` raced a user-initiated nav (the user clicks the back CTA before 5s elapses) and clobbered the URL the user already moved to. The timer is held on `redirectTimerRef: useRef<number | null>(null)`. The cleanup effect cancels any pending timer on unmount; the manual-nav CTA cancels the timer before navigating; a fresh `handleConfirmBooking` submit cancels the timer before re-firing the request.
 
 ## Manual QA
 
@@ -188,7 +191,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 ## Audit Remediation (2026-07-17)
 
 - **G-01 (HIGH, fixed):** `/api/bookings/create` now strict-Zod validates the complete request. `guests` is a finite integer from 1–100, unknown fields are rejected, and computed totals have a final `Number.isFinite` guard before the booking write. The already-strict walk-in schema remains unchanged.
-- **G-02 (MED, open):** No maximum stay length or advance-booking window server-side. Anonymous pay-at-hotel `pending` bookings occupy inventory until staff cancel them — long or far-future bookings can deny availability. Fix: cap `numNights` and the booking horizon in the create handlers and mirror in the date picker.
+- **G-02 (MED, fixed 2026-08-14):** The server now enforces `MAX_STAY_NIGHTS` (30) and `MAX_ADVANCE_DAYS` (365) in `handleCreateBooking` (lines 1418-1431). Both limits are defined in `shared/constants`. The client date picker surfaces the advance window. Walk-in creation is exempt from the advance-window check.
 
 ## References
 
@@ -889,6 +892,240 @@ The behavioural emulator test (the user ticks/unticks the checkbox on a real roo
 - **A "We added this for you" toast on auto-init** — moot. Auto-init is removed.
 - **Per-room individual extra-bed toggles** — let the user add an extra bed to one Single but not the other. Carried over from EXB-11's Phase 2 list.
 - **A "Reset to 0 extra beds" quick action** — out of scope. The counter's `[−]` is now freely clickable; the user can reset to 0 manually.
+
+---
+
+## EXB-11.5 — Rate Option Toggle on `/book` Step 1 (User Can Untick Room Only / Room + Breakfast)
+> Proposed 2026-08-06, per decision #198 (operator feedback post-EXB-11.4 shipped surface). Files: `guest-app/src/pages/BookingPage.tsx:989-1014` (the `selectRoomType` function — refactored to a per-type toggle) + the hint text at `BookingPage.tsx:2415` (updated to teach the toggle). Sibling to EXB-11.3 + EXB-11.4 — same `/book` Step 1 surface, different control.
+
+### The problem
+
+The post-EXB-11.3 surface (current `main` as of 2026-08-06, post-EXB-11.4) has a one-way rate-option click: clicking a rate option (`Room Only` or `Room + Breakfast`) on a card adds the room (or updates the rate if the type is already in the cart), but clicking the same rate again is a no-op — the user has no way to "untick" the room via the rate option itself. The only way to remove a room is via the "Rooms" stepper (decrement to 0), which is a per-quantity control, not a per-type toggle. The rate option is a per-type control (one button per type, not per room); it should be toggleable. Same "user is in full control" pattern as EXB-11.4 (extra-bed toggle), different surface.
+
+**Root cause.** The pre-EXB-11.5 `selectRoomType` function at `BookingPage.tsx:989-1014` had a single ternary: `hasType ? updateRate : addRoom`. The "type in cart" branch only updated the rate; it never removed the type. The user could add a room and switch between Room Only / Room + Breakfast, but they couldn't deselect the room via the rate option. The `RateOption` component is a `<button>` (per `BookingPage.tsx:3425`), and the `onSelect` handler always adds or updates — never removes.
+
+**Three reasons this was the wrong shape:**
+
+1. **Inconsistent with the per-type toggle pattern** — the rate option is a per-type control, and the natural mental model is "click to add, click again to remove" (the same pattern as the extra-bed checkbox added in EXB-11.4). The "Rooms" stepper is the per-quantity control; the rate option is the per-type control. Mixing the two shapes (one is a toggle, the other is a one-way click) is inconsistent.
+2. **Hidden state mutation** — the user adds a room via the rate option, then has to find the "Rooms" stepper to remove it. The rate option's "active" state (the checkmark) shows the room is in the cart, but the only way to change that state is via a different control. The user has to scan the card for the "Rooms" stepper, which is below the rate options and the Extras sub-section.
+3. **Asymmetric with the extra-bed toggle** — the extra-bed checkbox (EXB-11.4) is a toggle (tick/untick), but the rate option is a one-way click. The user expects toggles to be toggles. If one toggle on the card is toggleable and the other isn't, the user has to learn a different mental model for each.
+
+### The fix — three-part change
+
+**1. Split the "type in cart" branch into two.** The new `selectRoomType` function has three cases:
+
+- **(a) Type not in cart** → add 1 room with the chosen rate (Room Only or Room + Breakfast). The pre-EXB-11.5 function had this in the `false` branch of the ternary.
+- **(b) Type in cart with the same rate** → untick (per-type toggle) — remove all rooms of this type from the cart. The pre-EXB-11.5 function had this case missing entirely; the "type in cart" branch only updated the rate, never removed the type.
+- **(c) Type in cart with a different rate** → update the rate in place for every room of that type. The pre-EXB-11.5 function had this in the `true` branch of the ternary.
+
+**2. Guard the `setSelectedRoomType` + `setRateChoice` calls with a `shouldSyncSelection` flag.** The pre-EXB-11.5 function always called these setters regardless of which branch fired. The EXB-11.5 function sets the flag to `true` only on the add and switch-rate paths (cases a and c). The untick path (case b) skips the sync — the `useEffect` at `BookingPage.tsx:865` handles the selection sync when the current selection is no longer in the cart (it picks `roomCart[0]` as the new selection, or clears if the cart is empty).
+
+**3. Update the hint text on `/book` Step 1.** The pre-EXB-11.5 hint said "Select Room Only or Room + Breakfast to lock the Step 1 summary" — a one-way instruction. The EXB-11.5 hint says "Click a rate to add a room. Click the same rate again to remove it." — a two-way instruction that teaches the toggle.
+
+### What the user sees now
+
+- **Empty cart → click "Room Only" on Single Room** → 1 Single Room added to the cart with rate "room-only". The "Room Only" rate option shows the checkmark (`active = true`). The "Rooms" stepper shows 1. The Step 1 summary is now active.
+- **1 Single Room (rate "room-only") → click "Room Only" again** → Single Room removed from the cart. The "Room Only" rate option no longer shows the checkmark (`active = false`). The "Rooms" stepper is hidden (no rooms of this type). The selection sync useEffect picks another type (or clears if the cart is empty). The bottom bar shows the "Add at least one room" CTA.
+- **1 Single Room (rate "room-only") → click "Room + Breakfast"** → the rate is updated in place to "room-breakfast" (same as the pre-EXB-11.5 behavior). The "Room + Breakfast" rate option shows the checkmark; the "Room Only" rate option does not. The "Rooms" stepper still shows 1.
+- **2 Single Rooms (rate "room-only") → click "Room Only" again** → both rooms removed (per-type toggle, not per-room). The "Rooms" stepper is hidden.
+- **1 Single Room + 1 Family Room → click "Room Only" on Single Room** → Single Room removed; Family Room stays. The selection sync useEffect picks the Family Room as the new selection. The Step 2/3 aside updates to show the Family Room.
+
+### Why this is the right shape
+
+- **(1) Consistent with the per-type toggle pattern** — the rate option is a per-type control, and the toggle is the natural shape. Same pattern as the extra-bed checkbox (EXB-11.4). The "Rooms" stepper is the per-quantity control; the rate option is the per-type control. No mixing of shapes.
+- **(2) Discoverable** — the rate option's "active" state (the checkmark) shows the room is in the cart, and clicking the same option removes it. No need to find a different control to change the state. The hint text teaches the toggle.
+- **(3) Symmetric with the extra-bed toggle** — both toggles on the card are toggleable. The user has a consistent mental model: "click to add, click again to remove."
+- **(4) Per-type toggle, not per-room** — the rate option removes ALL rooms of that type, not just 1. This matches the per-type shape of the rate option (one button per type, not per room). The "Rooms" stepper is the per-quantity control for fine-grained adjustments.
+
+### What this changes for the data model
+
+Nothing. `roomCart` shape is unchanged. `roomType`, `rateChoice`, `numAdults`, `numChildren`, `extraBedCount`, `bookingId` are all unchanged. The `serializeBookingRoomCart` / `parseBookingRoomCart` helpers are unchanged. Cart URL serialization (`rooms=`) is unchanged. Server-side validation is unchanged.
+
+### Implementation
+
+- `guest-app/src/pages/BookingPage.tsx`:
+  - **Refactor `selectRoomType` (lines 989-1014).** Replace the one-way ternary with a three-branch if/else: (a) type not in cart → add 1 room with the chosen rate; (b) type in cart with the same rate → untick (remove all rooms of that type); (c) type in cart with a different rate → update the rate in place. Guard the `setSelectedRoomType` + `setRateChoice` calls with a `shouldSyncSelection` flag (only set to `true` on paths a and c). The `setSearchParams` call stays inside the `setRoomCart` callback (matches the existing pattern; idempotent in React 18 StrictMode).
+  - **Update the hint text at line 2415.** Change "Select Room Only or Room + Breakfast to lock the Step 1 summary." to "Click a rate to add a room. Click the same rate again to remove it."
+- No changes to the data model, the URL contract, the server-side validation, the `RateOption` component (the toggle logic lives in the parent), the `updateRoomQuantity` function (it's the per-quantity control), the `useEffect` at `BookingPage.tsx:865` (it already handles the "selection no longer in cart" case), the `selectedRoomType` + `rateChoice` state, or the `serializeBookingRoomCart` / `parseBookingRoomCart` helpers.
+
+### Gates
+
+- **EXB-11** — the underlying contract is unchanged. The toggle is a refinement of the user-explicit path.
+- **EXB-11.1** — the Extras sub-section placement + checkbox-for-`maxExtraBeds === 1` shape is unchanged. The EXB-11.5 fix is on the rate options, not the Extras sub-section.
+- **EXB-11.2** — the auto-init useEffect is still removed per EXB-11.4. EXB-11.5 doesn't reintroduce it.
+- **EXB-11.3** — the "no default room-type on page load" invariant is preserved. The function still has the user-explicit add path; the toggle is a refinement, not a replacement.
+- **EXB-11.4** — the extra-bed toggle is unchanged. The rate-option toggle is a parallel pattern on the same card.
+- **CHD-11** — the capacity chip is unchanged.
+- **CHD-12** — the per-type cart summary is unchanged. It reads from the cart, which the toggle now mutates more often.
+- **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room data.
+- **Step 2/3 aside** — unchanged. Reads from `selectedTypeEntry` and the cart.
+- **MRB-15-10** — the admin surface for editing room types is the input side. EXB-11.5 only changes the *client-side selection surface*.
+- **MRB-15-11** — unrelated (photo gallery, not extras toggle).
+- **CHD-13** — unrelated (homepage search widget).
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+New `guest-app/tests/api/exb-11-5-rate-option-toggle.test.ts` (~8 source-text guards):
+
+- The `selectRoomType` function declares the toggle with three branches (add / untick / switch rate).
+- The untick branch removes ALL rooms of the type (per-type toggle, not per-room).
+- The add branch stays (type not in cart → add 1 room with the chosen rate).
+- The switch-rate branch stays (type in cart with different rate → update rate in place).
+- The `setSelectedRoomType` + `setRateChoice` calls are guarded by `shouldSyncSelection` (skipped on the untick path).
+- The comment block documents the per-type toggle (add / untick / switch) and references EXB-11.5 + decision #198.
+- The hint text on `/book` Step 1 is updated to "Click a rate to add a room. Click the same rate again to remove it." (and the pre-EXB-11.5 hint is gone).
+- The `selectRoomType` function is still wired to the rate-option `onSelect` handlers (sanity check).
+
+The existing `exb-11-3-no-default-room-type-on-load.test.ts` tests still pass (the function still has the user-explicit add path). The behavioural emulator test (the user clicks a rate option on a real room type, sees the room added; clicks the same rate again, sees the room removed; clicks a different rate, sees the rate updated) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **Keep the one-way click + add a separate "Remove" button next to each rate option** — friction point. Adds a new control; the toggle is the natural shape. The "Rooms" stepper already provides a way to remove rooms (decrement to 0); the toggle is a more discoverable alternative.
+- **Decrement by 1 instead of remove all** — per-room toggle, inconsistent with the per-type shape of the rate option. The "Rooms" stepper is the per-quantity control; the rate option should be the per-type toggle.
+- **Add a confirmation dialog ("Are you sure you want to remove this room?")** — friction point. The toggle is a clear, explicit action; the user clicked the same rate again, they know what they're doing. A confirmation dialog adds noise.
+- **Show a "Room removed" toast notification** — patronizing. The checkmark disappearing is enough signal; a toast notification adds noise.
+- **Add a separate "Clear cart" button** — different scope. Clears the entire cart, not just one type. A future UX work item; out of scope for EXB-11.5.
+- **Auto-clear the `selectedRoomType` when the type is removed from the cart** — handled by the existing useEffect at `BookingPage.tsx:865`. It picks `roomCart[0]` as the new selection; auto-clearing would be a third option in the useEffect, but the existing behavior is correct.
+- **Keep the pre-EXB-11.5 hint text and let the user discover the toggle** — worse discoverability. The hint text teaches the toggle explicitly, which is the right shape for a user-facing control.
+
+### Phase 2 (deferred, NOT in EXB-11.5)
+
+- **Per-room individual rate toggles** — let the user pick Room Only for one Single and Room + Breakfast for another. Out of scope — the rate is per-type, and the per-room shape would require a bigger data model change. Carried over from EXB-11's Phase 2 list.
+- **A "Clear cart" button** — a future UX work item. Clears the entire cart, not just one type.
+- **A "Remove all rooms of this type" button next to the "Rooms" stepper** — a more discoverable alternative to the rate-option toggle. Out of scope — the toggle is the natural shape, and the button would be redundant.
+- **Keyboard shortcut for the toggle** (e.g., Escape to remove the currently-active rate) — a future accessibility work item.
+
+---
+
+## EXB-12 — Extra-Bed Breakfast Toggle on `/book` Step 1
+> Proposed 2026-08-06, per decision #199 (operator feedback post-EXB-11.4 shipped surface). Files: `shared/utils/bookingAddOns.ts` (extended `calculateBreakfastAddOn` with `extraBedCount` + `extraBedBreakfast`) + `shared/types/index.ts` (added `extraBedBreakfast?: boolean` to the booking room line type) + `shared/schemas/booking.ts` (added the field to the public + walkin schemas) + `guest-app/src/utils/bookingRoomCart.ts` (added the field to the cart shape) + `guest-app/src/pages/BookingPage.tsx` (added `updateExtraBedBreakfast` helper + toggle UI + breakfast total update + booking body) + `guest-app/server/handlers/bookings.ts` (invariant enforcement + pricing + booking doc snapshot) + `guest-app/server/lib/rate-breakdown.ts` (rebuild reads the field from the doc). Sibling to EXB-11 + EXB-11.1 + EXB-11.4 + EXB-11.5 — same `/book` Step 1 room-type card surface, different control (per-type toggle on the Extras sub-section).
+
+### The problem
+
+The pre-EXB-12 surface (post-EXB-11.4) had no coupling between the extra-bed add-on and the breakfast add-on. The breakfast total was strictly `(numAdults + (breakfastIncludesChildren ? numChildren : 0))`, and the extra beds were priced as a separate add-on with no breakfast coupling. The user had no way to opt in to breakfast for the extra-bed occupant(s) — even if the extra bed was for a person, that person wasn't counted in the breakfast total unless the user manually added the person to `numAdults` / `numChildren`. The two add-ons were orthogonal.
+
+**Root cause.** The pre-EXB-12 `calculateBreakfastAddOn` helper at `shared/utils/bookingAddOns.ts:79-101` only took `numGuests` + `numAdults` + `numChildren` (per CHD-10) and computed `effectiveOccupancy = numAdults + (includesChildren ? numChildren : 0)`. There was no field for the extra beds, so they were invisible to the breakfast calculation. The extra bed was a separate add-on (`calculateExtraBedAddOn` at `shared/utils/bookingAddOns.ts:108-122`), priced as `extraBedCount × extraBedRate × nights` — no breakfast coupling.
+
+### The fix — end-to-end change to 7 files
+
+**1. `shared/utils/bookingAddOns.ts` — extended `calculateBreakfastAddOn`.** The helper interface gains two new optional fields: `extraBedCount?: number | null` + `extraBedBreakfast?: boolean | null`. The helper's `effectiveOccupancy` is now `(numAdults + (includesChildren ? numChildren : 0)) + (extraBedBreakfast ? extraBedCount : 0)`. When the toggle is off (the default) or `extraBedCount` is 0, the extra beds are not counted — byte-equivalent to the pre-EXB-12 behavior for existing callers. When the toggle is on and `extraBedCount > 0`, the extra beds are counted toward the breakfast total (priced as `breakfastRate × extraBedCount × nights`).
+
+**2. `shared/types/index.ts` — added `extraBedBreakfast?: boolean` to the booking room line type.** The field is on the booking doc (snapshotted from the cart at create time). Older booking docs without the field render the same total (nullish → `false`, no breakfast for extra beds).
+
+**3. `shared/schemas/booking.ts` — added the field to the public + walkin schemas.** The public booking schema (`CreateBookingSchema`) gains `extraBedBreakfast: z.boolean().optional()`. The walkin schema (`WalkinRoomLineSchema`) gains the same field for admin consistency — a walk-in booking can also opt in to breakfast for extra beds. The walkin admin form is a separate scope (not updated in EXB-12); the schema accepts the field, but the UI doesn't expose it yet.
+
+**4. `guest-app/src/utils/bookingRoomCart.ts` — added the field to the cart shape.** The `BookingRoomCartItem` interface gains `extraBedBreakfast?: boolean` (default `false`). The `parseBookingRoomCart` helper normalizes `extraBedBreakfast === true` from the URL (any other value → `false`), so a stale URL with a non-boolean value can't slip through. The serialization includes the field in the `rooms=` URL param.
+
+**5. `guest-app/src/pages/BookingPage.tsx` — added the toggle + helper + body field.** The `updateExtraBedBreakfast` helper mirrors the user's pick onto every room of the type (per-type pattern). The helper enforces the invariant: `safeEnabled = nextEnabled && (room.extraBedCount || 0) > 0` — when `extraBedCount === 0`, the toggle is forced off. The toggle is rendered in both Extras IIFE branches (checkbox for `maxExtraBeds === 1` + counter for `maxExtraBeds >= 2`), gated on `breakfastConfig.isEnabled` (no point offering breakfast when breakfast is off) and disabled when `userExtraBeds === 0`. The price hint "+ ₱X / bed / night" is shown next to the toggle when the extra-bed count > 0. The `breakfastTotal` calculation passes both fields to `calculateBreakfastAddOn`. The booking body adds `extraBedBreakfast: room.extraBedBreakfast === true` to the `rooms[]` array (multi-room) and `extraBedBreakfast: firstRoomSelection.extraBedBreakfast === true` to the single-room create body.
+
+**6. `guest-app/server/handlers/bookings.ts` — invariant + pricing + snapshot.** The `validatedRoomStays` loop enforces the invariant: `extraBedBreakfast: selection.extraBedBreakfast === true && extraBedCount > 0`. A `true` toggle with 0 extra beds is a client bug (or a stale URL); the server forces it off. The pricing loop at line 2252 passes both fields to `calculateBreakfastAddOn`. The booking doc at line 3059 snapshots `extraBedBreakfast: pricingForRoom.extraBedBreakfast === true` alongside the existing `extraBedCount` + `extraBedRate` + `hasBreakfast` + `breakfastRate` + `breakfastIncludesChildren` fields.
+
+**7. `guest-app/server/lib/rate-breakdown.ts` — rebuild reads the field from the doc.** The early-departure / reschedule rebuild path reads `booking.extraBedCount` + `booking.extraBedBreakfast` from the booking doc and passes them to `calculateBreakfastAddOn`. Nullish → `false` (no breakfast for extra beds), for back-compat with older booking docs that don't have the field. The rebuild matches the create-time total.
+
+### What the user sees
+
+- **1 Single Room + Room + Breakfast + 1 extra bed (toggle off, the default)** — breakfast total = `breakfastRate × 1 adult × nights`. The toggle is visible but unchecked. The price hint "+ ₱X / bed / night" is shown next to the toggle.
+- **Same setup, toggle ON** — breakfast total = `breakfastRate × 1 adult × nights + breakfastRate × 1 extra bed × nights`. The Step 3 review shows the extra-bed breakfast as part of the "Breakfast add-on" line (the helper's effective occupancy is `1 adult + 1 extra bed = 2`).
+- **Drop extra bed to 0 (toggle was ON)** — the toggle is forced off by the `updateExtraBedBreakfast` helper's `safeEnabled = nextEnabled && (room.extraBedCount || 0) > 0` guard. The breakfast total drops back to the adult-only total.
+- **Toggle ON with 0 extra beds (e.g., via stale URL)** — the client renders the toggle as unchecked (because `userExtraBeds === 0`). The server-side invariant enforcement in `validatedRoomStays` forces the toggle off before pricing. The booking is created with `extraBedBreakfast: false` regardless of what the client sent.
+- **No rooms of this type** — the toggle is hidden (gated on `typeQuantity > 0`).
+- **Breakfast config disabled** — the toggle is hidden (gated on `breakfastConfig.isEnabled`).
+
+### Why the explicit opt-in is the right shape
+
+- **(1) Explicit opt-in** — the guest decides whether to include breakfast for the extra-bed occupant(s). The default is `false` (no breakfast for extra beds, matching the pre-EXB-12 behavior). The user opts in via a single toggle that applies to all extra beds in the room. No surprise charges.
+- **(2) Per-type** — the toggle is per-type (mirrored onto every room of the type), same shape as the extra-bed count + rate choice. One click applies to all rooms of the type.
+- **(3) Invariant enforcement** — the server validates the invariant `extraBedBreakfast implies extraBedCount > 0`. A `true` toggle with 0 extra beds is a client bug (or a stale URL); the server forces it off. The client also enforces the invariant via the toggle's `disabled` state when `userExtraBeds === 0` and the `updateExtraBedBreakfast` helper's `safeEnabled` guard.
+- **(4) Back-compat with older booking docs** — the `extraBedBreakfast` field is optional. When absent, the server treats it as `false` (no breakfast for extra beds). The rate-breakdown rebuild reads the field from the booking doc and passes it to the helper; nullish → `false`. Older booking docs render the same total.
+- **(5) End-to-end** — the change touches the client cart, the helper, the schemas, the server handler, the booking doc, and the rate-breakdown rebuild. All surfaces are updated; the create + reschedule + early-departure paths all honor the toggle.
+
+### What this changes for the data model
+
+Adds `extraBedBreakfast?: boolean` to:
+1. The `BookingRoomCartItem` shape (guest-app cart, URL serialization)
+2. The `BookingRoom` type on the booking doc (shared/types)
+3. The public booking schema (`CreateBookingSchema`)
+4. The walkin schema (`WalkinRoomLineSchema`) — for admin consistency
+
+The helper's `BreakfastAddOnInput` gains `extraBedCount?: number | null` + `extraBedBreakfast?: boolean | null`. The `extraBedCount` field on the booking doc is unchanged (already exists from EXB-01).
+
+### What this changes for the server
+
+- The `validatedRoomStays` loop enforces the invariant (`extraBedBreakfast && extraBedCount > 0`).
+- The pricing loop includes the extra beds in the breakfast total when the toggle is on.
+- The booking doc snapshots the field.
+- The rate-breakdown rebuild reads the field from the doc + passes it to the helper.
+
+### Implementation
+
+- `shared/utils/bookingAddOns.ts` — extended `calculateBreakfastAddOn` with `extraBedCount` + `extraBedBreakfast`; added `if (input.extraBedBreakfast) { effectiveOccupancy += extraBedCount; }` to the helper body.
+- `shared/types/index.ts` — added `extraBedBreakfast?: boolean` to the `BookingRoom` type.
+- `shared/schemas/booking.ts` — added `extraBedBreakfast: z.boolean().optional()` to the public + walkin schemas.
+- `guest-app/src/utils/bookingRoomCart.ts` — added `extraBedBreakfast?: boolean` to `BookingRoomCartItem`; `parseBookingRoomCart` normalizes the field.
+- `guest-app/src/pages/BookingPage.tsx` — added `updateExtraBedBreakfast` helper (per-type mirror + invariant enforcement); added the toggle UI in both Extras IIFE branches (gated on `breakfastConfig.isEnabled` + `typeQuantity > 0`, disabled when `userExtraBeds === 0`); updated `breakfastTotal` to pass the new fields; added `extraBedBreakfast` to the booking body's `rooms[]` + `firstRoomSelection`.
+- `guest-app/server/handlers/bookings.ts` — `validatedRoomStays` enforces the invariant; pricing loop passes the new fields; booking doc snapshots the field.
+- `guest-app/server/lib/rate-breakdown.ts` — rebuild reads the field from the doc + passes it to the helper.
+
+~50 lines changed across 7 files.
+
+### Gates
+
+- **EXB-01..10** — server-side contract is unchanged. The cart still writes the same per-room `extraBedCount` + `extraBedRate`; the server still validates against `maxExtraBeds` and snapshots `extraBedRate`.
+- **EXB-11** — the underlying extra-bed toggle contract is unchanged. The new `extraBedBreakfast` field is additive.
+- **EXB-11.1** — the Extras sub-section placement + checkbox-for-`maxExtraBeds === 1` shape is unchanged. The new toggle is added to both branches.
+- **EXB-11.2** — the auto-init useEffect is still removed per EXB-11.4. The new toggle has no auto-init behavior.
+- **EXB-11.3** — the "no default room-type on page load" invariant is preserved. The new toggle is per-type, user-explicit.
+- **EXB-11.4** — the extra-bed toggle is unchanged. The new `extraBedBreakfast` toggle is a parallel pattern on the same card.
+- **EXB-11.5** — the rate-option toggle is unchanged. The new toggle is a separate control.
+- **CHD-10** — the adult/child split + `breakfastIncludesChildren` toggle is unchanged. The new toggle is per-bed, not per-person. The helper's effective occupancy is `(numAdults + (includesChildren ? numChildren : 0)) + (extraBedBreakfast ? extraBedCount : 0)`.
+- **CHD-11** — the capacity chip is at the top of the card and is unchanged. The new toggle is at the bottom with the other add-on choices.
+- **CHD-12** — the per-type cart summary is unchanged — it reads from the cart, which now has the new `extraBedBreakfast` field but renders the same per-type line. The pill can show the breakfast count in a future refinement.
+- **Step 2/3 aside** — unchanged. Reads from the cart's `totalExtraBeds` + `totalBreakfast`.
+- **MRB-15-10** — the admin surface for editing `maxExtraBeds` + `extraBedRate` is the input side. EXB-12 only changes the *client-side selection surface* + the server pricing.
+- **MRB-15-11** — unrelated (photo gallery, not extras toggle).
+- **CHD-13** — unrelated (homepage search widget).
+
+### Source-text tests (per `plan/docs/CONTRIBUTING.md §Testing`)
+
+New `guest-app/tests/api/exb-12-extra-bed-breakfast.test.ts` (~16 source-text guards):
+
+- The `BookingRoomCartItem` shape gains an optional `extraBedBreakfast: boolean` field.
+- The `parseBookingRoomCart` helper preserves `extraBedBreakfast` from the URL (normalizes to `true`/`false`).
+- The `calculateBreakfastAddOn` helper accepts `extraBedCount` + `extraBedBreakfast`.
+- The helper's `effectiveOccupancy` includes `extraBedCount` when `extraBedBreakfast` is truthy.
+- The public booking schema accepts `extraBedBreakfast: z.boolean().optional()`.
+- The walkin schema also accepts `extraBedBreakfast` (admin consistency).
+- The booking room line type gains an `extraBedBreakfast?: boolean` field.
+- The BookingPage exposes an `updateExtraBedBreakfast` helper (per-type mirror).
+- The BookingPage's `breakfastTotal` passes `extraBedCount` + `extraBedBreakfast` to the helper.
+- The Extras IIFE renders an "Include breakfast for the extra beds" toggle (both branches).
+- The toggle only renders when the breakfast config is enabled.
+- The booking body passes `extraBedBreakfast` to the server (multi-room + single-room).
+- The server handler validates the invariant `extraBedBreakfast implies extraBedCount > 0`.
+- The server's `calculateBreakfastAddOn` call includes `extraBedCount` + `extraBedBreakfast`.
+- The server snapshots `extraBedBreakfast` onto the booking doc.
+- The rate-breakdown rebuild path passes `extraBedCount` + `extraBedBreakfast` to the helper.
+
+The behavioural emulator test (the user adds a room, adds an extra bed, toggles breakfast for the extra bed, sees the price update; the user toggles off, sees the price drop; the user drops the extra bed, sees the toggle forced off; the user submits and the server stores the toggle on the booking doc) is out of scope for this sandbox.
+
+### Rejected alternatives
+
+- **Auto-count extra beds as breakfast guests** — the other option I presented. The user explicitly chose the per-type toggle for the explicit-opt-in pattern. Auto-counting is the "user is in control" anti-pattern in reverse — the system would force breakfast for every extra bed, even when the extra bed is for storage or a child who doesn't need breakfast.
+- **Per-bed counter (0 to extraBedCount) for the breakfast toggle** — more flexible but more UI. The per-type single toggle is simpler and matches the per-type mirror pattern of the extra-bed count + rate choice. Per-bed can be a future refinement if guests want it.
+- **Include the extra-bed breakfast in the existing "Breakfast add-on" line item without a separate line** — the existing line already covers it via the helper's effective occupancy. No separate line is needed; the per-room `extraBedBreakfast` toggle is the only UI surface. A separate "Breakfast for extra beds" line would break the receipt layout convention.
+- **Show a per-bed stepper next to the extra-bed counter** — a "Breakfast: 0/1/2" stepper. More flexible but more UI. The single toggle is simpler and matches the "all or nothing" pattern of other add-on toggles like the breakfast-includes-children toggle.
+- **Add a server-side warning when `extraBedBreakfast` is `true` but `extraBedCount` is 0** — instead of silently forcing it off. The silent fix is cleaner — the client should never have a `true` toggle with 0 extra beds, and the server is the authoritative gate. A warning would be noise.
+- **Add the toggle to the walkin admin surface** — the walkin schema accepts the field for consistency, but the admin UI is a separate scope. The walkin form can be updated in a follow-up to expose the toggle.
+- **Auto-enable the toggle when the user adds an extra bed** — the "let the user decide" pattern from EXB-11.4. The system should not make the choice for the user. The toggle is unchecked by default; the user opts in explicitly.
+
+### Phase 2 (deferred, NOT in EXB-12)
+
+- **A per-bed breakfast stepper** (0 to `extraBedCount`) — a future refinement if guests want to opt in for some extra beds but not all.
+- **A "Breakfast for extra beds" line item in the receipt PDF** — currently included in the "Breakfast add-on" line via the helper's effective occupancy. A separate line would be clearer but breaks the receipt layout convention.
+- **A walkin admin surface for the new toggle** — the walkin schema accepts the field for consistency, but the admin form doesn't expose it yet. A future UX work item.
+- **An admin setting to default the toggle on or off per room type** — a future UX work item. Some room types might want breakfast included by default for extra beds.
+- **A per-room individual toggle** — let one Single have breakfast for the extra bed and another not. Out of scope — the toggle is per-type, and the per-room shape would require a bigger data model change.
+- **A "Reset to 0" quick action for the extra-bed breakfast toggle** — a future UX work item. The user can uncheck the toggle manually.
 
 ---
 

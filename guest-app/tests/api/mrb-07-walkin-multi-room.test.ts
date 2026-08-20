@@ -203,9 +203,25 @@ const seedFixtures = () => {
 const bookingWrites = () => setCalls.filter((c) => c.path.startsWith("bookings/"));
 const reservationWrite = () => setCalls.find((c) => c.path.startsWith("reservations/"));
 
+// Dynamic dates (2026-08-14): hardcoded calendar dates go stale —
+// the BI-12 guard rejects past check-ins on the public path, and
+// any future walk-in guard would break them too. Generated from
+// Manila "today" so the fixtures are always ≥ today.
+const manilaToday = new Date(Date.now() + 8 * 60 * 60 * 1000);
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+const nextWeekday = (targetDay: number) => {
+  const d = new Date(manilaToday);
+  const days = (targetDay - d.getUTCDay() + 7) % 7 || 7;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+};
+
 // Tue → Thu: two weekday nights, no weekend rate in play, so every
 // expected figure below is `pricePerNight * 2`.
-const STAY = { checkIn: "2026-08-04", checkOut: "2026-08-06" };
+const STAY = {
+  checkIn: fmtDate(nextWeekday(2)),
+  checkOut: fmtDate(nextWeekday(4))
+};
 const NIGHTS = 2;
 
 describe("MRB-07 — multi-room walk-in creation", () => {
@@ -329,8 +345,14 @@ describe("MRB-07 — multi-room walk-in creation", () => {
     expect(reservation.totalPrice).toBe(
       writes.reduce((sum, w) => sum + w.data.totalPrice, 0)
     );
-    expect(reservation.roomCount).toBe(2);
-    expect(reservation.activeRoomCount).toBe(2);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // 5 aggregate counter fields are no longer written
+    // to the reservation header. The N=2 derivation is
+    // `deriveReservationCounters(children).roomCount ===
+    // 2` (covered in
+    // `shared/__tests__/booking-folio.test.ts`).
+    expect(reservation.roomCount).toBeUndefined();
+    expect(reservation.activeRoomCount).toBeUndefined();
   });
 
   test("charges breakfast per guest across the reservation, not per guest per room", async () => {
@@ -444,7 +466,13 @@ describe("MRB-07 — multi-room walk-in creation", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     const occupied = updateCalls.filter((c) => c.data?.status === "occupied");
     expect(occupied.map((c) => c.path).sort()).toEqual(["rooms/room_101", "rooms/room_102"]);
-    expect(reservationWrite()!.data.checkedInRoomCount).toBe(2);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `checkedInRoomCount` is no longer written to the
+    // reservation header. The N=2 check-in derivation is
+    // `deriveReservationCounters(children).checkedInRoomCount
+    // === 2` (covered in
+    // `shared/__tests__/booking-folio.test.ts`).
+    expect(reservationWrite()!.data.checkedInRoomCount).toBeUndefined();
   });
 
   test("aborts the whole reservation when any one room is unavailable", async () => {
@@ -453,8 +481,8 @@ describe("MRB-07 — multi-room walk-in creation", () => {
       id: "existing_1",
       roomId: "room_102",
       status: "confirmed",
-      checkIn: new Date("2026-08-04T00:00:00Z"),
-      checkOut: new Date("2026-08-06T00:00:00Z")
+      checkIn: new Date(`${STAY.checkIn}T00:00:00Z`),
+      checkOut: new Date(`${STAY.checkOut}T00:00:00Z`)
     }];
 
     const req = mockRequest({
@@ -580,8 +608,14 @@ describe("MRB-07 — multi-room walk-in creation", () => {
       reservationRoomCount: 1
     });
     const reservation = reservationWrite()!.data;
-    expect(reservation.roomCount).toBe(1);
-    expect(reservation.activeRoomCount).toBe(1);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // 5 aggregate counter fields are no longer written
+    // to the reservation header. The N=1 derivation is
+    // `deriveReservationCounters(children).roomCount ===
+    // 1` (covered in
+    // `shared/__tests__/booking-folio.test.ts`).
+    expect(reservation.roomCount).toBeUndefined();
+    expect(reservation.activeRoomCount).toBeUndefined();
     expect(reservation.totalPrice).toBe(2000 * NIGHTS);
   });
 });

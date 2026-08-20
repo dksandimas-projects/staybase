@@ -18,7 +18,15 @@ describe("FL-05 direct-paid store reconciliation", () => {
 
   it("includes store tenders in the shared collection-group ledger", () => {
     expect(reports).toMatch(/data\.source === "store-order"/);
-    expect(reports).toMatch(/bookingId: isStoreTender \? `store:\$\{sourceId\}` : parentDocumentId/);
+    // Per RPT-06 (2026-08-19): the `bookingId` ternary
+    // now routes reservation-scope payments through a
+    // `data.bookingId` fallback before falling back to
+    // the path's parent. Pin the discriminator + the
+    // store-tender branch (the FL-05-relevant shape);
+    // the non-store branch is allowed to vary as long
+    // as the discriminator + the synthetic
+    // `store:${sourceId}` id survive any refactor.
+    expect(reports).toMatch(/bookingId:\s*isStoreTender\s*\?\s*`store:\$\{sourceId\}`/);
     expect(reports).toMatch(/summarizeFolioSnapshot/);
     expect(reports).toMatch(/directStoreOrderIds: deliveredStoreOrders/);
   });

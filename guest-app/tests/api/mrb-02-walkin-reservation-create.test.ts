@@ -216,20 +216,23 @@ describe("MRB-02.x walk-in reservation create", () => {
       );
     });
 
-    it("walk-in header counters reflect the reservation's actual room count", () => {
-      // Per MRB-07 (2026-08-02, per decision #159): the header's
-      // aggregate counters are the N room stays the reservation
-      // actually created, so the admin reservation row can show
-      // room count, status and balance without fanning out to the
-      // children. For a single-room walk-in `walkinRoomCount` is 1
-      // — the historical values. `checkedInRoomCount` is
-      // conditional on the resolved `status` (the walk-in can land
-      // on `checked-in` directly), in which case every room in the
-      // reservation is occupied.
-      expect(walkin).toMatch(/roomCount:\s*walkinRoomCount,/);
-      expect(walkin).toMatch(/activeRoomCount:\s*walkinRoomCount,/);
-      expect(walkin).toMatch(/cancelledRoomCount:\s*0/);
-      expect(walkin).toMatch(
+    it("walk-in does NOT stamp the five aggregate counter fields (per BAR-02 / #203)", () => {
+      // Per BAR-02 (2026-08-08, per decision #203): the
+      // five aggregate counter fields are no longer
+      // written to the reservation header on walk-in
+      // either. Consumers derive them via
+      // `deriveReservationCounters` over the children
+      // at read time. The pre-BAR-02 shape
+      // (`roomCount: walkinRoomCount` / `activeRoomCount:
+      // walkinRoomCount` / `cancelledRoomCount: 0` /
+      // the conditional `checkedInRoomCount` for the
+      // instant-checked-in walkin case) is gone — the
+      // derivation in `bar-02-derive-counters.test.ts`
+      // gives the same byte-equivalent answer.
+      expect(walkin).not.toMatch(/roomCount:\s*walkinRoomCount,/);
+      expect(walkin).not.toMatch(/activeRoomCount:\s*walkinRoomCount,/);
+      expect(walkin).not.toMatch(/cancelledRoomCount:\s*0/);
+      expect(walkin).not.toMatch(
         /checkedInRoomCount:\s*status === "checked-in" \? walkinRoomCount : 0/
       );
     });

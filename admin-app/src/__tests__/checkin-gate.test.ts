@@ -43,4 +43,15 @@ describe("BookingsPage check-in gate", () => {
       expect(sharedSrc).toContain(label);
     }
   });
+
+  it("hides the readiness card once the booking has been checked in", () => {
+    // The card's purpose is to drive staff toward the check-in
+    // button. After the booking is `checked-in` (or past it) the
+    // gate is irrelevant and the helper would otherwise report
+    // "Booking status must be confirmed or payment-confirmed" as
+    // a permanent "1 missing" — that's a confusing lie, so we hide
+    // the card. The same applies to every status outside
+    // CHECK_IN_ELIGIBLE_STATUSES.
+    expect(pageSrc).toMatch(/CHECK_IN_ELIGIBLE_STATUSES\.includes\(selectedBooking\.status/);
+  });
 });

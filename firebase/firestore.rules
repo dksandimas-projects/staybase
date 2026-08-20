@@ -217,6 +217,8 @@ service cloud.firestore {
             "dateOfBirth",
             "emergencyContact",
             "preferences",
+            "audioRouting",
+            "audioRoutingUpdatedAt",
             "updatedAt"
           ])
         );
@@ -370,15 +372,49 @@ service cloud.firestore {
             "isStoreOrder",
             "orderRef",
             "isEarlyCheckInRequest",
-            "currentStayId"
+            "currentStayId",
+            // Per `feat/call-history-messages` + decision #214
+            // (2026-08-19): four optional fields on system messages
+            // that surface the call outcome in the chat thread.
+            // `messageType` drives the distinct render;
+            // `callStartedAt` + `callDuration` carry the
+            // answered-call telemetry; `callAnsweredByName` is the
+            // staff attribution written by the `runTransaction`
+            // claim in `AdminContext.acceptCall` and surfaces in
+            // the chat thread as "Call answered by {Name} at
+            // {clock} · {duration}". All four are optional so
+            // existing chat messages are unaffected. See
+            // `firebase/tests/intercoms-messages-call-history-
+            // rules.emulator.test.ts` for the contract pin + the
+            // negative case (a non-allowlisted key is rejected).
+            "messageType",
+            "callStartedAt",
+            "callDuration",
+            "callAnsweredByName"
           ])
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 1000
-          && request.resource.data.sender in ["guest", "front-desk"]
+          && request.resource.data.sender in ["guest", "front-desk", "system"]
           && request.resource.data.guestName is string
           && request.resource.data.guestName.size() <= 120
           && request.resource.data.timestamp == request.time
-          && (!("currentStayId" in request.resource.data.keys()) || request.resource.data.currentStayId == null || request.resource.data.currentStayId is string);
+          && (!("currentStayId" in request.resource.data.keys()) || request.resource.data.currentStayId == null || request.resource.data.currentStayId is string)
+          // When sender === "system", the messageType must be one
+          // of the four documented call outcomes (or absent for
+          // future-proofing). No ad-hoc "system" docs without a
+          // type — keeps the audit trail structured.
+          // Per decision #217 (2026-08-19): "call-failed" joins the
+          // enum. The pre-#217 enum was 3 values; the post-#217
+          // enum is 4. The enum is closed (no fallback to
+          // anything-else) so a typo on the client side is
+          // rejected by the rule instead of silently writing
+          // a malformed audit-trail doc. See
+          // `shared/types/index.ts §IntercomMessageType` for the
+          // matching TypeScript union — the two must stay in
+          // sync.
+          && (request.resource.data.sender != "system"
+              || (request.resource.data.keys().hasAny(["messageType"])
+                  && request.resource.data.messageType in ["call-answered", "call-missed", "call-declined", "call-failed"]));
         allow update: if isStaff()
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead"]);
         allow delete: if isStaff();
@@ -460,6 +496,19 @@ service cloud.firestore {
     }
 
     match /{path=**}/payments/{paymentId} {
+      allow read: if isStaff();
+      allow update, delete: if false;
+    }
+
+    // Per RPT-03 (2026-08-07): the `refunds` collectionGroup
+    // (read by `LiabilityTab` to project each liability's
+    // live `processedAmount`). The nested per-doc rule on
+    // `reservations/{id}/refunds/{id}` only covers direct path
+    // reads — Firestore requires an explicit collectionGroup
+    // rule for cross-document `collectionGroup(db, "refunds")`
+    // queries. Without this, staff got "Missing or insufficient
+    // permissions" the moment the Liability tab mounted.
+    match /{path=**}/refunds/{refundId} {
       allow read: if isStaff();
       allow update, delete: if false;
     }

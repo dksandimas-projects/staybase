@@ -292,4 +292,43 @@ describe("CHD-11 — submit-gate validation + Adjust room CTA", () => {
     expect(bookingPageSrc).toMatch(/Adjust room/);
     expect(bookingPageSrc).toMatch(/or pick a different room type, or remove a guest\./);
   });
+
+  // Per v0.264.9 test-discipline retrofit: one runtime
+  // assertion that exercises the actual cart parser. The
+  // source-text guards above pin the *contract shape*
+  // (the cart summary uses the type label, the picker
+  // uses the soft cap); this test pins the *parser
+  // contract* (a representative URL-serialized cart
+  // parses correctly, including the EXB-12
+  // `extraBedBreakfast` field that the v0.264.5 commit
+  // added). A future refactor that drops the EXB-12
+  // field from the parser would silently lose the
+  // toggle on every page reload — this test catches it.
+  describe("RUNTIME — parseBookingRoomCart", () => {
+    it("parses a cart that includes the EXB-12 `extraBedBreakfast` toggle", async () => {
+      const { parseBookingRoomCart } = await import("../../src/utils/bookingRoomCart");
+      const serialized = JSON.stringify([
+        {
+          bookingId: "abc123def456ghi789",
+          roomType: "Deluxe Queen",
+          rateChoice: "room-breakfast",
+          numAdults: 2,
+          numChildren: 0,
+          extraBedCount: 1,
+          extraBedBreakfast: true
+        }
+      ]);
+      const parsed = parseBookingRoomCart(serialized);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]).toMatchObject({
+        bookingId: "abc123def456ghi789",
+        roomType: "Deluxe Queen",
+        rateChoice: "room-breakfast",
+        numAdults: 2,
+        numChildren: 0,
+        extraBedCount: 1,
+        extraBedBreakfast: true
+      });
+    });
+  });
 });

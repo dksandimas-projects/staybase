@@ -90,11 +90,26 @@ describe("Audit Batch 3 (BI-12 + BI-16) — past-date rejection + guest details 
       // Mirrors BookingPage's timezone-aware shared helper.
       expect(corporateBookingSrc).toMatch(/getDateKeyInTimezone\(config\.timezone,\s*1\)/);
       expect(corporateBookingSrc).toMatch(/getDateKeyInTimezone\(config\.timezone,\s*2\)/);
+      //
+      // Per NBS-2026-08-08 (F10, booking-flow audit
+      // 2026-08-08): the pre-F10 `useState(searchParams.get("checkIn") ?? ...)`
+      // accepted any URL value verbatim — a direct hit
+      // to `/corporate/book?checkIn=invalid` seeded the
+      // form with the bad value and a blank date picker.
+      // The F10 fix validates the URL value through
+      // `isValidDateKey`; an invalid or missing value
+      // falls back to the Manila "today" / "tomorrow"
+      // helper. The test asserts both halves of the
+      // contract: (a) the URL is validated, (b) the
+      // fallback is the shared helper.
       expect(corporateBookingSrc).toMatch(
-        /useState\(searchParams\.get\(\s*["']checkIn["']\s*\)\s*\?\?\s*getDateKeyInTimezone\(config\.timezone,\s*1\)\)/
+        /isValidDateKey/
       );
       expect(corporateBookingSrc).toMatch(
-        /useState\(searchParams\.get\(\s*["']checkOut["']\s*\)\s*\?\?\s*getDateKeyInTimezone\(config\.timezone,\s*2\)\)/
+        /useState\(\s*isValidDateKey\(initialCheckInParam\)/
+      );
+      expect(corporateBookingSrc).toMatch(
+        /useState\(\s*isValidDateKey\(initialCheckOutParam\)/
       );
     });
   });

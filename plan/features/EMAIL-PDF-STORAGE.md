@@ -208,6 +208,7 @@ Used in: Bookings Management (print/download), email attachment option.
 - If no payments recorded — show "Payment Method: {paymentMethod}" and "Amount Due: ₱{totalPrice}" as before
 - Footer: "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property."
 - **Reservation-aware receipt (MRB-04):** linked bookings produce one reservation receipt. The reservation reference is used in the header, footer, and filename. Child rooms are ordered by reservation position and each prints its stored pricing allocation, add-ons, deductions, room total, and special requests. VAT is aggregated from those stored room allocations. Reservation-wide store and incidental charges retain child-room labels where present; payments and refunds print once; the reservation total and balance are never multiplied by room count. Legacy bookings without a reservation link retain the single-booking layout above.
+- **`lookupUrl()` deep-link shape (RFO-01, decision #209, shipped 2026-08-10):** the reservation-scope email templates now emit `?reservationRef=<R>&email=<leadGuestEmail>` in the "View my booking" CTA so the guest can paste the public `R-` identifier from the email subject into `/my-booking` without a magic link. The N=1 + per-child paths stay byte-equivalent on the legacy `?ref=<SI>&token=<token>` shape. The page's auto-lookup `useEffect` reads `?reservationRef=` in priority over `?ref=`, and the form's single ref input accepts both `SI-…` and `R-…` (routed client-side via `RESERVATION_REF_REGEX` from `@spark-inn/shared/utils/references`). A bare R- with no email shows the server's 400 copy inline so the guest sees the next step without a wasted round-trip. The receipt PDF filename mirror (`receipt-<R-…>.pdf` for reservation-scope, `receipt-<SI-…>.pdf` for per-child) is unchanged.
 - **Reservation-scope email fan-out (MRB-09, decision #168):** the guest-facing email templates (`booking-submitted`, `payment-confirmed`, `booking-confirmed`, `checkin-reminder`, `booking-confirmed-with-balance`, `booking-rescheduled`, plus the receipt PDF) all render a single block view that lists every room in the reservation. The view is built by `buildReservationEmailView(reservation, children)` (exported from `guest-app/server/handlers/email.ts`) which synthesises a `rooms[]` array of per-stay projections (position + ref + type + occupancy + breakfast + per-stay total) and an aggregate total. Subject lines use the reservation ref (`R-YYYYMMDD-NNNNN`) when the view is reservation-scope; the receipt PDF filename mirrors the subject. The checkin reminder cron groups confirmed bookings by `reservationId` and sends one email per reservation — the pre-MRB-09 cron sent N duplicate reminders for an N-room reservation. The new `booking-cancelled-reservation` action + template fires from MRB-13's reservation-scope cancel path and renders a per-room table with the cancelled room(s) marked and the surviving rooms (if any) marked Confirmed. N=1 is byte-equivalent to the pre-MRB-09 single-room shape; legacy pre-MRB-01 bookings (no `reservationId`) continue through the per-child path.
 
 **PDF checklist:**
@@ -231,6 +232,7 @@ Used at check-in by front desk. Generated from booking data.
   - One row per guest, one column per night of stay
   - Each cell has a blank line or checkbox list of silog options for the guest to fill in
   - Silog options pulled from `settings/breakfastConfig.silogItems` at PDF generation time
+  - **Drawer pre-fill (2026-08-09):** if staff pre-selected a silog in the booking drawer, the matching cell renders a **filled brand-color box + white checkmark + bold label** for that guest/day, sourced from `booking.breakfastSelections["${date}-guest-${n}"]`. Other silog options stay as hollow checkboxes so the guest can still change their mind at check-in. Helper line reads "Pre-selected choices are marked; circle or check to change." Pre-fill matches by silog `name` (the drawer's `<select>` stores the item name, not id) — a silog name edit in Settings after capture will silently drop the pre-check for that booking, accepted trade-off.
 
 **Checklist:**
 - [x] Wireframe data capture exists in admin booking drawer for guest registry fields, ID photo preview, and breakfast choices
@@ -242,6 +244,7 @@ Used at check-in by front desk. Generated from booking data.
 - [x] Silog items listed as checkboxes or options per cell — guest circles/checks their choice
 - [x] Printable — front desk prints and guest fills/signs physical copy
 - [x] Same stable jsPDF font fallback requirements as receipt
+- [x] Drawer pre-selected silog is pre-filled in the printed form (filled box + check + bold label); other options stay blank (2026-08-09)
 
 ---
 

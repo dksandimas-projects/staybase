@@ -58,8 +58,22 @@ function lighten(hex: string, amount: number): string {
   return `#${out(blend(r))}${out(blend(g))}${out(blend(b))}`;
 }
 
+// Per-feature-op-bug-fix-1 / decision #222 (2026-08-19): the Google
+// image-serving `=wN` token was missing from these static-fallback
+// URLs. The `buildHeroSrcSet` helper in `HeroImage.tsx:65` returns
+// `undefined` when the URL base does not end with a recognised
+// size token (the regex is `=[sw]\d+$`), which meant the homepage
+// + rewards hero image ALWAYS downloaded the full-size original
+// regardless of viewport — no responsive srcset, no responsive
+// preload, the "background images load with visible delay" bug
+// (#1) was the user-visible symptom. Appending `=w1920` (the
+// canonical "this is a responsive image" token; the helper
+// strips it + re-emits 640/1080/1920 widths) unlocks the
+// responsive path. The Unsplash URLs already carry `w=` params so
+// they were unaffected by this fix.
+
 export const homepageHeroImage =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuCTef7Kgv1QtQkGMUF3IjkJC-VCn1qzPu4wpvFbsZfXP9IJv_dhrx4JJo34Kuxb5ka-hagWW7LvX18wbAck93GBqVBjEn24s5FzC7mAt28gar-1qQn34heG8ehz4jsBY1iBDf5G9vmLwEbivs1ATFikNbWpY6Gjd7_RerEeeiF0pEo1vNo_X_ZFlRPCy9mO_AMQf01x7s0a-pMAG15CWDWwHA_AFNAFp3UqpV-rcx8B6AZY0-2II8F4vAwYUzvd-52h1OJ_fKdE96h2";
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuCTef7Kgv1QtQkGMUF3IjkJC-VCn1qzPu4wpvFbsZfXP9IJv_dhrx4JJo34Kuxb5ka-hagWW7LvX18wbAck93GBqVBjEn24s5FzC7mAt28gar-1qQn34heG8ehz4jsBY1iBDf5G9vmLwEbivs1ATFikNbWpY6Gjd7_RerEeeiF0pEo1vNo_X_ZFlRPCy9mO_AMQf01x7s0a-pMAG15CWDWwHA_AFNAFp3UqpV-rcx8B6AZY0-2II8F4vAwYUzvd-52h1OJ_fKdE96h2=w1920";
 
 // Per-page hero fallbacks. Each is read by `usePublicSiteContent` when
 // the corresponding `settings/websiteContent.<section>.heroPhotoUrl` is
@@ -71,7 +85,7 @@ export const aboutHeroImage =
 export const corporateHeroImage =
   "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80";
 export const rewardsHeroImage =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuDxE3ob-vSO4zxT_VMu0OviqdIAMTOtgsJXzWeddVJ-6-QmLSHHkERJKmN_zfFFeGvMrFhzST6Xoc-MNtubwhDrYU3ZjBFSjACtuAwnlBaH4z6Ts-UB0kYlC38ol_42OAWXX2iUGuPhL2ZSvUac1bc6j0zvNGyAyCNMnyrg9X2dwyDXafz7n_EIfEX_xAI6S2D_XhfdiedtLyzdH-SxVWzm25SwLm9ovUul16TnLGbrr9fj2Jmezvw2N3x4T49eU2RDAchvC4pc-2UY";
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuDxE3ob-vSO4zxT_VMu0OviqdIAMTOtgsJXzWeddVJ-6-QmLSHHkERJKmN_zfFFeGvMrFhzST6Xoc-MNtubwhDrYU3ZjBFSjACtuAwnlBaH4z6Ts-UB0kYlC38ol_42OAWXX2iUGuPhL2ZSvUac1bc6j0zvNGyAyCNMnyrg9X2dwyDXafz7n_EIfEX_xAI6S2D_XhfdiedtLyzdH-SxVWzm25SwLm9ovUul16TnLGbrr9fj2Jmezvw2N3x4T49eU2RDAchvC4pc-2UY=w1920";
 
 // Per-page hero text fallbacks. The admin can override any of these
 // from Settings → Branding; the constants below are the values that

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 
@@ -157,8 +157,32 @@ export function CorporateBookingPage() {
   });
 
   // Booking states
-  const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
-  const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
+  // Per NBS-2026-08-08 (F10, booking-flow audit 2026-08-08):
+  // the previous `useState(searchParams.get("checkIn") ?? ...)`
+  // accepted any URL value verbatim — a direct hit to
+  // `/corporate/book?checkIn=invalid` seeded the form with
+  // `checkIn: "invalid"`, the date picker showed a blank,
+  // and the submit hit the server's 400 "Invalid check-in
+  // or check-out date." with no clear back-to-Step-1
+  // affordance (see F2). The fix: parse the URL value
+  // through the YYYY-MM-DD shape; an invalid or missing
+  // value falls back to today's Manila date. The same
+  // pattern guards `checkOut` (a missing URL value
+  // previously landed as `null` → empty date input).
+  const initialCheckInParam = searchParams.get("checkIn");
+  const initialCheckOutParam = searchParams.get("checkOut");
+  const isValidDateKey = (value: string | null) =>
+    typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const [checkIn, setCheckIn] = useState(
+    isValidDateKey(initialCheckInParam)
+      ? initialCheckInParam!
+      : getDateKeyInTimezone(config.timezone, 1)
+  );
+  const [checkOut, setCheckOut] = useState(
+    isValidDateKey(initialCheckOutParam)
+      ? initialCheckOutParam!
+      : getDateKeyInTimezone(config.timezone, 2)
+  );
   // Per EXB-07 (2026-08-01, per decision #155): the
   // corporate /book page gains the same adult/child split
   // + extra bed count the guest /book page already has.
@@ -298,6 +322,39 @@ export function CorporateBookingPage() {
   const [paymentProofError, setPaymentProofError] = useState("");
   const [termsConsent, setTermsConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Per NBS-2026-08-08 (F2): the recovery action the
+  // sticky footer's error CTA should render alongside
+  // the submit error. The catch block in the create
+  // handler maps the server error to one of three
+  // actions — "back-to-step-1" / "retry" / "none" — so
+  // the user has an explicit next step instead of a
+  // stranded message. The discriminator mirrors the
+  // public `/book` flow's shape.
+  const [submitErrorAction, setSubmitErrorAction] = useState<"back-to-step-1" | "retry" | "none">("none");
+  // Per NBS-2026-08-08 (F11): the auto-redirect timer
+  // for the "Room no longer available" path is held on
+  // a ref so the user can cancel it by navigating
+  // manually (clicking the back CTA or the browser back
+  // button) before the 5s elapses. The cleanup effect
+  // below cancels any pending timer on unmount.
+  //
+  // Per L-06 (corporate audit 2026-08-10): the effect
+  // also runs on `currentStepKey` change so a
+  // navigation away from review (e.g. the user clicks
+  // back to Step 1 or 2) does not fire the stale
+  // redirect. The pre-L-06 effect only ran on unmount,
+  // which a same-page nav (URL searchParam change) does
+  // not trigger — the timer would still fire and
+  // override the user's manual nav.
+  const redirectTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current !== null) {
+        window.clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = null;
+      }
+    };
+  }, [currentStepKey]);
 
   // Per `plan/features/SETTINGS.md §Payment Methods` — the booking
   // payment list is dynamic. Sourced from
@@ -490,11 +547,26 @@ export function CorporateBookingPage() {
   // loaded (no `roomsLoading` flicker) and on the
   // cart being empty (no-op after the user has
   // added rooms).
+  //
+  // Per M-04 (corporate booking audit 2026-08-10):
+  // the URL `?roomType=` value is validated against
+  // the room type catalog before the seed runs. A
+  // direct hit to `/corporate/book?roomType=does-not-exist`
+  // used to seed the cart with an unknown type — the
+  // guest picked dates + occupancy, then hit a 400 on
+  // submit from the server's strict `publicRoomSelectionSchema`.
+  // The fix falls back to the first available type on
+  // miss (same shape as the F10 date URL fallback at
+  // `CorporateBookingPage.tsx:172-185`). A missing URL
+  // value still falls back to the first available type.
   useEffect(() => {
     if (roomCart.length > 0) return;
     if (roomsLoading || roomTypes.length === 0) return;
     const fromQuery = searchParams.get("roomType");
-    const candidate = fromQuery
+    const fromQueryIsValid = fromQuery
+      ? roomTypes.some((type) => type.value === fromQuery)
+      : false;
+    const candidate = fromQueryIsValid
       ? roomTypes.find((type) => type.value === fromQuery)
       : availableRoomTypes[0]?.type;
     if (!candidate) return;
@@ -998,6 +1070,16 @@ export function CorporateBookingPage() {
     e.preventDefault();
     setIsSubmitting(true);
     setSubmitError("");
+    // Per NBS-2026-08-08 (F2): reset the recovery
+    // action so a fresh submit doesn't render a stale
+    // CTA from the previous attempt.
+    setSubmitErrorAction("none");
+    // Per NBS-2026-08-08 (F11): cancel any pending
+    // auto-redirect timer from a prior failed submit.
+    if (redirectTimerRef.current !== null) {
+      window.clearTimeout(redirectTimerRef.current);
+      redirectTimerRef.current = null;
+    }
 
     // Per 2026-07-24 (refactor/unify-payment-reference-fields):
     // guests no longer enter a payment reference number at booking
@@ -1048,9 +1130,15 @@ export function CorporateBookingPage() {
         // auto-derives one selection from
         // `roomType` + `numAdults` + `numChildren`
         // + `extraBedCount` when `roomSelections`
-        // is absent, per the `createBookingSchema`
-        // + `roomCount` default of 1).
-        roomCount: distributedRoomCart.length,
+        // is absent, per the `createBookingSchema` +
+        // `roomCount` default of 1). Per BAR-02 (2026-08-08,
+        // per decision #203): the `roomCount` field is no
+        // longer written to the reservation header.
+        // Consumers derive it at read time via
+        // `deriveReservationCounters`. The field is no
+        // longer sent in the create request body —
+        // the server reads the children list directly
+        // to compute the count.
         roomSelections: distributedRoomCart.map((stay, index) => ({
           bookingId: index === 0 ? bookingId : stay.bookingId,
           roomType: stay.roomType,
@@ -1172,6 +1260,11 @@ export function CorporateBookingPage() {
       } else {
         const errorMessage = result.error || "Booking submission failed. Please try again.";
         setSubmitError(errorMessage);
+        // Per NBS-2026-08-08 (F2): the recovery action for
+        // the sticky footer's error CTA. Mirrors the public
+        // `/book` flow's three-way discriminator
+        // ("back-to-step-1" / "retry" / "none").
+        setSubmitErrorAction("none");
         // Tokens are single-use; mint a fresh one for the retry.
         reviewTurnstile.reset();
         setIsSubmitting(false);
@@ -1189,18 +1282,38 @@ export function CorporateBookingPage() {
 
         if (errorMessage === "Room no longer available") {
           setSubmitError("Sorry, no rooms of this type are available for your selected dates. Please go back and pick another room type.");
-          setTimeout(() => {
+          setSubmitErrorAction("back-to-step-1");
+          // Per NBS-2026-08-08 (F11): the auto-redirect
+          // timer is held on a ref so the user can cancel
+          // it by navigating manually (clicking the back
+          // CTA) before the 5s elapses.
+          redirectTimerRef.current = window.setTimeout(() => {
             const next = new URLSearchParams(searchParams);
             next.set("step", "select-room");
             next.delete("roomType");
             setSelectedRoomType("");
             setSearchParams(next);
             setSubmitError("");
+            setSubmitErrorAction("none");
+            redirectTimerRef.current = null;
           }, 5000);
+        } else if (/maximum stay length|max.*stay.*night/i.test(errorMessage)) {
+          setSubmitError(`${errorMessage} Go back to pick a shorter stay.`);
+          setSubmitErrorAction("back-to-step-1");
+        } else if (/in advance|advance.*days/i.test(errorMessage)) {
+          setSubmitError(`${errorMessage} Go back to pick a closer check-in date.`);
+          setSubmitErrorAction("back-to-step-1");
+        } else if (/past/i.test(errorMessage) && /check-?in|date/i.test(errorMessage)) {
+          setSubmitError(`${errorMessage} Go back to pick a new check-in date.`);
+          setSubmitErrorAction("back-to-step-1");
+        } else if (/too many|rate.*limit/i.test(errorMessage)) {
+          setSubmitError(`${errorMessage} You can try again in a minute.`);
+          setSubmitErrorAction("retry");
         }
       }
     } catch {
       setSubmitError("Unable to submit booking. Please check your connection and try again.");
+      setSubmitErrorAction("retry");
       reviewTurnstile.reset();
       setIsSubmitting(false);
     }
@@ -1230,11 +1343,16 @@ export function CorporateBookingPage() {
           <div className="min-h-11 min-w-11" />
         </div>
         
-        {/* Persistent corporate rate badge — per W2.13 / decision #101 */}
+        {/* Persistent corporate rate badge — per W2.13 / decision #101.
+            Per L-01 (corporate audit 2026-08-10): the wording is now
+            aligned with the spec — "Corporate Rate — [Company Name or
+            Flat Rate]". The pre-L-01 label ("Active Negotiated Pricing")
+            drifted from the spec and used "Flat Corporate Rate" on the
+            flat-rate path. */}
         {(companyName || isFlatRate) && currentStepKey !== "confirm" && (
           <div className="bg-primary/10 border-t border-primary/20 text-center py-1.5 text-xs text-primary font-medium">
-            Active Negotiated Pricing: <span className="font-bold underline">{companyName || "Flat Corporate Rate"}</span>
-            {activeCode && " — Negotiated rate applied"}
+            Corporate Rate — <span className="font-bold underline">{companyName || "Flat Rate"}</span>
+            {activeCode && " (Negotiated rate applied)"}
           </div>
         )}
       </header>
@@ -2329,9 +2447,52 @@ export function CorporateBookingPage() {
 
             {/* Submit error */}
             {submitError && (
-              <div className="rounded-card bg-red-50 border border-red-200 p-4 text-sm text-red-700 flex gap-2">
-                <Info size={18} className="shrink-0 mt-0.5" />
-                <span>{submitError}</span>
+              <div className="flex flex-col gap-3 rounded-card bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex gap-2">
+                  <Info size={18} className="shrink-0 mt-0.5" />
+                  <span>{submitError}</span>
+                </div>
+                {/* Per NBS-2026-08-08 (F2): the recovery
+                    CTA mirrors the public `/book` flow's
+                    three-way discriminator. The
+                    "back-to-step-1" CTA cancels any
+                    pending auto-redirect timer (F11) so
+                    the manual nav doesn't race the
+                    auto-nav. */}
+                {submitErrorAction === "back-to-step-1" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (redirectTimerRef.current !== null) {
+                        window.clearTimeout(redirectTimerRef.current);
+                        redirectTimerRef.current = null;
+                      }
+                      const next = new URLSearchParams(searchParams);
+                      next.set("step", "select-room");
+                      next.delete("roomType");
+                      setSelectedRoomType("");
+                      setSearchParams(next);
+                      setSubmitError("");
+                      setSubmitErrorAction("none");
+                    }}
+                    className="self-start min-h-11 rounded-lg border border-red-300 bg-white px-4 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    Back to room selection
+                  </button>
+                )}
+                {submitErrorAction === "retry" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSubmitError("");
+                      setSubmitErrorAction("none");
+                      setIsSubmitting(false);
+                    }}
+                    className="self-start min-h-11 rounded-lg border border-red-300 bg-white px-4 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    Dismiss and try again
+                  </button>
+                )}
               </div>
             )}
           </div>

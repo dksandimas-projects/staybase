@@ -22,6 +22,11 @@ import { cn } from "../utils/cn";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { useFocusTrap } from "../utils/useFocusTrap";
 
+// Top-level navigation. Per-staff audio routing moved to a
+// sub-flow off /intercom (the page that owns the audible
+// behaviour audio controls) — see the Intercom inbox header's
+// "Audio settings" link for the entry point. The /audio route
+// is still reachable for direct-bookmark navigation.
 const navItems = [
   { label: "Dashboard", to: "/", icon: Home },
   { label: "Bookings", to: "/bookings", icon: CalendarDays },

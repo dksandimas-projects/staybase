@@ -13,6 +13,7 @@ import { IntercomInboxPage } from "./pages/IntercomInboxPage";
 import { QRManagementPage } from "./pages/QRManagementPage";
 import { MembersPage } from "./pages/MembersPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { AudioSettingsPage } from "./pages/AudioSettingsPage";
 
 export function App() {
   return (
@@ -33,6 +34,7 @@ export function App() {
           <Route path="/qr" element={<QRManagementPage />} />
           <Route path="/members" element={<MembersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/audio" element={<AudioSettingsPage />} />
         </Route>
 
         {/* Fallback routing */}

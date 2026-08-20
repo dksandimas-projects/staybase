@@ -137,15 +137,34 @@ describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
     expect(bookingsPageSrc).toMatch(/"Cancelled"/);
     // The pill is rendered when the header is present; the
     // legacy "Mixed" chip is the cold-start fallback only.
-    expect(bookingsPageSrc).toMatch(/renderReservationPaymentStatusPill\(\s*row\.listReservationHeader\.paymentStatus/);
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `paymentStatus` aggregate is no longer read from
+    // the reservation header. The pill is fed by
+    // `computeReservationAggregatePaymentStatus(row.listChildBookings.map(c => c.status))`
+    // (the derivation over the children that are
+    // already in memory at row-build time). The
+    // pre-BAR-02 shape was
+    // `renderReservationPaymentStatusPill(row.listReservationHeader.paymentStatus, ...)`;
+    // the post-BAR-02 shape is the same call but with
+    // a derived value.
+    expect(bookingsPageSrc).toMatch(/renderReservationPaymentStatusPill\(\s*computeReservationAggregatePaymentStatus\(/);
   });
 
-  it("MRB-12-02: the reservation row renders a `X cancelled` chip when `cancelledRoomCount > 0`", () => {
-    expect(bookingsPageSrc).toMatch(/row\.listReservationHeader\.cancelledRoomCount > 0/);
-    expect(bookingsPageSrc).toMatch(/cancelledRoomCount\} cancelled/);
-    // The chip's tooltip lists the cancelled room numbers.
+  it("MRB-12-02: the reservation row renders a `X cancelled` chip when the derived cancellation count is > 0", () => {
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // chip's count is derived from the children at
+    // read time, not read from the reservation
+    // header's `cancelledRoomCount` field. The
+    // `row.listChildBookings` array is already in
+    // memory at row-build time; the chip filters it
+    // for `status === "cancelled"`. The pre-BAR-02
+    // shape was `row.listReservationHeader.cancelledRoomCount > 0`;
+    // the post-BAR-02 shape is the inline IIFE over
+    // `listChildBookings`.
     expect(bookingsPageSrc).toMatch(/Cancelled rooms in this reservation/);
     expect(bookingsPageSrc).toMatch(/Room \$\{child\.roomNumber\}/);
+    expect(bookingsPageSrc).toMatch(/cancelledChildren/);
+    expect(bookingsPageSrc).toMatch(/child\.status === "cancelled"/);
   });
 
   it("MRB-12-03: the drawer reservation strip shows the reservation-scope Total / Paid / Balance pills", () => {
@@ -181,15 +200,129 @@ describe("MRB-12-02..05 — row + drawer affordances + discount scope", () => {
     expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-selector"/);
     expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-room"/);
     expect(bookingsPageSrc).toMatch(/data-testid="staff-discount-scope-reservation"/);
-    // The submit loop calls `apply-discount` for every room
-    // when the scope is "reservation".
+    // The submit handler picks the atomic endpoint when the
+    // scope is "reservation" and a reservation context exists;
+    // falls back to the per-booking endpoint for single-room.
+    // Per DSC-04 (2026-08-15): this replaces the per-targetId
+    // loop with a single atomic fetch.
     expect(bookingsPageSrc).toMatch(
-      /scope === "reservation" && selectedReservationContext\s*\?\s*selectedReservationContext\.rooms\.map\(\(room\) => room\.id\)\s*:\s*\[selectedBooking\.id\]/
+      /isReservationScope = scope === "reservation" && !!selectedReservationContext/
+    );
+    expect(bookingsPageSrc).toMatch(
+      /endpointPath = isReservationScope\s*\?\s*"\/api\/bookings\/apply-reservation-discount"\s*:\s*"\/api\/bookings\/apply-discount"/
     );
     // The "all rooms" submit button label + toast surface the
     // reservation scope so the desk sees what was applied.
     expect(bookingsPageSrc).toMatch(/Apply to all \$\{selectedReservationContext\.roomCount\} rooms/);
-    expect(bookingsPageSrc).toMatch(/Reservation repriced \(\$\{targetIds\.length\} rooms\)/);
+    expect(bookingsPageSrc).toMatch(/Reservation repriced \(\$\{selectedReservationContext\.roomCount\} rooms\)/);
+  });
+
+  // Per MRB-12-05 (2026-08-14, found during the audit pass
+  // that followed RPT-05 + EXB-12.1 + VOU-01): the admin
+  // client loop was the only thing that achieved per-child
+  // usageCount semantics for the reservation-scope apply-
+  // discount flow (the handler did +1 per call; the client
+  // called it N times for N rooms). The original regex pin
+  // covered the `targetIds = ...rooms.map(...)` + the
+  // `for (const targetId of targetIds)` loop body — a future
+  // refactor that broke the loop would silently miscount
+  // `vouchers.usageCount`.
+  //
+  // Per DSC-04 (2026-08-15, owner decision option a): the
+  // loop is REPLACED by a single fetch to the atomic
+  // `apply-reservation-discount` endpoint — one server-side
+  // transaction that either applies the discount to every
+  // eligible child or none. The single-room path (scope ===
+  // "room") still uses the per-booking `apply-discount`
+  // endpoint (byte-equivalent to a 1-child reservation).
+  //
+  // This test pins the new atomic-shape at the source level
+  // (replaces the old loop pin). Without this pin, a future
+  // refactor could revert to the per-child loop and silently
+  // re-introduce the partial-failure UX (room N failing
+  // after rooms 1..N-1 succeeded leaves the reservation
+  // half-discounted).
+  it("MRB-12-05: the discount submit handler routes reservation-scope applies to the atomic endpoint (DSC-04)", () => {
+    // Pin the conditional endpoint + reservationId payload
+    // shape — the same URL substring that lives in the router
+    // test (DSC-04 guard).
+    expect(bookingsPageSrc).toMatch(
+      /apply-reservation-discount[\s\S]{0,2000}?reservationId:[\s\S]{0,200}?selectedReservationContext/
+    );
+    // Pin the single-room fallback to the per-booking endpoint.
+    expect(bookingsPageSrc).toMatch(
+      /bookingId:[\s\S]{0,100}?selectedBooking\.id/
+    );
+    // Anti-regression: the per-targetId loop is GONE.
+    expect(bookingsPageSrc).not.toMatch(
+      /for\s*\(\s*const\s+targetId\s+of\s+targetIds\s*\)\s*\{[\s\S]{0,3000}?await\s+fetch\([\s\S]{0,500}?\/api\/bookings\/apply-discount[\s\S]{0,1000}?bookingId:\s*targetId/
+    );
+  });
+
+  it("MRB-12-05: the per-individual discount guard disables the `All N rooms` scope (PWD / senior)", () => {
+    // Per the per-individual discount guard: PWD and
+    // senior are per-individual legal entitlements
+    // (RA 7277 / RA 9442) — they must be applied to
+    // the specific guest's booking, not the whole
+    // reservation. The `All N rooms` button is
+    // disabled when `staffDiscountType` is
+    // `"senior"` or `"pwd"`, with a clear visual
+    // + a tooltip + a one-line hint. The submit
+    // handler also has a defense-in-depth guard
+    // that falls back to single-room if the scope
+    // is somehow set when the type is per-individual.
+    //
+    // The `isPerIndividualDiscount` derivation is the
+    // single source of truth — the segmented-control
+    // disable + the useEffect auto-revert + the
+    // submit-time guard all read from it.
+    expect(bookingsPageSrc).toMatch(
+      /const isPerIndividualDiscount = staffDiscountType === "senior" \|\| staffDiscountType === "pwd";/
+    );
+    // The button is `disabled` when per-individual is
+    // selected.
+    expect(bookingsPageSrc).toMatch(
+      /disabled=\{perIndividual\}[\s\S]{0,500}?aria-disabled=\{perIndividual\}/
+    );
+    // The title / hint text is "Senior / PWD only — pick
+    // one room" (so the staff knows why the button is
+    // disabled).
+    expect(bookingsPageSrc).toMatch(/Senior \/ PWD only — pick one room/);
+    // The title (the tooltip) is the per-individual
+    // explanation.
+    expect(bookingsPageSrc).toMatch(
+      /Not available for senior \/ PWD discounts — these are per-individual entitlements\. Apply to one room at a time\./
+    );
+  });
+
+  it("MRB-12-05: the per-individual guard auto-reverts the scope to `null` via useEffect", () => {
+    // Defense in depth: if the staff already picked
+    // "All N rooms" and then switches the type to
+    // senior / PWD, the scope auto-clears so the
+    // submit handler applies to the lead only. The
+    // segmented-control button is also disabled
+    // (per the test above), but the useEffect
+    // catches the case where the staff has the
+    // modal open and toggles the type without
+    // re-clicking the segmented control.
+    expect(bookingsPageSrc).toMatch(
+      /if \(isPerIndividualDiscount && staffDiscountScope === "reservation"\) \{[\s\S]{0,200}?setStaffDiscountScope\(null\);/
+    );
+    expect(bookingsPageSrc).toMatch(
+      /useEffect\(\(\) => \{[\s\S]{0,800}?if \(isPerIndividualDiscount && staffDiscountScope === "reservation"\)/
+    );
+  });
+
+  it("MRB-12-05: the submit handler falls back to `room` scope when the type is per-individual (defense in depth)", () => {
+    // Belt-and-braces: even if the UI + the
+    // useEffect fail to clear the scope, the submit
+    // handler computes an `effectiveScope` that
+    // forces `room` when the type is per-individual.
+    // The reservation-scope loop is never reached
+    // for a per-individual discount.
+    expect(bookingsPageSrc).toMatch(
+      /const effectiveScope =\s*isPerIndividualDiscount \? "room" : \(staffDiscountScope \?\? "room"\);/
+    );
   });
 
   it("MRB-12-05: the discount form's scope state resets to `null` on close (mirroring the MRB-13 cancel-modal reset)", () => {

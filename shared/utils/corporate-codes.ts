@@ -44,6 +44,20 @@ export function validateCorporateCode(
     effectiveNow = new Date();
     requestedUses = now?.requestedUses ?? 1;
   }
+  // Per M-01 (corporate booking audit 2026-08-10):
+  // defensive guard against an `Invalid Date` from a
+  // caller passing `new Date("garbage")`. A NaN `now`
+  // causes `code.expiresAt < effectiveNow` to evaluate
+  // to `false` (any comparison with NaN is false), so
+  // the expiry check would silently pass. Fall back
+  // to the wall clock — the safer failure mode is
+  // "treat now as right now" rather than "treat now
+  // as the heat death of the universe." The current
+  // call sites all pass a real timestamp, so this
+  // is belt-and-suspenders for a future caller.
+  if (Number.isNaN(effectiveNow.getTime())) {
+    effectiveNow = new Date();
+  }
   // `requestedUses` is always at least 1. A zero or
   // negative value would defeat the cap check; an
   // undefined value defaults to 1 (the historical

@@ -75,6 +75,44 @@ describe("PDF generation repair", () => {
     expect(registrationBody).not.toMatch(/drawBreakfastHeader/);
   });
 
+  it("pre-fills the registration PDF silog checkbox from booking.breakfastSelections (drawn from the booking drawer)", () => {
+    // Per the 2026-08-09 follow-up: when staff pre-select a silog
+    // per guest per day in the drawer, the matching checkbox in the
+    // printed registration form must be pre-filled (filled box in
+    // brand color + white checkmark + bold label) so the guest can
+    // see what was already recorded. The other silog options stay
+    // blank so the guest can still change their mind at check-in.
+    const registrationStart = bookingsPage.indexOf("const printRegistrationPDF");
+    const registrationEnd = bookingsPage.indexOf("const printBookingReceiptPDF", registrationStart);
+    const registrationBody = bookingsPage.slice(registrationStart, registrationEnd);
+
+    // Helper text was updated to call out the pre-fill behaviour.
+    expect(registrationBody).toMatch(/Pre-selected choices are marked; circle or check to change\./);
+    expect(registrationBody).not.toMatch(/Circle or check your choice for each guest per day\./);
+
+    // The pre-fill reads from `booking.breakfastSelections` keyed
+    // by `${date}-guest-${g + 1}` (the same key shape the booking
+    // drawer's <select> writes to). Matching is by silog item name
+    // because the drawer stores `item.name` as the <option> value.
+    expect(registrationBody).toMatch(/b\.breakfastSelections\?\.\[\s*`\$\{date\}-guest-\$\{g\s*\+\s*1\}`\s*\]/);
+    expect(registrationBody).toMatch(/isSelected\s*=\s*!!selectedName\s*&&\s*item\.name\s*===\s*selectedName/);
+
+    // The selected branch must fill the checkbox in the brand
+    // color (FD = fill + draw) and overlay a white checkmark via
+    // two line segments (no unicode glyph dependency).
+    expect(registrationBody).toMatch(/pdf\.setFillColor\(\.\.\.brandRgb\)/);
+    expect(registrationBody).toMatch(/pdf\.rect\(optionX,\s*y\s*-\s*2\.8,\s*2\.7,\s*2\.7,\s*"FD"\)/);
+    expect(registrationBody).toMatch(/pdf\.line\(optionX\s*\+\s*0\.55,\s*y\s*-\s*1\.55,\s*optionX\s*\+\s*1\.15,\s*y\s*-\s*0\.9\)/);
+    expect(registrationBody).toMatch(/pdf\.line\(optionX\s*\+\s*1\.15,\s*y\s*-\s*0\.9,\s*optionX\s*\+\s*2\.2,\s*y\s*-\s*2\.35\)/);
+    expect(registrationBody).toMatch(/pdf\.setDrawColor\(255,\s*255,\s*255\)/);
+
+    // The selected label is bolded in the brand color so the
+    // pre-check is scannable; the unselected branch keeps the
+    // hollow rect + neutral label path intact.
+    expect(registrationBody).toMatch(/pdf\.setFont\("helvetica",\s*"bold"\)/);
+    expect(registrationBody).toMatch(/pdf\.setFont\("helvetica",\s*"normal"\)/);
+  });
+
   it("wraps PDF builders in visible success and error toasts", () => {
     expect(bookingsPage).toMatch(/Registration PDF ready/);
     expect(bookingsPage).toMatch(/Registration PDF failed/);

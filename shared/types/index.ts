@@ -273,7 +273,19 @@ export interface Reservation {
   memberDiscountPct: number;
 
   /** Money state — mirrors the child rooms but at reservation scope. A reservation is "awaiting payment" while any non-cancelled room is `pending` or `payment-uploaded`. */
-  paymentStatus: ReservationPaymentStatus;
+  // Per BAR-02 (2026-08-08, per decision #203): the
+  // `paymentStatus` field is no longer written to the
+  // reservation header. Consumers that need it call
+  // `computeReservationAggregatePaymentStatus(childStatuses)`
+  // over the children at read time. Existing
+  // pre-BAR-02 reservations may still carry the field in
+  // Firestore (harmless dead data) — the helper ignores
+  // the header and always derives from the children. The
+  // Reservation type retains the field as optional `?`
+  // for back-compat reads (the AdminContext mapper may
+  // still surface it for pre-BAR-02 reservations), but no
+  // handler writes it.
+  paymentStatus?: ReservationPaymentStatus;
   paymentMethod: PaymentMethod;
   /** Per BF-45: canonical "no payment proof" is `null` (not `""`). */
   paymentProofUrl: string | null;
@@ -289,12 +301,21 @@ export interface Reservation {
   privacyVersion: string;
   cancellationPolicySnapshot?: CancellationPolicySnapshot | null;
 
-  /** Aggregate counters — denormalized for fast UI; recomputed transactionally in MRB-04 / MRB-13. */
-  roomCount: number;
-  activeRoomCount: number;
-  cancelledRoomCount: number;
-  checkedInRoomCount: number;
-  checkedOutRoomCount: number;
+  // Per BAR-02 (2026-08-08, per decision #203): the
+  // five aggregate counter fields are no longer written
+  // to the reservation header. Consumers that need them
+  // call `deriveReservationCounters(children)` at read
+  // time. The 2026-08-08 audit verified that no
+  // `where()` or `orderBy()` anywhere in the codebase
+  // references any of the five fields — they are
+  // render-time projections only. The fields are
+  // retained as optional `?` for back-compat reads of
+  // pre-BAR-02 reservations; no handler writes them.
+  roomCount?: number;
+  activeRoomCount?: number;
+  cancelledRoomCount?: number;
+  checkedInRoomCount?: number;
+  checkedOutRoomCount?: number;
 
   // Per MRB-14 (2026-08-03, per decision #180 — proposed):
   // the per-child date spread. The header's `checkIn` /
@@ -659,6 +680,25 @@ export interface Booking {
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: Date | null;
   paymentRejectedBy?: string | null;
+  // Per FOL-01 (2026-08-06, off-roadmap bug fix, decision #197):
+  // the durable "payment was verified" signal. Stamped by
+  // `handleVerifyAndRecordPayment` (and `handleMarkPaymentConfirmed`
+  // / `handleConfirmBookingWithBalance`) on the full-payment
+  // transition, then NEVER cleared by any other lifecycle handler.
+  // Differs from `status === "payment-confirmed"` in that
+  // `paymentConfirmedAt` survives the subsequent transitions to
+  // `confirmed` / `checked-in` / `checked-out` — so a confirmed
+  // booking whose payment was verified at some earlier point
+  // still reads as "verified" in the admin UI. The admin
+  // `isPaymentVerified()` helper in
+  // `shared/utils/paymentVerification.ts` is the single source of
+  // truth for that read; the per-render inline checks against
+  // `status === "payment-confirmed"` are the bug this field
+  // fixes. `null` for legacy bookings and any booking whose
+  // payment has not been staff-verified yet. The server writes
+  // it as a `Date`; the admin mapper hydrates it as an ISO string
+  // (the `parseDateTimeString` convention).
+  paymentConfirmedAt?: Date | null;
   // Per PEX-01 (2026-08-01, per CVQ-12 + decision #147): the
   // snapshotted deadline at which a `pending` booking's hold on
   // the room expires. Written by `handleCreateBooking` (and the
@@ -738,6 +778,17 @@ export interface Booking {
    */
   extraBedCount?: number;
   extraBedRate?: number;
+  /**
+   * Per EXB-12 (2026-08-06, per decision #199): whether the
+   * guest opted in to breakfast for the extra-bed occupant(s).
+   * When `true`, all `extraBedCount` beds in this room are
+   * counted toward the breakfast total (priced as
+   * `breakfastRate × extraBedCount × nights`). Snapshotted
+   * from the cart at booking time. The server validates that
+   * `extraBedBreakfast` can only be `true` when `extraBedCount > 0`.
+   * Defaults to `false` (no breakfast for extra beds).
+   */
+  extraBedBreakfast?: boolean;
   /**
    * Per DSC-01..05 (2026-08-01, per CVQ-06): the admin's
    * per-class discount scope at the moment this booking was
@@ -883,7 +934,38 @@ export interface CorporateInvoice {
   paidBy: string | null;
 }
 
-export type IntercomSender = "guest" | "front-desk";
+export type IntercomSender = "guest" | "front-desk" | "system";
+
+// Per `feat/call-history-messages`: call lifecycle events now
+// surface as system messages in the chat thread so the front
+// desk has a permanent record. The four outcomes map directly
+// to the values staff see on screen:
+//
+//   "call-answered" — staff accepted via Accept Voice;
+//                     duration is recorded
+//   "call-missed"   — call went ringing → ended without anyone
+//                     connecting (guest hung up, network drop,
+//                     or the call timed out before staff picked up)
+//   "call-declined" — staff explicitly pressed Ignore
+//   "call-failed"   — staff pressed Accept, the claim transaction
+//                     committed, but the post-claim audio plumbing
+//                     failed (getUserMedia denied, createAnswer
+//                     failed, writeDoc rejected). The staff TRIED
+//                     to answer — the chat thread says so
+//                     explicitly so the audit trail is accurate.
+//                     Per decision #217 (2026-08-19).
+//
+// All four produce a `intercoms/{roomNumber}/messages` doc with
+// `sender: "system"`, formatted `text`, and (for answered) call-
+// duration metadata. Future-proofing: an undefined messageType
+// means the doc is a regular guest/staff chat message — old clients
+// continue to render the text body normally.
+export type IntercomMessageType =
+  | "call-answered"
+  | "call-missed"
+  | "call-declined"
+  | "call-failed"
+  | undefined;
 
 export interface IntercomMessage {
   id: string;
@@ -896,6 +978,37 @@ export interface IntercomMessage {
   isStoreOrder: boolean;
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
+  // Set when sender === "system" — drives the muted / italic
+  // render branch in IntercomChatPanel. Undefined for normal
+  // guest and staff chat messages.
+  messageType?: IntercomMessageType;
+  // When messageType === "call-answered": the Firestore server
+  // timestamp at which the call connected (i.e. when the staff
+  // accepted and the audio stream went live).
+  callStartedAt?: Date;
+  // When messageType === "call-answered": the call duration in
+  // seconds (connected → hung up). When messageType ===
+  // "call-missed": how long the call rang before it ended.
+  // When messageType === "call-failed": how long the call rang
+  // before the post-claim audio plumbing failed (typically
+  // <500ms). Computed at write time from `Date.now()` on the
+  // dispatcher's clock, not from Firestore server time, because
+  // the duration is a client-relative measurement that doesn't
+  // need a server round-trip to compute.
+  callDuration?: number;
+  // Per decision #206 (2026-08-19): the staff display name
+  // attributed to the `call-answered` system message — mirrors
+  // the `calls/{roomId}.acceptedBy.name` field that the
+  // `runTransaction` claim in `AdminContext.acceptCall` writes
+  // when the first staff to click Accept commits. `null` on
+  // pre-#206 messages, on `call-missed` / `call-declined` (no
+  // claim committed), or when the staff member's display name
+  // was unavailable at message-write time. The free-text `text`
+  // field still carries the human-readable line ("Call answered
+  // by Maria at 2:14 PM · 3m 22s") for legacy readers; this
+  // structured field lets future renderers style the name
+  // distinctly without parsing the line.
+  callAnsweredByName?: string | null;
 }
 
 export interface IntercomThread {
@@ -1073,4 +1186,23 @@ export interface CancellationPreview {
   refundPct: number;
   policyText: string;
   policySource: "settings" | "corporate-override" | "legacy-fallback";
+}
+
+// Per-staff intercom audio routing — see `plan/features/INTERCOM-AUDIO-ROUTING.md`.
+// The Web Audio API doesn't support per-stream output device selection
+// portably (Safari/Firefox don't), so routing is implemented by attaching
+// a `deviceId` to the HTMLMediaElement (`<audio>`) used for each audio
+// surface. The shape is intentionally narrow: one boolean master toggle +
+// two device IDs, all optional, all default to "system default output".
+export interface AudioRouting {
+  enabled: boolean;
+  // Output device for the call's WebRTC remote stream. Typically a USB
+  // headset. `null` = system default output.
+  callOutputDeviceId: string | null;
+  // Output device for notification sounds (incoming chat + incoming call
+  // ringtones) and the IntercomInbox unread-message chime. Typically the
+  // built-in speaker so the operator notices new activity even while
+  // wearing a headset. `null` = system default output.
+  ringtoneOutputDeviceId: string | null;
+  updatedAt?: Date;
 }

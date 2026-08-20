@@ -153,6 +153,18 @@ import {
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
+// Per BAR-03 (2026-08-08, per decision #204): the
+// shared FOL-05 sibling-flip helper. The pre-BAR-03
+// `handleVerifyAndRecordPayment` + `handleAddPayment`
+// + `handleRejectPayment` each open-coded the same
+// sibling-flip pass. The helper collapses the three
+// copies into one; each handler passes a per-handler
+// `rule.decide` callback + the shared `now`.
+import {
+  preReadSiblingChildren,
+  applyReservationScopePaymentTransition,
+  type SiblingFlipDecision
+} from "./reservationScopeTransition";
 // Per MRB-11 (2026-08-03, per decision #177): the
 // optional revenue allocation input. Per the 2026-08-03
 // design call, the server always recomputes this before
@@ -376,9 +388,17 @@ function buildCreateEmailView(args: {
     corporateCode: args.corporateCode,
     companyName: args.companyName,
     paymentMethod: args.paymentMethod,
-    paymentStatus: args.paymentStatus,
-    activeRoomCount: args.finalRooms.length,
-    cancelledRoomCount: 0
+    paymentStatus: args.paymentStatus
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `activeRoomCount` and `cancelledRoomCount`
+    // are not stamped onto the synthetic reservation
+    // object either. The downstream email view
+    // (and the page that renders it) derives
+    // the count from the in-memory `children` array.
+    // Pre-BAR-02 the synthetic object's
+    // `activeRoomCount: args.finalRooms.length` was
+    // a stub for the same value the helper now
+    // computes directly.
   };
   // Build the synthetic child docs (the values
   // `buildReservationEmailView` reads for each
@@ -1059,14 +1079,32 @@ const storageUrlRefiner = (val: string | null) => {
   return val.startsWith(storageBucketUrl);
 };
 
-const publicRoomSelectionSchema = z.object({
+// Exported for the EXB-12 strict-schema regression test
+// (see `tests/api/exb-12-strict-schema-acceptance.test.ts`).
+// The schema is a pure Zod object — no Firebase dependency at
+// parse time — so importing it from a unit test is safe and
+// catches the entire class of "client sends a new field but
+// the strict server schema rejects it" regressions that the
+// regex-only test surface would miss.
+export const publicRoomSelectionSchema = z.object({
   bookingId: z.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX).optional(),
   roomType: z.string().trim().min(1).max(120),
   numAdults: z.coerce.number().int().min(0).max(100),
   numChildren: z.coerce.number().int().min(0).max(100),
   extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
   hasBreakfast: z.boolean(),
-  breakfastIncludesChildren: z.boolean().optional()
+  breakfastIncludesChildren: z.boolean().optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // per-room opt-in for breakfast on the extra-bed
+  // occupant(s). The client sends this from the
+  // per-type toggle in the Extras sub-section (or
+  // always, even when false — the strict schema
+  // would otherwise reject every booking because
+  // EXB-12's body always includes the field).
+  // The server enforces the invariant
+  // `extraBedBreakfast implies extraBedCount > 0`
+  // in the `validatedRoomStays` loop below.
+  extraBedBreakfast: z.boolean().optional()
 }).strict().superRefine((selection, ctx) => {
   if (selection.numAdults + selection.numChildren < 1) {
     ctx.addIssue({
@@ -1093,7 +1131,14 @@ function allocateRoundedAmount(total: number, weights: number[]): number[] {
   return allocations;
 }
 
-const createBookingSchema = z.object({
+// Exported for the EXB-12 strict-schema regression test
+// (see `tests/api/exb-12-strict-schema-acceptance.test.ts`).
+// The schema is a pure Zod object — no Firebase dependency at
+// parse time — so importing it from a unit test is safe and
+// catches the entire class of "client sends a new field but
+// the strict server schema rejects it" regressions that the
+// regex-only test surface would miss.
+export const createBookingSchema = z.object({
   bookingId: z.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
   roomType: z.string().trim().min(1).max(120),
   checkIn: z.string().trim().min(1).max(40),
@@ -1124,6 +1169,17 @@ const createBookingSchema = z.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // top-level extra-bed breakfast toggle. The client
+  // always sends it (defaults to `false` from
+  // `bookingRoomCart.ts:63`), so the strict schema
+  // must accept the field. The server-side
+  // authoritative value lives on each
+  // `roomSelections[i].extraBedBreakfast` (per-room
+  // pricing + invariant enforcement); this top-level
+  // field is accepted for wire back-compat with the
+  // EXB-12 client shape and otherwise unused.
+  extraBedBreakfast: z.boolean().optional(),
   guestDetails: guestDetailsSchema,
   discountType: z.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -1184,6 +1240,19 @@ const createBookingSchema = z.object({
   // the write boundary. Pre-MRB-11 callers omit it; the
   // server fills it in.
   revenueAllocation: BookingRevenueAllocationSchema.optional(),
+  // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+  // the LOU (Letter of Undertaking) flag for corporate
+  // chargeback bookings. The guest never sets this — the
+  // field is staff-toggled post-creation via
+  // `/api/bookings/set-lou-received` once the LOU arrives.
+  // The schema accepts `true` (the rare case where the
+  // corporate client supplied the LOU up-front and the
+  // staff walks it in pre-marked) and `false` (the common
+  // case — the booking is `pending` until the LOU workflow
+  // resolves it). The field defaults to `false` so a
+  // missing value matches the "LOU not yet received"
+  // state.
+  louReceived: z.boolean().optional().default(false),
   _hp: z.string().max(200).optional().default("")
 }).strict();
 
@@ -2019,6 +2088,15 @@ export async function handleCreateBooking(req: any, res: any) {
             : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
+        // Per EXB-12 (2026-08-06, per decision #199): the
+        // extra-bed breakfast toggle. The user opts in to
+        // breakfast for the extra-bed occupant(s). The server
+        // validates the invariant: `extraBedBreakfast`
+        // can only be `true` when `extraBedCount > 0`. A
+        // `true` toggle with 0 extra beds is a client bug
+        // (or a stale URL); we force it off here so the
+        // breakfast total isn't inflated by phantom beds.
+        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount > 0;
         return {
           ...assignedRoom,
           numAdults,
@@ -2028,6 +2106,11 @@ export async function handleCreateBooking(req: any, res: any) {
           extraBedRate: extraBedCount > 0
             ? Math.max(0, Number(selectionType.extraBedRate) || 0)
             : 0,
+          // Per EXB-12: snapshot the breakfast-for-extra-beds
+          // toggle onto the validated stay. The pricing loop
+          // reads this to count the extra beds toward the
+          // breakfast total (same rate as adult breakfast).
+          extraBedBreakfast,
           breakfastIncludesChildren: selection.breakfastIncludesChildren !== undefined
             ? selection.breakfastIncludesChildren
             : breakfastIncludesChildrenDefault
@@ -2307,7 +2390,18 @@ export async function handleCreateBooking(req: any, res: any) {
           numAdults: stay.numAdults,
           numChildren: stay.numChildren,
           numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren
+          breakfastIncludesChildren: stay.breakfastIncludesChildren,
+          // Per EXB-12 (2026-08-06, per decision #199):
+          // when the guest opts in to breakfast for the
+          // extra-bed occupant(s), the helper counts
+          // `extraBedCount` toward the breakfast total
+          // (priced as `breakfastRate × extraBedCount ×
+          // numNights`). The toggle is per-type, snapshotted
+          // onto the validated stay above. The invariant
+          // `extraBedBreakfast implies extraBedCount > 0`
+          // is enforced above.
+          extraBedCount: stay.extraBedCount,
+          extraBedBreakfast: stay.extraBedBreakfast === true
         });
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
@@ -2371,6 +2465,17 @@ export async function handleCreateBooking(req: any, res: any) {
       let appliedVoucherCode = "";
       let voucherUsageUpdate: { ref: any; data: any } | null = null;
       if (voucherCode && !corporateDetails.isCorporate) {
+        // Per VOU-01 (2026-08-14, per the canonical spec at
+        // `plan/features/VOUCHERS.md:91-93`): the increment
+        // is per-child, not per-reservation. The single
+        // top-level `voucherCode` field applies to ALL
+        // rooms in the booking body (no per-line voucher
+        // field exists on `publicRoomSelectionSchema`),
+        // so the increment equals the room count.
+        // Pre-VOU-01 incremented by `+ 1` regardless of
+        // room count — a 3-room reservation consumed 1
+        // cap use instead of 3.
+        const childrenWithVoucherCount = resolvedRoomSelections.length;
         const formattedCode = voucherCode.trim().toUpperCase();
         // Per BI-10 (booking-intercom audit 2026-07-06): the
         // create-time voucher lookup was `vouchers.doc(code)` only,
@@ -2452,7 +2557,7 @@ export async function handleCreateBooking(req: any, res: any) {
             voucherUsageUpdate = {
               ref: voucherRef,
               data: {
-                usageCount: (vData.usageCount || 0) + 1,
+                usageCount: (vData.usageCount || 0) + childrenWithVoucherCount,
                 updatedAt: new Date()
               }
             };
@@ -2777,6 +2882,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // is null for normal bookings; the convert-to-booking UI (per
         // audit 1.4 SEV-1 #2) will populate it.
         linkedInquiryId: linkedInquiryId || null,
+        // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+        // the LOU (Letter of Undertaking) flag for corporate
+        // chargeback bookings. Stamped from the request body
+        // (rare — the LOU usually arrives later and the desk
+        // toggles via `/api/bookings/set-lou-received`). Default
+        // `false`. The field exists on every booking doc; the
+        // `corporate.flat-rate / with-code` paths that arrive
+        // via the public flow set it to the body value, the
+        // walkin + convert-inquiry paths leave it at `false`
+        // (chargeback doesn't apply to those surfaces).
+        louReceived: body.louReceived === true,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
         // Per BI-11 (booking-intercom audit 2026-07-06): the
         // corporate flow collects `designation`,
         // `companyAddress`, `purposeOfStay`, and
@@ -2939,11 +3056,13 @@ export async function handleCreateBooking(req: any, res: any) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: termsConsentVersion,
-        roomCount: assignedRooms.length,
-        activeRoomCount: assignedRooms.length,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 these were the
+        // create-time init for the header's denormalized
+        // counter mirror.
         holdExpiresAt: (newBooking as any).holdExpiresAt
           ? (newBooking as any).holdExpiresAt
           : null,
@@ -3033,6 +3152,14 @@ export async function handleCreateBooking(req: any, res: any) {
               : false,
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
+            // Per EXB-12 (2026-08-06, per decision #199):
+            // snapshot the extra-bed breakfast toggle onto
+            // the booking doc. The invariant
+            // `extraBedBreakfast implies extraBedCount > 0`
+            // is enforced in the validatedRoomStays loop
+            // above. Absent → `false` (no breakfast for extra
+            // beds) for back-compat with older booking docs.
+            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
@@ -4190,9 +4317,19 @@ export async function handleCreateWalkin(req: any, res: any) {
           discountType: voucherData.discountType === "percent" ? "percent" : "flat",
           discountValue: Number(voucherData.discountValue) || 0
         }, voucherBase));
+        // Per VOU-01 (2026-08-14, per the canonical spec at
+        // `plan/features/VOUCHERS.md:91-93`): the increment
+        // is per-child, not per-reservation. The walkin
+        // schema has a single top-level `voucherCode`
+        // field that applies to ALL walked-in rooms (no
+        // per-line field on `WalkinRoomLineSchema`), so
+        // the increment equals `walkinRoomCount`. Pre-
+        // VOU-01 incremented by `+ 1` regardless of room
+        // count — a 3-room walkin consumed 1 cap use
+        // instead of 3.
         voucherUsageUpdate = {
           ref: voucherRef,
-          data: { usageCount: Number(voucherData.usageCount || 0) + 1, updatedAt: new Date() }
+          data: { usageCount: Number(voucherData.usageCount || 0) + walkinRoomCount, updatedAt: new Date() }
         };
       }
 
@@ -4579,15 +4716,14 @@ export async function handleCreateWalkin(req: any, res: any) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: DEFAULT_TERMS_VERSION,
-        // Per MRB-07 (2026-08-02, per decision #159): the aggregate
-        // counters reflect the N room stays this reservation actually
-        // created, so the admin reservation row can show room count,
-        // status and balance without fanning out to the children.
-        roomCount: walkinRoomCount,
-        activeRoomCount: walkinRoomCount,
-        cancelledRoomCount: 0,
-        checkedInRoomCount: status === "checked-in" ? walkinRoomCount : 0,
-        checkedOutRoomCount: 0,
+        // Per BAR-02 (2026-08-08, per decision #203): the
+        // five aggregate counter fields are no longer
+        // written to the reservation header. Consumers
+        // derive them via `deriveReservationCounters` at
+        // read time. Pre-BAR-02 the walkin path mirrored
+        // the public create path's init (the "all
+        // checked-in" branch was the historical quirk
+        // for instant-walkin check-in).
         // Walk-ins have no auto-expiry hold (the staff is
         // creating the booking, not waiting on a guest
         // action) — `null` mirrors the public path's
@@ -4938,6 +5074,442 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
   }
 }
 
+// Per DSC-04 (2026-08-15, found during the discount-flow
+// review that followed VOU-02, per owner decision option (a)):
+// the per-room `handleApplyBookingDiscount` is already atomic
+// per-booking (runTransaction at line 4963), but the admin
+// client's reservation-scope apply loops `for (const targetId
+// of targetIds) { fetch(...apply-discount ... bookingId:
+// targetId) }` over each room. If room 1 succeeds and room 2
+// fails, the desk sees an error but room 1 is already
+// discounted — partial-failure UX + manual correction needed.
+//
+// This handler is the atomic sibling: it accepts a
+// `reservationId`, discovers every child booking via the
+// pre-transaction `bookings.where("reservationId", "==", ...)`
+// pattern used at line 471, opens ONE runTransaction, re-reads
+// every child with `transaction.get` (FOL-03 reads-before-writes),
+// validates the voucher cap ONCE against the SUM of planned
+// writes (`usageCount + eligibleChildrenCount <= usageCap`),
+// and writes the discount to every child + the voucher
+// increment in the same transaction. Any failure aborts the
+// whole transaction — no partial state.
+//
+// Three behaviors that close the original gap:
+//   (a) Voucher cap validation happens once against the SUM,
+//       so a 3-child reservation with 1 cap slot left fails
+//       cleanly with 400 (no over-increment + no partial
+//       writes) instead of the current behavior where 1 child
+//       succeeds + the cap check rejects the 2nd child mid-loop
+//   (b) Each child is re-read inside the transaction (FOL-03),
+//       so a concurrent modification to one child between
+//       discovery and write is caught
+//   (c) The response shape (`{ appliedTo: [...], skipped: [...] }`)
+//       tells the desk exactly which rooms got the discount
+//       and which were skipped (already discounted, ineligible
+//       status, room-type mismatch) — replaces the current
+//       ambiguous "X of Y rooms failed" error
+//
+// Scope decision: this is staff-only. The admin client's
+// reservation-scope path (`BookingsPage.tsx:7874-7908`)
+// switches from looping `/api/bookings/apply-discount` to a
+// single `/api/bookings/apply-reservation-discount` call.
+// Single-room bookings still go through `apply-discount` —
+// the two endpoints coexist (N=1 reservation is byte-equivalent
+// either way; the per-child handler is faster for that case).
+//
+// Idempotency: matches `handleApplyBookingDiscount` (line
+// 4971). A retry with the same `reservationId` + same
+// `discountType`/`voucherCode` is a no-op — all eligible
+// children already have `discountType`/`voucherCode` set, so
+// they go into `skipped` and the cap is not re-incremented.
+export async function handleApplyReservationDiscount(req: any, res: any) {
+  const reservationId = String(req.body?.reservationId || "").trim();
+  const requestedDiscountType = req.body?.discountType;
+  const requestedVoucherCode = String(req.body?.voucherCode || "").trim().toUpperCase();
+  if (!reservationId) {
+    return res.status(400).json({ success: false, error: "Reservation ID is required." });
+  }
+  if (!requestedDiscountType && !requestedVoucherCode) {
+    return res.status(400).json({ success: false, error: "Choose a government discount or enter a voucher code." });
+  }
+  if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
+    return res.status(400).json({ success: false, error: "Invalid government discount type." });
+  }
+
+  // Staff-auth gate — same posture as the per-room handler.
+  // The router enforces this before invoking the handler; we
+  // trust `req.staff` here.
+  const staffUid = String(req.staff?.uid || "staff");
+
+  // Pre-transaction: discover every child booking for the
+  // reservation. Firestore transactions don't support
+  // `.where().get()` queries, so the child IDs must be
+  // gathered outside the transaction. We re-read each child
+  // with `transaction.get` inside the transaction (FOL-03
+  // reads-before-writes) — the pre-transaction read is just
+  // for ID discovery.
+  let childRefs: FirebaseFirestore.DocumentReference[] = [];
+  try {
+    const childSnap = await adminDb.collection("bookings")
+      .where("reservationId", "==", reservationId)
+      .get();
+    childRefs = childSnap.docs.map((doc) => doc.ref);
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Unable to query children." });
+  }
+  if (childRefs.length === 0) {
+    return res.status(404).json({ success: false, error: "Reservation has no bookings." });
+  }
+
+  try {
+    let result: { appliedTo: string[]; skipped: string[]; voucherUsageCount?: number } = { appliedTo: [], skipped: [] };
+    await adminDb.runTransaction(async (transaction) => {
+      // Read the reservation header (audit trail) + every
+      // child + the voucher (if any). ALL reads complete
+      // BEFORE any write (FOL-03).
+      const reservationRef = adminDb.collection("reservations").doc(reservationId);
+      const reservationSnap = await transaction.get(reservationRef);
+      if (!reservationSnap.exists) throw new Error("Reservation not found.");
+
+      const childSnapshots: { id: string; ref: FirebaseFirestore.DocumentReference; data: any }[] = [];
+      for (const ref of childRefs) {
+        const snap = await transaction.get(ref);
+        if (!snap.exists) {
+          throw new Error(`Booking ${ref.id} not found.`);
+        }
+        childSnapshots.push({ id: ref.id, ref, data: snap.data()! });
+      }
+
+      // Discover eligibility: each child must be in a status
+      // that allows discount + must not already have a
+      // discount or voucher applied. Eligible children are
+      // updated in this transaction; skipped children go into
+      // the response but get no write.
+      const eligibleStatuses = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+      const eligible: typeof childSnapshots = [];
+      const skipped: string[] = [];
+      for (const child of childSnapshots) {
+        if (!eligibleStatuses.includes(child.data.status)) {
+          skipped.push(child.id);
+          continue;
+        }
+        if (child.data.discountType || child.data.voucherCode) {
+          skipped.push(child.id);
+          continue;
+        }
+        eligible.push(child);
+      }
+      if (eligible.length === 0) {
+        throw new Error("No eligible bookings in this reservation (all already have a discount or voucher, or are checked-out/cancelled).");
+      }
+
+      // Voucher lookup + cap validation against the SUM of
+      // planned writes. The cap check happens ONCE here — if
+      // usageCount + eligibleChildrenCount > usageCap, the
+      // entire transaction aborts.
+      let voucherRef: FirebaseFirestore.DocumentReference | null = null;
+      let voucherData: any = null;
+      if (requestedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(requestedVoucherCode);
+        let snap: any = await transaction.get(voucherRef);
+        if (!snap.exists) {
+          const querySnap = await transaction.get(
+            adminDb.collection("vouchers").where("code", "==", requestedVoucherCode).limit(1)
+          );
+          if (!querySnap.empty) {
+            snap = querySnap.docs[0];
+            voucherRef = snap.ref;
+          }
+        }
+        if (!snap.exists) throw new Error("Voucher is invalid or no longer available.");
+        voucherData = snap.data();
+        const expiresAt = toDateOrNull(voucherData.expiresAt);
+        const applicableRoomTypes = voucherData.applicableRoomTypes || [];
+        const capAllows = voucherData.usageCap == null
+          || Number(voucherData.usageCount || 0) + eligible.length <= Number(voucherData.usageCap);
+        const roomsApply = applicableRoomTypes.length === 0
+          || eligible.every((c) => applicableRoomTypes.includes(c.data.roomType));
+        const valid = voucherData.isActive !== false
+          && (!expiresAt || expiresAt >= new Date())
+          && capAllows
+          && roomsApply;
+        if (!valid) throw new Error("Voucher is invalid or no longer available.");
+      }
+
+      // Compute + write per-child updates. The discount math
+      // is the per-child shape from `handleApplyBookingDiscount`
+      // (line 4990-5064); we hoist the constants out of the
+      // loop so they're computed once per transaction.
+      const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
+      const discountPct = discountType ? 20 : 0;
+
+      for (const child of eligible) {
+        const booking = child.data;
+        const breakdown = booking.rateBreakdown as BookingRateBreakdown | undefined;
+        const storedOriginalTotal = Number(booking.originalTotalPrice);
+        const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0)
+          + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+        const storedTotalPrice = Number(booking.totalPrice);
+        const subtotal = booking.originalTotalPrice !== null
+          && booking.originalTotalPrice !== undefined
+          && Number.isFinite(storedOriginalTotal)
+          && storedOriginalTotal >= 0
+          ? storedOriginalTotal
+          : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0
+            ? breakdownSubtotal
+            : storedTotalPrice;
+        if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
+
+        const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+        const voucherBase = calculateVoucherBase(subtotal, seniorPwdDiscount);
+        let voucherDiscount = 0;
+        let voucherCode = "";
+        if (requestedVoucherCode && voucherData) {
+          voucherCode = requestedVoucherCode;
+          voucherDiscount = Math.round(calculateVoucherDiscount({
+            discountType: voucherData.discountType === "percent" ? "percent" : "flat",
+            discountValue: Number(voucherData.discountValue) || 0
+          }, voucherBase));
+        }
+        const afterVoucher = calculateVoucherBase(voucherBase, voucherDiscount);
+        const memberDiscountPct = Number(booking.memberDiscountPct || 0);
+        const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
+        const pointsValue = Number(booking.pointsRedeemedValue || 0);
+        const totalPrice = Math.max(afterVoucher - memberDiscount - pointsValue, 0);
+        const rateBreakdown = buildRateBreakdown({
+          roomLines: breakdown?.roomLines || [],
+          roomSubtotal: Number(breakdown?.roomSubtotal || subtotal),
+          breakfastTotal: (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
+          discountType,
+          discountPct,
+          voucherDiscount,
+          memberDiscountPct,
+          pointsRedeemedValue: pointsValue,
+          finalTotal: totalPrice
+        });
+        const updates = {
+          originalTotalPrice: subtotal,
+          discountType,
+          discountPct,
+          discountVerified: Boolean(discountType),
+          discountVerifiedBy: discountType ? staffUid : null,
+          discountRejected: false,
+          discountRejectedBy: null,
+          discountRejectionReason: "",
+          voucherCode,
+          voucherDiscount,
+          totalPrice,
+          rateBreakdown,
+          updatedAt: new Date()
+        };
+        transaction.update(child.ref, updates);
+      }
+
+      // Single voucher write — the per-child increment
+      // (`eligible.length`) matches VOU-01's per-child
+      // semantics: a 3-child reservation with a voucher
+      // applied to all 3 children increments usageCount by 3.
+      let voucherUsageCount: number | undefined;
+      if (voucherRef && voucherData) {
+        voucherUsageCount = Number(voucherData.usageCount || 0) + eligible.length;
+        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: new Date() });
+      }
+
+      result = {
+        appliedTo: eligible.map((c) => c.id).sort(),
+        skipped: skipped.sort(),
+        voucherUsageCount
+      };
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    const message = error.message || "Unable to apply the discount or voucher.";
+    let status = 400;
+    if (message === "Reservation not found." || message.startsWith("Booking ") && message.endsWith(" not found.")) {
+      status = 404;
+    } else if (message === "Reservation has no bookings.") {
+      status = 404;
+    }
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
+// Per VOU-02 (2026-08-14, found during the discount-flow
+// review that followed STR-01): the spec at
+// plan/features/VOUCHERS.md:44 promises a "Remove applied
+// voucher option" but there was no server endpoint to
+// remove a voucher without canceling the booking. The
+// asymmetry the audit caught: handleRejectDiscount
+// exists for senior/PWD but there's no equivalent for
+// vouchers. The cancel-handler decrements usageCount on
+// cancel, but staff can't correct a mistaken apply
+// without canceling the booking (which is destructive
+// for the guest — they lose their reservation).
+//
+// This handler is the mirror of handleApplyBookingDiscount's
+// voucher branch:
+//   - reads the booking + voucher in one transaction (FOL-03)
+//   - clears voucherCode + voucherDiscount
+//   - rebuilds rateBreakdown via the shared
+//     calculateDiscountChain helper (same shape as
+//     handleRejectDiscount at line 5124) with
+//     voucherAmount: 0 (the chain sees no voucher
+//     discount on the rebuild)
+//   - decrements vouchers.usageCount by 1 (mirror of
+//     apply at line 5022), clamped at 0 — the cancel
+//     handler at store.ts:490 uses the same clamp shape
+//   - idempotent: returns success if no voucherCode is
+//     set (the "already removed" no-op + the "cancel
+//     cleared it" no-op compose cleanly)
+//   - stamps staffRejectedBy + rejectReason on the
+//     booking doc for audit trail (mirror of
+//     handleRejectDiscount at line 5152)
+//
+// Scope decision: this is a staff operation only. The
+// guest-facing "Remove" link in VOUCHERS.md:44 implies
+// a separate endpoint (the bookingId + guestEmail + token
+// auth pattern, mirroring /api/bookings/lookup). Building
+// the guest path is out of scope for VOU-02 — staff can
+// correct mistakes via this endpoint, and a future
+// guest-side remove endpoint would compose with this one
+// (idempotency holds).
+export async function handleRemoveVoucher(req: any, res: any) {
+  const bookingId = String(req.body?.bookingId || "").trim();
+  const reason = String(req.body?.reason || "").trim();
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid booking id." });
+  }
+
+  // Mirror of handleApplyBookingDiscount line ~4967:
+  // staff-authenticated, router sets `req.staff`.
+  const staffUid = String(req.staff?.uid || "staff");
+
+  try {
+    let result: Record<string, any> = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+
+      const bookingData = bookingDoc.data()!;
+
+      // Idempotency: if no voucher is currently
+      // applied, the call is a no-op (the "already
+      // removed" case + the "cancel cleared it"
+      // case compose cleanly). Mirror of the
+      // apply-discount idempotency check at line 4971.
+      const existingVoucherCode = String(bookingData.voucherCode || "").trim();
+      if (!existingVoucherCode) {
+        result = { idempotentReplay: true, bookingId };
+        return;
+      }
+
+      // Per FOL-03 reads-before-writes: read the booking
+      // doc + the voucher doc BEFORE any writes. The
+      // booking-doc update + the voucher-doc update
+      // go in one contiguous write block after the reads.
+      const voucherRef = adminDb.collection("vouchers").doc(existingVoucherCode);
+      const voucherDoc = await transaction.get(voucherRef);
+
+      // Mirror of handleRejectDiscount at line 5124:
+      // rebuild the discount chain with voucherAmount: 0
+      // (we just removed the voucher, so the chain sees
+      // no voucher discount). The originalTotalPrice +
+      // snapshotted discountScope + member/points chain
+      // recompute the correct post-removal totalPrice.
+      const originalTotalPrice = bookingData.originalTotalPrice;
+      if (originalTotalPrice === null || originalTotalPrice === undefined) {
+        throw new Error("Original total price not stored on booking.");
+      }
+      const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
+      const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
+      const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue)
+        ? Math.max(rawPointsRedeemedValue, 0)
+        : 0;
+      const removeChain = calculateDiscountChain({
+        roomTotal: Number(originalTotalPrice) || 0,
+        breakfastTotal: 0,
+        extraBedTotal: 0,
+        seniorPct: 0,
+        // Per the VOU-02 fix: voucher is being removed,
+        // so the chain sees voucherAmount: 0. The
+        // member-discount base widens to include the
+        // voucher-amount range (the guest pays more
+        // after removal, member discount applies to
+        // the larger pre-voucher base).
+        voucherAmount: 0,
+        memberPct: memberDiscountPct,
+        scope: normalizeDiscountScope(bookingData.discountScopeSnapshot),
+        round: true
+      });
+      const restoredTotalPrice = Math.max(removeChain.total - pointsRedeemedValue, 0);
+      const rateBreakdown = rebuildRateBreakdown({
+        // Strip `voucherCode` before spreading — it's
+        // not part of the `RebuildableBooking` type
+        // (the type only carries `voucherDiscount`).
+        // The clear is intentional (we're removing
+        // the voucher) so a stray `voucherCode`
+        // leaking through the spread would be
+        // semantically wrong.
+        ...((): any => {
+          const { voucherCode: _omit, ...rest } = bookingData;
+          return rest;
+        })(),
+        voucherCode: "",
+        voucherDiscount: 0,
+        pointsRedeemedValue,
+        totalPrice: restoredTotalPrice
+      }, {
+        pointsRedeemedValue,
+        finalTotal: restoredTotalPrice
+      });
+
+      // Per BF-15 (booking-flow audit 2026-06-26):
+      // `staffRejectedBy` is a staff UID per the BACKEND.md
+      // schema. Use the auth result, not the email.
+      // Per VOU-02: stamp a `staffRemovedVoucherBy` field
+      // (mirror of `discountRejectedBy`) so the audit
+      // trail distinguishes "voucher was removed by staff"
+      // from "voucher was cleared on cancel".
+      const updates = {
+        voucherCode: "",
+        voucherDiscount: 0,
+        staffRemovedVoucherBy: staffUid,
+        staffRemovedVoucherReason: reason,
+        staffRemovedVoucherAt: new Date(),
+        totalPrice: restoredTotalPrice,
+        ...(rateBreakdown ? { rateBreakdown } : {}),
+        updatedAt: new Date()
+      };
+
+      // Per the VOU-02 contract: decrement usageCount
+      // by 1, clamped at 0. Mirror of the cancel-handler
+      // decrement shape at store.ts:490. The apply
+      // handler at line 5022 increments by 1 (no clamp
+      // — usageCount is always 0+ when apply runs); the
+      // remove handler mirrors that direction in reverse.
+      if (voucherDoc.exists) {
+        const voucherData = voucherDoc.data() || {};
+        transaction.update(voucherRef, {
+          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: new Date()
+        });
+      }
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    const message = error.message || "Unable to remove the voucher.";
+    const status = message === "Booking not found." ? 404 : 400;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
 export async function handleRejectDiscount(req: any, res: any) {
   const { bookingId, reason } = req.body;
   if (!bookingId) {
@@ -5044,6 +5616,132 @@ export async function handleRejectDiscount(req: any, res: any) {
   }
 }
 
+// Per LOW-1 (reports audit 2026-08-10) +
+// `DECISIONS-FEATURES.md #99` (LOU workflow):
+// the staff-toggled LOU (Letter of Undertaking) flag
+// for corporate chargeback bookings. A corporate
+// chargeback lands as `status: "pending" +
+// paymentMethod: "pay-at-hotel" + isCorporate: true`
+// and stays pending until the company's LOU arrives
+// by email (per `plan/features/CORPORATE-BOOKING.md`
+// §LOU). The desk previously had no way to mark the
+// LOU as received — `louReceived` was declared in
+// `TYPES.md` but never written or read by any code
+// path, so the receivables widget's "Corporate AR"
+// card was perpetually inflated by chargeback rows
+// that had already been resolved out-of-band.
+//
+// The toggle is a strict staff-only mutation (matches
+// the auth posture of `apply-discount` +
+// `reject-discount` + `reject-payment`): the
+// `authenticateStaff` middleware at the apiRouter
+// level gates the call. The `louReceivedAt` +
+// `louReceivedBy` companion fields are stamped on
+// the same write so the audit trail matches the
+// existing staff-mutation fields (`handledBy`,
+// `discountVerifiedBy`, `cancelledBy`, etc.).
+//
+// The endpoint accepts the same `true` / `false`
+// payload as the schema; a `null` / missing value is
+// rejected at the schema level (the desk must be
+// explicit). To UN-mark an LOU (the rare "we marked
+// it received but the company withdrew" case), the
+// desk can call this endpoint with `louReceived:
+// false`; the `louReceivedAt` / `louReceivedBy`
+// companions are cleared in the same write.
+export async function handleSetLouReceived(req: any, res: any) {
+  const { bookingId, louReceived } = req.body || {};
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (typeof louReceived !== "boolean") {
+    return res.status(400).json({ success: false, error: "louReceived must be a boolean (true or false)." });
+  }
+
+  try {
+    let result: Record<string, any> = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(String(bookingId).trim());
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("Booking not found.");
+      }
+      const booking = bookingSnap.data()!;
+      // Per DECISIONS-FEATURES.md #99: LOU only applies
+      // to corporate chargeback bookings. A non-corporate
+      // booking (personal pay, walk-in, online) cannot
+      // have a chargeback. The guard prevents the desk
+      // from accidentally toggling the flag on the
+      // wrong booking shape.
+      if (booking.isCorporate !== true) {
+        throw new Error("LOU flag only applies to corporate chargeback bookings (isCorporate: true).");
+      }
+      // Per DECISIONS-FEATURES.md #99: the LOU is the
+      // settlement trigger for chargebacks
+      // (`paymentMethod === "pay-at-hotel"`). A corporate
+      // personal-pay booking never has an LOU — even if
+      // the desk toggles the flag, the math consumers
+      // (Reports) only use it on chargeback rows. We
+      // allow the toggle here for forward-compat but the
+      // guard above is the corporate-true check.
+      if (booking.paymentMethod !== "pay-at-hotel") {
+        throw new Error("LOU flag only applies to chargeback bookings (paymentMethod: 'pay-at-hotel').");
+      }
+      const staffUid = req.staff?.uid || "staff";
+      const now = new Date();
+      // Per the unwired-spec fix: the LOU toggle is a
+      // single-stamp field write. We do NOT change
+      // `status` here — the booking stays `pending`
+      // (or whatever status the desk has flipped it to)
+      // and the LOU flag is a parallel signal. The
+      // receivables widget's filter (per MED-1) now
+      // reads the LOU flag AND the status to decide
+      // whether to count a chargeback row; the
+      // combined rule is: `isCorporate + paymentMethod
+      // === 'pay-at-hotel' + louReceived !== true` is
+      // still AR (LOU not yet received). Once
+      // `louReceived === true` the row is excluded
+      // from the corporate AR widget (the receivable
+      // was settled via LOU, not a payment).
+      //
+      // Wait — looking at the MED-1 fix above, the
+      // receivables filter does NOT check
+      // `louReceived`. So a "LOU received" row is
+      // STILL in the receivables list (status is
+      // still `pending`, the desk hasn't flipped the
+      // status). That's by-design for now: the LOU
+      // is "we have the paperwork" but the actual
+      // payment is still pending. A future fix can
+      // also auto-flip the status to `confirmed` when
+      // the LOU arrives (the staff has accepted the
+      // chargeback terms). For this round the LOU
+      // field is a signal + audit stamp; the status
+      // stays in the desk's hands.
+      const updates: Record<string, any> = {
+        louReceived,
+        ...(louReceived
+          ? {
+              louReceivedAt: now,
+              louReceivedBy: staffUid
+            }
+          : {
+              louReceivedAt: null,
+              louReceivedBy: null
+            }),
+        updatedAt: now
+      };
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    const message = error.message || "An unexpected error occurred while updating the LOU flag.";
+    const status = message === "Booking not found." ? 404 : 400;
+    console.error("Set LOU handler error:", error);
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
 // Per Phase 12 — Dashboard Payment Rejection & Reference
 // Verification (2026-07-15). Staff reject a pending
 // payment proof from the dashboard; the booking is
@@ -5080,6 +5778,16 @@ export async function handleRejectPayment(req: any, res: any) {
   const paymentRejectedBy = req.staff?.uid || "staff";
 
   let bookingData: any = null;
+  // Per FOL-05 (2026-08-07, per decision #201): the
+  // count of sibling children that just transitioned
+  // from `payment-uploaded` back to `pending` inside
+  // this reject transaction. Symmetric with
+  // `handleVerifyAndRecordPayment`'s `siblingFlippedCount`
+  // — the staff sees "X rooms rejected" in the bell
+  // panel + the response. Zero for the N=1 case
+  // (no siblings) or for legacy null-`reservationId`
+  // bookings.
+  let siblingRejectedCount = 0;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     // Per PEX-04 (2026-08-01, per decision #147): stamping a
@@ -5097,26 +5805,59 @@ export async function handleRejectPayment(req: any, res: any) {
     let paymentRejectedBy: string | null = null;
     let freshHoldExpiresAt: Date | null = null;
     await adminDb.runTransaction(async (transaction) => {
+      // ---- READS — all reads first, per FOL-03 ----
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
         throw new Error("Booking not found.");
       }
       const data = bookingDoc.data()!;
-      if (data.status !== "payment-uploaded") {
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // relaxed target check. The pre-FOL-05 handler
+      // threw INVALID_STATUS when the target was not
+      // `payment-uploaded`. For N>1 we want to allow
+      // a reservation-scope reject even when the lead
+      // booking is already `payment-confirmed` (e.g. a
+      // partial-verify edge case the staff wants to
+      // walk back) — the lead's own status update is
+      // skipped, but the still-`payment-uploaded`
+      // siblings flip back to `pending`. The
+      // `hasRejectableSiblings` pre-read below is the
+      // decision input. checked-in / checked-out /
+      // cancelled remain rejected.
+      const isTargetInPaymentUploaded = data.status === "payment-uploaded";
+      const bookingReservationId = String((data as any).reservationId || "").trim();
+
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // pre-read sibling children for the sibling-flip
+      // pass. Same pattern as
+      // `handleVerifyAndRecordPayment` + `handleAddPayment`.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the pre-read is the shared
+      // `preReadSiblingChildren` helper. The
+      // `bookingReservationId.length === 0` guard
+      // (inside the helper) skips the pre-read for
+      // legacy null-`reservationId` bookings — the
+      // pre-FOL-05 single-child-only path stays
+      // byte-equivalent.
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId,
+        (d) => ({
+          id: d.id,
+          status: String((d.data() || {}).status || "")
+        })
+      );
+      const hasRejectableSiblings = siblingChildBookings.some(
+        (c) => c.id !== bookingId && c.status === "payment-uploaded"
+      );
+
+      if (!isTargetInPaymentUploaded && !hasRejectableSiblings) {
         throw new Error(`Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`);
       }
-      bookingData = data;
 
-      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
-      // the canonical `reservationId` derivation for the
-      // reservation header mirror. Same pattern as
-      // `handleAddPayment` + `handleVerifyAndRecordPayment` —
-      // `String((data as any).reservationId || "").trim()`
-      // collapses legacy null / undefined / whitespace to
-      // `""` so the legacy adapter (booking without a
-      // reservation header) is a clean `length === 0` skip
-      // below.
-      const bookingReservationId = String((data as any).reservationId || "").trim();
+      bookingData = data;
 
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
@@ -5134,46 +5875,83 @@ export async function handleRejectPayment(req: any, res: any) {
       paymentRejectedBy = paymentRejectedBy;
       freshHoldExpiresAt = newDeadline;
 
-      transaction.update(bookingRef, {
-        status: "pending",
-        paymentRejectionReason: safeReason,
-        paymentRejectedAt: updatedAt,
-        paymentRejectedBy,
-        // Per PEX-04 (2026-08-01, per decision #147): a fresh
-        // snapshotted deadline. The retained `paymentProofPath` /
-        // legacy `paymentProofUrl` are audit evidence only and
-        // do NOT exempt this booking — the `holdExpiresAt` is
-        // the only expiry authority. If the guest does not
-        // re-upload, the daily cron (PEX-06) retires the booking
-        // at this deadline.
-        holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
-        // Per the implementation plan: stale proof state is
-        // kept for audit. The re-upload is guest-driven via
-        // the existing `pending` UI on the lookup page.
-        updatedAt
-      });
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // compute the post-update child statuses. Every
+      // child currently in `payment-uploaded` flips to
+      // `pending` (the lead + every rejectable sibling).
+      // For legacy N=1 the array has one element (the
+      // target) and the rule is byte-equivalent to the
+      // pre-FOL-05 single-child update.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204): the
+      // sibling-flip pass is the shared
+      // `applyReservationScopePaymentTransition` helper.
+      // The handler passes a per-handler `rule.decide`
+      // callback (the per-child rejection rule + the
+      // write payload); the helper handles the
+      // per-sibling `transaction.update` + the
+      // post-update statuses array + the reservation
+      // header heartbeat.
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingRejectedCount } =
+        applyReservationScopePaymentTransition(
+          transaction,
+          adminDb,
+          bookingReservationId,
+          bookingId,
+          siblingChildBookings,
+          (child) => {
+            if (child.status === "payment-uploaded") {
+              const decision: SiblingFlipDecision = {
+                write: {
+                  status: "pending",
+                  paymentRejectionReason: safeReason,
+                  paymentRejectedAt: updatedAt,
+                  paymentRejectedBy,
+                  holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+                  updatedAt
+                },
+                newStatus: "pending"
+              };
+              return decision;
+            }
+            return null;
+          },
+          updatedAt
+        );
+      siblingRejectedCount = helperSiblingRejectedCount;
 
-      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
-      // the reservation header's `paymentStatus` mirror.
-      // The booking just transitioned from `payment-uploaded`
-      // back to `pending` (the check at the top of the
-      // transaction guarantees this is the only possible
-      // transition), so the mirror value is
-      // `mapBookingStatusToReservationPaymentStatus("pending")`
-      // = `"awaiting-payment"`. The
-      // `bookingReservationId.length > 0` guard skips the
-      // write for legacy null-`reservationId` bookings
-      // (pre-MRB-01) — byte-equivalent to pre-Phase 3
-      // behavior for legacy records. The same `updatedAt`
-      // is used for the booking update AND the header
-      // mirror — no clock skew between the two.
-      if (bookingReservationId.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        transaction.update(reservationRef, {
-          paymentStatus: mapBookingStatusToReservationPaymentStatus("pending"),
+      // ---- WRITES — all writes after every `get()`, per FOL-03 ----
+
+      // 1. Update the target booking (only if it was
+      // actually in `payment-uploaded`).
+      if (isTargetInPaymentUploaded) {
+        transaction.update(bookingRef, {
+          status: "pending",
+          paymentRejectionReason: safeReason,
+          paymentRejectedAt: updatedAt,
+          paymentRejectedBy,
+          // Per PEX-04 (2026-08-01, per decision #147): a fresh
+          // snapshotted deadline. The retained `paymentProofPath` /
+          // legacy `paymentProofUrl` are audit evidence only and
+          // do NOT exempt this booking — the `holdExpiresAt` is
+          // the only expiry authority. If the guest does not
+          // re-upload, the daily cron (PEX-06) retires the booking
+          // at this deadline.
+          holdExpiresAt: newDeadline ? Timestamp.fromDate(newDeadline) : null,
+          // Per the implementation plan: stale proof state is
+          // kept for audit. The re-upload is guest-driven via
+          // the existing `pending` UI on the lookup page.
           updatedAt
         });
       }
+
+      // 2. Per BAR-03 (2026-08-08, per decision #204):
+      // the per-sibling `transaction.update` calls + the
+      // reservation header heartbeat are queued by the
+      // shared `applyReservationScopePaymentTransition`
+      // helper above (called from the post-update status
+      // computation step). The target's own status
+      // update was already queued at step 1.
     });
 
     return res.status(200).json({
@@ -5183,7 +5961,12 @@ export async function handleRejectPayment(req: any, res: any) {
         paymentRejectionReason,
         paymentRejectedAt,
         paymentRejectedBy,
-        holdExpiresAt: freshHoldExpiresAt
+        holdExpiresAt: freshHoldExpiresAt,
+        // Per FOL-05 (2026-08-07, per decision #201):
+        // the sibling-rejection count for symmetry with
+        // `handleVerifyAndRecordPayment`. Zero for the
+        // N=1 case or when no flippable siblings.
+        siblingRejectedCount
       }
     });
   } catch (error: any) {
@@ -5224,6 +6007,27 @@ export async function handleCancelBooking(req: any, res: any) {
   const cancelledBy = isStaffCancellation
     ? String(req.staff.uid)
     : "guest";
+
+  // Per BK-05 / decision #221 (2026-08-19): staff cancellations
+  // require a non-empty reason. Mirrors the UCO pattern at the
+  // checkout handler (`UNPAID_REASON_REQUIRED` — `bookings.ts:9643`)
+  // which CLS-01 surfaced. The admin client (`BookingsPage.tsx`)
+  // also gates the UI with `reasonRequired={true}` on all three
+  // cancel `ConfirmForm`s (booking + 2 store-order call sites).
+  // Guest cancellations are NOT gated here — they go through
+  // `guestCancelSchema` in `apiRouter.ts` with their own
+  // min-length validation. Defense-in-depth: even if a future
+  // client refactor drops the prop, the server still rejects
+  // empty-reason staff cancels with a 400 + the canonical
+  // `CANCELLATION_REASON_REQUIRED` code.
+  if (isStaffCancellation && !validReason.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: "CANCELLATION_REASON_REQUIRED",
+      message:
+        "A non-empty cancellation reason is required for staff cancellations."
+    });
+  }
 
   try {
     let bookingDocumentRef: any;
@@ -5478,6 +6282,20 @@ export async function handleCancelBooking(req: any, res: any) {
         // snapshot is `null` when `policyRefund === 0`
         // (no liability work to do) and the field is
         // simply absent from the header update.
+        // Per CRL-07 fix (2026-08-11, decision #184): the
+        // snapshot fallback chain — child booking's own
+        // snapshot, then the reservation header's. Without
+        // the reservation fallback, every child whose
+        // booking doc has no snapshot (the current state
+        // — snapshots are written to the reservation
+        // header at create time, not the child) produces
+        // `policyRefund: 0` for any beyond-cutoff cancel,
+        // silently swallowing the guest's refund. The
+        // header's snapshot is the canonical source for
+        // the whole reservation, so we use it here. Same
+        // fix lives in `handleCancelPreview`.
+        const reservationCancellationPolicySnapshotForLiability =
+          (reservationData && reservationData.cancellationPolicySnapshot) || null;
         const cancellableChildren = children
           .filter((c) => cancellableIds.has(c.id))
           .map((c) => ({
@@ -5487,7 +6305,8 @@ export async function handleCancelBooking(req: any, res: any) {
             roomType: String(c.data.roomType || ""),
             totalPrice: Number(c.data.totalPrice) || 0,
             reservationPosition: Number(c.data.reservationPosition) || null,
-            cancellationPolicySnapshot: c.data.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot:
+              c.data.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
           }));
         const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
           transaction,
@@ -5501,7 +6320,8 @@ export async function handleCancelBooking(req: any, res: any) {
               roomType: String(bookingData.roomType || ""),
               totalPrice: Number(bookingData.totalPrice) || 0,
               reservationPosition: Number(bookingData.reservationPosition) || null,
-              cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+              cancellationPolicySnapshot:
+                bookingData.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
             },
             reservation: {
               id: lookedUpReservationId,
@@ -5618,31 +6438,17 @@ export async function handleCancelBooking(req: any, res: any) {
           }
         }
 
-        // Per MRB-13: the reservation header mirror.
-        // `cancelledRoomCount` is incremented by the
-        // number of children we just cancelled in
-        // this transaction (NOT by `children.length`
-        // — a partial cancel only bumps the counter
-        // for the children we actually flipped).
-        // `activeRoomCount` is decremented by the
-        // same count, floored at 0 (the helper
-        // already floors, the explicit `Math.max`
-        // makes the invariant obvious to a future
-        // reader). `paymentStatus` is the aggregate
-        // from the post-cancellation state of every
-        // child (cancelled children report
-        // `"cancelled"`, survivors report their
-        // current status). When every child is
-        // cancelled the aggregate is `"cancelled"`
-        // — same as the per-child N=1 case.
-        const newActiveRoomCount = Math.max(
-          (Number(reservationData.activeRoomCount) || 0) - cancelledCount,
-          0
-        );
-        const newCancelledRoomCount = (Number(reservationData.cancelledRoomCount) || 0) + cancelledCount;
-        const postStatuses = children.map((c) =>
-          cancellableIds.has(c.id) ? "cancelled" : String(c.data.status || "")
-        );
+        // Per BAR-02 (2026-08-08, per decision #203):
+        // the five aggregate counter fields +
+        // `paymentStatus` are no longer written to the
+        // reservation header on cancel. Consumers
+        // derive them via `deriveReservationCounters` +
+        // `computeReservationAggregatePaymentStatus`
+        // over the children at read time. The
+        // per-child cancellation stamps (CRL-02) and
+        // the liability snapshot (CRL-07) are still
+        // written — those are real denormalized
+        // values, not pure projections.
         // Per CRL-07 (2026-08-03, per decision #173):
         // the liability snapshot is stamped onto the
         // reservation header (the source of truth for
@@ -5652,9 +6458,6 @@ export async function handleCancelBooking(req: any, res: any) {
         // shares the same `now` as the cancellation
         // stamp — no clock skew between the two.
         const reservationHeaderUpdate: Record<string, any> = {
-          cancelledRoomCount: newCancelledRoomCount,
-          activeRoomCount: newActiveRoomCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(postStatuses),
           updatedAt: now
         };
         if (liabilitySnapshot) {
@@ -5751,7 +6554,43 @@ export async function handleCancelBooking(req: any, res: any) {
       // (the header has no liability field on a
       // per-child cancel — the cancelled child
       // carries the snapshot).
+      // Per CRL-07 fix (2026-08-11, decision #184): the
+      // per-child branch also needs the reservation
+      // header snapshot as a fallback. The booking's
+      // own `cancellationPolicySnapshot` is null in the
+      // current write shape (the snapshot lives on the
+      // reservation), so we read the header here. If
+      // the header exists, use its snapshot; otherwise
+      // (legacy null-`reservationId`) synthesize a
+      // legacy-default snapshot from the booking's own
+      // `checkIn` field — same fix as in
+      // `handleCancelPreview`.
       const bookingReservationIdForLiability = String(freshBooking.reservationId || "").trim();
+      let perChildReservationCancellationPolicySnapshot: any = null;
+      if (bookingReservationIdForLiability.length > 0) {
+        const perChildReservationRef = adminDb.collection("reservations").doc(bookingReservationIdForLiability);
+        const perChildReservationDoc = await transaction.get(perChildReservationRef);
+        if (perChildReservationDoc.exists) {
+          perChildReservationCancellationPolicySnapshot =
+            (perChildReservationDoc.data() || {}).cancellationPolicySnapshot || null;
+        }
+      }
+      const perChildLegacyFallbackSnapshot = !bookingReservationIdForLiability && freshBooking.checkIn
+        ? {
+            cutoffHours: 48,
+            refundPctBefore: 100,
+            refundPctAfter: 0,
+            policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+            scheduledCheckInTime: (freshBooking.checkIn.toDate
+              ? freshBooking.checkIn.toDate()
+              : new Date(freshBooking.checkIn)).toISOString(),
+            source: "legacy-fallback" as const
+          }
+        : null;
+      const perChildEffectiveSnapshot =
+        freshBooking.cancellationPolicySnapshot
+        || perChildReservationCancellationPolicySnapshot
+        || perChildLegacyFallbackSnapshot;
       const liabilitySnapshot = await computeCancellationLiabilityInTransaction(
         transaction,
         {
@@ -5764,7 +6603,7 @@ export async function handleCancelBooking(req: any, res: any) {
             roomType: String(freshBooking.roomType || ""),
             totalPrice: Number(freshBooking.totalPrice) || 0,
             reservationPosition: Number(freshBooking.reservationPosition) || null,
-            cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot: perChildEffectiveSnapshot
           },
           // For per-child cancel, the helper needs
           // the reservation context (the folio read
@@ -5787,7 +6626,7 @@ export async function handleCancelBooking(req: any, res: any) {
             roomType: String(freshBooking.roomType || ""),
             totalPrice: Number(freshBooking.totalPrice) || 0,
             reservationPosition: Number(freshBooking.reservationPosition) || null,
-            cancellationPolicySnapshot: freshBooking.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot: perChildEffectiveSnapshot
           }]
         }
       );
@@ -5856,14 +6695,19 @@ export async function handleCancelBooking(req: any, res: any) {
       // (MRB-05 PR #2). The clawback code is below
       // (after the reservation header mirror). The
       // terminal-status reject above was also updated
-      // to exclude `checked-out` (per the spec body
-      // "A production cancellation never deletes the
-      // reservation; an all-cancelled reservation
-      // remains the audit/financial record").
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on a
+      // single-cancel. Consumers derive it at read
+      // time (an all-cancelled N=1 reservation
+      // surfaces the `"cancelled"` aggregate
+      // automatically). The per-child cancellation
+      // stamps (CRL-02) + the liability snapshot
+      // (CRL-07) on the booking doc are unchanged —
+      // those are real denormalized values.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["cancelled"]),
           updatedAt: now
         });
       }
@@ -6244,6 +7088,23 @@ export async function handleCancelPreview(req: any, res: any) {
       cancellationPolicySnapshot: any;
     }> = [];
     let allocationSubtotal = Math.max(Number(bookingData.totalPrice) || 0, 0);
+    // Per CRL-06 fix (2026-08-11, decision #184): the
+    // reservation header's snapshot. Hoisted to the
+    // outer `try` scope because the anchor's snapshot
+    // fallback chain (just below the `if`/`else`,
+    // `lookedUpBookingForHelper.cancellationPolicySnapshot`)
+    // references it. Keeping the declaration inside
+    // `if (hasReservation) { ... }` put the binding
+    // in the inner block scope, so the outer reference
+    // threw `ReferenceError: reservationCancellationPolicySnapshot
+    // is not defined` and surfaced as a 500 on every
+    // cancel-preview for a booking that has a
+    // `reservationId` (the common modern path). The
+    // legacy `!hasReservation` branch never assigns it
+    // (it stays `null`) and the anchor's ternary gates
+    // the use to the reservation case — same fallback
+    // semantics, just declared where it's read.
+    let reservationCancellationPolicySnapshot: any = null;
 
     if (hasReservation) {
       const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
@@ -6262,6 +7123,27 @@ export async function handleCancelPreview(req: any, res: any) {
         reservationRef: String(reservationSnapshot.reservationRef || ""),
         totalPrice: Number(reservationSnapshot.totalPrice) || 0
       };
+      // Per CRL-06 fix (2026-08-11, decision #184): at
+      // booking creation the snapshot is written to the
+      // RESERVATION header (`reservations/{id}.cancellationPolicySnapshot`),
+      // not to the child booking. The cancel-preview
+      // helper (`evaluateCancelPreview`) reads the
+      // snapshot off each child; without this fallback,
+      // a null child snapshot falls through to
+      // `checkInMs = Date.now()` (the helper's
+      // `fallbackContext.checkInDateKey` is empty
+      // string) and the time math silently reads
+      // "0.0 hours before check-in" — every
+      // beyond-cutoff cancel reports the wrong refund
+      // even though the guest's actual check-in is days
+      // away. The reservation header is the canonical
+      // source (every child under it was stamped with
+      // the same policy at create time, per CRL-05), so
+      // we fall back to it here. Same fix lives in
+      // `handleCancelBooking` (the destructive-cancel
+      // liability computation uses the same shape).
+      reservationCancellationPolicySnapshot =
+        reservationSnapshot.cancellationPolicySnapshot || null;
       const eligibleChildren = childrenSnap.docs
         .map((d: any) => {
           const data = d.data() || {};
@@ -6291,7 +7173,8 @@ export async function handleCancelPreview(req: any, res: any) {
             roomType: String(data.roomType || ""),
             totalPrice: Number(data.totalPrice) || 0,
             reservationPosition: Number(data.reservationPosition) || null,
-            cancellationPolicySnapshot: data.cancellationPolicySnapshot || null
+            cancellationPolicySnapshot:
+              data.cancellationPolicySnapshot || reservationCancellationPolicySnapshot
           };
         })
         .filter(Boolean) as typeof cancellableChildren;
@@ -6308,6 +7191,29 @@ export async function handleCancelPreview(req: any, res: any) {
       // single child with the looked-up booking's
       // own snapshot. The legacy null-`reservationId`
       // path is the same shape (no sibling read).
+      // Per CRL-06 fix (2026-08-11, decision #184):
+      // pre-MRB-01 bookings have no reservation
+      // header to fall back to + the booking doc itself
+      // has no snapshotted policy. Without this
+      // constructor, the helper's `fallbackContext`
+      // has `checkInDateKey: ""` and falls through to
+      // `checkInMs = Date.now()` (same 0h-readout bug
+      // as the reservation case). We synthesize a
+      // legacy-default snapshot from the booking's own
+      // `checkIn` field so the time math uses the
+      // real check-in date.
+      const legacyFallbackSnapshot = bookingData.checkIn
+        ? {
+            cutoffHours: 48,
+            refundPctBefore: 100,
+            refundPctAfter: 0,
+            policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+            scheduledCheckInTime: (bookingData.checkIn.toDate
+              ? bookingData.checkIn.toDate()
+              : new Date(bookingData.checkIn)).toISOString(),
+            source: "legacy-fallback" as const
+          }
+        : null;
       cancellableChildren = [{
         id: bookingDocumentRef.id,
         bookingRef: String(bookingData.bookingRef || ""),
@@ -6315,7 +7221,7 @@ export async function handleCancelPreview(req: any, res: any) {
         roomType: String(bookingData.roomType || ""),
         totalPrice: Number(bookingData.totalPrice) || 0,
         reservationPosition: Number(bookingData.reservationPosition) || null,
-        cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+        cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || legacyFallbackSnapshot
       }];
     }
 
@@ -6368,6 +7274,26 @@ export async function handleCancelPreview(req: any, res: any) {
     // `cancellableChildren` is the full set the
     // policy applies to (a single child for `"room"`
     // scope, N children for `"reservation"` scope).
+    // Per CRL-06 fix (2026-08-11, decision #184): the
+    // snapshot fallback chain — child booking's own
+    // snapshot, then the reservation header's, then
+    // (for legacy no-`reservationId` bookings) a
+    // synthesized legacy snapshot from the booking's
+    // `checkIn` field. The chain is in `cancellableChildren`
+    // already; we mirror it here for the anchor so the
+    // helper's policy text + cutoff source match.
+    const legacyFallbackSnapshotForAnchor = !hasReservation && bookingData.checkIn
+      ? {
+          cutoffHours: 48,
+          refundPctBefore: 100,
+          refundPctAfter: 0,
+          policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
+          scheduledCheckInTime: (bookingData.checkIn.toDate
+            ? bookingData.checkIn.toDate()
+            : new Date(bookingData.checkIn)).toISOString(),
+          source: "legacy-fallback" as const
+        }
+      : null;
     const lookedUpBookingForHelper = {
       id: bookingDocumentRef.id,
       bookingRef: String(bookingData.bookingRef || ""),
@@ -6375,7 +7301,9 @@ export async function handleCancelPreview(req: any, res: any) {
       roomType: String(bookingData.roomType || ""),
       totalPrice: Number(bookingData.totalPrice) || 0,
       reservationPosition: Number(bookingData.reservationPosition) || null,
-      cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || null
+      cancellationPolicySnapshot:
+        bookingData.cancellationPolicySnapshot
+        || (hasReservation ? reservationCancellationPolicySnapshot : legacyFallbackSnapshotForAnchor)
     };
 
     const preview = evaluateCancelPreview({
@@ -6465,6 +7393,13 @@ export async function handleAddPayment(req: any, res: any) {
   let bookingDataSnapshot: any = null;
   let loyaltyPointsAwarded = 0;
   let idempotentReplay = false;
+  // Per FOL-05 (2026-08-07, per decision #201): the
+  // count of sibling children that just transitioned to
+  // `payment-confirmed` inside this add-payment
+  // transaction. Surfaced in the post-transaction response
+  // for symmetry with `handleVerifyAndRecordPayment`'s
+  // `siblingFlippedCount`. Zero for the N=1 case.
+  let siblingFlippedCount = 0;
 
   // Per MRB-04 Phase 3 (2026-08-02, per decision #159): the
   // canonical `now` for both the booking update AND the
@@ -6545,12 +7480,92 @@ export async function handleAddPayment(req: any, res: any) {
       }
       totalPaid = existingPaid + numericAmount;
 
+      // Per FOL-05 (2026-08-07, per decision #201): the
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // sibling-flip pre-read. Same pattern as
+      // `handleVerifyAndRecordPayment` — pre-read every
+      // child of the reservation BEFORE any writes
+      // (FOL-03 "reads before writes") so the
+      // sibling-flip pass can compute the post-update
+      // child statuses in a single deterministic array.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the pre-read is the shared
+      // `preReadSiblingChildren` helper. The
+      // `bookingReservationId.length === 0` guard
+      // (inside the helper) skips the pre-read for
+      // legacy null-`reservationId` bookings — the
+      // pre-FOL-05 single-child-only path stays
+      // byte-equivalent.
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId,
+        (d) => {
+          const childData = d.data() || {};
+          return {
+            id: d.id,
+            status: String(childData.status || ""),
+            totalPrice: Number(childData.totalPrice || 0)
+          };
+        }
+      );
+
       totalPrice = Number(bookingData.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
       isConfirmableStatus = bookingData.status === "pending"
         || bookingData.status === "payment-uploaded";
       hadPaymentProof = !!(bookingData.paymentProofPath || bookingData.paymentProofUrl);
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
+
+      // Per FOL-05 (2026-08-07, per decision #201): the
+      // post-update child status computation. Same rule
+      // as `handleVerifyAndRecordPayment` — for each
+      // child, the post-update status is
+      // `payment-confirmed` if the new cumulative
+      // reservation payments cover that child's
+      // `totalPrice` AND the child's current status is
+      // `pending` or `payment-uploaded`. Otherwise no
+      // change. For legacy N=1 the array has one
+      // element and the rule is byte-equivalent to the
+      // pre-FOL-05 `fullyPaid` flag.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204): the
+      // sibling-flip pass is the shared
+      // `applyReservationScopePaymentTransition` helper.
+      // The handler passes a per-handler `rule.decide`
+      // callback (the per-child coverage check + the
+      // write payload); the helper handles the
+      // per-sibling `transaction.update` + the
+      // post-update statuses array + the reservation
+      // header heartbeat.
+      const { siblingFlippedCount: helperSiblingFlippedCount } =
+        applyReservationScopePaymentTransition(
+          transaction,
+          adminDb,
+          bookingReservationId,
+          bookingId,
+          siblingChildBookings,
+          (child) => {
+            const coversChild = child.totalPrice > 0 && totalPaid >= child.totalPrice;
+            const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+            if (isFlippableStatus && coversChild) {
+              const decision: SiblingFlipDecision = {
+                write: {
+                  status: "payment-confirmed",
+                  paymentConfirmedAt: now,
+                  handledBy: staffUid,
+                  updatedAt: now
+                },
+                newStatus: "payment-confirmed"
+              };
+              return decision;
+            }
+            return null;
+          },
+          now
+        );
+      siblingFlippedCount = helperSiblingFlippedCount;
 
       const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
       const settlesCheckedOutFolio = bookingData.status === "checked-out"
@@ -6586,6 +7601,7 @@ export async function handleAddPayment(req: any, res: any) {
         Object.assign(bookingUpdates, {
           status: "payment-confirmed",
           handledBy: staffUid,
+          paymentConfirmedAt: now,
           updatedAt
         });
         transitionedToPaymentConfirmed = true;
@@ -6621,31 +7637,21 @@ export async function handleAddPayment(req: any, res: any) {
         });
       }
 
+      // ---- ALL WRITES BELOW — no `transaction.get()` calls from this
+      // point forward. Per FOL-03. ----
+
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
       }
 
-      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
-      // the reservation header's `paymentStatus` mirror.
-      // Only fires when the booking just transitioned to
-      // `payment-confirmed` (the `transitionedToPaymentConfirmed`
-      // guard prevents touching the header on idempotent
-      // replays or partial-payment writes that didn't change
-      // the status). The mirror value comes from
-      // `mapBookingStatusToReservationPaymentStatus` (the
-      // N=1 mapping helper in `shared/utils/bookingFolio.ts`).
-      // The `bookingReservationId.length > 0` guard skips the
-      // write for legacy null-`reservationId` bookings (pre-MRB-01)
-      // — byte-equivalent to pre-Phase 3 behavior for legacy
-      // records. The same `now` is used for the booking update
-      // AND the header mirror — no clock skew between the two.
-      if (transitionedToPaymentConfirmed && bookingReservationId.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        transaction.update(reservationRef, {
-          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingDataSnapshot.status),
-          updatedAt: now
-        });
-      }
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the per-sibling `transaction.update` calls + the
+      // reservation header heartbeat are queued by the
+      // shared `applyReservationScopePaymentTransition`
+      // helper above (called from the post-update status
+      // computation step). The target's own status
+      // update was already queued by the
+      // `transitionedToPaymentConfirmed` block above.
 
       // Append the payment record inside the transaction after
       // all reads have completed. Per MRB-04 Phase 2: for
@@ -6726,6 +7732,25 @@ export async function handleAddPayment(req: any, res: any) {
       roomNumber: bookingDataSnapshot.roomNumber || null,
       bookingRef: bookingDataSnapshot.bookingRef || null
     });
+    // Per FOL-05 (2026-08-07, per decision #201): the
+    // sibling-flip bell notification. Same shape as
+    // `handleVerifyAndRecordPayment`'s sibling-flips
+    // notification. Fires only when the add-payment
+    // pass cleared at least one sibling room (zero
+    // for the N=1 case). The notification is keyed
+    // to the target booking (the lead) so the bell
+    // panel surfaces it under the same reservation
+    // row the staff added the payment against.
+    if (siblingFlippedCount > 0) {
+      await writeNotification({
+        type: "payment",
+        title: `${siblingFlippedCount} more room${siblingFlippedCount === 1 ? "" : "s"} cleared — ${bookingDataSnapshot.bookingRef || bookingId}`,
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: bookingDataSnapshot.roomNumber || null,
+        bookingRef: bookingDataSnapshot.bookingRef || null
+      });
+    }
   }
 
   return res.status(200).json({
@@ -6735,7 +7760,12 @@ export async function handleAddPayment(req: any, res: any) {
       totalPaid,
       status: bookingDataSnapshot?.status || null,
       loyaltyPointsAwarded,
-      idempotentReplay
+      idempotentReplay,
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // the sibling-flip count for symmetry with
+      // `handleVerifyAndRecordPayment`. Zero for the
+      // N=1 case.
+      siblingFlippedCount
     }
   });
 }
@@ -7501,6 +8531,15 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
     let totalPrice = 0;
     let fullyPaid = false;
     let idempotentReplay = false;
+    // Per FOL-05 (2026-08-07, per decision #201): the
+    // count of sibling children that just transitioned to
+    // `payment-confirmed` inside this verify transaction.
+    // Surfaced to the post-transaction side effects so the
+    // bell panel can emit a `rooms cleared` notification
+    // distinct from the per-target `Payment verified` one.
+    // The target's own flip is NOT counted here — it's
+    // covered by the `fullyPaid` flag.
+    let siblingFlippedCount = 0;
 
     // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
     // the canonical `now` for both the booking update AND
@@ -7516,6 +8555,8 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
     const now = new Date();
 
     await adminDb.runTransaction(async (transaction) => {
+      // ---- READS — all reads first, per FOL-03 ----
+
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data()!;
@@ -7550,6 +8591,38 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         return sum + Number(docSnap.data().amount || 0);
       }, 0);
 
+      // Per FOL-05 (2026-08-07, per decision #201): the
+      // sibling-flip pre-read. For new reservations (post-MRB-01)
+      // we pre-read every child of the reservation BEFORE any
+      // writes (FOL-03 "reads before writes" rule) so the
+      // sibling-flip pass can compute the post-update child
+      // Per FOL-05 (2026-08-07, per decision #201):
+      // pre-read every child of the reservation BEFORE
+      // any writes (FOL-03 "reads before writes") so the
+      // sibling-flip pass can compute the post-update
+      // child statuses in a single deterministic array.
+      // Per BAR-03 (2026-08-08, per decision #204):
+      // the pre-read is the shared
+      // `preReadSiblingChildren` helper. The
+      // `bookingReservationId.length === 0` guard
+      // (inside the helper) skips the pre-read for
+      // legacy null-`reservationId` bookings — the
+      // pre-FOL-05 single-child-only path stays
+      // byte-equivalent.
+      const siblingChildBookings = await preReadSiblingChildren(
+        transaction,
+        adminDb,
+        bookingReservationId,
+        (d) => {
+          const childData = d.data() || {};
+          return {
+            id: d.id,
+            status: String(childData.status || ""),
+            totalPrice: Number(childData.totalPrice || 0)
+          };
+        }
+      );
+
       // The client-preallocated document ID is the idempotency key. Matching
       // cash installments remain distinct when they intentionally use
       // different IDs, even if their amount and method are identical.
@@ -7568,19 +8641,46 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         return;
       }
 
-      // Only allow new verify-and-record entries from payment-uploaded/pending.
-      // Existing payment IDs are checked first so a committed full-payment
-      // retry can replay safely and conflicting reuse cannot hide behind the
-      // booking's now-confirmed status.
-      if (data.status === "payment-confirmed" || data.status === "confirmed") {
+      // Per FOL-05 (2026-08-07, per decision #201): the
+      // status check is now reservation-aware. N=1 (no
+      // flippable siblings) keeps the pre-FOL-05 contract:
+      // a target already past the money gate throws
+      // ALREADY_CONFIRMED (the 200 OK with
+      // `alreadyConfirmed: true` the catch handler emits).
+      // N>1 (at least one flippable sibling in
+      // `pending` / `payment-uploaded`) RELAXES the check:
+      // a target already past the money gate proceeds so
+      // the sibling-flip pass can run — the target's own
+      // status update is skipped (its post-update status
+      // equals its pre-update status), but every covered
+      // sibling still flips in the same transaction. The
+      // PRC-13 email + bell notification are gated on the
+      // target-flip flag (a target that's already verified
+      // doesn't re-fire `payment-confirmed`). checked-in /
+      // checked-out / cancelled remain INVALID_STATUS.
+      const hasFlippableSiblings = siblingChildBookings.some(
+        (c) => c.id !== bookingId && (c.status === "pending" || c.status === "payment-uploaded")
+      );
+      const targetAlreadyPastMoneyGate =
+        data.status === "payment-confirmed" || data.status === "confirmed";
+      if (!hasFlippableSiblings && targetAlreadyPastMoneyGate) {
         throw new Error("ALREADY_CONFIRMED");
       }
-      if (data.status !== "payment-uploaded" && data.status !== "pending") {
+      if (
+        !targetAlreadyPastMoneyGate &&
+        data.status !== "payment-uploaded" &&
+        data.status !== "pending"
+      ) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
 
-      // PRC-07: method-aware reference requirement from server config
-      if (method !== "pay-at-hotel" && method !== "add-to-bill") {
+      // PRC-07: method-aware reference requirement from server config.
+      // Skipped when the target is already past the money gate (the
+      // reference is per-payment, not per-verify-action; a second
+      // verify on an already-confirmed target is the sibling-flip
+      // path described above and the staff is recording a
+      // supplementary payment, not verifying fresh proof).
+      if (!targetAlreadyPastMoneyGate && method !== "pay-at-hotel" && method !== "add-to-bill") {
         const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
         const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
         const paymentMethodsArr: any[] = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
@@ -7593,7 +8693,64 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
 
       totalPrice = Number(data.totalPrice || 0);
       totalCollected = existingPaid + numericAmount;
-      fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+
+      // Per FOL-05 (2026-08-07, per decision #201): the
+      // post-update child status computation. For each child
+      // of the reservation, the post-update status is
+      // `payment-confirmed` if the new cumulative reservation
+      // payments cover that child's `totalPrice` AND the
+      // child's current status is `pending` or
+      // `payment-uploaded`. Otherwise no change. For legacy
+      // N=1 the array has one element (the target) and the
+      // rule is byte-equivalent to the pre-FOL-05 `fullyPaid`
+      // flag.
+      //
+      // Per BAR-03 (2026-08-08, per decision #204): the
+      // sibling-flip pass is the shared
+      // `applyReservationScopePaymentTransition` helper. The
+      // handler passes a per-handler `rule.decide` callback
+      // (the per-child coverage check + the write payload);
+      // the helper handles the per-sibling
+      // `transaction.update` + the post-update statuses
+      // array + the reservation header heartbeat.
+      const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingFlippedCount } =
+        applyReservationScopePaymentTransition(
+          transaction,
+          adminDb,
+          bookingReservationId,
+          bookingId,
+          siblingChildBookings,
+          (child) => {
+            const coversChild = child.totalPrice > 0 && totalCollected >= child.totalPrice;
+            const isFlippableStatus = child.status === "pending" || child.status === "payment-uploaded";
+            if (isFlippableStatus && coversChild) {
+              const decision: SiblingFlipDecision = {
+                write: {
+                  status: "payment-confirmed",
+                  paymentConfirmedAt: now,
+                  handledBy: staffUid,
+                  updatedAt: now
+                },
+                newStatus: "payment-confirmed"
+              };
+              return decision;
+            }
+            return null;
+          },
+          now
+        );
+      siblingFlippedCount = helperSiblingFlippedCount;
+      // The target booking's "fullyPaid" flag = its own
+      // post-update status is `payment-confirmed`. Used for
+      // the PRC-13 email + the bell notification's "full"
+      // variant. A target that's already past the money gate
+      // is NOT counted as `fullyPaid` here (the gate was
+      // crossed in a prior call; this call is the
+      // sibling-flip pass).
+      const targetPostStatus = siblingChildBookings.length > 0
+        ? postUpdateChildStatuses[siblingChildBookings.findIndex((c) => c.id === bookingId)]
+        : (totalCollected >= totalPrice && totalPrice > 0 ? "payment-confirmed" : data.status);
+      fullyPaid = targetPostStatus === "payment-confirmed" && !targetAlreadyPastMoneyGate;
 
       const paymentRecord: Record<string, any> = {
         type: "payment",
@@ -7619,41 +8776,39 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         ? { ...paymentRecord, reservationId: bookingReservationId, bookingId: bookingId }
         : paymentRecord;
 
+      // ---- WRITES — all writes after every `get()`, per FOL-03 ----
+
+      // 1. Create the payment record (reservation-owned for new
+      // reservations, booking-owned for legacy).
       transaction.create(paymentsRef.doc(paymentId), recordWithReservation);
 
-      // Transition to payment-confirmed only when fully paid
+      // 2. Update the target booking. The status transition fires
+      // only when the target's post-update status differs from its
+      // pre-update status (the FOL-05 sibling-flip pass may decide
+      // the target is already past the money gate — its `fullyPaid`
+      // check is "no change" and we skip the status fields). The
+      // `updatedAt` stamp is unconditional so the snapshot listener
+      // always sees a fresh write.
       const bookingUpdates: Record<string, any> = {
         updatedAt: now
       };
-      if (fullyPaid) {
-        bookingUpdates.status = "payment-confirmed";
+      if (targetPostStatus !== data.status) {
+        bookingUpdates.status = targetPostStatus;
         bookingUpdates.handledBy = staffUid;
         bookingUpdates.paymentConfirmedAt = now;
       }
-      transaction.update(bookingRef, bookingUpdates);
+      if (Object.keys(bookingUpdates).length > 0) {
+        transaction.update(bookingRef, bookingUpdates);
+      }
       bookingData = { ...data, ...bookingUpdates };
 
-      // Per MRB-04 Phase 3 (2026-08-02, per decision #159):
-      // the reservation header's `paymentStatus` mirror.
-      // Only fires when the booking just transitioned to
-      // `payment-confirmed` (the `fullyPaid` guard prevents
-      // touching the header on partial payments that didn't
-      // change the status). The mirror value comes from
-      // `mapBookingStatusToReservationPaymentStatus` (the
-      // N=1 mapping helper in `shared/utils/bookingFolio.ts`).
-      // The `bookingReservationId.length > 0` guard skips the
-      // write for legacy null-`reservationId` bookings
-      // (pre-MRB-01) — byte-equivalent to pre-Phase 3
-      // behavior for legacy records. The same `now` is used
-      // for the booking update AND the header mirror — no
-      // clock skew between the two.
-      if (fullyPaid && bookingReservationId.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        transaction.update(reservationRef, {
-          paymentStatus: mapBookingStatusToReservationPaymentStatus(bookingUpdates.status),
-          updatedAt: now
-        });
-      }
+      // 3. Per BAR-03 (2026-08-08, per decision #204):
+      // the per-sibling `transaction.update` calls + the
+      // reservation header heartbeat are queued by the
+      // shared `applyReservationScopePaymentTransition`
+      // helper above (called from the post-update status
+      // computation step). The target's own status
+      // update was already queued at step 2.
     });
 
     if (idempotentReplay) {
@@ -7664,7 +8819,8 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
           paymentId,
           totalCollected,
           status: bookingData?.status || null,
-          fullyPaid
+          fullyPaid,
+          siblingFlippedCount
         }
       });
     }
@@ -7684,6 +8840,33 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         roomNumber: bookingData?.roomNumber || null,
         bookingRef: bookingData?.bookingRef || null
       });
+      // Per FOL-05 (2026-08-07, per decision #201): the
+      // sibling-flip bell notification. Fires when the
+      // verify pass cleared at least one sibling room
+      // (the FOL-05 "one click = whole reservation" semantic
+      // — the desk sees both the target's full-payment
+      // notification AND the per-sibling "rooms cleared"
+      // breadcrumb). The notification is keyed to the
+      // target booking (the lead) so the bell panel
+      // surfaces it under the same reservation row the
+      // staff clicked Verify on. The PRC-13 email is
+      // intentionally NOT re-fired here — the original
+      // `payment-confirmed` email already covered the
+      // money event when the FIRST room flipped (which
+      // for a full-reservation payment is the first
+      // verify call's target); the sibling flips are
+      // metadata for the staff, not a new guest-facing
+      // event.
+      if (siblingFlippedCount > 0) {
+        await writeNotification({
+          type: "payment",
+          title: `${siblingFlippedCount} more room${siblingFlippedCount === 1 ? "" : "s"} cleared — ${bookingData?.bookingRef || bookingId}`,
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: bookingData?.roomNumber || null,
+          bookingRef: bookingData?.bookingRef || null
+        });
+      }
     } catch (sideEffectErr) {
       console.error("Verify-and-record side effect error:", sideEffectErr);
     }
@@ -7698,7 +8881,15 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         recordedBy: staffUid,
         totalCollected,
         status: fullyPaid ? "payment-confirmed" : "payment-uploaded",
-        fullyPaid
+        fullyPaid,
+        // Per FOL-05 (2026-08-07, per decision #201):
+        // the sibling-flip count surfaces to the admin UI
+        // so the post-verify success modal can show a
+        // "X rooms cleared" breadcrumb alongside the
+        // per-target `isFullPayment` math. Zero for the
+        // N=1 case (the single child either flipped via
+        // the target path or didn't flip at all).
+        siblingFlippedCount
       }
     });
   } catch (error: any) {
@@ -7708,7 +8899,7 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
     if (error?.message === "ALREADY_CONFIRMED") {
       return res.status(200).json({
         success: true,
-        data: { alreadyConfirmed: true, status: bookingData?.status || "payment-confirmed" }
+        data: { alreadyConfirmed: true, status: bookingData?.status || "payment-confirmed", siblingFlippedCount: 0 }
       });
     }
     if (error?.message?.startsWith("INVALID_STATUS:")) {
@@ -7808,20 +8999,24 @@ export async function handleConfirmBooking(req: any, res: any) {
       // `pending` / `payment-uploaded` / `payment-confirmed`,
       // and the new status is always `confirmed`).
       // The mirror value comes from the N>1 aggregate
-      // helper — for the N=1 case (today's entire
-      // active surface) the aggregate is the same as
-      // the single mapped status. The
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on
+      // confirm-with-balance. Consumers derive it at
+      // read time. The per-child status transition
+      // (the `transaction.update` of the target
+      // booking + the FOL-03 sibling
+      // pre-checked-in flip) is unchanged — that is
+      // the real state mutation. The
       // `bookingReservationId.length > 0` guard skips
       // the write for legacy null-`reservationId`
-      // bookings (pre-MRB-01) — byte-equivalent to
-      // pre-Phase 5 behavior for legacy records. The
-      // same `now` is used for the booking update AND
-      // the header mirror — no clock skew between the
-      // two.
+      // bookings — byte-equivalent to pre-Phase 5
+      // behavior for legacy records. The same `now`
+      // is used for the booking update AND the
+      // header touch — no clock skew between the two.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -8024,22 +9219,21 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
       // Per MRB-05 (2026-08-02, per decision #159):
       // the reservation header's `paymentStatus`
       // mirror. The booking just transitioned to
-      // `confirmed` (the only possible new status
-      // for this handler — the CWB-01 status check
-      // guarantees the prior status was
-      // `payment-uploaded`, and the new status is
-      // always `confirmed`). The mirror value comes
-      // from the N>1 aggregate helper. The
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // the `paymentStatus` mirror is no longer
+      // written to the reservation header on
+      // confirm-with-balance-rebooking. Consumers
+      // derive it at read time. The per-child status
+      // transition is unchanged. The
       // `bookingReservationId.length > 0` guard skips
       // the write for legacy null-`reservationId`
-      // bookings (pre-MRB-01) — byte-equivalent to
-      // pre-Phase 5 behavior for legacy records. The
-      // same `now` is used for the booking update AND
-      // the header mirror.
+      // bookings — byte-equivalent to pre-Phase 5
+      // behavior for legacy records. The same `now`
+      // is used for the booking update AND the
+      // header touch.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
-          paymentStatus: computeReservationAggregatePaymentStatus(["confirmed"]),
           updatedAt: now
         });
       }
@@ -8197,6 +9391,60 @@ export async function handleCheckinBooking(req: any, res: any) {
       // handlers.
       const bookingReservationId = String((bookingData as any).reservationId || "").trim();
 
+      // Per FOL-03 (2026-08-07, per decision #199):
+      // Firestore `runTransaction` requires all `get()`
+      // calls to complete BEFORE any `update()` /
+      // `set()` / `create()` calls — the SDK throws
+      // "Firestore transactions require all reads to
+      // be executed before all writes" if the contract
+      // is violated. The pre-FOL-03 handler did the
+      // childrenForCount `get()` AFTER the booking +
+      // room `update()` calls (a leftover from the
+      // MRB-15-03 work that recomputed
+      // `checkedInRoomCount` from the post-update
+      // child statuses). The read-after-write pattern
+      // surfaces in production as a 500 from
+      // `/api/bookings/checkin` for any booking with a
+      // `reservationId` — the listener throws before
+      // the `transaction.update(reservationRef, ...)`
+      // call ever runs, so the reservation header's
+      // mirror is never written either.
+      //
+      // The fix: do ALL reads first (booking doc + room
+      // doc + active-checkin query + children query),
+      // then do ALL writes. To preserve the MRB-15-03
+      // semantic ("the count includes the
+      // just-checked-in booking"), we pre-read the
+      // children statuses and then REPLACE the
+      // current booking's status in the array with the
+      // post-update value (`"checked-in"`) before
+      // computing the count + the aggregate. The
+      // resulting `childStatuses` array is what every
+      // child's status WILL be after the writes
+      // commit, so the count and the aggregate are
+      // correct for the post-update state.
+      //
+      // The pattern is the same as
+      // `handleCheckoutBooking`'s (per FOL-03) and is
+      // the standard Firestore "all reads before all
+      // writes" idiom — see the
+      // `plan/docs/GOTCHAS.md` "Firestore transaction"
+      // entry for the broader pattern.
+      let postUpdateChildStatuses: string[] = [];
+      if (bookingReservationId.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map((d: any) =>
+          d.id === bookingId
+            ? "checked-in" // post-update status for the just-checked-in booking
+            : String(d.data()?.status || "")
+        );
+      }
+
+      // ALL WRITES BELOW — no `transaction.get()` calls
+      // from this point forward. Per FOL-03.
+
       transaction.update(bookingRef, {
         status: "checked-in",
         checkedInAt: now,
@@ -8228,31 +9476,24 @@ export async function handleCheckinBooking(req: any, res: any) {
       // Per MRB-15-03 (2026-08-03): the same
       // transaction also recomputes
       // `checkedInRoomCount` from every child's
-      // status (the just-checked-in booking is now
-      // `status: "checked-in"`, so the count
-      // includes it). The header's
-      // `activeRoomCount` / `cancelledRoomCount` /
-      // `roomCount` are NOT touched here — those are
-      // owned by the create / add-room / cancel paths
-      // only (per the JSDoc on `Reservation` in
-      // `shared/types/index.ts`). The
-      // `paymentStatus` aggregate reads every child's
-      // status (not just `["checked-in"]`) so the
-      // N>1 case is correct: a 2-room reservation
-      // where 1 room is checked-in and 1 is still
-      // pending reports the aggregate of `["checked-in",
-      // "payment-confirmed"]` — not a synthetic
-      // `["checked-in"]`.
+      // status. Per FOL-03, the count reads from the
+      // pre-computed `postUpdateChildStatuses` (the
+      // pre-update read + the just-checked-in booking's
+      // status replaced with `"checked-in"`) so the
+      // `get()` happens BEFORE the writes. The
+      // header's `activeRoomCount` /
+      // `cancelledRoomCount` / `roomCount` are NOT
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // `checkedInRoomCount` and `paymentStatus` are
+      // no longer written to the reservation header on
+      // check-in. Consumers derive them at read time.
+      // The per-child status transition (the
+      // `transaction.update` of the target booking +
+      // any FOL-03 sibling pre-checked-in flip) is
+      // unchanged — that is the real state mutation.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
-        );
-        const childStatuses = childrenForCount.docs.map((d: any) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s) => s === "checked-in").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }
@@ -8495,6 +9736,38 @@ export async function handleCheckoutBooking(req: any, res: any) {
       // handlers.
       const bookingReservationId = String((freshBookingData as any).reservationId || "").trim();
 
+      // Per FOL-03 (2026-08-07, per decision #199):
+      // pre-compute the post-update child statuses
+      // BEFORE the writes. Same read-before-writes
+      // contract as `handleCheckinBooking` (per
+      // FOL-03) — Firestore `runTransaction` requires
+      // all `get()` calls to complete before any
+      // `update()` / `set()` / `create()` calls.
+      // The pre-update `get()` of the children lets us
+      // know every child's current status; we then
+      // REPLACE the current booking's status with
+      // `"checked-out"` (the post-update value) so
+      // the count + aggregate match the post-update
+      // state. The pre-FOL-03 handler did the
+      // childrenForCount `get()` AFTER the booking +
+      // room + intercom updates — a Firestore
+      // transaction violation that surfaces as a
+      // 500 for any checkout with a `reservationId`.
+      let postUpdateChildStatuses: string[] = [];
+      if (bookingReservationId.length > 0) {
+        const childrenForCount = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
+        );
+        postUpdateChildStatuses = childrenForCount.docs.map((d: any) =>
+          d.id === bookingId
+            ? "checked-out" // post-update status for the just-checked-out booking
+            : String(d.data()?.status || "")
+        );
+      }
+
+      // ALL WRITES BELOW — no `transaction.get()` calls
+      // from this point forward. Per FOL-03.
+
       transaction.update(bookingRef, bookingUpdate);
 
       if (bookingData.roomId) {
@@ -8543,29 +9816,30 @@ export async function handleCheckoutBooking(req: any, res: any) {
       // transaction also recomputes
       // `checkedInRoomCount` (decrement) +
       // `checkedOutRoomCount` (increment) from every
-      // child's status. The just-checked-out booking
-      // is now `status: "checked-out"`, so the counts
-      // include it. The header's
+      // child's status. Per FOL-03, the counts read
+      // from the pre-computed
+      // `postUpdateChildStatuses` (the pre-update
+      // read + the just-checked-out booking's status
+      // replaced with `"checked-out"`) so the `get()`
+      // happens BEFORE the writes. The header's
       // `activeRoomCount` / `cancelledRoomCount` /
       // `roomCount` are NOT touched here — those are
       // owned by the create / add-room / cancel paths
       // only (per the JSDoc on `Reservation` in
       // `shared/types/index.ts`). The
-      // `paymentStatus` aggregate reads every child's
-      // status (not just `["checked-out"]`) so the
-      // N>1 case is correct.
+      // `paymentStatus` aggregate reads every
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // `checkedInRoomCount` / `checkedOutRoomCount`
+      // and `paymentStatus` are no longer written to
+      // the reservation header on check-out. Consumers
+      // derive them at read time. The per-child status
+      // transition (the `transaction.update` of the
+      // target booking + the FOL-03 sibling
+      // pre-checked-in flip) is unchanged — that is
+      // the real state mutation.
       if (bookingReservationId.length > 0) {
         const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
-        const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
-        );
-        const childStatuses = childrenForCount.docs.map((d: any) => String(d.data()?.status || ""));
-        const newCheckedInCount = childStatuses.filter((s) => s === "checked-in").length;
-        const newCheckedOutCount = childStatuses.filter((s) => s === "checked-out").length;
         transaction.update(reservationRef, {
-          checkedInRoomCount: newCheckedInCount,
-          checkedOutRoomCount: newCheckedOutCount,
-          paymentStatus: computeReservationAggregatePaymentStatus(childStatuses),
           updatedAt: now
         });
       }
@@ -8686,24 +9960,51 @@ export async function handleLookupBooking(req: any, res: any) {
     }
 
     if (trimmedReservationRef) {
-      // Per MRB-10 (2026-08-02, per decision #169): the
-      // direct reservation-scope lookup. The MRB-09
+      // Per MRB-10 (2026-08-02, per decision #169) +
+      // #209 (RFO-01, 2026-08-10): the direct
+      // reservation-scope lookup. The MRB-09
       // reservation-scope emails carry a
-      // `reservationRef` link so the guest can deep-link
-      // straight to the reservation without first
-      // landing on a per-child booking. The auth gate
-      // is the existing `ref + (email | token)`
-      // contract: the email is the second factor
-      // against the reservation's lead guest; the
-      // token is the per-child magic link (the
-      // reservation ref links to the first child's
-      // token in the email footer — future iteration).
+      // `reservationRef` link so the guest can
+      // deep-link straight to the reservation
+      // without first landing on a per-child
+      // booking.
       //
-      // The credential is required — a bare
-      // `reservationRef` is not enough to see a
-      // reservation (an attacker who guesses an
-      // `R-YYYYMMDD-NNNNN` would otherwise see the
-      // whole block view).
+      // Three input shapes are accepted (priority
+      // is most-specific-first, mirroring the
+      // per-child dispatch above):
+      //   R- + email   → email-second-factor gate
+      //                   against `reservation.leadGuestEmail`
+      //   R- + token   → token gate against the
+      //                   first child's `lookupToken`
+      //                   (the per-child magic link
+      //                   path)
+      //   R- alone     → no credential gate; the
+      //                   defense is the same
+      //                   Turnstile + 10/min/IP rate
+      //                   limit + 3-failure 1-hour
+      //                   backoff as the
+      //                   `ref`-alone path
+      //                   (`plan/docs/SECURITY.md
+      //                   §Booking Lookup Security`).
+      //                   The R- ref is the
+      //                   reservation's public
+      //                   identifier (subject line,
+      //                   body header, receipt PDF
+      //                   filename) — the form copy
+      //                   on `/my-booking` reads
+      //                   "Enter your booking
+      //                   reference or the email you
+      //                   used to book", so the
+      //                   guest expects the R- to
+      //                   work without a second
+      //                   factor. The 99,999-key
+      //                   per-day namespace
+      //                   (5-digit sequence per
+      //                   `RESERVATION_REF_REGEX`)
+      //                   has the same enumeration
+      //                   risk as the SI- ref-alone
+      //                   path; the same defenses
+      //                   apply.
       const reservationSnap = await adminDb.collection("reservations")
         .where("reservationRef", "==", trimmedReservationRef)
         .limit(1)
@@ -8712,9 +10013,10 @@ export async function handleLookupBooking(req: any, res: any) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
       const reservation = { id: reservationSnap.docs[0].id, ...reservationSnap.docs[0].data() };
-      // Resolve the credential. The reservation's
-      // `leadGuestEmail` is the canonical email for
-      // the email-second-factor path; the magic-link
+      // Resolve the credential when one was
+      // supplied. The reservation's `leadGuestEmail`
+      // is the canonical email for the
+      // email-second-factor path; the magic-link
       // path is per-child (the first child's
       // `lookupToken` is what the email footer
       // carries).
@@ -8742,17 +10044,15 @@ export async function handleLookupBooking(req: any, res: any) {
         // paths can detect the reservationId + return
         // the reservation view.
         return await enrichAndRespond(res, { id: match.id, ...match });
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: "Please provide your booking email or lookup token along with the reservation reference."
-        });
       }
-      // Email path: find the first child (or any
-      // child — the credential already gates access)
-      // and hand to `enrichAndRespond` which detects
-      // the `reservationId` and returns the
-      // reservation view.
+      // R- alone (no credential) OR credential
+      // matched. Find the first child by
+      // `reservationPosition` and hand to
+      // `enrichAndRespond` which detects the
+      // `reservationId` and returns the
+      // reservation view (N>1 → `kind:
+      // "reservation"`; N=1 → `kind: "single"`,
+      // byte-equivalent to the per-child view).
       const firstChildSnap = await adminDb.collection("bookings")
         .where("reservationId", "==", reservation.id)
         .orderBy("reservationPosition", "asc")
@@ -9155,9 +10455,21 @@ function buildReservationLookupView(reservation: any, children: any[], anchorRoo
     // each room and the aggregate status for the
     // header.
     status: reservation.paymentStatus || "pending",
-    roomCount: Number(reservation.roomCount || rooms.length),
-    activeRoomCount: Number(reservation.activeRoomCount || rooms.length),
-    cancelledRoomCount: Number(reservation.cancelledRoomCount || 0),
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // three counter fields are no longer read from the
+    // reservation header. They are always derived from
+    // the `rooms` array (already in memory at this
+    // point). Pre-BAR-02 the header mirror was
+    // maintained transactionally; the new code is
+    // byte-equivalent for both pre- and post-BAR-02
+    // reservations because the derivation is the same
+    // calculation the pre-BAR-02 write performed.
+    roomCount: rooms.length,
+    activeRoomCount: Math.max(
+      rooms.length - rooms.filter((r) => r.status === "cancelled").length,
+      0
+    ),
+    cancelledRoomCount: rooms.filter((r) => r.status === "cancelled").length,
     rooms,
     // The "active room" data is what the cancel +
     // resend flows use as the server credential. The
@@ -9285,6 +10597,17 @@ export async function handleRescheduleBooking(req: any, res: any) {
   try {
     let updatedBooking: any = null;
     let fullBookingForEmail: any = null;
+    // Per MRB-02.x (2026-08-02, per decision #164): the
+    // canonical reservation id + header snapshot for this
+    // reschedule. Hoisted to the outer `try` scope because
+    // the response payload (after the transaction commits)
+    // echoes both `reservationId` and `reservationRef` —
+    // keeping the declarations inside the transaction
+    // callback would leave them out of scope at the
+    // success branch and surface as `bookingReservationId
+    // is not defined` 400s on every reschedule.
+    let bookingReservationId: string | null = null;
+    let existingReservationData: any = null;
     // Per PEX-03 (2026-08-01, per decision #147): same retirement
     // list pattern as handleCreateBooking / handleCreateWalkin.
     // The reschedule transaction may displace an expired `pending`
@@ -9314,7 +10637,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // does NOT touch a reservation header (the booking's
       // own rate breakdown + status matrix remain the
       // single source of truth for those legacy records).
-      const bookingReservationId: string | null = (() => {
+      bookingReservationId = (() => {
         const stored = String((booking as any).reservationId || "").trim();
         if (stored.length > 0) return stored;
         if (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId)) {
@@ -9338,7 +10661,30 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // unrecoverable by this request — staff must
       // investigate, then either restore the header or
       // migrate the booking to a fresh one.
-      let existingReservationData: any = null;
+      //
+      // `existingReservationData` is declared in the
+      // outer `try` scope (above the transaction) so
+      // the post-commit response payload can echo the
+      // header's `reservationRef`.
+      // Per FOL-03 (2026-08-10, audit follow-up): the
+      // children `get()` for the `actualDateRange`
+      // recompute must happen BEFORE the booking +
+      // reservation header `transaction.update()` calls.
+      // The pre-FOL-03 handler did the read AFTER the
+      // writes (the comment claimed it needed the
+      // post-update state for the just-rescheduled
+      // child) — Firestore's `runTransaction` rejects
+      // any read after a write, so the whole reschedule
+      // surfaced as a 500. The fix pre-reads the
+      // children here, and for the just-rescheduled
+      // child substitutes the in-memory NEW dates
+      // (checkInDate / checkOutDate) into the array.
+      // The post-update state of the just-rescheduled
+      // child is constructed in JavaScript, not
+      // observed via a re-read. Same pattern as
+      // `handleCheckinBooking` + `handleCheckoutBooking`
+      // (FOL-03 original, 2026-08-07).
+      let rescheduleChildrenDates: Array<{ checkIn: Date; checkOut: Date }> | null = null;
       if (reservationDocRef) {
         const existingReservationSnap = await transaction.get(reservationDocRef);
         if (existingReservationSnap.exists) {
@@ -9346,6 +10692,36 @@ export async function handleRescheduleBooking(req: any, res: any) {
         } else {
           throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
         }
+        // Pre-read every sibling of the just-rescheduled
+        // booking. The just-rescheduled child is the
+        // current `booking` (it carries the OLD dates at
+        // this point — the write hasn't happened yet);
+        // we replace its contribution with the NEW dates
+        // in the array below.
+        const rescheduleChildrenQuery = adminDb
+          .collection("bookings")
+          .where("reservationId", "==", bookingReservationId as string);
+        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
+        rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
+          if (docSnap.id === String(bookingId)) {
+            // The just-rescheduled child — use the
+            // NEW dates from the in-memory function
+            // scope. The Firestore doc still carries
+            // the old dates; the post-update state
+            // is constructed in JavaScript per the
+            // FOL-03 "pre-read + post-update construct"
+            // pattern.
+            return {
+              checkIn: checkInDate,
+              checkOut: checkOutDate
+            };
+          }
+          const childData = docSnap.data() as any;
+          return {
+            checkIn: toDateOrNull(childData.checkIn) || checkInDate,
+            checkOut: toDateOrNull(childData.checkOut) || checkOutDate
+          };
+        });
       }
       if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
         throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
@@ -9590,13 +10966,28 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // coercion.
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
+      // Per EXB-12 (2026-08-06, per decision #199): the
+      // reschedule must pass the snapshotted
+      // `extraBedCount` + `extraBedBreakfast` to the helper
+      // so the recomputed `breakfastTotal` matches the
+      // create-time total. Pre-v0.264.8 the reschedule
+      // dropped these two fields, silently losing the
+      // extra-bed breakfast charge on every reschedule
+      // of a booking that opted in to breakfast for the
+      // extra beds. `undefined` on legacy bookings
+      // (pre-EXB-12) reads as `false` via the helper's
+      // defensive coercion — back-compat with the
+      // historical "no extra-bed breakfast" default.
+      const preservedExtraBedBreakfast = booking.extraBedBreakfast === true;
       const breakfastTotal = manualNightlyRate === null
         ? calculateBreakfastAddOn({
             hasBreakfast: booking.hasBreakfast,
             breakfastRate,
             numGuests: booking.numGuests,
             numNights,
-            breakfastIncludesChildren: booking.breakfastIncludesChildren
+            breakfastIncludesChildren: booking.breakfastIncludesChildren,
+            extraBedCount: preservedExtraBedCount,
+            extraBedBreakfast: preservedExtraBedBreakfast
           })
         : 0;
       const extraBedTotal = manualNightlyRate === null
@@ -9675,6 +11066,21 @@ export async function handleRescheduleBooking(req: any, res: any) {
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        // Per EXB-08 (2026-08-01, per decision #156):
+        // the addOns array must include the "Extra bed
+        // add-on" line on reschedule so the receipt PDF
+        // + email + admin drawer surfaces render the
+        // term. Pre-v0.264.8 the reschedule dropped these
+        // three fields, leaving the addOns array with
+        // only the breakfast line — the extra bed was
+        // invisible on every downstream surface even
+        // though the `extraBedTotal` was correctly
+        // computed by `calculateExtraBedAddOn` two
+        // blocks above. Same shape as the create +
+        // walkin + add-room `buildRateBreakdown` calls.
+        extraBedTotal,
+        extraBedCount: preservedExtraBedCount,
+        extraBedRate: preservedExtraBedRate,
         discountType: booking.discountType || "",
         discountPct,
         voucherDiscount,
@@ -9781,12 +11187,17 @@ export async function handleRescheduleBooking(req: any, res: any) {
         // header's original `checkIn` / `checkOut` stay
         // immutable (the previous block of code no longer
         // updates them); we read every child via
-        // `where("reservationId", "==", id)` inside the
-        // transaction and pass their current dates to
+        // `where("reservationId", "==", id)` INSIDE the
+        // transaction (the read happens at the top of the
+        // transaction, right after the reservation header
+        // read — per FOL-03, all reads must complete before
+        // any writes) and pass their current dates to
         // `computeReservationActualDateRange`. The
         // just-rescheduled child is represented by its
-        // NEW dates (the `updatedBooking` we just
-        // built); every other child contributes its
+        // NEW dates (constructed in JavaScript from
+        // `checkInDate` / `checkOutDate` — the
+        // post-update state, not the pre-write Firestore
+        // snapshot); every other child contributes its
         // current dates as-is. Pre-MRB-14 reservations
         // have no `actualDateRange` — for those the
         // helper falls through to writing
@@ -9796,31 +11207,21 @@ export async function handleRescheduleBooking(req: any, res: any) {
         // because the admin surfaces + email continue
         // to read the children's per-child dates for
         // pre-MRB-14 rows).
-        const rescheduleChildrenQuery = adminDb
-          .collection("bookings")
-          .where("reservationId", "==", bookingReservationId as string);
-        const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
-        const rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
-          const childData = docSnap.data() as any;
-          if (docSnap.id === String(bookingId)) {
-            // The just-rescheduled child — use the
-            // new dates from `updatedBooking` (the
-            // post-write state, not the pre-write
-            // snapshot).
-            return {
-              checkIn: checkInDate,
-              checkOut: checkOutDate
-            };
-          }
-          return {
-            checkIn: childData.checkIn,
-            checkOut: childData.checkOut
-          };
-        });
+        //
+        // The pre-read `rescheduleChildrenDates` array
+        // was populated right after the reservation
+        // header read at the top of the transaction
+        // (around line 10058) — the just-rescheduled
+        // child's entry already has the NEW dates
+        // substituted in via the `if (docSnap.id === String(bookingId))`
+        // branch in the early-read `.map()`. Reusing
+        // the pre-built array here means the late
+        // block is pure compute + writes — no reads
+        // — which is what the FOL-03 contract demands.
         const rescheduleActualDateRange = computeReservationActualDateRange(
           existingReservationData.checkIn,
           existingReservationData.checkOut,
-          rescheduleChildrenDates
+          rescheduleChildrenDates || []
         );
         const rescheduleFingerprint = computeRequestFingerprint({
           reservationId: bookingReservationId as string,
@@ -10213,6 +11614,47 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       const typeBaseRate = Number(targetTypeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(targetTypeEntry.weekendRate) || typeBaseRate;
 
+      // Per EXB-10 (2026-08-01, per decision #157): the
+      // hotel-wide rollaway-bed inventory check. Same
+      // shape as the create / walkin / reschedule paths.
+      // The candidate query reads every `ROOM_OCCUPYING_STATUSES`
+      // booking with `extraBedCount > 0` (the in-memory
+      // date-overlap filter is in the helper) and the
+      // in-use sum includes the reservation's existing
+      // children (they're already in the bookings
+      // collection, their beds are already consumed, and
+      // the new child shares the header's dates so the
+      // overlap is automatic). The new child is NOT yet
+      // a doc — it's being created in this transaction
+      // — so no `excludeBookingId` is needed. `0
+      // inventory` short-circuits to `ok: true` so the
+      // historical "any number" behavior is preserved
+      // when the field is absent (legacy / freshly
+      // bootstrapped projects). Pre-v0.264.8 the
+      // add-room path silently skipped this check —
+      // the desk could add a room with extra beds that
+      // exceeded the hotel's rollaway inventory.
+      if (extraBedCount > 0) {
+        const addRoomExtraBedOverlapQuery = adminDb.collection("bookings")
+          .where("status", "in", ROOM_OCCUPYING_STATUSES);
+        const addRoomExtraBedOverlapSnapshot = await transaction.get(addRoomExtraBedOverlapQuery);
+        const addRoomExtraBedInUse = countExtraBedsInUse(
+          addRoomExtraBedOverlapSnapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+          headerCheckIn,
+          headerCheckOut
+        );
+        const addRoomInventoryResult = checkExtraBedInventory(
+          Math.max(0, Number(hotelConfig.extraBedInventory) || 0),
+          addRoomExtraBedInUse,
+          extraBedCount
+        );
+        if (!addRoomInventoryResult.ok) {
+          throw new Error(
+            `Not enough extra beds: ${addRoomExtraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${addRoomExtraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+          );
+        }
+      }
+
       // 5. Compute the per-line pricing for the new
       // child. Per MRB-08: corporate rates apply at
       // the room-type level (the negotiated rate or
@@ -10235,6 +11677,26 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       const activeWeekendRate = perRoomTypeCorporateRate > 0
         ? perRoomTypeCorporateRate
         : typeWeekendRate;
+
+      // Per H-01 (corporate booking audit 2026-08-10):
+      // the previous add-room path derived the corporate
+      // code's `usageCount` delta from the reservation
+      // header's `corporateUsageCount` — a field that
+      // does not exist on the reservation doc. The real
+      // counter lives on `corporateCodes/{code}`. The
+      // buggy shape silently wrote `usageCount: 1` to
+      // the corporateCodes doc on every add-room,
+      // resetting the real counter and breaking the
+      // cap check on the create path. The fix reads
+      // the corporateCodes doc HERE (before the writes
+      // begin at step 9, per FOL-03's reads-before-
+      // writes rule) and stashes the snapshot for the
+      // deferred `corporateUsageUpdate` write below.
+      let corporateCodeDocForUpdate: any = null;
+      if (isCorporateReservation && corporateCode) {
+        const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        corporateCodeDocForUpdate = await transaction.get(corpRef);
+      }
 
       const seasonalRateOverrides = normalizeSeasonalRateOverrides((hotelConfig as any).seasonalRateOverrides || []);
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
@@ -10426,6 +11888,33 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         extraBedCount,
         extraBedRate,
         extraBedTotal,
+        // Per CHD-10 (2026-07-31, per CVQ-01): the
+        // snapshotted `breakfastIncludesChildren`
+        // value the new child inherits from the
+        // header (the per-room override is out of
+        // scope for MRB-14 v1). `true` is the safe
+        // default for legacy reservations that
+        // pre-date the CHD-10 snapshot — matches the
+        // historical "children pay the full rate"
+        // math. The create + walkin paths write the
+        // same field; the add-room path pre-v0.264.8
+        // silently dropped it (silent data loss for
+        // any future read site that checks
+        // `booking.breakfastIncludesChildren === true`).
+        breakfastIncludesChildren: Boolean((reservation as any).breakfastIncludesChildren ?? true),
+        // Per EXB-12 (2026-08-06, per decision #199):
+        // the snapshotted `extraBedBreakfast` toggle
+        // the new child inherits. The current
+        // add-room admin UI doesn't expose the
+        // toggle yet (consistent with the walkin
+        // admin surface per the EXB-12 spec — a
+        // future UX work item), so the value is
+        // `false` for every new child created via
+        // add-room until the UI is updated. The
+        // create + walkin paths write the same
+        // field; the add-room path pre-v0.264.8
+        // silently dropped it.
+        extraBedBreakfast: false,
         checkIn: Timestamp.fromDate(headerCheckIn),
         checkOut: Timestamp.fromDate(headerCheckOut),
         numNights: headerNumNights,
@@ -10545,17 +12034,41 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       // by 1. Vouchers are per-child (the new
       // child's `voucherUsageUpdate` already
       // handled the increment above).
+      //
+      // Per H-01 (corporate booking audit 2026-08-10):
+      // the corporateCodes doc snapshot was read earlier
+      // in this transaction (step 5, before any writes,
+      // per FOL-03). The increment reads from that
+      // snapshot, NOT from the reservation header (which
+      // has no `corporateUsageCount` field) — mirrors
+      // the create-path pattern at `bookings.ts:2271-2277`
+      // and the cancel-path pattern at
+      // `bookings.ts:5788-5792`. If the corporateCodes
+      // doc was deleted between create and now, we no-op
+      // (mirror the cancel path's `cpDoc.exists` guard).
       const corporateUsageUpdate: { ref: any; data: any } | null = (() => {
         if (!isCorporateReservation || !corporateCode) return null;
+        if (!corporateCodeDocForUpdate || !corporateCodeDocForUpdate.exists) return null;
+        const corpData = corporateCodeDocForUpdate.data() || {};
         const corpRef = adminDb.collection("corporateCodes").doc(corporateCode);
         return {
           ref: corpRef,
-          data: { usageCount: Number((reservation as any).corporateUsageCount || 0) + 1, updatedAt: new Date() }
+          data: {
+            usageCount: (Number(corpData.usageCount) || 0) + 1,
+            updatedAt: new Date()
+          }
         };
       })();
+      // Per BAR-02 (2026-08-08, per decision #203):
+      // `roomCount` and `activeRoomCount` are no
+      // longer written to the reservation header on
+      // add-room. Consumers derive them at read time.
+      // The real denormalized header values
+      // (`subtotal` / `totalPrice` /
+      // `aggregateRevenueAllocation` /
+      // `actualDateRange`) stay — those are not pure
+      // projections.
       updatedHeader = {
-        roomCount: existingChildren.length + 1,
-        activeRoomCount: existingChildren.length + 1,
         subtotal: newSubtotal,
         totalPrice: newTotalPrice,
         aggregateRevenueAllocation: newAggregateRevenueAllocation,

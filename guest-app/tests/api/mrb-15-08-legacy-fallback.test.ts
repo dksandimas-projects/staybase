@@ -80,6 +80,10 @@ const bookingsHandlerSrc = readFileSync(
   resolve(__dirname, "../../server/handlers/bookings.ts"),
   "utf8"
 );
+const helperSrc = readFileSync(
+  resolve(__dirname, "../../server/handlers/reservationScopeTransition.ts"),
+  "utf8"
+);
 
 // Slice the source by handler function. The next
 // `^export async function` (or `^export function` for
@@ -183,8 +187,21 @@ describe("MRB-15-08 — `handleRescheduleBooking` falls through to the per-child
     // rate breakdown + status matrix remain
     // the single source of truth for those
     // legacy records).
+    //
+    // The hoist fix: `bookingReservationId` is
+    // declared with `let` in the outer `try` scope
+    // (alongside `existingReservationData`) so the
+    // post-commit response payload can echo both the
+    // `reservationId` and the header's
+    // `reservationRef`. The IIFE body is unchanged;
+    // only the surrounding declaration moved
+    // (`const` → `let` + assignment). The `{0,3000}`
+    // window between the outer-scope `let` and the
+    // in-transaction IIFE assignment covers the
+    // existing-snapshot/header-read/occupancy-check
+    // block the transaction opens with.
     expect(bookingsHandlerSrc).toMatch(
-      /handleRescheduleBooking[\s\S]{0,5000}?const bookingReservationId: string \| null = \(\(\) => \{[\s\S]{0,500}?const stored = String\(\(booking as any\)\.reservationId \|\| ""\)\.trim\(\)/
+      /export async function handleRescheduleBooking[\s\S]{0,8000}?let bookingReservationId: string \| null = null;[\s\S]{0,3000}?bookingReservationId = \(\(\) => \{[\s\S]{0,200}?const stored = String\(\(booking as any\)\.reservationId \|\| ""\)\.trim\(\)/
     );
   });
 });
@@ -227,32 +244,38 @@ describe("MRB-15-08 — `handleCheckinBooking` + `handleCheckoutBooking` skip th
 });
 
 describe("MRB-15-08 — `handleVerifyAndRecordPayment` + `handleMarkPaymentConfirmed` skip the header mirror for legacy bookings", () => {
-  it("the verify-payment handler's header mirror is gated on `bookingReservationId.length > 0`", () => {
-    // The reservation-scope payment status
-    // mirror (per MRB-04 Phase 3) is skipped
-    // for legacy null-`reservationId` bookings
-    // — byte-equivalent to pre-Phase 3
-    // behavior. The same `now` is used for the
-    // booking update AND the header mirror.
-    expect(bookingsHandlerSrc).toMatch(
-      /handleVerifyAndRecordPayment[\s\S]{0,5000}?bookingReservationId\.length > 0[\s\S]{0,200}?paymentStatus: mapBookingStatusToReservationPaymentStatus/
+  it("the verify-payment handler's header touch is gated on `bookingReservationId.length > 0` (FOL-05 legacy = skip) — owned by the BAR-03 helper", () => {
+    // Per FOL-05 (2026-08-07, per decision #201):
+    // the reservation-scope payment status
+    // mirror is gated on `bookingReservationId.length > 0`
+    // — byte-equivalent to pre-Phase 3 behavior for
+    // legacy null-`reservationId` bookings. Per
+    // BAR-02 (2026-08-08, per decision #203): the
+    // mirror write itself is gone — the `paymentStatus`
+    // field is no longer written to the reservation
+    // header. Per BAR-03 (2026-08-08, per decision
+    // #204): the conditional `transaction.update(reservationRef, { updatedAt })`
+    // heartbeat is now inside the shared
+    // `applyReservationScopePaymentTransition`
+    // helper, gated on the same
+    // `bookingReservationId.length > 0` check. The
+    // helper call's guard is the contract — the
+    // legacy-skip behavior is preserved.
+    expect(helperSrc).toMatch(
+      /if \(bookingReservationId\.length > 0 && children\.length > 0\) \{[\s\S]{0,200}?transaction\.update\(adminDb\.collection\("reservations"\)\.doc\(bookingReservationId\), \{ updatedAt \}\);/
     );
   });
 
-  it("the verify-payment handler's header mirror is gated on `fullyPaid && bookingReservationId.length > 0` (legacy = skip)", () => {
-    // The verify-payment handler mirrors
-    // the payment status to the reservation
-    // header when the booking just transitioned
-    // to `payment-confirmed`. The gate is
-    // BOTH `fullyPaid` (the transition fired)
-    // AND `bookingReservationId.length > 0`
-    // (the booking has a header to mirror
-    // to). Legacy null-`reservationId`
-    // bookings skip the mirror — byte-
-    // equivalent to pre-MRB-04 Phase 3
-    // behavior for legacy records.
-    expect(verifyPaymentHandlerSrc).toMatch(
-      /fullyPaid && bookingReservationId\.length > 0[\s\S]{0,500}?paymentStatus: mapBookingStatusToReservationPaymentStatus/
+  it("the verify-payment handler does NOT write `paymentStatus` to the reservation header (per BAR-02 / #203)", () => {
+    // Per BAR-02 (2026-08-08, per decision #203):
+    // the `paymentStatus` mirror is no longer
+    // written. Consumers derive it at read time
+    // via `computeReservationAggregatePaymentStatus`.
+    // The FOL-05 sibling-flip pass (the per-child
+    // status flip) is unchanged — only the
+    // redundant header mirror is gone.
+    expect(verifyPaymentHandlerSrc).not.toMatch(
+      /paymentStatus: computeReservationAggregatePaymentStatus\(postUpdateChildStatuses\)/
     );
   });
 
@@ -268,8 +291,19 @@ describe("MRB-15-08 — `handleVerifyAndRecordPayment` + `handleMarkPaymentConfi
     // payment handler (which does mirror) is
     // the separate path that fires from the
     // payment-uploaded transition.
+    //
+    // Per FOL-05 (2026-08-07, per decision #201):
+    // the pre-FOL-05 negative-assertion target
+    // (`paymentStatus: mapBookingStatusToReservationPaymentStatus`)
+    // no longer appears in the source — the
+    // helper was retired in favor of
+    // `computeReservationAggregatePaymentStatus`.
+    // The post-FOL-05 negative-assertion targets
+    // both the N=1 mapper AND the N>1 aggregate
+    // (markPaymentConfirmed uses neither; the
+    // status flip is the only write).
     expect(markPaymentConfirmedHandlerSrc).not.toMatch(
-      /paymentStatus: mapBookingStatusToReservationPaymentStatus/
+      /paymentStatus: mapBookingStatusToReservationPaymentStatus|paymentStatus: computeReservationAggregatePaymentStatus/
     );
   });
 });
@@ -288,8 +322,21 @@ describe("MRB-15-08 — `handleAddPayment` + `handleAddRefund` use the dual-sour
     // shape is byte-equivalent to the historical
     // `OnsitePayment` shape (no `reservationId`
     // field).
+    //
+    // Per FOL-05 (2026-08-07, per decision #201):
+    // the FOL-05 sibling pre-read sits between
+    // the payments snapshot read and the
+    // `recordWithReservation` computation, so the
+    // char distance grew past the pre-FOL-05 5000
+    // budget. The 30000 budget covers the
+    // FOL-05 sibling pre-read + the post-update
+    // child status computation + the per-child
+    // flip `transaction.update` calls + the
+    // aggregate header mirror + the
+    // `recordWithReservation` computation in the
+    // same `runTransaction`.
     expect(bookingsHandlerSrc).toMatch(
-      /handleAddPayment[\s\S]{0,5000}?const recordWithReservation = bookingReservationId\.length > 0/
+      /handleAddPayment[\s\S]{0,30000}?const recordWithReservation = bookingReservationId\.length > 0/
     );
   });
 

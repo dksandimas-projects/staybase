@@ -424,6 +424,194 @@ export async function handleCreateStoreOrder(req: any, res: any) {
   }
 }
 
+// Per DECISIONS-FEATURES.md #80 + plan/features/STORE-MANAGEMENT.md:67:
+// stock decrement happens on order confirmation, not on order
+// creation. This is the missing half of the create-then-confirm
+// split. The cancel handler at line ~427 checks `stockDecrementedAt`
+// before restoring — that check has always been there; what was
+// missing is the matching confirm-side write that SETS
+// `stockDecrementedAt`. Without this handler, stock is never
+// decremented and an order can be "confirmed" without any
+// inventory change.
+//
+// STR-01 (2026-08-14, found during the audit pass that followed
+// RPT-05 + EXB-12.1 + VOU-01): the spec promised this handler but
+// it was never built. The handler composes with the cancel
+// handler's `!stockRestoredAt && stockDecrementedAt` guard —
+// confirm writes `stockDecrementedAt`, cancel reads it.
+//
+// Behavior:
+//   1. Staff-authenticated (the deliver-order endpoint is the
+//      same shape; the desk confirms orders as part of the
+//      placed → confirmed → out-for-delivery → delivered flow).
+//   2. Reads the order + each storeItems doc in one transaction
+//      (FOL-03 reads-before-writes rule).
+//   3. Idempotent: if `stockDecrementedAt` is already set, return
+//      success without decrementing again. This handles the
+//      "desk double-clicks Confirm" race + the "confirm-order is
+//      retried after a Vercel freeze" case.
+//   4. For each item with `stock !== null && stock !== undefined`
+//      (skipping unlimited inventory items), decrements
+//      `stock` by `item.quantity`. Throws `OUT_OF_STOCK` if any
+//      decrement would push stock below 0 — the transaction
+//      aborts, the desk sees the error, no partial decrement.
+//   5. Sets `status: "confirmed"`, `stockDecrementedAt: now`,
+//      `handledBy: req.staff?.uid`, `updatedAt: now` on the
+//      order doc.
+//   6. Best-effort email (mirrors the deliver-order flow).
+export async function handleConfirmStoreOrder(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const body = (req.body || {}) as CancelStoreOrderBody;
+  if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
+    return res.status(400).json({ success: false, error: "Missing required confirmation fields." });
+  }
+
+  // Per H4 (hardening batch 2026-06-26): trim + cap
+  // every free-form string before the transaction. Same
+  // trim/cap pattern as handleCancelStoreOrder.
+  const orderId = String(body.orderId).trim();
+  const roomNumber = String(body.roomNumber).trim();
+  const orderRef = String(body.orderRef).trim();
+  if (orderId.length === 0 || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid order id." });
+  }
+  if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid room number." });
+  }
+  if (orderRef.length === 0 || orderRef.length > MAX_ORDER_REF_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid order reference." });
+  }
+
+  // Per STR-01: confirm is a staff operation. The
+  // router wraps this in `authenticateStaff`; the
+  // handler reads `req.staff?.uid` for `handledBy`.
+  const staffUid = String(req.staff?.uid || "staff");
+
+  try {
+    let confirmedOrder: any = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRefDoc = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRefDoc);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+
+      const orderData = orderDoc.data()!;
+      if (String(orderData.roomNumber || "").trim() !== roomNumber) {
+        throw new Error("ORDER_ROOM_MISMATCH");
+      }
+      if (String(orderData.orderRef || "").trim() !== orderRef) {
+        throw new Error("ORDER_REF_MISMATCH");
+      }
+      if (orderData.status !== "placed") {
+        throw new Error("ORDER_NOT_CONFIRMABLE");
+      }
+
+      // Idempotency: if the operator double-clicks
+      // Confirm, the second call returns success
+      // without decrementing again. Also covers the
+      // Vercel-freeze retry case where the first call
+      // committed but the response didn't reach the
+      // client.
+      if (orderData.stockDecrementedAt) {
+        confirmedOrder = orderData;
+        return;
+      }
+
+      // Per FOL-03 reads-before-writes: read the order
+      // + every storeItem doc BEFORE any writes. The
+      // stock decrement + the order-doc writes go in
+      // one contiguous write block after the reads.
+      const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
+      const itemRefs = orderItems.map((item: any) => adminDb.collection("storeItems").doc(item.itemId));
+      const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+
+      for (let index = 0; index < orderItems.length; index++) {
+        const item = orderItems[index];
+        const itemDoc = itemDocs[index];
+        if (!itemDoc.exists) continue;
+        const itemData = itemDoc.data()!;
+        // Skip unlimited stock items (stock: null).
+        if (itemData.stock === null || itemData.stock === undefined) continue;
+        const currentStock = Number(itemData.stock || 0);
+        const requestedQuantity = Number(item.quantity || 0);
+        const newStock = currentStock - requestedQuantity;
+        // Race-safety: a concurrent order between stock
+        // check + decrement could push stock negative.
+        // Throw to abort the transaction (no partial
+        // decrement lands) so the desk never confirms
+        // an order the inventory can't fill.
+        if (newStock < 0) {
+          throw new Error("OUT_OF_STOCK");
+        }
+        transaction.update(itemRefs[index], {
+          stock: newStock,
+          updatedAt: new Date()
+        });
+      }
+
+      transaction.update(orderRefDoc, {
+        status: "confirmed",
+        stockDecrementedAt: new Date(),
+        handledBy: staffUid,
+        updatedAt: new Date()
+      });
+
+      confirmedOrder = { ...orderData, status: "confirmed", stockDecrementedAt: new Date() };
+    });
+
+    // Per W4.4 / decision #104: fire the confirmed
+    // email after the transaction commits. The guest's
+    // email is looked up from the active booking (if
+    // any) by Admin SDK. Idempotent — the email helper
+    // no-ops if guestEmail is missing. The "store-order-confirmed"
+    // action is already in the EmailAction enum
+    // (email.ts:77) and the template is built at email.ts:1778 —
+    // this handler was the missing caller.
+    if (confirmedOrder) {
+      try {
+        let guestEmail = "";
+        if (confirmedOrder.bookingId) {
+          const bookingDoc = await adminDb.collection("bookings").doc(confirmedOrder.bookingId).get();
+          if (bookingDoc.exists) {
+            guestEmail = String(bookingDoc.data()?.guestEmail || "");
+          }
+        }
+        await sendStoreOrderTrigger("store-order-confirmed", {
+          ...confirmedOrder,
+          guestEmail,
+          handledBy: staffUid
+        });
+      } catch (emailErr) {
+        console.error("Failed to send store confirmation email:", emailErr);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        orderId,
+        status: "confirmed",
+        idempotentReplay: confirmedOrder ? !confirmedOrder.stockDecrementedAt || false : false
+      }
+    });
+  } catch (error: any) {
+    const message = error.message || "Unable to confirm the store order.";
+    const statusMap: Record<string, number> = {
+      ORDER_NOT_FOUND: 404,
+      ORDER_ROOM_MISMATCH: 403,
+      ORDER_REF_MISMATCH: 403,
+      ORDER_NOT_CONFIRMABLE: 400,
+      OUT_OF_STOCK: 409
+    };
+    const status = statusMap[message] || 500;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
 export async function handleCancelStoreOrder(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });

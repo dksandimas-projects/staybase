@@ -20,7 +20,9 @@ export * from "./utils/checkin";
 export * from "./utils/dates";
 export * from "./utils/images";
 export * from "./utils/points";
+export * from "./utils/paymentMethodLabel";
 export * from "./utils/paymentReference";
+export * from "./utils/paymentVerification";
 export * from "./utils/pricing";
 export * from "./utils/publicSiteCache";
 export * from "./utils/references";
@@ -34,4 +36,5 @@ export * from "./utils/corporate-codes";
 export * from "./utils/failureBackoff";
 export * from "./utils/financeInvariants";
 export * from "./utils/cancellation";
+export * from "./utils/uploads";
 

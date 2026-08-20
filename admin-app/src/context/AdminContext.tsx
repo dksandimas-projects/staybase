@@ -26,6 +26,19 @@ import {
   StoreConfig,
   bustPublicSiteContentCache,
   compressImageFile,
+  // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+  // the optional client-preallocated `reservationId` for
+  // walk-in create requests. When the call site supplies
+  // one, the server's transactional create replays the
+  // original commit on a retry-after-uncertain-response
+  // (same `reservationId` + same `requestFingerprint` →
+  // idempotent replay; different `requestFingerprint` →
+  // 409). When absent (the historical default), the server
+  // auto-mints a UUIDv4 — same pattern as the public
+  // `/api/bookings/create` path. Walk-in callers should
+  // always preallocate so a double-click on Confirm
+  // doesn't create a duplicate booking.
+  generateReservationId,
   normalizeDiscountScope,
   normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverrides,
@@ -49,6 +62,10 @@ import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes }
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { useAudioRouting, type AudioSurface } from "../hooks/useAudioRouting";
+import { setSinkIdSafe } from "../utils/audioOutputDevices";
+import { renderRingtoneWav } from "../utils/renderRingtoneWav";
+import type { AudioRouting as AudioRoutingShape } from "@spark-inn/shared";
 
 type StaffRole = "front-desk" | "admin";
 
@@ -89,6 +106,16 @@ async function resolvePrivateStorageUrl(path: string): Promise<string> {
 interface AdminUser {
   uid: string;
   email: string;
+  // Per decision #214 (2026-08-19): the staff's Firebase Auth
+  // `displayName`, surfaced on `AdminUser` so the intercom call
+  // claim transaction can write the staff attribution to
+  // `calls/{roomId}.acceptedBy.name` and the call-answered system
+  // message can prefix the audit trail with "Call answered by
+  // {Name}". Falls through to email when the Firebase user has no
+  // display name set (the common case for staff whose Google
+  // account has no public name — the booking inbox still shows
+  // their email which is equally identifiable).
+  displayName: string | null;
   role: StaffRole;
 }
 
@@ -259,6 +286,15 @@ export interface Booking {
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: string | null;
   paymentRejectedBy?: string | null;
+  // Per FOL-01 (2026-08-06, decision #197): the durable
+  // "payment was verified" signal. ISO string (the
+  // `parseDateTimeString` convention) — server writes a `Date`,
+  // the admin mapper hydrates it to ISO. See the shared
+  // `Booking.paymentConfirmedAt` doc for the full contract.
+  // The shared `isPaymentVerified()` helper is the only
+  // authoritative read; per-render `status === "payment-confirmed"`
+  // checks are the bug this field fixes.
+  paymentConfirmedAt?: string | null;
   rescheduleHistory?: any[];
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
@@ -423,7 +459,7 @@ export interface CorporateInquiry {
 export interface IntercomMessage {
   id: string;
   text: string;
-  sender: "guest" | "front-desk";
+  sender: "guest" | "front-desk" | "system";
   guestName: string;
   timestamp: string;
   isRead: boolean;
@@ -432,6 +468,24 @@ export interface IntercomMessage {
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
   currentStayId?: string;
+  // Per `feat/call-history-messages`. Defined in the canonical
+  // type at `@spark-inn/shared` (`shared/types/index.ts`) — these
+  // fields are mirrored here only because the AdminContext uses a
+  // local duplicate instead of importing the shared type. Consumers
+  // (IntercomChatPanel) hit this shape via `import type { IntercomMessage
+  // } from "../context/AdminContext"` and need the new fields.
+  messageType?: "call-answered" | "call-missed" | "call-declined";
+  callStartedAt?: string;
+  callDuration?: number;
+  // Per decision #206 (2026-08-19): the staff display name for
+  // `messageType === "call-answered"` system messages. Mirrors the
+  // `calls/{roomId}.acceptedBy.name` written by the claim
+  // transaction so future renderers can surface "Answered by
+  // {Name}" without parsing the free-text `text` field. Null on
+  // pre-#206 messages, on missed/declined (no claim committed), or
+  // when the staff member's display name was not available at
+  // message-write time.
+  callAnsweredByName?: string | null;
 }
 
 export interface IntercomThread {
@@ -443,11 +497,26 @@ export interface IntercomThread {
   currentStayId?: string;
 }
 
+// Per decision #206 (2026-08-19): when two front-desk staff race to
+// accept the same incoming call, the first one to commit the
+// `runTransaction` claim wins and writes `acceptedBy` to the call doc.
+// The snapshot mapper hydrates `acceptedBy` for every tab so the
+// loser's UI can render "Already answered by {Name}" instead of letting
+// them click through to a half-built WebRTC connection. Absent on
+// pre-#206 calls (the field never existed; harmless fallback is
+// `null`).
+export interface CallAcceptedBy {
+  uid: string;
+  name: string;
+  claimedAt?: Date | null;
+}
+
 export interface IncomingCall {
   roomId: string;
   guestName: string;
   status: "ringing" | "active" | "ended";
   offer?: RTCSessionDescriptionInit;
+  acceptedBy?: CallAcceptedBy | null;
 }
 
 export interface StoreOrderItem {
@@ -564,6 +633,12 @@ export interface AdminContextType {
         numChildren: number;
         extraBedCount: number;
       }>;
+      // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+      // the optional client-preallocated `bookingId` +
+      // `reservationId`. See the implementation JSDoc for
+      // the retry-after-uncertain-response contract.
+      preallocatedBookingId?: string;
+      preallocatedReservationId?: string;
     }
   ) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
@@ -572,8 +647,12 @@ export interface AdminContextType {
   // booking back to `pending` (room stays held), emails
   // the guest with the reason, and writes a `payment`
   // notification for the bell.
-  verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string }>;
-  rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string; siblingFlippedCount?: number }>;
+  rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; siblingRejectedCount?: number }>;
+  // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
+  // staff-toggled LOU (Letter of Undertaking) flag for
+  // corporate chargeback bookings.
+  setLouReceived: (bookingId: string, louReceived: boolean) => Promise<{ success: boolean; error?: string }>;
   // Per CWB (decision #122, 2026-07-23): staff-triggered
   // transition from `payment-uploaded` to `confirmed` when
   // a positive balance will be collected at check-in. Server
@@ -630,6 +709,36 @@ export interface AdminContextType {
   triggerIncomingCall: (roomId: string, guestName: string) => void | Promise<void>;
   acceptCall: () => void | Promise<void>;
   declineCall: () => void | Promise<void>;
+
+  // Per-call mute state. Mirrors the "Mute" button on every phone /
+  // conferencing app: scoped to the active call only and auto-resets
+  // to unmuted on the next call. The active-call banner reads this
+  // flag and shows Mute / Unmute accordingly; clicking toggles the
+  // local MediaStreamTrack's `enabled` property so the remote end
+  // hears silence while muted without disconnecting. We deliberately
+  // do NOT persist this across calls — a stale mute on a fresh call
+  // is a worse UX than asking the operator to reach for the button.
+  // Owned by AdminContext because the MediaStream itself lives here
+  // (set in acceptCall from getUserMedia). Implementation details in
+  // the `toggleMicMute` and lifecycle reset below.
+  isMicMuted: boolean;
+  toggleMicMute: () => void;
+  // Per decision #219 (2026-08-19): returns the LIVE `track.enabled`
+  // state (the single source of truth for the mic). The banner
+  // reads this on every render so the pill + button can never
+  // disagree with the audio. `isMicMuted` is kept as a hint for
+  // `toggleMicMute` but is no longer the displayed state.
+  getActualMicMuted: () => boolean;
+
+  // Per-staff intercom audio routing (see `plan/features/INTERCOM-AUDIO-ROUTING.md`).
+  // The hook lives in `AdminProvider` so every consumer (call audio,
+  // notification sound, Audio Settings page) sees the same live value.
+  audioRouting: AudioRoutingShape;
+  audioRoutingLoading: boolean;
+  audioRoutingError: string | null;
+  applyAudioSink: (el: HTMLMediaElement | null | undefined, surface: AudioSurface) => Promise<boolean>;
+  updateAudioRouting: (next: Partial<AudioRoutingShape>) => Promise<void>;
+  resetAudioRouting: () => Promise<void>;
 
   // Store Orders
   storeOrders: StoreOrder[];
@@ -803,6 +912,13 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<AdminContextType["currentUser"]>(null);
 
+  // Per-staff intercom audio routing (see `plan/features/INTERCOM-AUDIO-ROUTING.md`).
+  // Subscribed once at the provider level so every consumer — the
+  // Audio Settings page, the IntercomInboxPage notification sound,
+  // and the WebRTC remote stream created in `acceptCall` — sees the
+  // same live value without each opening its own Firestore listener.
+  const audioRoutingState = useAudioRouting(currentUser?.uid ?? null);
+
   useEffect(() => {
     void setPersistence(auth, browserSessionPersistence).catch(() => undefined);
 
@@ -825,6 +941,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         setCurrentUser({
           uid: firebaseUser.uid,
           email: firebaseUser.email ?? "",
+          displayName: firebaseUser.displayName ?? null,
           role
         });
       } catch {
@@ -880,6 +997,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       setCurrentUser({
         uid: credential.user.uid,
         email: credential.user.email ?? email,
+        displayName: credential.user.displayName ?? null,
         role
       });
     } finally {
@@ -1161,7 +1279,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   }
 
+  // Per RM-05 / decision #220 (2026-08-19): hard-delete of a `rooms/{id}`
+  // document is destructive and only admins should be able to do it
+  // from the admin app (Front Desk can still create / edit / toggle
+  // status per `firestore.rules:22`). The server rule
+  // (`allow delete: if isAdmin()` at `firestore.rules:23`) already
+  // rejects Front Desk with `permission-denied`, but the wasted
+  // round-trip + the misleading toast pushed the operator's report.
+  // The handler-side gate mirrors the rule so the UI gets a clean
+  // "Admins only" error and a future refactor can't accidentally
+  // allow Front Desk through a different rules gap.
   const deleteRoom = async (roomId: string, reason = ""): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
+    if (currentUser?.role !== "admin") {
+      const error = "Only administrators can delete rooms.";
+      notify.error("Cannot delete room", error);
+      return { success: false, error };
+    }
     const room = rooms.find((r) => r.id === roomId);
     if (!room) {
       const error = "Room not found.";
@@ -1360,6 +1493,46 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // canonical "absent" is `null`, not `""`.
             paymentProofUrl: data.paymentProofUrl || null,
             paymentProofPath: data.paymentProofPath || null,
+            // Per FOL-01 (2026-08-06, decision #197): the
+            // durable "payment was verified" signal. Hydrate
+            // from the Firestore doc (server writes a `Date`;
+            // admin convention is ISO string via
+            // `parseDateTimeString`). `null` for legacy
+            // bookings and any booking whose payment has not
+            // been staff-verified. The shared
+            // `isPaymentVerified()` helper is the only
+            // authoritative read; the per-render `status ===
+            // "payment-confirmed"` checks at BookingsPage.tsx
+            // 4803-4811 + 5195-5208 are the bug this hydration
+            // (and the helper) fixes. The other two rejection
+            // fields (`paymentRejectionReason` / `paymentRejectedAt`)
+            // are not hydrated here — they're populated via
+            // the explicit reject-payment flow only and are
+            // not needed for the verified-state read.
+            paymentConfirmedAt: data.paymentConfirmedAt
+              ? parseDateTimeString(data.paymentConfirmedAt)
+              : null,
+            // Per Phase 12 — Dashboard Payment Rejection & Reference
+            // Verification (2026-07-15): the reject-payment handler
+            // stamps these three fields on the booking doc. The
+            // admin `Booking` type already declares them but the
+            // pre-FOL-02 mapper silently dropped all three on every
+            // snapshot echo — same shape of bug as MRB-15-10 and
+            // FOL-01 (the type declares a field, the mapper forgets
+            // to read it from the snapshot). The dashboard's
+            // reject-payment card reads `paymentRejectionReason`
+            // from this hydrated field; the Folio's "Rejected"
+            // badge reads the same field. `paymentRejectedAt` /
+            // `paymentRejectedBy` are audit metadata for the
+            // rejected-proof trail. Default to `null` / `""` so a
+            // legacy booking without these fields reads as
+            // "no rejection happened" (the type already declares
+            // them nullable).
+            paymentRejectionReason: data.paymentRejectionReason || null,
+            paymentRejectedAt: data.paymentRejectedAt
+              ? parseDateTimeString(data.paymentRejectedAt)
+              : null,
+            paymentRejectedBy: data.paymentRejectedBy || null,
             // Per H2 (hardening batch 2026-06-26): the
             // server generates this on create. The admin
             // app just hydrates the field for display /
@@ -1405,6 +1578,117 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // as `null` (the type already declares it
             // nullable).
             cancellationLiability: data.cancellationLiability || null,
+            // Per MRB-01 (2026-08-02, per decision #159): the
+            // reservation header linkage. The pre-FOL-02 mapper
+            // silently dropped all four fields on every snapshot
+            // echo — same shape of bug as MRB-15-10 and FOL-01
+            // (the type declares a field, the mapper forgets
+            // to read it from the snapshot). The downstream
+            // consequences are visible in two places:
+            //   1. The booking drawer's payments listener at
+            //      `BookingsPage.tsx:1164-1224` gates on
+            //      `selectedBooking.reservationId` to decide
+            //      whether to subscribe to the post-MRB-01
+            //      canonical path `reservations/{id}/payments/`
+            //      OR the legacy `bookings/{id}/payments/`. With
+            //      the field dropped, every booking fell through
+            //      to the legacy path — so a verified payment
+            //      written to the canonical subcollection was
+            //      invisible to the Folio's "Payment history",
+            //      and the "Collect <balance>" CTA stayed on
+            //      screen even after the staff verified the
+            //      full amount. The Folio summary read
+            //      `paymentsTotal = 0` and "balance = grandTotal"
+            //      even though `paymentConfirmedAt` was set and
+            //      the verified record existed in the
+            //      subcollection.
+            //   2. The booking drawer's reservation strip, the
+            //      Bookings table's group-row collapse, the
+            //      MRB-12 reservation-scope payment-status pill,
+            //      and the deep-link `?reservationId=` resolution
+            //      all read these four fields. With the fields
+            //      dropped, those surfaces silently fell through
+            //      to the legacy null-reservationId shape.
+            // Hydrating from the snapshot (with `String().trim()`
+            // for the id / ref and `Number()` for the position /
+            // count) matches the post-MRB-01 contract. Legacy
+            // null-`reservationId` bookings have all four as
+            // `null` (no migration; pre-live TEST DATA is reset,
+            // not migrated).
+            reservationId: data.reservationId ? String(data.reservationId).trim() || null : null,
+            reservationRef: data.reservationRef ? String(data.reservationRef).trim() || null : null,
+            reservationPosition: Number.isFinite(Number(data.reservationPosition))
+              ? Number(data.reservationPosition)
+              : null,
+            reservationRoomCount: Number.isFinite(Number(data.reservationRoomCount))
+              ? Number(data.reservationRoomCount)
+              : null,
+            // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+            // the canonical payment reference lives on each entry
+            // in the booking's `onsitePayments[]` ledger as
+            // `transactionReference`. The previous top-level
+            // `Booking.paymentReferenceNumber` is retired. The
+            // shared `getLatestPaymentReference()` reads from
+            // this array; the Folio summary + the booking
+            // table's "PAID" pill + the report exports + the
+            // dashboard's pending-payment card all consume it.
+            //
+            // The pre-FOL-02 mapper declared the field on the
+            // admin `Booking` type but never read it from the
+            // snapshot, so the array was always `undefined` in
+            // React state. The downstream consequences:
+            //   1. The header's "Reference" line
+            //      (`BookingDrawerWorkspace.tsx:170`) renders
+            //      "Pending verification" forever for every
+            //      booking — the helper returns `null` because
+            //      the array is empty, and the staff sees
+            //      "Pending verification" even after a verified
+            //      payment. The fix is the same as FOL-01's
+            //      paymentConfirmedAt: hydrate from the
+            //      snapshot. (A complementary fix wires the
+            //      live listener's results into the reference
+            //      read at the call site — see the
+            //      `getSelectedBookingLatestReference` helper
+            //      below + the `BookingDrawerWorkspaceHeader`
+            //      `latestPaymentReference` prop.)
+            //   2. The Folio's "gcash · <reference>" line on
+            //      the proof card shows "No reference" for the
+            //      same reason.
+            //   3. The Bookings table's "PAID" pill computes
+            //      paid = `(row.onsitePayments ?? []).reduce(...)`
+            //      (line 2074) — every row reads as ₱0 paid.
+            //   4. The advanced filter's "Reference" search
+            //      (line 1759) matches against the empty
+            //      array — staff can't filter by reference.
+            //
+            // Defensive default: the field is always present
+            // on the Firestore doc (server writes an empty
+            // array on create), but legacy bookings from
+            // before 2026-07-24 may have no `onsitePayments`
+            // field at all — fall back to `[]` so the read is
+            // never undefined.
+            onsitePayments: Array.isArray(data.onsitePayments)
+              ? data.onsitePayments.map((p: any) => ({
+                  id: String(p.id || ""),
+                  type: p.type === "refund" ? "refund" : "payment",
+                  amount: Number(p.amount || 0),
+                  method: String(p.method || ""),
+                  note: String(p.note || ""),
+                  transactionReference: p.transactionReference
+                    ? String(p.transactionReference)
+                    : null,
+                  reason: p.reason ? String(p.reason) : null,
+                  approvedBy: p.approvedBy ? String(p.approvedBy) : null,
+                  recordedBy: String(p.recordedBy || "staff"),
+                  recordedAt: p.recordedAt
+                    ? (typeof p.recordedAt.toDate === "function"
+                        ? p.recordedAt.toDate().toISOString()
+                        : (p.recordedAt instanceof Date
+                            ? p.recordedAt.toISOString()
+                            : String(p.recordedAt)))
+                    : ""
+                }))
+              : [],
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
             breakfastSelections: data.breakfastSelections || {},
@@ -1588,7 +1872,6 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               companyName: data.companyName || "",
               voucherCode: data.voucherCode || "",
               memberDiscountPct: Number(data.memberDiscountPct) || 0,
-              paymentStatus: data.paymentStatus || "awaiting-payment",
               paymentMethod: data.paymentMethod || "",
               paymentProofUrl: data.paymentProofUrl ?? null,
               paymentProofPath: data.paymentProofPath ?? null,
@@ -1599,11 +1882,6 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               privacyAcceptedAt: parseDateOrNull(data.privacyAcceptedAt),
               privacyVersion: data.privacyVersion || "",
               cancellationPolicySnapshot: data.cancellationPolicySnapshot ?? null,
-              roomCount: Number(data.roomCount) || 0,
-              activeRoomCount: Number(data.activeRoomCount) || 0,
-              cancelledRoomCount: Number(data.cancelledRoomCount) || 0,
-              checkedInRoomCount: Number(data.checkedInRoomCount) || 0,
-              checkedOutRoomCount: Number(data.checkedOutRoomCount) || 0,
               holdExpiresAt: parseDateOrNull(data.holdExpiresAt),
               requestFingerprint: data.requestFingerprint || "",
               createdAt: parseDateOrEpoch(data.createdAt),
@@ -1611,6 +1889,28 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               createdBy: data.createdBy || "guest",
               cancellationLiability: data.cancellationLiability ?? null,
               aggregateRevenueAllocation: data.aggregateRevenueAllocation ?? null,
+              // Per BAR-02 (2026-08-08, per decision #203):
+              // the five aggregate counter fields +
+              // `paymentStatus` are no longer written to
+              // the reservation header. Consumers derive
+              // them via `deriveReservationCounters` +
+              // `computeReservationAggregatePaymentStatus`
+              // over the children at read time. The
+              // back-compat reads below surface `undefined`
+              // for post-BAR-02 reservations (the fields
+              // are absent) and the historical values for
+              // pre-BAR-02 reservations that still carry
+              // them in Firestore. The pre-BAR-02
+              // byte-equivalence at the read boundary is
+              // preserved (consumers that haven't migrated
+              // to the derivation helpers still see the
+              // same values).
+              paymentStatus: data.paymentStatus,
+              roomCount: data.roomCount,
+              activeRoomCount: data.activeRoomCount,
+              cancelledRoomCount: data.cancelledRoomCount,
+              checkedInRoomCount: data.checkedInRoomCount,
+              checkedOutRoomCount: data.checkedOutRoomCount,
               // Per MRB-14 (2026-08-03, per decision #180
               // — proposed): the `actualDateRange` field.
               // Pre-MRB-14 reservations have no field
@@ -2034,11 +2334,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         numChildren: number;
         extraBedCount: number;
       }>;
+      // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
+      // the optional client-preallocated `bookingId` and
+      // `reservationId`. The historical auto-mint path
+      // (both fields freshly generated on every submit)
+      // silently created a duplicate booking on a
+      // retry-after-uncertain-response — the user clicks
+      // Confirm, the request times out, the user clicks
+      // again, the server's auto-mint gives each call a
+      // new id, and the second submit lands as a separate
+      // booking against the same guest. The preallocation
+      // contract matches the public `/api/bookings/create`
+      // path (MRB-02): the call site preallocates both
+      // ids in a `useState` lazy init, reuses them across
+      // retries inside the same modal session, and resets
+      // them after the success toast. When absent, the
+      // server auto-mints (back-compat with the existing
+      // caller that does not preallocate).
+      preallocatedBookingId?: string;
+      preallocatedReservationId?: string;
     }
   ): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const bookingId = doc(collection(db, "bookings")).id;
+      // Per NBS-2026-08-08 (F1): the call site may preallocate
+      // both ids; when absent, we auto-mint (legacy behavior).
+      // The preallocation is what makes a retry-after-uncertain-
+      // response safe — the server's transaction reads the
+      // reservation header first and either replays the
+      // original commit (same `reservationId` + same
+      // `requestFingerprint`) or returns a 409 (different
+      // `requestFingerprint`). Without preallocation each
+      // retry races the auto-mint and produces a duplicate.
+      const bookingId = input.preallocatedBookingId || doc(collection(db, "bookings")).id;
+      const reservationId = input.preallocatedReservationId || generateReservationId();
 
       // Per fix/walkin-split-name (2026-07-25): the walk-in
       // modal now collects `firstName` + `lastName` separately
@@ -2064,6 +2393,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         },
         body: JSON.stringify({
           bookingId,
+          // Per NBS-2026-08-08 (F1): the optional
+          // client-preallocated `reservationId` for
+          // reservation-level idempotency. The server's
+          // `WalkinBookingSchema` already accepts the
+          // field (decision #164 / MRB-02.x); the
+          // auto-mint path stays as the back-compat
+          // default for any caller that does not
+          // preallocate.
+          ...(reservationId ? { reservationId } : {}),
           roomId: input.roomId,
           // Per MRB-07 (2026-08-02, per decision #159): the New Booking
           // modal can create a reservation covering N rooms. When
@@ -2146,7 +2484,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     method: string,
     transactionReference?: string,
     note?: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; siblingFlippedCount?: number }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/verify-and-record-payment`, {
@@ -2161,14 +2499,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || "Failed to verify and record payment." };
       }
-      return { success: true };
+      // Per FOL-05 (2026-08-07, per decision #201): surface
+      // the server-computed sibling-flip count to the admin
+      // UI so the dashboard's per-room coverage preview can
+      // mirror what the server actually cleared. Falls back
+      // to 0 when the server is pre-FOL-05 (no field) so the
+      // admin app stays forward-compatible.
+      const siblingFlippedCount = typeof data?.data?.siblingFlippedCount === "number"
+        ? data.data.siblingFlippedCount
+        : 0;
+      return { success: true, siblingFlippedCount };
     } catch (err: any) {
       console.error("Error verifying and recording payment:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
 
-  const rejectPayment = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string }> => {
+  const rejectPayment = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string; siblingRejectedCount?: number }> => {
     const safeReason = String(reason || "").trim().slice(0, 500);
     if (!safeReason) {
       return { success: false, error: "A rejection reason is required so the guest can fix the issue." };
@@ -2187,9 +2534,51 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || "Failed to reject payment." };
       }
-      return { success: true };
+      // Per FOL-05 (2026-08-07, per decision #201): surface
+      // the server-computed sibling-rejection count to the
+      // admin UI for symmetry with the verify path. Falls
+      // back to 0 when the server is pre-FOL-05 (no field).
+      const siblingRejectedCount = typeof data?.data?.siblingRejectedCount === "number"
+        ? data.data.siblingRejectedCount
+        : 0;
+      return { success: true, siblingRejectedCount };
     } catch (err: any) {
       console.error("Error rejecting payment:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  // Per LOW-1 (reports audit 2026-08-10) +
+  // `DECISIONS-FEATURES.md #99` (LOU workflow):
+  // the staff-toggled LOU (Letter of Undertaking) flag
+  // for corporate chargeback bookings. The desk calls
+  // this when the company's LOU arrives by email
+  // (per `plan/features/CORPORATE-BOOKING.md` §LOU).
+  // The server stamps `louReceived` +
+  // `louReceivedAt` + `louReceivedBy` on the booking
+  // doc and the receivables widget picks up the
+  // change via the standard onSnapshot subscription.
+  // Un-marking is supported (pass `false`) so the
+  // rare "we marked it but the company withdrew"
+  // case is reversible.
+  const setLouReceived = async (bookingId: string, louReceived: boolean): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/set-lou-received`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, louReceived })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to update the LOU flag." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error setting LOU flag:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -2607,41 +2996,70 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Per W1.12 / decision #85: real `onSnapshot` listener on the `members`
   // collection. Replaces the hardcoded `useState<Member[]>([fake entry])`
   // mock that hid all real members from the admin UI. Cleanup on unmount.
+  //
+  // Per MRB-15-09 / decision #219 (2026-08-19): the listener was
+  // missing the `auth.currentUser?.getIdToken(true)` force-refresh
+  // wrapper that the reservations listener (line 1832) and the
+  // post-NOTIF-01 notifications listener adopted. Without the
+  // refresh, a fresh sign-in / long-idle session / first load
+  // after a role mint attached the listener with a stale SDK
+  // token and the `isStaff()` rule on `/members/{userId}`
+  // (`firestore.rules:229`) returned `Missing or insufficient
+  // permissions`. The error was logged at the `.catch` site but
+  // never surfaced to the UI — `members` stayed `[]`, the page
+  // rendered the empty-state card ("No members match the current
+  // search.") which the operator reported as "blank white screen"
+  // (bugs #20 + #21). The fix mirrors the reservations pattern
+  // exactly: await the refresh before attaching the snapshot,
+  // guard the unmount-mid-refresh race with `cancelled`, and
+  // keep the unsubscribe arrow in the cleanup branch.
   const [members, setMembers] = useState<Member[]>([]);
   useEffect(() => {
     if (!currentUser) return;
     const membersRef = collection(db, "members");
-    const unsubscribe = onSnapshot(
-      membersRef,
-      (snapshot) => {
-        const membersData: Member[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          membersData.push({
-            id: doc.id,
-            memberNumber: data.memberNumber || "",
-            fullName: data.fullName || "",
-            email: data.email || "",
-            phone: data.phone || "",
-            photoUrl: data.photoUrl || "",
-            authProvider: data.authProvider || "email",
-            isMember: data.isMember !== false,
-            memberSince: data.memberSince || "",
-            rewardsPoints: data.rewardsPoints || 0,
-            tier: data.tier || "standard",
-            isActive: data.isActive !== false,
-            pointsHistory: data.pointsHistory || []
-          });
-        });
-        // Sort by member number for stable display
-        membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
-        setMembers(membersData);
-      },
-      (error) => {
-        console.error("Error listening to members collection:", error);
-      }
-    );
-    return unsubscribe;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    void auth.currentUser?.getIdToken(true)
+      .then(() => {
+        if (cancelled) return;
+        unsubscribe = onSnapshot(
+          membersRef,
+          (snapshot) => {
+            const membersData: Member[] = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              membersData.push({
+                id: doc.id,
+                memberNumber: data.memberNumber || "",
+                fullName: data.fullName || "",
+                email: data.email || "",
+                phone: data.phone || "",
+                photoUrl: data.photoUrl || "",
+                authProvider: data.authProvider || "email",
+                isMember: data.isMember !== false,
+                memberSince: data.memberSince || "",
+                rewardsPoints: data.rewardsPoints || 0,
+                tier: data.tier || "standard",
+                isActive: data.isActive !== false,
+                pointsHistory: data.pointsHistory || []
+              });
+            });
+            // Sort by member number for stable display
+            membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
+            setMembers(membersData);
+          },
+          (error) => {
+            console.error("Error listening to members collection:", error);
+          }
+        );
+      })
+      .catch((refreshErr) => {
+        console.error("Failed to force-refresh ID token for members listener:", refreshErr);
+      });
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUser]);
 
   const updateMemberPoints = async (
@@ -2792,6 +3210,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   }, []);
 
   const audioContextRef = useRef<AudioContext | null>(null);
+  // Chrome rejects `new AudioContext()` outside a user-gesture handler:
+  //   "The AudioContext was not allowed to start. It must be resumed
+  //    (or created) after a user gesture on the page."
+  // The Firestore `onSnapshot` callbacks for bookings + intercoms call
+  // `playSynthNotification` on first load hydration *and* on every
+  // network-driven update, which runs outside any gesture. If we let
+  // that path construct the AudioContext, Chrome logs the autoplay
+  // warning to the console (and the context stays suspended —
+  // `oscillator.start()` is silent). Gate the constructor on this
+  // boolean, which only the gesture handler (below) flips.
+  const audioGestureUnlockedRef = useRef(false);
 
   useEffect(() => {
     const unlockAudio = () => {
@@ -2801,6 +3230,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       if (audioContextRef.current.state === "suspended") {
         void audioContextRef.current.resume();
       }
+      audioGestureUnlockedRef.current = true;
     };
     window.addEventListener("pointerdown", unlockAudio, { once: true });
     window.addEventListener("keydown", unlockAudio, { once: true });
@@ -2812,14 +3242,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
 
   const playSynthNotification = useCallback((type: "booking" | "payment" | "message" | "arrival" | "departure") => {
     if (!soundsEnabledRef.current) return;
+    // Bail before touching the AudioContext. The gesture handler above is
+    // the only place that constructs it — if the staff signed in via deep
+    // link (no prior click on the admin chrome), the first few snapshot
+    // notifications will be silent, which is correct: Chrome requires the
+    // user to interact with the page before audio plays.
+    if (!audioGestureUnlockedRef.current) return;
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume();
-      }
 
       const now = ctx.currentTime;
 
@@ -2986,7 +3417,29 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               isStoreOrder: !!data.isStoreOrder,
               orderRef: data.orderRef || undefined,
               isEarlyCheckInRequest: !!data.isEarlyCheckInRequest,
-              currentStayId: data.currentStayId || undefined
+              currentStayId: data.currentStayId || undefined,
+              // Per FOL-02 (2026-08-07, per `GOTCHAS.md` line 30) and
+              // decision #214 (2026-08-19): the snapshot mapper must
+              // preserve every field the `IntercomMessage` contract
+              // guarantees. The pre-#214 surface silently dropped
+              // `messageType`, `callStartedAt`, and `callDuration` —
+              // the chat panel couldn't render the centered "Call
+              // answered" footer row without `messageType`. The #214
+              // fix closed the drops alongside adding the new
+              // `callAnsweredByName` field; the per-field test pins
+              // (one per field) live in
+              // `admin-app/src/__tests__/call-staff-claim-transaction.test.ts`
+              // so a future refactor that drops any of the four
+              // breaks the test instead of silently regressing
+              // (FOL-02 contract enforcement pattern).
+              messageType: data.messageType || undefined,
+              callStartedAt: data.callStartedAt?.toMillis
+                ? new Date(data.callStartedAt.toMillis()).toISOString()
+                : undefined,
+              callDuration: typeof data.callDuration === "number" ? data.callDuration : undefined,
+              callAnsweredByName: typeof data.callAnsweredByName === "string"
+                ? data.callAnsweredByName
+                : null
             };
           });
 
@@ -3046,6 +3499,156 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
+  // Per `feat/call-history-messages`. Records a single
+  // system-message doc in `intercoms/{roomNumber}/messages` for
+  // every call lifecycle event. The doc carries the structured
+  // `messageType: "call-answered" | "call-missed" | "call-declined"`
+  // discriminator plus a human-readable `text` body so legacy
+  // clients (or readers that don't yet know about messageType)
+  // still see a sensible line in the chat thread.
+  //
+  // Inputs are computed by `cleanupAdminCall` and read directly
+  // from the three telemetry refs the call lifecycle writes into.
+  // We deliberately do NOT take duration from the persisted
+  // `calls/{roomId}.startedAt` / `endedAt` Firestore timestamps
+  // because:
+  //   1. Reading them back would race the cleanup, and
+  //   2. The duration is a client-relative measurement that the
+  //      server timestamp deltas would over-engineer.
+  // millisAtStart is recorded on acceptCall; millisAtEnd on
+  // cleanup. For a missed call, millisAtStart is the moment the
+  // call transitioned to ringing in the snapshot listener —
+  // `recordCallHistory` reads that from `incomingCall.startedAt`
+  // if available (which the existing snapshot mapper already
+  // produces).
+  const recordCallHistory = async (
+    roomId: string,
+    outcome: "call-answered" | "call-missed" | "call-declined" | "call-failed",
+    durationMs: number | null
+  ) => {
+    try {
+      // Format helpers local to the doc — kept inline so the
+      // system message reads identically across the admin
+      // web app without importing a shared formatter.
+      const fmtClock = (ms: number) => {
+        const d = new Date(ms);
+        return d.toLocaleTimeString(config.locale, {
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      };
+      const fmtDuration = (ms: number) => {
+        const totalSec = Math.max(0, Math.round(ms / 1000));
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        if (m === 0) return `${s}s`;
+        return `${m}m ${s.toString().padStart(2, "0")}s`;
+      };
+
+      const durationMsSafe =
+        typeof durationMs === "number" && durationMs >= 0 ? durationMs : 0;
+      const durationSec = Math.round(durationMsSafe / 1000);
+
+      let text: string;
+      // The "started at" wall-clock for the system message comes
+      // from the appropriate signal:
+      //   answered → millisAtEnd - durationMs (caller passes
+      //               the actual start wall clock)
+      //   missed/declined → currentClockAtRinging, captured by
+      //               the snapshot mapper on incomingCall.startedAt
+      //               and stored in adminCallRingingStartedAtRef
+      //               (set in the snapshot effect below)
+      const startedAtMs =
+        outcome === "call-answered"
+          ? Math.max(0, Date.now() - durationMsSafe)
+          : adminCallRingingStartedAtRef.current ?? Date.now() - durationMsSafe;
+      const clockStr = fmtClock(startedAtMs);
+
+      if (outcome === "call-answered") {
+        // Per decision #206 (2026-08-19): when this tab is the
+        // claimer, prefix the system message with the staff's
+        // display name so the chat thread audit-trail tells the
+        // desk who answered. Falls through to the legacy
+        // un-attributed text when the ref is false (older call
+        // docs without an acceptedBy stamp, or staff not signed
+        // in at hangup time).
+        const staffName = adminCallLocalAcceptRef.current
+          ? (currentUser?.displayName || currentUser?.email || "Front Desk")
+          : null;
+        text = staffName
+          ? `Call answered by ${staffName} at ${clockStr} · ${fmtDuration(durationMsSafe)}`
+          : `Call answered at ${clockStr} · ${fmtDuration(durationMsSafe)}`;
+      } else if (outcome === "call-missed") {
+        text = `Missed call at ${clockStr} · rang ${fmtDuration(durationMsSafe)}`;
+      } else if (outcome === "call-failed") {
+        // Per decision #217 (2026-08-19): staff pressed Accept and
+        // the claim transaction committed, but the post-claim
+        // audio plumbing (getUserMedia / createAnswer / writeDoc)
+        // failed. The call-failed system message surfaces this in
+        // the chat thread so the audit trail says "the staff TRIED
+        // to answer" instead of "the staff MISSED it". durationMs
+        // is the wall-clock from ringing start to failure, which
+        // is typically <500ms (mic permission denial is instant);
+        // the duration is omitted from the text because the
+        // failure happened during connect, not during a
+        // sustained call. If durationMs is 0 or null, drop the
+        // "after Ns" clause.
+        text = durationMsSafe > 0
+          ? `Call failed at ${clockStr} · after ${fmtDuration(durationMsSafe)}`
+          : `Call failed at ${clockStr}`;
+      } else {
+        text = `Call declined at ${clockStr}`;
+      }
+
+      // Persist alongside the regular thread state so the room
+      // surfaces the call banner / last-message preview correctly.
+      await setDoc(doc(db, "intercoms", roomId), {
+        roomId,
+        roomNumber: roomId,
+        currentStayId: intercomThreads[roomId]?.currentStayId ?? null,
+        resolved: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+        text,
+        sender: "system",
+        guestName: "Front Desk",
+        timestamp: serverTimestamp(),
+        isRead: true,
+        isQuickRequest: false,
+        isStoreOrder: false,
+        isEarlyCheckInRequest: false,
+        currentStayId: intercomThreads[roomId]?.currentStayId ?? null,
+        messageType: outcome,
+        callStartedAt: outcome === "call-answered"
+          ? Timestamp.fromMillis(startedAtMs)
+          : null,
+        // The Firestore rules cap timestamp==request.time, but
+        // they do NOT cap number-valued optional fields, so we can
+        // send duration in seconds without a Timestamp shim.
+        callDuration: durationSec,
+        // Per decision #206 (2026-08-19): the staff display name
+        // for `call-answered` messages, so future renderers can
+        // surface "Answered by Maria" without parsing the free-
+        // text `text` field. Mirrors the claim transaction's
+        // `acceptedBy.name` — null when this tab did not claim
+        // (older call docs) so the renderer can fall back to the
+        // un-attributed text.
+        callAnsweredByName: outcome === "call-answered" && adminCallLocalAcceptRef.current
+          ? (currentUser?.displayName || currentUser?.email || "Front Desk")
+          : null
+      });
+    } catch (error) {
+      // Best-effort — never let the audit-trail write break the
+      // call cleanup flow. A failure here means the chat history
+      // is missing one entry; the active-call banner / hang-up
+      // already succeeded by the time recordCallHistory is
+      // called.
+      console.warn(`[call-history] failed to record ${outcome} for ${roomId}:`, error);
+    }
+  };
+
   const markChatAsRead = async (roomId: string) => {
     const unreadGuestMessages = (intercoms[roomId] || []).filter((message) => message.sender === "guest" && !message.isRead);
     if (unreadGuestMessages.length === 0) return;
@@ -3082,80 +3685,70 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Call Signaling state — live from Firestore calls/{roomId}
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const ringtoneIntervalIdRef = useRef<any>(null);
+  // Per `plan/features/INTERCOM-AUDIO-ROUTING.md`: the call ringtone
+  // (the looping double trill before the staff answers) is rendered
+  // once to a WAV Blob and played through a hidden `<audio>` element
+  // so the staff's `ringtoneOutputDeviceId` (typically the built-in
+  // speaker) is honoured via `setSinkId`. Pre-rendering once and
+  // re-seeking on each interval is cheaper than rebuilding the
+  // oscillator graph every 3 s and routes the same sound that the
+  // previous Web Audio API tree produced.
+  const ringtoneAudioUrlRef = useRef<string | null>(null);
+  const ringtoneAudioElRef = useRef<HTMLAudioElement | null>(null);
 
   const stopCallRingtone = useCallback(() => {
     if (ringtoneIntervalIdRef.current) {
       clearInterval(ringtoneIntervalIdRef.current);
       ringtoneIntervalIdRef.current = null;
     }
+    const audio = ringtoneAudioElRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
   }, []);
 
-  const playCallRingtone = useCallback(() => {
+  const playCallRingtone = useCallback(async () => {
     if (!soundsEnabledRef.current) return;
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const url = await renderRingtoneWav();
+      if (!url) return;
+      let audio = ringtoneAudioElRef.current;
+      if (!audio) {
+        audio = new Audio(url);
+        audio.preload = "auto";
+        ringtoneAudioElRef.current = audio;
+        // Pin to the staff's chosen ringtone output device. No-op when
+        // routing is disabled or the runtime doesn't support setSinkId.
+        void audioRoutingState.applyToElement(audio, "ringtone").catch(() => undefined);
       }
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") {
-        void ctx.resume();
+      try {
+        audio.currentTime = 0;
+        void audio.play().catch(() => undefined);
+      } catch {
+        // Some browsers throw when the source isn't fully buffered yet;
+        // the next interval tick will retry with the same element.
       }
-
-      const now = ctx.currentTime;
-      const frequencies = [853, 960];
-
-      const playBurst = (startTime: number, duration: number) => {
-        const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(0, startTime);
-        gainNode.gain.linearRampToValueAtTime(0.25, startTime + 0.02);
-        gainNode.gain.setValueAtTime(0.25, startTime + duration - 0.05);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
-        const oscs = frequencies.map((freq) => {
-          const osc = ctx.createOscillator();
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(freq, startTime);
-
-          const lfo = ctx.createOscillator();
-          const lfoGain = ctx.createGain();
-          lfo.type = "sine";
-          lfo.frequency.value = 14;
-          lfoGain.gain.value = 40;
-
-          lfo.connect(lfoGain);
-          lfoGain.connect(osc.frequency);
-
-          osc.connect(gainNode);
-
-          lfo.start(startTime);
-          lfo.stop(startTime + duration);
-
-          return { osc, lfo };
-        });
-
-        gainNode.connect(ctx.destination);
-
-        oscs.forEach(({ osc }) => {
-          osc.start(startTime);
-          osc.stop(startTime + duration);
-        });
-      };
-
-      // Cadence: double electronic trill (ring 0.4s, pause 0.2s, ring 0.4s)
-      playBurst(now, 0.4);
-      playBurst(now + 0.6, 0.4);
     } catch (e) {
       console.warn("Failed to play ringtone audio:", e);
     }
-  }, []);
+  }, [renderRingtoneWav, audioRoutingState]);
+
+  // Re-route the call ringtone element when the routing preference
+  // changes (e.g. operator picks a new ringtone device).
+  useEffect(() => {
+    const audio = ringtoneAudioElRef.current;
+    if (!audio) return;
+    void audioRoutingState.applyToElement(audio, "ringtone").catch(() => undefined);
+  }, [audioRoutingState.routing, audioRoutingState]);
 
   useEffect(() => {
     const isRinging = incomingCall?.status === "ringing";
     if (isRinging && soundsEnabled) {
       if (!ringtoneIntervalIdRef.current) {
-        playCallRingtone();
+        void playCallRingtone();
         ringtoneIntervalIdRef.current = setInterval(() => {
-          playCallRingtone();
+          void playCallRingtone();
         }, 3000);
       }
     } else {
@@ -3174,7 +3767,231 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
   const adminPreviousCallRoomIdRef = useRef<string | null>(null);
 
+  // Per-call-history-messages telemetry. Three refs the call
+  // dispatch helper reads at cleanup time to determine the
+  // outcome:
+  //
+  //   adminCallAnsweredRef      — true after acceptCall successfully
+  //                                established the peer connection.
+  //                                False for ringing → ended (missed)
+  //                                and ringing → declined (declined).
+  //   adminCallStartedAtRef     — wall-clock millis at which acceptCall
+  //                                succeeded; used to compute the
+  //                                call-duration seconds on hang-up.
+  //                                Null when never answered.
+  //   adminCallExplicitDeclineRef — true when declineCall was the
+  //                                trigger for cleanup (staff pressed
+  //                                Ignore). False when the snap-
+  //                                shot listener's nextCall watcher
+  //                                ended the call automatically
+  //                                (second-call-wins supersede) or
+  //                                when the call simply timed out.
+  //   adminCallRingingStartedAtRef — wall-clock millis at which
+  //                                the snapshot listener first saw
+  //                                the new call as `status: "ringing"`.
+  //                                Used to compute "the call rang
+  //                                for N seconds" on the missed /
+  //                                declined system message.
+  //
+  // These refs are the only state needed to write the correct
+  // `messageType` system doc — no extra context, no global store.
+  // Reset by `cleanupAdminCall` (every disconnect path) so the
+  // next call starts with a clean slate.
+  const adminCallAnsweredRef = useRef<boolean>(false);
+  const adminCallStartedAtRef = useRef<number | null>(null);
+  const adminCallExplicitDeclineRef = useRef<boolean>(false);
+  const adminCallRingingStartedAtRef = useRef<number | null>(null);
+  // Room number the call-history message should be attached to
+  // — the snapshot listener sets this on every fresh ringing
+  // call; acceptCall / declineCall override it before calling
+  // cleanup so the dispatcher always knows which thread to
+  // write to, even after `incomingCall` has been cleared.
+  const adminCallRoomIdRef = useRef<string | null>(null);
+
+  // Per decision #206 (2026-08-19): tracks whether THIS tab is the
+  // staff member that won the `runTransaction` claim for the current
+  // call. Set to `true` the instant the claim transaction commits —
+  // BEFORE getUserMedia — so the inbox banner can keep rendering the
+  // "Connected · {duration}" UI even if the local mic permission fails
+  // and the catch path forces the call to "ended". Reset to `false`
+  // on every cleanup (next call starts clean) and on every snapshot
+  // tick that lands on a different roomId. The IntercomInboxPage
+  // banner reads this through `incomingCall` state shape to decide
+  // which surface to render: "Connected" (we claimed) vs
+  // "Already answered by {Name}" (someone else did).
+  const adminCallLocalAcceptRef = useRef<boolean>(false);
+
+  // Per decision #217 (2026-08-19): gates the cleanupAdminCall IIFE
+  // dispatch so it fires EXACTLY ONCE per call lifecycle, not twice.
+  // Without this gate, React 18 StrictMode double-invokes effect
+  // cleanups in dev (and any future double-call to cleanupAdminCall
+  // from non-terminal paths would double-dispatch). Set to true the
+  // moment the IIFE calls recordCallHistory; reset to false at the
+  // tail of cleanupAdminCall so the NEXT call lifecycle starts fresh.
+  const adminCallHistoryDispatchedRef = useRef<boolean>(false);
+
+  // Per-call microphone mute flag. `false` = mic hot, `true` =
+  // track.enabled = false on the local outbound audio. Auto-resets
+  // to false on every new call (acceptCall, status → active) and on
+  // every cleanup (declineCall / disconnect / tab close). Lives in
+  // AdminContext state (not a ref) so the IntercomInboxPage banner
+  // can read isMicMuted through useAdmin() and re-render the button
+  // label/icon reactively.
+  const [isMicMuted, setIsMicMuted] = useState<boolean>(false);
+
+  const toggleMicMute = useCallback(() => {
+    // Flip the local track's `enabled` property on every audio track
+    // in the stream. The active call's MediaStream lives in
+    // adminMediaStreamRef (set in `acceptCall` from getUserMedia)
+    // and may contain more than one track in the future (e.g.
+    // echo-cancelling mic + speaker). Setting `enabled = false` on
+    // the outbound track is what makes the remote end hear silence
+    // — the local mic is still physically hot, just the network
+    // packets stop carrying audio. This matches the behaviour of
+    // every conferencing UI: the indicator in the room UI is the
+    // local handle, not a server-side muting of the other party.
+    const stream = adminMediaStreamRef.current;
+    if (!stream) {
+      // No active call — fall through to the state flip anyway so
+      // the UI stays in sync if the call ends mid-click. The next
+      // call will ignore the stale state via the lifecycle reset.
+      setIsMicMuted((prev) => !prev);
+      return;
+    }
+    const tracks = stream.getAudioTracks();
+    // Per decision #219 (2026-08-19): the next-enabled value is
+    // derived from the CURRENT TRACK STATE (`track.enabled`),
+    // not from the React `isMicMuted` state. Pre-#219 the code
+    // read `!isMicMuted` which could drift from `track.enabled`
+    // if the track was replaced mid-call (WebRTC renegotiation
+    // can swap the outbound track — the new track arrives with
+    // `enabled = true` by default but the operator's previous
+    // Mute click left the OLD track at `enabled = false`; the
+    // new track's `enabled = true` made the audio audible but
+    // `isMicMuted` still read `true` from the prior render, so
+    // the next Mute click would set the new track to `false`
+    // (silencing it again) and the displayed state would lag
+    // reality by one click). Reading from `track.enabled` makes
+    // the displayed state and the actual track state converge
+    // to the same source of truth.
+    const currentTrackEnabled =
+      tracks.length > 0 ? tracks[0].enabled : true;
+    const nextEnabled = !currentTrackEnabled;
+    tracks.forEach((track) => {
+      track.enabled = nextEnabled;
+    });
+    setIsMicMuted(!nextEnabled);
+  }, []);
+
+  // Per decision #219 (2026-08-19): the UI label MUST be driven
+  // by the actual `track.enabled` state, NOT by the React
+  // `isMicMuted` state. Operator-reported 2026-08-19 (post-#218):
+  // the pill said "MIC OPEN" but the audio was muted. Root cause:
+  // something OTHER than `toggleMicMute` set `track.enabled =
+  // false` (WebRTC track renegotiation, browser tab mute, the
+  // OS audio subsystem, or a stale closure in an early render)
+  // and `isMicMuted` didn't follow. The displayed state and
+  // the actual audio desynced, so the operator saw "Mic open"
+  // but the guest heard silence. The fix: every render of the
+  // banner reads the live `track.enabled` value, so the pill
+  // and the button can never disagree with the audio. `useState`
+  // is no longer the source of truth for the displayed state —
+  // it's only a hint to `toggleMicMute` about the user's last
+  // intent (so double-clicks don't oscillate). The track is
+  // the truth.
+  const getActualMicMuted = useCallback((): boolean => {
+    const stream = adminMediaStreamRef.current;
+    if (!stream) return false;
+    const tracks = stream.getAudioTracks();
+    if (tracks.length === 0) return false;
+    // The convention: muted = track.enabled === false. Read the
+    // FIRST audio track's state — getUserMedia requests a single
+    // audio track today, so tracks[0] is the only outbound track
+    // in practice. Multi-track callers would need a per-track UI
+    // surface (out of scope for this fix).
+    return !tracks[0].enabled;
+  }, []);
+
   const cleanupAdminCall = () => {
+    // Per-call-history-messages: dispatch the system message
+    // BEFORE we tear down refs / release the peer connection, so
+    // `recordCallHistory` can read the four outcome refs.
+    //
+    // Outcome resolution:
+    //   adminCallAnsweredRef === true
+    //     → "call-answered"; duration = Date.now() - adminCallStartedAtRef
+    //   adminCallAnsweredRef === false AND adminCallExplicitDeclineRef === true
+    //     → "call-declined"; no duration recorded (decline is instantaneous)
+    //   adminCallAnsweredRef === false AND adminCallExplicitDeclineRef === false
+    //     → "call-missed"; duration = Date.now() - adminCallRingingStartedAtRef
+    //
+    // We also gate on adminCallRoomIdRef being set — without a
+    // room we have no thread to attach the message to. That can
+    // happen if the snapshot effect clears the room before any
+    // ringing happened (e.g. race on logout). Skip silently.
+    //
+    // Per decision #217 (2026-08-19): gate the IIFE dispatch with
+    // adminCallHistoryDispatchedRef so it fires EXACTLY ONCE per
+    // call lifecycle. Without this gate, React 18 StrictMode
+    // double-invokes effect cleanups in dev (and any future
+    // double-call to cleanupAdminCall from non-terminal paths
+    // would double-dispatch a "call-missed" / "call-answered" /
+    // "call-declined" message into the chat thread). The flag
+    // is reset at the tail of cleanupAdminCall so the NEXT call
+    // lifecycle starts fresh.
+    (async () => {
+      if (adminCallHistoryDispatchedRef.current) return;
+      const roomId = adminCallRoomIdRef.current;
+      if (!roomId) return;
+      const answered = adminCallAnsweredRef.current === true;
+      const explicitDecline = adminCallExplicitDeclineRef.current === true;
+      let outcome: "call-answered" | "call-missed" | "call-declined" | "call-failed" | null = null;
+      let durationMs: number | null = null;
+      if (answered) {
+        outcome = "call-answered";
+        const start = adminCallStartedAtRef.current;
+        durationMs = start === null ? 0 : Math.max(0, Date.now() - start);
+      } else if (explicitDecline) {
+        outcome = "call-declined";
+        // Decline is instantaneous by design; we don't record a
+        // ringing duration on the decline system message (the
+        // text is just "Call declined at HH:MM" — no duration).
+        durationMs = null;
+      } else if (adminCallLocalAcceptRef.current) {
+        // Per decision #217 (2026-08-19): the claim transaction
+        // committed (adminCallLocalAcceptRef === true) but
+        // adminCallAnsweredRef was never set because
+        // getUserMedia / createAnswer / updateDoc threw. The
+        // staff tried to answer but couldn't connect — that's
+        // a "call-failed" outcome, not a "call-missed" one
+        // (the staff DIDN'T miss it, the audio plumbing failed).
+        // Record a call-failed system message so the chat
+        // thread audit trail reflects what actually happened.
+        // durationMs is the time from claim → failure, which
+        // is typically <500ms; included for telemetry.
+        outcome = "call-failed";
+        const start = adminCallRingingStartedAtRef.current;
+        durationMs = start === null ? 0 : Math.max(0, Date.now() - start);
+      } else {
+        outcome = "call-missed";
+        const start = adminCallRingingStartedAtRef.current;
+        durationMs = start === null ? 0 : Math.max(0, Date.now() - start);
+      }
+      if (!outcome) return;
+      // Mark dispatched BEFORE the await so a synchronous re-entry
+      // (e.g. StrictMode's second cleanup invoke) is a no-op even
+      // before recordCallHistory's first await yields.
+      adminCallHistoryDispatchedRef.current = true;
+      await recordCallHistory(roomId, outcome, durationMs);
+    })().catch((err) => {
+      // The async IIFE above already catches its own errors
+      // inside recordCallHistory; this catch is belt-and-braces
+      // for any uncaught throw between the await and the
+      // dispatch. Never let a logging failure disrupt the
+      // hangup flow.
+      console.warn("[call-history] dispatch hook threw:", err);
+    });
+
     adminIceUnsubscribeRef.current?.();
     adminIceUnsubscribeRef.current = null;
     adminProcessedIceIdsRef.current.clear();
@@ -3187,6 +4004,83 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       adminRemoteAudioRef.current.srcObject = null;
       adminRemoteAudioRef.current = null;
     }
+    // Reset the per-call mute flag. Every disconnect path (operator
+    // pressed Disconnect, the guest hung up, a second call superseded
+    // this one, the tab is closing) goes through cleanupAdminCall, so
+    // a single line here ensures the next call always starts unmuted.
+    // Mirrors the "Mute resets on every new call" UX of phone /
+    // conferencing apps — see isMicMuted docs above for rationale.
+    setIsMicMuted(false);
+    // Per-call-history-messages: clear the four outcome refs at the
+    // END so the next call starts with a clean slate. Note that
+    // setIsMicMuted is in the same "reset" category but uses
+    // useState because the UI subscribes to it; the call-history
+    // refs aren't observed by React (the dispatcher reads them
+    // once at hangup) so plain refs work and stay cheap.
+    adminCallAnsweredRef.current = false;
+    adminCallStartedAtRef.current = null;
+    adminCallExplicitDeclineRef.current = false;
+    adminCallRingingStartedAtRef.current = null;
+    adminCallRoomIdRef.current = null;
+    // Per decision #206 (2026-08-19): the "this tab is the claimer"
+    // flag is reset on every cleanup. If a future call arrives and
+    // a different staff claims it, this tab's ref stays false so
+    // the inbox banner correctly shows "Already answered by {Name}"
+    // instead of the "Connected" surface. The new claim (if any)
+    // sets the ref back to true at the moment its runTransaction
+    // commits.
+    adminCallLocalAcceptRef.current = false;
+    // Per decision #217 (2026-08-19): reset the dispatch-once gate
+    // so the NEXT call lifecycle can fire its call-history system
+    // message. The gate was set true at the moment recordCallHistory
+    // was called inside the IIFE above.
+    adminCallHistoryDispatchedRef.current = false;
+  };
+
+  // Per decision #217 (2026-08-19): clearCallRefsOnly is the
+  // NON-DISPATCHING sibling of cleanupAdminCall. It zeroes the
+  // outcome refs and tears down the peer connection without firing
+  // the call-history system message. It exists because
+  // cleanupAdminCall's dispatch hook fires exactly-once per call
+  // lifecycle (gated by adminCallHistoryDispatchedRef), and the
+  // accept path needs to clear stale refs from any prior call
+  // without consuming the dispatch slot for the NEW call.
+  //
+  // Use cases:
+  //   1. acceptCall (before setting the new call's refs) — was the
+  //      source of decision #217. Before #217 this site called
+  //      cleanupAdminCall, which dispatched a "call-missed" message
+  //      against the in-flight ringing call's refs (answered=false),
+  //      producing a phantom "Missed call at HH:MM · rang 2s" entry
+  //      in the chat thread on EVERY accepted call.
+  //   2. Future call-site additions that need to reset refs
+  //      without writing a system message (e.g. test harnesses,
+  //      state reconciliation paths).
+  //
+  // Do NOT use this for terminal lifecycle states (operator
+  // disconnect, guest hang up, second-call-wins supersede, explicit
+  // decline, logout) — those still go through cleanupAdminCall so
+  // the call-history system message is written.
+  const clearCallRefsOnly = () => {
+    adminIceUnsubscribeRef.current?.();
+    adminIceUnsubscribeRef.current = null;
+    adminProcessedIceIdsRef.current.clear();
+    adminPeerConnectionRef.current?.close();
+    adminPeerConnectionRef.current = null;
+    adminMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    adminMediaStreamRef.current = null;
+    if (adminRemoteAudioRef.current) {
+      adminRemoteAudioRef.current.pause();
+      adminRemoteAudioRef.current.srcObject = null;
+      adminRemoteAudioRef.current = null;
+    }
+    setIsMicMuted(false);
+    adminCallAnsweredRef.current = false;
+    adminCallStartedAtRef.current = null;
+    adminCallExplicitDeclineRef.current = false;
+    adminCallRingingStartedAtRef.current = null;
+    adminCallRoomIdRef.current = null;
+    adminCallLocalAcceptRef.current = false;
   };
 
   useEffect(() => {
@@ -3202,11 +4096,30 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         const activeCalls = snapshot.docs
           .map((docSnap): IncomingCall & { startedAt: number } => {
             const data = docSnap.data();
+            // Per decision #206 (2026-08-19): when the call doc carries
+            // `acceptedBy` (the runTransaction claim in `acceptCall`
+            // wrote it), surface it on the mapped IncomingCall so the
+            // IntercomInboxPage banner can render "Already answered
+            // by {Name}" for the staff member that lost the race. The
+            // field is absent on pre-#206 docs and on calls that
+            // haven't been claimed yet (status === "ringing"); both
+            // map to `null` so the rest of the render path can
+            // treat it as a single shape.
+            const rawAcceptedBy = data.acceptedBy;
+            const acceptedBy: CallAcceptedBy | null =
+              rawAcceptedBy && typeof rawAcceptedBy === "object" && typeof rawAcceptedBy.uid === "string"
+                ? {
+                    uid: rawAcceptedBy.uid,
+                    name: typeof rawAcceptedBy.name === "string" ? rawAcceptedBy.name : "Front Desk",
+                    claimedAt: rawAcceptedBy.claimedAt?.toMillis ? new Date(rawAcceptedBy.claimedAt.toMillis()) : null
+                  }
+                : null;
             return {
               roomId: docSnap.id,
               guestName: data.guestName || "Guest",
               status: data.status || "ended",
               offer: data.offer || undefined,
+              acceptedBy,
               startedAt: data.startedAt?.toMillis ? data.startedAt.toMillis() : 0
             };
           })
@@ -3232,7 +4145,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           });
           cleanupAdminCall();
         }
-        adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
+        // Per-call-history-messages: capture the wall-clock millis at
+// which the incoming call's `status: "ringing"` first showed up
+// in the snapshot. We capture on EVERY snapshot tick where the
+// incoming-call roomId differs from the previous one we served
+// (covers the natural new-call case AND the second-call-wins
+// supersede case — both store the correct start for the newly
+// active call). The ref is read by `recordCallHistory` to format
+// the "Missed call at HH:MM · rang Ns" text on the missed path.
+if (nextCall && nextCall.roomId !== previousRoomId) {
+  // New call — set the ringing start. This also re-sets on every
+  // supersede, which is correct: the second call IS a fresh
+  // ringing start for the front desk.
+  adminCallRingingStartedAtRef.current = Date.now();
+}
+adminCallRoomIdRef.current = nextCall?.roomId ?? null;
+// (When nextCall becomes null but the previous call had a
+// ringing start, the dispatcher's "Date.now() -
+// adminCallRingingStartedAtRef.current" math inside recordCallHistory
+// handles the duration naturally — no need to capture an explicit
+// "end" timestamp here.)
+adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         setIncomingCall(nextCall);
         if (!nextCall) {
           cleanupAdminCall();
@@ -3263,19 +4196,116 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
 
   const acceptCall = async () => {
     if (!incomingCall) return;
+    const roomId = incomingCall.roomId;
+    const callRef = doc(db, "calls", roomId);
+
+    // Per decision #206 (2026-08-19): the call claim is the FIRST step
+    // of acceptCall. Two front-desk staff may both click Accept within
+    // the same ~200ms getUserMedia window, and the pre-#206
+    // `updateDoc` write was a best-effort last-write-wins race that
+    // left the wrong staff with a half-built peer connection. The
+    // `runTransaction` claim atomically reads the call doc, checks
+    // `status === "ringing"`, and writes `status: "active"` plus
+    // `acceptedBy: { uid, name, claimedAt }` in one commit. The first
+    // staff to commit wins; every subsequent staff that tries the
+    // same room hits the `data.status !== "ringing"` branch and the
+    // transaction aborts with `FirebaseError: Transaction failed all
+    // retries.` — we catch and surface a friendly toast instead of
+    // silently no-op-ing the half-built peer connection.
+    let claimCommitted = false;
+    try {
+      await runTransaction(db, async (transaction) => {
+        const callSnap = await transaction.get(callRef);
+        const data = callSnap.data();
+        if (!data || data.status !== "ringing") {
+          // Either the call doc disappeared (guest hung up before we
+          // could accept) or another staff already claimed it. Either
+          // way, we lose — the snapshot listener will surface the new
+          // state to the inbox banner via `acceptedBy`. The thrown
+          // error aborts the transaction (no writes), the outer
+          // `catch` toasts the staff, and we return without building
+          // a WebRTC connection.
+          throw new Error("call-already-claimed");
+        }
+        transaction.update(callRef, {
+          status: "active",
+          endedAt: null,
+          acceptedBy: {
+            uid: currentUser?.uid ?? "unknown",
+            name: currentUser?.displayName || currentUser?.email || "Front Desk",
+            claimedAt: serverTimestamp()
+          }
+        });
+      });
+      claimCommitted = true;
+      // Set the local-accept ref IMMEDIATELY after the claim commits
+      // — BEFORE any async work (getUserMedia) — so even if a later
+      // step throws, the inbox state still attributes the call to
+      // this tab. The ref is also useful for the call-history
+      // message write (it carries `staffName`).
+      adminCallLocalAcceptRef.current = true;
+    } catch (claimError) {
+      // The claim transaction is the gate — if it didn't commit,
+      // nothing else runs. The toast tells the staff they lost the
+      // race; the snapshot listener will follow up with the
+      // `acceptedBy` payload for the "Already answered by {Name}"
+      // banner.
+      const existingName = incomingCall.acceptedBy?.name;
+      if (existingName) {
+        notify.info("Call taken", `Already answered by ${existingName}.`);
+      } else {
+        notify.info("Call no longer available", "The guest hung up or another staff member answered first.");
+      }
+      void claimError; // already logged by Firestore SDK
+      return;
+    }
 
     try {
-      const callRef = doc(db, "calls", incomingCall.roomId);
-
       if (!incomingCall.offer) {
-        await updateDoc(callRef, {
-          status: "active",
-          endedAt: null
-        });
+        // No peer connection is built in this branch (the call
+        // doc has no offer). The claim transaction already flipped
+        // status to "active" + stamped acceptedBy; the no-offer
+        // branch just needs to mark the local answered refs so
+        // recordCallHistory writes the "call-answered" audit message
+        // with whatever elapsed time the eventual hangup reports
+        // (probably <1s; still useful as a "staff pressed accept
+        // but no audio" audit trail).
+        adminCallAnsweredRef.current = true;
+        adminCallStartedAtRef.current = Date.now();
+        adminCallRoomIdRef.current = roomId;
         return;
       }
 
-      cleanupAdminCall();
+      // Per decision #217 (2026-08-19): clearCallRefsOnly is the
+      // non-dispatching sibling of cleanupAdminCall. We use it here
+      // (instead of cleanupAdminCall) so the call-history system
+      // message dispatch hook does NOT fire at the moment the staff
+      // clicks Accept. The dispatch hook is gated by
+      // adminCallHistoryDispatchedRef and is reserved for TERMINAL
+      // lifecycle events (operator disconnect, guest hangup, second-
+      // call-wins supersede, explicit decline, logout). The accept
+      // path is a LIFECYCLE BEGIN event — the call-history message
+      // for it lands at the terminal event, not here.
+      //
+      // Pre-#217 this line called cleanupAdminCall(), which
+      // dispatched a "call-missed" system message against the
+      // ringing call's refs (adminCallAnsweredRef was still false,
+      // because line 4106 hasn't run yet). Every accepted call
+      // produced a phantom "Missed call at HH:MM · rang Ns"
+      // entry in the chat thread (operator-reported 2026-08-19
+      // with screenshot showing paired Missed + Answered messages).
+      clearCallRefsOnly();
+      // Per-call-history-messages: re-pin the room + started-at
+      // for THIS new accepted call (clearCallRefsOnly cleared all
+      // six refs at its tail, including the new local-accept ref
+      // — we need to re-set the room, the answered flag, AND the
+      // local-accept flag so the dispatcher can attribute the
+      // future call-answered message to this call, not to whatever
+      // the previous one was). Set adminCallLocalAcceptRef back to
+      // true here even though the claim transaction already set it
+      // — clearCallRefsOnly's tail reset it.
+      adminCallLocalAcceptRef.current = true;
+      adminCallRoomIdRef.current = roomId;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       adminMediaStreamRef.current = stream;
 
@@ -3283,9 +4313,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       adminPeerConnectionRef.current = peerConnection;
       stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
 
+      // Per-call-history-messages: mark this call as answered
+      // and capture the wall-clock start the moment the local
+      // stream is wired into the peer connection. This timestamp
+      // is what `recordCallHistory` subtracts from Date.now()
+      // at hangup time to compute the answered-call duration in
+      // seconds. Keep the assignment right after the
+      // `addTrack` loop so the ref is set BEFORE any
+      // `cleanupAdminCall` from a later error path can race
+      // it — every cleanup that runs after this point will see
+      // `adminCallAnsweredRef.current === true`.
+      adminCallAnsweredRef.current = true;
+      adminCallStartedAtRef.current = Date.now();
+
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) return;
-        void addDoc(collection(db, "calls", incomingCall.roomId, "iceCandidates"), {
+        void addDoc(collection(db, "calls", roomId, "iceCandidates"), {
           candidate: event.candidate.toJSON(),
           from: "staff",
           createdAt: serverTimestamp()
@@ -3298,6 +4341,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         remoteAudio.autoplay = true;
         remoteAudio.srcObject = remoteStream;
         adminRemoteAudioRef.current = remoteAudio;
+        // Pin the remote stream to the staff's chosen call output device
+        // (typically a USB headset). `applyAudioSink` is a no-op when
+        // audio routing is disabled or the runtime doesn't support
+        // setSinkId, so the call still works on the default output.
+        void audioRoutingState.applyToElement(remoteAudio, "call").catch(() => undefined);
         void remoteAudio.play().catch(() => {
           // Browser autoplay policy can still require staff interaction.
         });
@@ -3308,7 +4356,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       await peerConnection.setLocalDescription(answer);
 
       adminIceUnsubscribeRef.current = onSnapshot(
-        collection(db, "calls", incomingCall.roomId, "iceCandidates"),
+        collection(db, "calls", roomId, "iceCandidates"),
         (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type !== "added") return;
@@ -3322,26 +4370,67 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         }
       );
 
+      // Per decision #206: the claim transaction already set
+      // `status: "active" + endedAt: null + acceptedBy`. This final
+      // write only carries the SDP answer — no need to re-flip
+      // status (the transaction already did, atomically). The
+      // `endedAt: null` re-stamp is also redundant; kept out so the
+      // call doc reflects the claim transaction as the single source
+      // of truth for the active state.
       await updateDoc(callRef, {
         answer: {
           type: answer.type,
           sdp: answer.sdp
-        },
-        status: "active",
-        endedAt: null
+        }
       });
     } catch (error) {
       console.error("Error accepting WebRTC call:", error);
+      // Per decision #217 (2026-08-19): cleanupAdminCall now
+      // dispatches a "call-failed" (not "call-missed") system
+      // message for this path. The previous wording was wrong:
+      // the staff DID press Accept, the claim transaction
+      // committed (adminCallLocalAcceptRef === true), but the
+      // post-claim audio plumbing (getUserMedia / createAnswer /
+      // writeDoc) failed. The new "call-failed" outcome
+      // distinguishes "the staff tried to answer and the audio
+      // stack failed" from "the call rang and no one pressed
+      // Accept" — both produce a system message but with
+      // semantically different content. The chat thread audit
+      // trail now says "Call failed at HH:MM" instead of
+      // "Missed call at HH:MM · rang 2s" when the operator's
+      // mic permission was denied.
       cleanupAdminCall();
-      await updateDoc(doc(db, "calls", incomingCall.roomId), {
-        status: "ended",
-        endedAt: serverTimestamp()
-      });
+      // If the claim committed but a later step (getUserMedia,
+      // createAnswer, writeDoc) failed, we have to end the call for
+      // the guest too — otherwise the call would be stuck at
+      // `status: "active"` with no working peer connection. The
+      // `acceptedBy` field stays on the call doc as the audit
+      // trail of who tried to answer; recordCallHistory dispatched
+      // the "call-failed" system message in the cleanup IIFE above
+      // because `adminCallLocalAcceptRef.current === true` AND
+      // `adminCallAnsweredRef.current === false` at the moment
+      // the IIFE resolved the outcome.
+      if (claimCommitted) {
+        await updateDoc(callRef, {
+          status: "ended",
+          endedAt: serverTimestamp(),
+          endedReason: "accept-failed"
+        }).catch(() => undefined);
+      }
     }
   };
 
   const declineCall = async () => {
     if (!incomingCall) return;
+    // Per-call-history-messages: flag this cleanup as "the staff
+    // explicitly clicked Ignore" so the dispatcher in
+    // cleanupAdminCall writes a "call-declined" (not
+    // "call-missed") entry. The roomId ref is also pinned here
+    // — the snapshot effect may have already cleared it if
+    // decline happened immediately after the second-call-wins
+    // supersede fired.
+    adminCallExplicitDeclineRef.current = true;
+    adminCallRoomIdRef.current = incomingCall.roomId;
     cleanupAdminCall();
     await updateDoc(doc(db, "calls", incomingCall.roomId), {
       status: "ended",
@@ -3366,57 +4455,89 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return;
     }
     setNotificationsLoading(true);
-    // Bounded query — never the whole collection. Firestore
-    // requires an `orderBy` on the same field as any range
-    // filter; the retention cron reads with a range filter
-    // and orders ascending (see guest-app/server/lib/
-    // notifications.ts). The composite index `(createdAt
-    // desc)` is the only one this listener needs.
-    const notifRef = collection(db, "notifications");
-    const notifQuery = query(notifRef, orderBy("createdAt", "desc"), limit(50));
-    const unsubscribe = onSnapshot(
-      notifQuery,
-      (snapshot) => {
-        const docs: Notification[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          const readBy: Record<string, Date | null> = {};
-          if (data.readBy && typeof data.readBy === "object") {
-            Object.entries(data.readBy).forEach(([uid, ts]) => {
-              if (ts && typeof (ts as any).toDate === "function") {
-                readBy[uid] = (ts as any).toDate();
-              } else if (ts instanceof Date) {
-                readBy[uid] = ts;
-              } else if (ts === null) {
-                readBy[uid] = null;
-              } else {
-                readBy[uid] = null;
-              }
-            });
-          }
-          return {
-            id: docSnap.id,
-            type: (data.type as NotificationType) || "booking",
-            title: String(data.title || ""),
-            entityType: data.entityType || "booking",
-            entityId: String(data.entityId || ""),
-            roomNumber: data.roomNumber || null,
-            bookingRef: data.bookingRef || null,
-            readBy,
-            createdBy: "system",
-            createdAt: data.createdAt && typeof (data.createdAt as any).toDate === "function"
-              ? (data.createdAt as any).toDate()
-              : new Date(0)
-          };
-        });
-        setNotifications(docs);
-        setNotificationsLoading(false);
-      },
-      (error) => {
-        console.error("Error listening to notifications collection:", error);
-        setNotificationsLoading(false);
-      }
-    );
-    return unsubscribe;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+
+    // Per MRB-15-09 (force-refresh pattern for staff-gated
+    // listeners): the `notifications` collection is
+    // `isStaff()`-gated, which reads the `role` custom
+    // claim. The Firestore SDK uses its OWN cached ID
+    // token for the listener handshake — if the cache is
+    // one refresh behind the auth-state callback's
+    // token (a long-idle session, a fresh tab, or a
+    // just-minted role claim), the listener attaches with
+    // a stale token and `Missing or insufficient
+    // permissions` silently empties the bell badge.
+    // `getIdToken(true)` is idempotent — returns the
+    // cached token if fresh, exchanges the refresh token
+    // if stale. The `await` (via `.then`) makes the
+    // listener attach AFTER the refresh. The `cancelled`
+    // flag handles the unmount-mid-refresh race.
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+      // Bounded query — never the whole collection. Firestore
+      // requires an `orderBy` on the same field as any range
+      // filter; the retention cron reads with a range filter
+      // and orders ascending (see guest-app/server/lib/
+      // notifications.ts). The composite index `(createdAt
+      // desc)` is the only one this listener needs.
+      const notifRef = collection(db, "notifications");
+      const notifQuery = query(notifRef, orderBy("createdAt", "desc"), limit(50));
+      unsubscribe = onSnapshot(
+        notifQuery,
+        (snapshot) => {
+          const docs: Notification[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            const readBy: Record<string, Date | null> = {};
+            if (data.readBy && typeof data.readBy === "object") {
+              Object.entries(data.readBy).forEach(([uid, ts]) => {
+                if (ts && typeof (ts as any).toDate === "function") {
+                  readBy[uid] = (ts as any).toDate();
+                } else if (ts instanceof Date) {
+                  readBy[uid] = ts;
+                } else if (ts === null) {
+                  readBy[uid] = null;
+                } else {
+                  readBy[uid] = null;
+                }
+              });
+            }
+            return {
+              id: docSnap.id,
+              type: (data.type as NotificationType) || "booking",
+              title: String(data.title || ""),
+              entityType: data.entityType || "booking",
+              entityId: String(data.entityId || ""),
+              roomNumber: data.roomNumber || null,
+              bookingRef: data.bookingRef || null,
+              readBy,
+              createdBy: "system",
+              createdAt: data.createdAt && typeof (data.createdAt as any).toDate === "function"
+                ? (data.createdAt as any).toDate()
+                : new Date(0)
+            };
+          });
+          setNotifications(docs);
+          setNotificationsLoading(false);
+        },
+        (error) => {
+          console.error("Error listening to notifications collection:", error);
+          setNotificationsLoading(false);
+        }
+      );
+    }).catch((refreshErr) => {
+      // The refresh itself failed (e.g. network down or
+      // refresh-token revoked). Don't block the operator
+      // from seeing the rest of the dashboard — just log
+      // and let the next user interaction retry.
+      console.error("Failed to force-refresh ID token for notifications listener:", refreshErr);
+      setNotificationsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUser]);
 
   const unreadNotificationCount = useMemo(() => {
@@ -5555,6 +6676,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         resendBookingEmail,
         verifyAndRecordPayment,
         rejectPayment,
+        setLouReceived,
         confirmBookingWithBalance,
         roomBlocks,
         createRoomBlock,
@@ -5586,6 +6708,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         triggerIncomingCall,
         acceptCall,
         declineCall,
+        isMicMuted,
+        toggleMicMute,
+        getActualMicMuted,
+        audioRouting: audioRoutingState.routing,
+        audioRoutingLoading: audioRoutingState.loading,
+        audioRoutingError: audioRoutingState.error,
+        applyAudioSink: audioRoutingState.applyToElement,
+        updateAudioRouting: audioRoutingState.updateRouting,
+        resetAudioRouting: audioRoutingState.resetToDefault,
         storeOrders,
         updateStoreOrderStatus,
         billStoreOrder,

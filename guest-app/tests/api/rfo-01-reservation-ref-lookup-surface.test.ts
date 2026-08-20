@@ -1,0 +1,326 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Per RFO-01 (Reservation-lookup Form-Open surface, 2026-08-10,
+// decision #209): the MRB-09 reservation-scope emails expose
+// the `R-YYYYMMDD-NNNNN` reservation ref to the guest, but the
+// /my-booking page could not actually use it — the form's ref
+// field was hardcoded to `SI-…` only, the auto-lookup useEffect
+// only read `?ref=`, and `lookupUrl()` in email.ts generated
+// `?ref=<SI>&token=<token>` deep links. The R- ref the guest
+// saw in the email subject was decorative.
+//
+// This change wires the spec end-to-end:
+// 1. The MRB-09 email deep link generates
+//    `?reservationRef=…&email=…` for reservation-scope views
+//    (the N=1 path stays byte-equivalent on `?ref=<SI>&token=`).
+// 2. The page's auto-lookup useEffect reads `?reservationRef=`
+//    in addition to `?ref=` + `?token=` + `?email=`.
+// 3. The form's ref field accepts both `SI-…` and `R-…`,
+//    routed client-side via the shared `RESERVATION_REF_REGEX`.
+// 4. The reservation-scope path requires a second factor
+//    (the lead guest's email), so a bare R- ref is not
+//    enough to enumerate reservations (mirrors the
+//    `handleLookupBooking` 400 response).
+
+const emailHandlerSrc = readFileSync(
+  resolve(__dirname, "../../server/handlers/email.ts"),
+  "utf8"
+);
+
+const bookingsHandlerSrc = readFileSync(
+  resolve(__dirname, "../../server/handlers/bookings.ts"),
+  "utf8"
+);
+
+const lookupPageSrc = readFileSync(
+  resolve(__dirname, "../../src/pages/BookingLookupPage.tsx"),
+  "utf8"
+);
+
+const sharedIndexSrc = readFileSync(
+  resolve(__dirname, "../../../shared/index.ts"),
+  "utf8"
+);
+
+describe("RFO-01 — email lookupUrl emits reservationRef+email for reservation-scope", () => {
+  it("the helper branches on reservationRef + guestEmail and emits ?reservationRef=…&email=…", () => {
+    // The new branch reads both fields and
+    // emits a different URL shape than the
+    // per-child SI-+token path. The legacy
+    // shape is the byte-equivalent fallback
+    // for the N=1 + per-child email case.
+    expect(emailHandlerSrc).toMatch(
+      /function lookupUrl\(booking: any\) \{[\s\S]*?const reservationRef = String\(booking\.reservationRef \|\| ""\)\.trim\(\)/
+    );
+    expect(emailHandlerSrc).toMatch(
+      /if \(reservationRef && leadGuestEmail\) \{/
+    );
+    expect(emailHandlerSrc).toMatch(
+      /\/my-booking\?reservationRef=\$\{encodeURIComponent\(reservationRef\)\}&email=\$\{encodeURIComponent\(leadGuestEmail\.toLowerCase\(\)\)\}/
+    );
+  });
+
+  it("the legacy SI-+token shape is the fallback when reservationRef is missing", () => {
+    // N=1 (no reservation header) and the per-child
+    // resend path keep the byte-equivalent
+    // `?ref=<SI>&token=<token>` URL. The fallback
+    // must still exist so the existing magic-link
+    // emails continue to work.
+    expect(emailHandlerSrc).toMatch(
+      /if \(!ref \|\| !token\) return siteUrl\("\/my-booking"\)/
+    );
+    expect(emailHandlerSrc).toMatch(
+      /return siteUrl\(`\/my-booking\?ref=\$\{ref\}&token=\$\{token\}`\)/
+    );
+  });
+
+  it("the email lead-guest email is lowercased before URL-encoding", () => {
+    // The server's `handleLookupBooking` lowercases
+    // the email on read (the zod schema runs
+    // `.toLowerCase()`), so the URL must match
+    // case-insensitively. Encode the lowercased
+    // value so the page's prefill + the server's
+    // email-second-factor gate line up.
+    expect(emailHandlerSrc).toMatch(
+      /leadGuestEmail\.toLowerCase\(\)/
+    );
+  });
+});
+
+describe("RFO-01 — BookingLookupPage auto-lookup reads ?reservationRef=", () => {
+  it("the useEffect reads searchParams.get(\"reservationRef\") and routes to performLookup", () => {
+    expect(lookupPageSrc).toMatch(
+      /const reservationRef = searchParams\.get\("reservationRef"\)/
+    );
+  });
+
+  it("the reservationRef branch is taken in priority over the legacy ?ref= branch", () => {
+    // When both are present (a malformed email, or a
+    // backward-compat test), the reservation-scope
+    // path wins. The signature guard keys off the
+    // active ref to dedupe the auto-lookup.
+    const effect = lookupPageSrc.match(
+      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken\]\);/
+    );
+    expect(effect, "expected the auto-lookup useEffect").toBeTruthy();
+    expect(effect![0]).toMatch(/const reservationRef = searchParams\.get\("reservationRef"\)/);
+    expect(effect![0]).toMatch(/if \(reservationRef\) \{/);
+    expect(effect![0]).toMatch(/void performLookup\("", email \|\| undefined, token \|\| undefined, reservationRef\)/);
+  });
+
+  it("a reservationRef deep link without a credential renders the form (not a hard error)", () => {
+    // The bare R- path requires a credential
+    // (email or token). The page should NOT
+    // auto-lookup with a missing credential —
+    // it returns early so the form is visible
+    // and the guest can fill in the missing
+    // piece. Mirrors the server's 400 reply.
+    const effect = lookupPageSrc.match(
+      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken\]\);/
+    );
+    expect(effect).toBeTruthy();
+    expect(effect![0]).toMatch(
+      /if \(reservationRef && !token && !email\) return/
+    );
+  });
+
+  it("the prefill uses the reservationRef when present, the legacy ref otherwise", () => {
+    const effect = lookupPageSrc.match(
+      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken\]\);/
+    );
+    expect(effect).toBeTruthy();
+    expect(effect![0]).toMatch(/if \(reservationRef\) \{[\s\S]*?setRefInput\(reservationRef\)/);
+  });
+});
+
+describe("RFO-01 — BookingLookupPage form routes R- inputs through reservationRef", () => {
+  it("imports the shared RESERVATION_REF_REGEX", () => {
+    // The shared utility is the single source of
+    // truth for the R-YYYYMMDD-NNNNN shape. The
+    // server's lookupSchema and the page's form
+    // both read from it; a regex drift would
+    // surface as a 400 from the server.
+    expect(sharedIndexSrc).toMatch(/export \* from "\.\/utils\/references"/);
+    expect(lookupPageSrc).toMatch(
+      /import \{ GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn \} from "@spark-inn\/shared"/
+    );
+  });
+
+  it("the form submit detects R-YYYYMMDD-NNNNN and routes to performLookup with reservationRef", () => {
+    // The form's ref field is a single input that
+    // accepts both SI- and R- shapes. Client-side
+    // dispatch keeps the form's UX simple — the
+    // guest pastes whatever the email subject
+    // carries and the page figures out the rest.
+    // The call uses `trimmedEmail || undefined` so
+    // a bare R- with no email still passes through
+    // (the server accepts R- alone per the #209
+    // audit amendment).
+    const handleSearch = lookupPageSrc.match(
+      /const handleSearch = async \(e: React\.FormEvent\) => \{[\s\S]*?\};/
+    );
+    expect(handleSearch, "expected handleSearch").toBeTruthy();
+    expect(handleSearch![0]).toMatch(/RESERVATION_REF_REGEX\.test\(trimmedRef\)/);
+    expect(handleSearch![0]).toMatch(
+      /await performLookup\("", trimmedEmail \|\| undefined, undefined, trimmedRef\)/
+    );
+  });
+
+  it("a bare R- ref without an email is submitted as-is (no inline error)", () => {
+    // Per the #209 audit amendment (R- alone is
+    // accepted, same defense posture as the SI-
+    // ref-alone path), the form no longer demands
+    // a second factor when the user types an R-
+    // ref. The page's header copy reads "Enter
+    // your booking reference or the email you used
+    // to book" — the R- alone case matches that
+    // contract. If the user did type an email, the
+    // server uses it as a second-factor gate
+    // against `reservation.leadGuestEmail`; if
+    // not, the server hands the first child to
+    // `enrichAndRespond` directly. The previous
+    // "Please enter the email you used to book
+    // alongside the reservation reference" copy
+    // is retired.
+    const handleSearch = lookupPageSrc.match(
+      /const handleSearch = async \(e: React\.FormEvent\) => \{[\s\S]*?\};/
+    );
+    expect(handleSearch).toBeTruthy();
+    expect(handleSearch![0]).not.toMatch(
+      /Please enter the email you used to book alongside the reservation reference\./
+    );
+    expect(handleSearch![0]).toMatch(
+      /if \(trimmedRef && RESERVATION_REF_REGEX\.test\(trimmedRef\)\) \{[\s\S]*?await performLookup\("", trimmedEmail \|\| undefined, undefined, trimmedRef\)/
+    );
+  });
+
+  it("the ref input label + placeholder surface both reference shapes", () => {
+    // The label and placeholder are the
+    // guest's first hint that the field
+    // accepts two ref types. The text is
+    // concise so the form stays compact.
+    expect(lookupPageSrc).toMatch(/Booking or Reservation Reference/);
+    expect(lookupPageSrc).toMatch(
+      /placeholder="e\.g\. SI-20260612-042 or R-20260815-00012"/
+    );
+  });
+});
+
+describe("RFO-01 — performLookup signature accepts reservationRef", () => {
+  it("the function takes a 4th optional reservationRef arg and routes it in the payload", () => {
+    // The signature is what enables both the
+    // deep-link auto-lookup and the form submit
+    // to share a single performLookup. The
+    // payload branch is the runtime contract
+    // the server's lookupSchema reads.
+    const fn = lookupPageSrc.match(
+      /const performLookup = async \(\s*bookingRef: string,\s*guestEmail\?: string,\s*token\?: string,\s*reservationRef\?: string\s*\) => \{[\s\S]*?\n  \};/m
+    );
+    expect(fn, "expected performLookup signature").toBeTruthy();
+    expect(fn![0]).toMatch(/payload\.reservationRef = reservationRef/);
+  });
+
+  it("the reservationRef branch sets the auth mode to email when an email is supplied", () => {
+    // The auth mode drives the cancel + resend
+    // re-validation contract (H2 hardening).
+    // For the reservation-scope path, the email
+    // is the second factor so the mode is
+    // "email" and the cached token stays empty.
+    const fn = lookupPageSrc.match(
+      /const performLookup = async \(\s*bookingRef: string,\s*guestEmail\?: string,\s*token\?: string,\s*reservationRef\?: string\s*\) => \{[\s\S]*?\n  \};/m
+    );
+    expect(fn).toBeTruthy();
+    expect(fn![0]).toMatch(
+      /if \(reservationRef\) \{[\s\S]*?setLookupAuthMode\("email"\)/
+    );
+  });
+});
+
+describe("RFO-01 — server handleLookupBooking accepts a bare reservationRef", () => {
+  it("the 400 'please provide credential' reply is retired (the bare R- path is accepted)", () => {
+    // Per the #209 audit amendment: the bare R-
+    // path is now accepted (same defense posture
+    // as the SI- `ref`-alone path). The previous
+    // 400 message that asked for a credential
+    // was retired — the page's form copy reads
+    // "Enter your booking reference or the email
+    // you used to book", and the R- ref is the
+    // reservation's public identifier. A guest
+    // who pastes just the R- should not get a
+    // hard error asking for an email.
+    expect(bookingsHandlerSrc).not.toMatch(
+      /Please provide your booking email or lookup token along with the reservation reference\./
+    );
+  });
+
+  it("the R- alone path falls through to the first child + enrichAndRespond (no 400 escape)", () => {
+    // The previous `else { return res.status(400) ... }`
+    // branch is removed; the R- alone path now
+    // continues through the same first-child
+    // lookup the email + token paths use. The
+    // server reads the reservation doc by
+    // `reservationRef`, finds the first child by
+    // `reservationPosition`, and hands to
+    // `enrichAndRespond` which returns
+    // `kind: "reservation"` (N>1) or
+    // `kind: "single"` (N=1).
+    const rfoBlock = bookingsHandlerSrc.match(
+      /if \(trimmedReservationRef\) \{[\s\S]*?return await enrichAndRespond\(res, firstChild\);/
+    );
+    expect(rfoBlock, "expected the reservationRef block").toBeTruthy();
+    // No 400 reply inside the block (the previous
+    // credential-required escape is gone).
+    expect(rfoBlock![0]).not.toMatch(/res\.status\(400\)/);
+    // The fall-through still reads the first child.
+    expect(rfoBlock![0]).toMatch(/orderBy\("reservationPosition",\s*"asc"\)/);
+  });
+
+  it("the lookupSchema still accepts a reservationRef (the input shape is unchanged)", () => {
+    // The schema's reservationRef field is
+    // unchanged. The new behavior is purely
+    // server-side: the R- alone path no longer
+    // 400s, the rest of the input validation
+    // is byte-equivalent.
+    expect(bookingsHandlerSrc).toMatch(
+      /reservationRef: z\s*\.string\(\)\s*\.trim\(\)\s*\.max\(40\)\s*\.regex\(\s*\/\^R-\\d\{8\}-\\d\{5\}\$\//
+    );
+  });
+});
+
+describe("RFO-01 — form hides when the reservation card is the active view", () => {
+  it("the form's hidden class includes activeReservation (decision #130)", () => {
+    // Per decision #130 in plan/features/BOOKING-LOOKUP.md,
+    // the search form is always mounted (so the
+    // Turnstile widget's container div is a stable
+    // DOM node across picker / card transitions)
+    // but the form is hidden when the picker or
+    // card is the active view. The original
+    // conditional checked `pickerResults?.length ||
+    // activeBooking`; the MRB-10 reservation-scope
+    // card was added later and the conditional was
+    // not updated, so the form stayed visible
+    // alongside the R- card. The fix adds
+    // `|| activeReservation` to both the `hidden`
+    // class and the `aria-hidden` prop so the
+    // reservation-scope card takes over the full
+    // result area cleanly.
+    const formMatch = lookupPageSrc.match(
+      /className=\{`mx-auto max-w-md[^`]*`\}/
+    );
+    expect(formMatch, "expected the form's className").toBeTruthy();
+    expect(formMatch![0]).toMatch(/pickerResults\?\.length \|\| activeBooking \|\| activeReservation/);
+  });
+
+  it("the form's aria-hidden prop also includes activeReservation", () => {
+    // The aria-hidden prop must mirror the
+    // visibility class so screen readers don't
+    // announce the form's "Find your booking"
+    // header when the result card is the active
+    // view.
+    expect(lookupPageSrc).toMatch(
+      /aria-hidden=\{Boolean\(pickerResults\?\.length \|\| activeBooking \|\| activeReservation\) \|\| undefined\}/
+    );
+  });
+});

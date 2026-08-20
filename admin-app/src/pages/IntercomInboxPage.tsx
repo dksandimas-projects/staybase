@@ -9,19 +9,19 @@ import { StoreOrderMessageCard } from "../components/StoreOrderMessageCard";
 import { ArrowLeft } from "lucide-react";
 import {
   MessageSquare, Send, PhoneOff, Phone,
-  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink,
-  Bell, BellOff
+  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, MicOff, ShoppingBag, ExternalLink,
+  Bell, BellOff, Headphones
 } from "lucide-react";
 import config from "@config";
 
 const NOTIFICATION_MUTED_KEY = "intercom-notification-muted";
 
 export function IntercomInboxPage() {
-  const { 
-    intercoms, 
+  const {
+    intercoms,
     intercomThreads,
-    sendIntercomMessage, 
-    markChatAsRead, 
+    sendIntercomMessage,
+    markChatAsRead,
     setIntercomResolved,
     incomingCall,
     acceptCall,
@@ -29,7 +29,28 @@ export function IntercomInboxPage() {
     rooms,
     bookings,
     hotelConfig,
-    storeOrders
+    storeOrders,
+    applyAudioSink,
+    audioRouting,
+    // Per-call microphone mute state + toggle. Owned by AdminContext
+    // (the local MediaStream lives there). See feature/INTERCOM-AUDIO-
+    // ROUTING.md §"Call mute" for the lifecycle contract.
+    // `isMicMuted` is intentionally NOT destructured here. Per
+    // decision #219 (2026-08-19): the displayed state derives from
+    // `getActualMicMuted()` (the live `track.enabled` flag), not
+    // from the React `isMicMuted` state. The React state is still
+    // exposed on the context for any future consumer that wants
+    // the user's last-intent hint (e.g. an analytics event or a
+    // different surface that doesn't need live-track accuracy),
+    // but this banner reads the truth, not the hint.
+    toggleMicMute,
+    getActualMicMuted,
+    // Per decision #206 (2026-08-19): the current staff UID is
+    // needed to compare against `incomingCall.acceptedBy.uid` so
+    // the banner can render "Connected" (we accepted) vs
+    // "Already answered by {Name}" (another staff claimed the
+    // call first).
+    currentUser
   } = useAdmin();
   const { isMobile } = useBreakpoint();
 
@@ -78,7 +99,7 @@ export function IntercomInboxPage() {
     return window.localStorage.getItem(NOTIFICATION_MUTED_KEY) === "true";
   });
   const audioContextRef = useRef<AudioContext | null>(null);
-  const notificationBufferRef = useRef<AudioBuffer | null>(null);
+  const notificationAudioRef = useRef<HTMLAudioElement | null>(null);
   const notificationInitializedRef = useRef(false);
   const previousUnreadGuestIdsRef = useRef<Set<string>>(new Set());
   const previousRingingCallKeyRef = useRef("");
@@ -108,12 +129,20 @@ export function IntercomInboxPage() {
     };
   }, []);
 
+  // Per `plan/features/INTERCOM-AUDIO-ROUTING.md`: the notification
+  // sound is now a hidden `<audio>` element (not a Web Audio API
+  // buffer) so `setSinkId` can pin it to the staff's chosen
+  // ringtone output device. The autoplay-unlock listener still
+  // applies — the first `.play()` after page load needs a user
+  // gesture in every browser. The unlock is also what gates
+  // `isNotificationAudioUnlocked`, which the chime player reads.
   useEffect(() => {
     const unlockNotificationAudio = () => {
-      if (!audioContextRef.current) {
+      if (audioContextRef.current === null && typeof window !== "undefined" && "AudioContext" in window) {
         audioContextRef.current = new AudioContext();
+        void audioContextRef.current.resume();
       }
-      void audioContextRef.current.resume().then(() => setIsNotificationAudioUnlocked(true));
+      setIsNotificationAudioUnlocked(true);
     };
 
     window.addEventListener("pointerdown", unlockNotificationAudio, { once: true });
@@ -124,31 +153,42 @@ export function IntercomInboxPage() {
       window.removeEventListener("keydown", unlockNotificationAudio);
       void audioContextRef.current?.close();
       audioContextRef.current = null;
+      notificationAudioRef.current = null;
     };
   }, []);
 
+  // Wire the notification sound URL to the routed `<audio>` element.
+  // When the URL changes we tear down the old element and create a
+  // fresh one so a new sound file is honoured. `applyAudioSink` is
+  // a safe no-op when audio routing is disabled — the element still
+  // plays through the system default in that case.
   useEffect(() => {
     const soundUrl = hotelConfig?.notificationSoundUrl;
-    notificationBufferRef.current = null;
-    if (!soundUrl || !audioContextRef.current || !isNotificationAudioUnlocked) return;
-
-    let isCancelled = false;
-    fetch(soundUrl)
-      .then((response) => response.arrayBuffer())
-      .then((arrayBuffer) => audioContextRef.current?.decodeAudioData(arrayBuffer))
-      .then((audioBuffer) => {
-        if (!isCancelled && audioBuffer) {
-          notificationBufferRef.current = audioBuffer;
-        }
-      })
-      .catch(() => {
-        notificationBufferRef.current = null;
-      });
-
+    if (!soundUrl) {
+      notificationAudioRef.current = null;
+      return;
+    }
+    const audio = new Audio(soundUrl);
+    audio.preload = "auto";
+    void applyAudioSink(audio, "ringtone").catch(() => undefined);
+    notificationAudioRef.current = audio;
     return () => {
-      isCancelled = true;
+      audio.pause();
+      audio.src = "";
+      notificationAudioRef.current = null;
     };
-  }, [hotelConfig?.notificationSoundUrl, isNotificationAudioUnlocked]);
+  }, [hotelConfig?.notificationSoundUrl, applyAudioSink]);
+
+  // Re-route the notification audio when the routing preference
+  // changes (e.g. the operator picks a new ringtone device). Same
+  // for the in-call WebRTC audio: the AdminContext side has the
+  // ref so a re-route is handled there, but for the inbox's own
+  // `<audio>` element we re-apply on every change.
+  useEffect(() => {
+    const audio = notificationAudioRef.current;
+    if (!audio) return;
+    void applyAudioSink(audio, "ringtone").catch(() => undefined);
+  }, [audioRouting, applyAudioSink]);
 
   // Handle active call duration timer
   useEffect(() => {
@@ -198,14 +238,24 @@ export function IntercomInboxPage() {
   };
 
   const playNotificationSound = () => {
-    const audioContext = audioContextRef.current;
-    const notificationBuffer = notificationBufferRef.current;
-    if (!audioContext || !notificationBuffer || audioContext.state !== "running") return;
-
-    const source = audioContext.createBufferSource();
-    source.buffer = notificationBuffer;
-    source.connect(audioContext.destination);
-    source.start();
+    const audio = notificationAudioRef.current;
+    if (!audio) return;
+    // Rewind to the start so back-to-back chimes don't drop the
+    // first 100ms. `setSinkId` was already applied at element
+    // creation; calling it again here is harmless.
+    try {
+      audio.currentTime = 0;
+    } catch {
+      // Some Safari builds throw when the element hasn't loaded
+      // enough to seek. Fall through — the .play() call will
+      // surface the same error and we silently skip.
+    }
+    void audio.play().catch(() => {
+      // Autoplay policy can still gate the first play after a
+      // cold page load. The unlock-on-pointerdown listener above
+      // covers subsequent plays. Silent skip per the original
+      // design — no toast for a missed chime.
+    });
   };
 
   // Get rooms with active occupancy or intercom history, then filter by resolved state
@@ -320,6 +370,31 @@ export function IntercomInboxPage() {
           <p className="text-xs text-gray-500 mt-1">Review active room chat logs, dispatch quick-request orders, and process voice signaling calls.</p>
         </div>
         <div className="flex items-center gap-2">
+          {/*
+           * Audio settings shortcut (refactor/audio-discovery). The
+           * /audio route owns per-staff call + ringtone output device
+           * routing and is the natural place to tune the sounds this
+           * page produces (notification chime + ringtone + the live
+           * intercom call). Previously this lived as a sidebar item
+           * — easy to miss from the inbox where the user actually
+           * hears the sound. Now it sits one click away from the
+           * inbox header, grouped with the existing sound On/Off
+           * toggle since both relate to "what does this inbox
+           * sound like?".
+           *
+           * Uses the same ghost-border / uppercase-chip pattern as
+           * the Bell toggle for visual consistency. The 44px tap
+           * target is preserved per CLAUDE.md hard rules.
+           */}
+          <Link
+            to="/audio"
+            aria-label="Open audio routing settings"
+            title="Per-staff audio routing — call + ringtone output devices"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-[10px] font-bold uppercase tracking-wider text-gray-500 transition hover:bg-gray-50"
+          >
+            <Headphones size={14} aria-hidden="true" />
+            Audio Settings
+          </Link>
           <button
             type="button"
             onClick={() => setIsNotificationMuted((prev) => !prev)}
@@ -339,7 +414,74 @@ export function IntercomInboxPage() {
       </header>
 
       {/* WebRTC Signaling Call Banner Overlay */}
-      {incomingCall && (
+      {incomingCall && (() => {
+        // Per decision #219 (2026-08-19): the displayed mic state
+        // is derived from the LIVE `track.enabled` (read at every
+        // render via `getActualMicMuted()`), NOT from the React
+        // `isMicMuted` state. Pre-#219 the pill and button read
+        // `isMicMuted` which could drift from `track.enabled` if
+        // the track was mutated outside `toggleMicMute` (WebRTC
+        // renegotiation, browser tab mute, OS-level audio
+        // subsystem, stale closure in an early render). Operator
+        // reported 2026-08-19: the pill said "MIC OPEN" but the
+        // audio was muted. The displayed state and the actual
+        // audio must converge — the track is the truth. The
+        // `actualMicMuted` local below is captured once per
+        // render (the IIFE re-runs on every state change so the
+        // capture is fresh) and drives the pill text, the dot
+        // colour, the button label, the aria-pressed, the title,
+        // and the button colour — every visual surface.
+        const actualMicMuted = getActualMicMuted();
+        // Per decision #206 (2026-08-19): the call banner has three
+        // states, not two. The pre-#206 banner had only "ringing"
+        // (Accept / Ignore) and "active" (Mute / Disconnect). The
+        // new "claimed by another staff" state appears when the
+        // runTransaction claim in `acceptCall` committed for a
+        // different staff member — this tab's snapshot will see
+        // `status: "active" + acceptedBy.uid !== currentUser.uid`
+        // and the banner needs to render an informational surface
+        // (no Accept/Ignore/Mute/Disconnect buttons) so the loser
+        // doesn't click through to a half-built WebRTC connection.
+        // The banner auto-dismisses when the winner ends the call
+        // (the snapshot listener clears incomingCall on status
+        // flip to "ended" via the activeCalls filter).
+        const isClaimedByOtherStaff =
+          incomingCall.status === "active" &&
+          !!incomingCall.acceptedBy &&
+          !!currentUser?.uid &&
+          incomingCall.acceptedBy.uid !== currentUser.uid;
+
+        if (isClaimedByOtherStaff) {
+          return (
+            <div
+              data-testid="call-already-claimed-banner"
+              className="rounded-xl border border-gray-200 bg-gray-50 p-6 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 animate-fade-in z-20"
+            >
+              <div className="flex items-center gap-4">
+                <div className="h-14 w-14 rounded-full flex items-center justify-center text-gray-500 bg-gray-200 shrink-0">
+                  <PhoneOff size={24} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+                    Call Already Answered
+                  </span>
+                  <h2 className="font-heading text-xl text-gray-700 lowercase mt-1">
+                    Room {incomingCall.roomId} ({incomingCall.guestName})
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-1.5 font-bold">
+                    Answered by{" "}
+                    <span className="text-gray-800">
+                      {incomingCall.acceptedBy?.name ?? "another staff member"}
+                    </span>
+                    . This banner clears when they hang up.
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-6 shadow-sm ring-4 ring-primary/10 flex flex-col md:flex-row justify-between items-center gap-6 animate-fade-in z-20">
           <div className="flex items-center gap-4">
             <div className={`h-14 w-14 rounded-full flex items-center justify-center text-white shrink-0 ${
@@ -347,7 +489,7 @@ export function IntercomInboxPage() {
             }`}>
               <Phone size={24} />
             </div>
-            
+
             <div>
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
@@ -386,15 +528,97 @@ export function IntercomInboxPage() {
               </>
             ) : (
               <>
-                {/* Voice connected indicators */}
-                <div className="hidden lg:flex items-center gap-1 bg-white/60 rounded px-2.5 py-1 border border-gray-150 text-[10px] text-gray-500 font-semibold">
-                  <Mic size={10} className="text-primary" />
-                  Audio Stream: Active
+                {/* Live mic status pill — always visible so the
+                 * operator can see the current mic state at a
+                 * glance, not just the action label of the toggle
+                 * button below. Pre-#218 the indicator was
+                 * `hidden lg:flex` (desktop only) and the toggle
+                 * button label was the only status cue on
+                 * mobile/tablet — that made the post-accept
+                 * "Mute" label read as "I'm muted" even when the
+                 * mic was open (operator-reported 2026-08-19).
+                 * The pill now shows on every breakpoint with a
+                 * green/red dot + a clear state label
+                 * ("Mic open" / "Mic muted"). The toggle button
+                 * below keeps the action label ("Mute" /
+                 * "Unmute") so the two surfaces don't compete.
+                 */}
+                <div
+                  data-testid={`call-mic-status-pill-${incomingCall.roomId}`}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border ${
+                    actualMicMuted
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`inline-block h-1.5 w-1.5 rounded-full ${
+                      actualMicMuted ? "bg-red-500" : "bg-emerald-500"
+                    }`}
+                  />
+                  {actualMicMuted ? "Mic muted" : "Mic open"}
                 </div>
-                
+
+                {/*
+                 * Per-call mic mute toggle. Owned by AdminContext so
+                 * it sees the local MediaStream and reads/writes its
+                 * audio track's `enabled` property. The toggle is
+                 * purely client-side — the remote end hears silence
+                 * only while muted, and the flag auto-resets on the
+                 * next call (or on Disconnect), so a stale mute can't
+                 * surprise the operator on the next guest.
+                 *
+                 * Visual states mirror the conventions:
+                 *   Mute (idle / unmuted)    → primary-on-light chip
+                 *   Unmute (mid-call mute)   → amber-on-light chip
+                 * The amber draws the eye without screaming "error".
+                 *
+                 * The button label is the ACTION ("Mute" = click to
+                 * mute), not the current state — the live status
+                 * pill above carries the current state. Together
+                 * they read as "Mic open · Mute" / "Mic muted ·
+                 * Unmute" which is unambiguous even on first read.
+                 */}
+                <button
+                  type="button"
+                  onClick={() => void toggleMicMute()}
+                  aria-label={actualMicMuted ? "Unmute microphone" : "Mute microphone"}
+                  aria-pressed={actualMicMuted}
+                  title={actualMicMuted
+                    ? "Mic is muted. The guest can't hear you. Click to unmute."
+                    : "Mic is open. The guest can hear you. Click to mute."}
+                  data-testid={`call-mute-toggle-${incomingCall.roomId}`}
+                  className={`min-h-[44px] px-5 rounded-lg border text-xs font-bold shadow-sm transition flex items-center gap-1.5 ${
+                    actualMicMuted
+                      ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                      : "border-primary/30 bg-primary-light text-primary-dark hover:bg-primary/10"
+                  }`}
+                >
+                  {actualMicMuted ? <MicOff size={14} /> : <Mic size={14} />}
+                  {actualMicMuted ? "Unmute" : "Mute"}
+                </button>
+
+                {/*
+                 * Per-call disconnect. Calls declineCall() which
+                 * sets adminCallExplicitDeclineRef=true and routes
+                 * through cleanupAdminCall — the terminal event
+                 * that fires the "call-answered" audit message (the
+                 * `answered` branch wins the if/else over explicit
+                 * decline because the answer ref is already set at
+                 * this point in the lifecycle).
+                 *
+                 * Pre-#218 the className used `bg-red-650` which is
+                 * not in the Tailwind palette (the standard scale
+                 * jumps 600 → 700) so the button rendered with NO
+                 * background and was effectively invisible against
+                 * the white card. Fixed to `bg-red-600` + the
+                 * standard `hover:bg-red-700` (operator-reported
+                 * 2026-08-19).
+                 */}
                 <button
                   onClick={() => void declineCall()}
-                  className="min-h-[44px] px-6 rounded-lg bg-red-650 hover:bg-red-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
+                  className="min-h-[44px] px-6 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
                 >
                   <PhoneOff size={14} />
                   Disconnect Call
@@ -403,7 +627,8 @@ export function IntercomInboxPage() {
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Main Inbox layout */}
       <div className="grid gap-6 lg:grid-cols-[280px_1fr] min-h-[500px]">

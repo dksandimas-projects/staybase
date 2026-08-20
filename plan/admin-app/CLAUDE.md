@@ -25,6 +25,7 @@ The internal front desk dashboard at `admin.sparkinnbohol.com`. Staff-only — n
 | `/qr` | `QRManagementPage.tsx` | Front Desk+ | `plan/features/QR-MANAGEMENT.md` |
 | `/members` | `MembersPage.tsx` | Admin only | `plan/features/SPARK-REWARDS.md §Admin` |
 | `/settings` | `SettingsPage.tsx` | Admin only | `plan/features/SETTINGS.md` |
+| `/audio` | `AudioSettingsPage.tsx` | Front Desk+ | `plan/features/INTERCOM-AUDIO-ROUTING.md` |
 
 ---
 
@@ -140,6 +141,7 @@ Fade strength is also standardized: `bg-gray-950/60 backdrop-blur-sm` for Modal,
 | `settings/rewardsConfig` | `getDoc` + `setDoc` | Spark Rewards settings tab |
 | `settings/breakfastConfig` | `getDoc` + `setDoc` | Breakfast settings tab |
 | `settings/storeConfig` | `getDoc` + `setDoc` | Store settings tab |
+| `guests/{uid}` | `onSnapshot` + `updateDoc` | Audio routing subscription (call + ringtone output device preferences) |
 
 ---
 

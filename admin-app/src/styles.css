@@ -11,7 +11,7 @@
 }
 
 @font-face {
-  font-family: "Apollo";
+  font-family: "ApolloItalic";
   src: url("/brand/fonts/APOLLOItalic.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
@@ -35,5 +35,66 @@ body {
   select:not([class]),
   textarea:not([class]) {
     font-size: 16px;
+  }
+}
+
+/* Per Q-03 + #22 / decision #225 (2026-08-19): the QR
+   Management page ("/qr") uses `window.print()` on the
+   CURRENT page (replacing the pre-#225 popup-window pattern)
+   so Safari iOS + every modern browser work without popup
+   permission. These rules:
+
+   - hide everything on the page except the printable QR
+     card row by scoping the `body * { visibility: hidden }`
+     to the QR Management route ONLY (the AdminLayout wraps
+     every page so a global rule would hide everything on
+     every print)
+   - flatten the print-mode card section so the SVG renders
+     without the rounded-card shadow / ring (print engines
+     sometimes rasterise the shadow and produce muddy output)
+   - set the @page size to A4 with reasonable margins
+     (matches the pre-#225 `openPrintWindow` behaviour — the
+     QR Management page is built for A4 sheets with a 4-up
+     grid)
+
+   Mirrors admin-app/src/pages/QRManagementPage.tsx's
+   `setPrintMode(true)` + `window.print()` flow. e2e hook:
+   `data-testid="qr-print-mode"` on the printable card row.
+
+   Note: we scope via "if the print-mode row is in the DOM,
+   hide everything else". That requires JavaScript — but
+   `setPrintMode(true)` IS the JS trigger. Tailwind's
+   `print:hidden` utility is applied per-element and works
+   everywhere; this rule is the targeted override for the
+   "show ONLY the QR cards on print" intent. */
+@media print {
+  /* When the print-mode row is in the DOM (the QR page
+     triggered setPrintMode(true) before window.print()), hide
+     every direct child of the main scroll container that
+     isn't the print-mode row. Uses `:has()` to scope the
+     hide-by-default to "page that contains a printable
+     row" — supported in modern Chrome/Safari/Firefox.
+     Tailwind's `print:hidden` utilities win for elements the
+     page author explicitly tagged (the page header, the
+     room grid, etc.). */
+  body:has([data-testid="qr-print-mode"]) *:not([data-testid="qr-print-mode"]):not([data-testid="qr-print-mode"] *) {
+    visibility: hidden !important;
+  }
+
+  /* Strip the chrome's rounded shadow on print for crisp
+     output. The Tailwind `print:bg-white` /
+     `print:border-0` utilities on the printable row itself
+     handle the rest. */
+  .rounded-card {
+    box-shadow: none !important;
+  }
+
+  /* A4 portrait, 12mm margin — matches the pre-#225 popup
+     window's `@page { size: A4; margin: 12mm; }`. The
+     printable row uses `print:break-inside-avoid` per card
+     so a 4-up grid renders cleanly without orphaned halves. */
+  @page {
+    size: A4;
+    margin: 12mm;
   }
 }

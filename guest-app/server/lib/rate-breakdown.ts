@@ -33,6 +33,14 @@ type BuildRateBreakdownInput = {
   // count-agnostic form when either is missing.
   extraBedCount?: number;
   extraBedRate?: number;
+  // Per EXB-12 (2026-08-06, per decision #199): the
+  // extra-bed breakfast toggle. When `true`, the extra
+  // beds in the room are counted toward the breakfast
+  // total (priced as `breakfastRate × extraBedCount × nights`).
+  // Optional — when absent, the helper treats it as `false`
+  // (no breakfast for extra beds) for back-compat with
+  // older callers + booking docs.
+  extraBedBreakfast?: boolean;
   discountType: string;
   discountPct: number;
   voucherDiscount: number;
@@ -54,6 +62,14 @@ type RebuildableBooking = {
   ratePerNight?: unknown;
   breakfastRate?: unknown;
   hasBreakfast?: unknown;
+  // Per EXB-12 (2026-08-06, per decision #199):
+  // the extra-bed count + breakfast-for-extra-beds
+  // toggle. Optional — when absent, the rebuild falls
+  // back to the historical `numGuests`-only path
+  // (no breakfast for extra beds) for back-compat
+  // with older booking docs.
+  extraBedCount?: unknown;
+  extraBedBreakfast?: unknown;
   checkIn?: unknown;
 };
 
@@ -265,7 +281,14 @@ export function rebuildEarlyCheckoutRateBreakdown(
             hasBreakfast: booking.hasBreakfast,
             breakfastRate: booking.breakfastRate,
             numGuests: booking.numGuests,
-            numNights: nights
+            numNights: nights,
+            // Per EXB-12 (2026-08-06, per decision #199):
+            // pass the extra-bed breakfast fields from
+            // the booking doc so the rebuild matches the
+            // create-time total. Nullish → no extra-bed
+            // breakfast (back-compat with older docs).
+            extraBedCount: booking.extraBedCount,
+            extraBedBreakfast: booking.extraBedBreakfast === true
           })
         }]
       : [];
@@ -280,7 +303,10 @@ export function rebuildEarlyCheckoutRateBreakdown(
             hasBreakfast: booking.hasBreakfast,
             breakfastRate: booking.breakfastRate,
             numGuests: booking.numGuests,
-            numNights: originalNights
+            numNights: originalNights,
+            // Per EXB-12: same as above.
+            extraBedCount: booking.extraBedCount,
+            extraBedBreakfast: booking.extraBedBreakfast === true
           })
         }]
       : []);

@@ -153,10 +153,14 @@ describe("EXB-09 — EXB-04 breakfast-coupling guard (extra bed is a separate ad
   it("handleCreateBooking calls `calculateBreakfastAddOn` with `numGuests: guests` (the total occupancy)", () => {
     // The server wires the breakfast helper with the stay's own
     // occupancy (`numAdults + numChildren` per CHD-04). The extra bed
-    // does NOT enter the breakfast math at this call site — the extra
-    // bed is a separate add-on line, computed by
-    // `calculateExtraBedAddOn`. Pin the call so a refactor that adds
-    // `+ extraBedCount` to the breakfast occupancy is caught.
+    // is a SEPARATE add-on line by default — computed by
+    // `calculateExtraBedAddOn` — but per EXB-12 (2026-08-06, per
+    // decision #199) the user can OPT IN to breakfast for the
+    // extra-bed occupant(s) via the per-type `extraBedBreakfast`
+    // toggle. The call site therefore passes `extraBedCount` +
+    // `extraBedBreakfast` together; the helper has the gate
+    // (`if (input.extraBedBreakfast) { effectiveOccupancy +=
+    // extraBedCount }`) that respects the toggle.
     //
     // Per MRB-06 / MRB-07 (2026-08-02, per decision #159): a
     // reservation charges breakfast once per guest, so each room stay
@@ -169,18 +173,33 @@ describe("EXB-09 — EXB-04 breakfast-coupling guard (extra bed is a separate ad
       /calculateBreakfastAddOn\(\{[\s\S]{0,400}numGuests:\s*assigned\.numAdults \+ assigned\.numChildren,[\s\S]{0,400}\}\)/m
     );
     expect(bookingsHandlerSrc).toMatch(/const stayBreakfastTotal = calculateBreakfastAddOn\(\{/);
-    // And the breakfast call must NOT include
-    // `extraBedCount` (the extra bed is a separate
-    // add-on, not a breakfast multiplier).
+    // Per EXB-12 (2026-08-06, per decision #199): every call site
+    // that passes `extraBedCount` to the breakfast helper must
+    // ALSO pass `extraBedBreakfast` (the opt-in toggle). The
+    // helper gates on `extraBedBreakfast` — a call site that
+    // passes `extraBedCount` without `extraBedBreakfast` would
+    // inflate the breakfast total by phantom beds (a 4-guest
+    // breakfast for a 3-guest booking). This is the v0.264.8
+    // contract: the gate moves from "never pass extraBedCount"
+    // (pre-EXB-12) to "always pass extraBedCount AND
+    // extraBedBreakfast together" (post-EXB-12). Use a wider
+    // regex window (5000 chars) so the full call body — not just
+    // the first 800 chars — is in scope.
     const breakfastCallMatches = bookingsHandlerSrc.match(
-      /calculateBreakfastAddOn\(\{[\s\S]{0,800}?\}\)/gm
+      /calculateBreakfastAddOn\(\{[\s\S]{0,5000}?\}\)/gm
     );
     expect(breakfastCallMatches).toBeTruthy();
     // Every call site, not just the first — the handler now has one per
-    // create path.
-    expect(breakfastCallMatches!.length).toBeGreaterThanOrEqual(2);
+    // create + walkin + reschedule path.
+    expect(breakfastCallMatches!.length).toBeGreaterThanOrEqual(3);
     for (const call of breakfastCallMatches!) {
-      expect(call).not.toMatch(/extraBedCount/);
+      if (/extraBedCount/.test(call)) {
+        // If the call site passes `extraBedCount`, it MUST also pass
+        // `extraBedBreakfast` so the helper's gate is wired.
+        // Otherwise the breakfast total silently includes the
+        // extra beds without the user's opt-in.
+        expect(call).toMatch(/extraBedBreakfast/);
+      }
     }
   });
 

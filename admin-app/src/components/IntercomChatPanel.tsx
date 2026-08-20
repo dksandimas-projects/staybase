@@ -3,9 +3,13 @@ import {
   ArchiveRestore,
   CheckCheck,
   MessageSquare,
+  Phone,
+  PhoneMissed,
+  PhoneOff,
   RotateCcw,
   Send,
   User,
+  Volume2,
   type LucideIcon
 } from "lucide-react";
 import { cn } from "../utils/cn";
@@ -163,6 +167,63 @@ export function IntercomChatPanel({
           messages.map((msg) => {
             const isFd = msg.sender === "front-desk";
             const storeOrder = msg.orderRef ? storeOrdersByRef.get(msg.orderRef) : undefined;
+
+            // Per `feat/call-history-messages`: system messages
+            // (sender === "system", messageType set) render in a
+            // distinct centered footer-style row — italic, muted,
+            // with the call-state icon (Phone / PhoneMissed /
+            // PhoneOff). They ignore the FD-vs-guest alignment
+            // because they aren't owned by either party, and they
+            // skip the "FD" / guest-avatar circle entirely. The
+            // text body already carries the human-readable
+            // summary (e.g. "Call answered at 2:14 PM · 3m 22s")
+            // written by recordCallHistory, so we don't reconstruct
+            // the line here — we just pick the right icon.
+            if (msg.sender === "system" && msg.messageType) {
+              // Per decision #217 (2026-08-19): the four
+              // messageType values map to four distinct icons and
+              // tone classes. New outcomes must be added to the
+              // dispatch tables below — the fallthrough is
+              // narrowed to the remaining values by TypeScript
+              // so the order of checks matters.
+              const callIconByType: Record<"call-answered" | "call-missed" | "call-declined" | "call-failed", typeof Phone> = {
+                "call-answered": Phone,
+                "call-missed": PhoneMissed,
+                "call-declined": PhoneOff,
+                "call-failed": PhoneOff
+              };
+              const callToneByType: Record<"call-answered" | "call-missed" | "call-declined" | "call-failed", string> = {
+                "call-answered": "text-primary",
+                // amber: the call rang and no one picked up —
+                // the caller's attempt went to voicemail.
+                "call-missed": "text-amber-600",
+                // gray: the staff explicitly chose to ignore.
+                "call-declined": "text-gray-400",
+                // orange: distinct from missed (amber) and
+                // declined (gray). Staff TRIED to answer — the
+                // audio stack failed (mic permission denial,
+                // createAnswer throw, writeDoc rejection).
+                "call-failed": "text-orange-600"
+              };
+              const icon = callIconByType[msg.messageType];
+              const toneClass = callToneByType[msg.messageType];
+              return (
+                <div
+                  key={msg.id}
+                  data-testid={`call-system-message-${msg.messageType}`}
+                  role="status"
+                  className="flex w-full justify-center"
+                >
+                  <div className="inline-flex max-w-[90%] items-center gap-1.5 rounded-full bg-gray-50 px-3 py-1 text-center text-[10px] italic text-gray-500 ring-1 ring-gray-150">
+                    {(() => {
+                      const Icon = icon;
+                      return <Icon size={11} aria-hidden="true" className={cn("shrink-0", toneClass)} />;
+                    })()}
+                    <span className="leading-tight">{msg.text}</span>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div

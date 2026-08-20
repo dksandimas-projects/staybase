@@ -54,6 +54,7 @@ Load only the bundle for your task type — do not read all MDs.
 | Full feature build | All of the above + `plan/docs/DECISIONS-FEATURES.md` |
 | Auth / roles | `plan/features/AUTH-ROLES.md` + `plan/docs/BACKEND.md` |
 | Availability / booking | `plan/features/AVAILABILITY-LOCKING.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
+| Booking data model / multi-room refactor (BAR) | `plan/features/BOOKING-UNIFIED.md` + `plan/docs/BACKEND.md` + `plan/docs/TYPES.md` |
 | Corporate booking | `plan/features/CORPORATE-BOOKING.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
 | Vouchers | `plan/features/VOUCHERS.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
 | Email / PDF | `plan/features/EMAIL-PDF-STORAGE.md` + `plan/docs/API-ROUTES.md` |
@@ -112,6 +113,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/VOUCHERS.md` — Promo voucher management
 - `plan/features/REPORTS.md` — Occupancy, revenue, bookings by source, export
 - `plan/features/INTERCOM-INBOX.md` — Chat list, notification sound, quick request badges
+- `plan/features/INTERCOM-AUDIO-ROUTING.md` — Per-staff call + ringtone output device pickers (admin app `/audio` page, persisted on `guests/{uid}.audioRouting`)
 - `plan/features/QR-MANAGEMENT.md` — QR per room, regenerate, print
 - `plan/features/SETTINGS.md` — Hotel info, payment methods, staff accounts, website content
 - `plan/features/ADMIN-MOBILE.md` — Admin app responsive layout (Phase 11.7, shipped 2026-06-18) — sidebar / header / drawer / data table for < 768px + `useBreakpoint` + Toast + ConfirmForm + BottomTabBar + focus trap
@@ -127,6 +129,7 @@ Load only the bundle for your task type — do not read all MDs.
 
 ### plan/features/ — Cross-cutting
 - `plan/features/SEO-OPENGRAPH.md` — Search indexability (Google/Bing/Yahoo) + link-preview cards (Facebook/Messenger/WhatsApp/Viber/X): robots, sitemap, OG image, per-route meta, JSON-LD
+- `plan/features/BOOKING-UNIFIED.md` — BAR-01 booking data-model refactor (rooms denormalized into the booking doc) — deferred spec; tasks in `plan/project/ROADMAP.md §BAR` · BAR-02 (derive counters) + BAR-03 (FOL-05 sibling-flip helper) shipped 2026-08-08; see `plan/docs/DECISIONS-FEATURES.md #203` + `#204`
 - `plan/features/AVAILABILITY-LOCKING.md` — Double-booking prevention, Firestore transactions
 - `plan/features/EMAIL-PDF-STORAGE.md` — Resend email flows, jsPDF receipts, Storage uploads
 - `plan/features/EMAIL-AUDIT-EXTENSIONS.md` — The 8 W4.4 email templates added by the 2026-06 audit

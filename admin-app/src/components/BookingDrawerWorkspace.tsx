@@ -32,6 +32,21 @@ interface BookingDrawerWorkspaceHeaderProps {
   // `getOnsitePaymentMethodLabel` helper the four other selectors use
   // and passes the resolved string down.
   paymentMethodLabel: string;
+  // Per FOL-02 (2026-08-06, decision #198): the latest payment
+  // reference for the selected booking, computed by the parent
+  // (BookingsPage) from the live subcollection listener state
+  // (preferred) + the booking's denormalized onsitePayments
+  // array (fallback). Pre-FOL-02, the header read the
+  // shared payment-reference helper directly against the
+  // booking — that helper returned null for new bookings
+  // because the denormalized array was empty (the server's
+  // verify / add-payment handlers write to the subcollection, not the
+  // array), so the staff saw "Pending verification" forever
+  // even after a verified payment. Passing the computed
+  // reference as a prop keeps the header a pure function of
+  // its inputs; the parent owns the live-vs-persisted
+  // disambiguation.
+  latestPaymentReference?: string | null;
 }
 
 const sections: Array<{
@@ -53,7 +68,8 @@ export function BookingDrawerWorkspaceHeader({
   totalPaid,
   balance,
   missingCheckInItems,
-  paymentMethodLabel
+  paymentMethodLabel,
+  latestPaymentReference
 }: BookingDrawerWorkspaceHeaderProps) {
   const needsPaymentReview = booking.status === "payment-uploaded";
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
@@ -167,7 +183,7 @@ export function BookingDrawerWorkspaceHeader({
                 Reference
               </p>
               <p className="mt-2 truncate text-xs text-gray-600">
-                {getLatestPaymentReference(booking) || (
+                {(latestPaymentReference ?? getLatestPaymentReference(booking)) || (
                   booking.paymentMethod === "pay-at-hotel" ? (
                     <span className="italic text-gray-400">Pay at hotel — no ref needed</span>
                   ) : (
