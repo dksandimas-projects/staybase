@@ -1,8 +1,8 @@
 /**
  * Pre-Live Test Data Cleanup Script
- * Cleans up untagged pre-live test bookings, store orders, intercom stays, notifications,
- * daily reference counters, and optionally Spark Rewards member accounts/counters while preserving
- * hotel configuration, staff accounts, store items, and room QR tokens.
+ * Cleans up untagged pre-live test bookings, store orders, intercom stays & messages (intercoms),
+ * notifications, daily reference counters, and optionally Spark Rewards member accounts/counters
+ * while preserving hotel configuration, staff accounts, store items, and room QR tokens.
  *
  * Usage:
  *   Dry Run (default):  npx tsx scripts/clean-prelive-bookings.ts
@@ -129,12 +129,14 @@ async function main() {
     orderSubcollectionRefs.push(...subRefs);
   }
 
-  // Intercom Stays & Messages
-  const intercomSnap = await db.collection("intercom").get();
+  // Intercom Stays & Messages (both "intercom" and "intercoms" collections)
+  const intercomSnap1 = await db.collection("intercom").get();
+  const intercomSnap2 = await db.collection("intercoms").get();
   const intercomDocRefs: DocumentReference[] = [];
   const intercomSubcollectionRefs: DocumentReference[] = [];
 
-  for (const doc of intercomSnap.docs) {
+  const allIntercomDocs = [...intercomSnap1.docs, ...intercomSnap2.docs];
+  for (const doc of allIntercomDocs) {
     intercomDocRefs.push(doc.ref);
     const subRefs = await getAllSubcollectionDocRefs(doc.ref);
     intercomSubcollectionRefs.push(...subRefs);
@@ -189,7 +191,7 @@ async function main() {
   console.log("─────────────────────────────────────────────────────────────────────");
   console.log(`  • Bookings to delete:            ${bookingDocRefs.length} root docs (+ ${bookingSubcollectionRefs.length} payments/charges subdocs)`);
   console.log(`  • Store Orders to delete:        ${orderDocRefs.length} root docs (+ ${orderSubcollectionRefs.length} tenders subdocs)`);
-  console.log(`  • Intercom Stays to delete:      ${intercomDocRefs.length} root docs (+ ${intercomSubcollectionRefs.length} messages subdocs)`);
+  console.log(`  • Intercom Stays/Threads to del: ${intercomDocRefs.length} root docs (+ ${intercomSubcollectionRefs.length} messages subdocs)`);
   console.log(`  • Notifications to delete:       ${notificationDocRefs.length} docs`);
   console.log(`  • Test Runs to delete:           ${testRunDocRefs.length} docs`);
   if (shouldResetMembers) {
@@ -289,12 +291,13 @@ async function main() {
   console.log("\n🔍 Running post-cleanup verification...");
   const verifyBookings = await db.collection("bookings").get();
   const verifyOrders = await db.collection("storeOrders").get();
-  const verifyIntercom = await db.collection("intercom").get();
+  const verifyIntercom1 = await db.collection("intercom").get();
+  const verifyIntercom2 = await db.collection("intercoms").get();
 
   console.log("─────────────────────────────────────────────────────────────────────");
   console.log(`  • Remaining Bookings:    ${verifyBookings.size}`);
   console.log(`  • Remaining Orders:      ${verifyOrders.size}`);
-  console.log(`  • Remaining Intercom:    ${verifyIntercom.size}`);
+  console.log(`  • Remaining Intercoms:   ${verifyIntercom1.size + verifyIntercom2.size}`);
   if (shouldResetMembers) {
     const verifyMembers = await db.collection("members").get();
     console.log(`  • Remaining Members:     ${verifyMembers.size}`);
