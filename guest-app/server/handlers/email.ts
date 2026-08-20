@@ -909,14 +909,50 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
     console.log(`Skipping email send to placeholder address: ${to}`);
     return;
   }
-  await resend.emails.send({
-    from: FROM_EMAIL,
-    to,
-    subject,
-    html,
-    replyTo: config.supportEmail,
-    attachments
-  });
+  // Per #11 (operator-reported 2026-08-20, tracked in
+  // `plan/project/ROADMAP.md §Open Operator-Reported Bugs → #11`):
+  // the pre-#11 `resend.emails.send` call was unguarded — any
+  // Resend API error (timeout, 5xx, network reset) threw
+  // uncaught, the outer try/catch at every trigger site just
+  // `console.error`'d + continued, and the desk had no way
+  // to know the email failed. #11 wraps the call in a
+  // try/catch that writes to a new `failed_emails` Firestore
+  // collection so the staff dashboard can surface a banner
+  // + the operator can audit + retry. The `bookingId` +
+  // `action` come from the caller-side `sendBookingTrigger`
+  // (which writes the canonical DLQ entry below); this
+  // `sendEmail`-level write captures the recipient + subject
+  // + raw error for any future caller that doesn't go
+  // through the trigger orchestrator.
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      html,
+      replyTo: config.supportEmail,
+      attachments
+    });
+  } catch (error: any) {
+    // Best-effort DLQ write — the failure is the
+    // thing we want to surface, so we don't want
+    // the DLQ write itself to crash the request.
+    try {
+      await adminDb.collection("failed_emails").add({
+        recipient: to,
+        subject,
+        error: typeof error?.message === "string" ? error.message : String(error),
+        lastAttemptAt: new Date(),
+        retryCount: 0
+      });
+    } catch (dlqErr) {
+      console.error("[#11] failed to write failed_emails DLQ row:", dlqErr);
+    }
+    // Re-throw so the caller can surface the
+    // failure in its own response shape (the
+    // post-#11 `{ emailQueued: false }` banner).
+    throw error;
+  }
 }
 
 async function findBooking(req: VercelRequest, options: { requireGuestMatch: boolean }) {

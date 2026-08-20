@@ -160,7 +160,7 @@ describe("/api/bookings/confirm", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { status: "confirmed" }
+      data: { status: "confirmed", emailQueued: true }
     });
   });
 
@@ -277,6 +277,44 @@ describe("/api/bookings/confirm", () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  // Per #11 (operator-reported 2026-08-20): when the
+  // booking-confirmed email fails to send, the
+  // response carries `emailQueued: false` so the
+  // desk's confirm-booking UI can branch on the
+  // email state. The DLQ write inside `sendEmail`
+  // (per #11) is the durable record; this is the
+  // synchronous desk-facing surface.
+  test("returns emailQueued: false when sendBookingTrigger throws (Resend failure)", async () => {
+    // Pre-populate the booking mock — the
+    // pre-existing test at line 128 does the same.
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-001",
+      guestName: "Maria Santos",
+      guestEmail: "maria@example.test",
+      status: "pending",
+      totalPrice: 5000
+    };
+    sendBookingTrigger.mockRejectedValueOnce(new Error("Resend API timeout"));
+    const res = mockResponse();
+    await handleConfirmBooking(
+      {
+        method: "POST",
+        staff: { uid: "staff_1", email: "staff@sparkinn.com" },
+        body: { bookingId: "booking_1" }
+      },
+      res
+    );
+
+    // The booking IS confirmed (the failure is on
+    // the email, not the confirmation). The
+    // response shape is the post-#11 contract.
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: { status: "confirmed", emailQueued: false }
+    });
   });
 });
 

@@ -485,6 +485,30 @@ service cloud.firestore {
         && request.resource.data.readBy[request.auth.uid] is timestamp;
       allow delete: if false;
     }
+    // Per #11 (operator-reported 2026-08-20, tracked in
+    // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+    // #11`): the `failed_emails` collection is the DLQ for
+    // every Resend send failure. The `sendEmail` wrapper at
+    // `guest-app/server/handlers/email.ts` writes a row on
+    // every Resend error. The admin dashboard renders a
+    // `FailedEmailsBanner` from this collection so the
+    // desk can see + retry the failures.
+    //
+    // Auth posture: admin-only read (mirrors the canonical
+    // admin write posture; front-desk staff should not
+    // see failed emails since they cannot resolve them
+    // without Resend credentials). Server-side write
+    // (the `sendEmail` wrapper is server-side — the client
+    // never writes to this collection directly).
+    match /failed_emails/{failureId} {
+      allow read: if isAdmin();
+      // Server-only writes — the `sendEmail` wrapper is
+      // server-side (admin SDK), the client never
+      // writes to this collection. Explicitly false on
+      // the client to defend against any future caller
+      // that bypasses the server.
+      allow create, update, delete: if false;
+    }
     // ── collectionGroup rules ──────────────────────────────────────────────
     // Firestore requires explicit collectionGroup rules for cross-document
     // queries (collectionGroup(db, "charges") / "payments"). The nested

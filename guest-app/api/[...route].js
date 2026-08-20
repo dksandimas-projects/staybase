@@ -224573,14 +224573,29 @@ async function sendEmail(to3, subject, html, attachments) {
     console.log(`Skipping email send to placeholder address: ${to3}`);
     return;
   }
-  await resend.emails.send({
-    from: FROM_EMAIL,
-    to: to3,
-    subject,
-    html,
-    replyTo: hotel_config_default.supportEmail,
-    attachments
-  });
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: to3,
+      subject,
+      html,
+      replyTo: hotel_config_default.supportEmail,
+      attachments
+    });
+  } catch (error) {
+    try {
+      await adminDb.collection("failed_emails").add({
+        recipient: to3,
+        subject,
+        error: typeof error?.message === "string" ? error.message : String(error),
+        lastAttemptAt: /* @__PURE__ */ new Date(),
+        retryCount: 0
+      });
+    } catch (dlqErr) {
+      console.error("[#11] failed to write failed_emails DLQ row:", dlqErr);
+    }
+    throw error;
+  }
 }
 async function findBooking(req, options) {
   const { bookingId, bookingRef, guestEmail } = req.body || {};
@@ -232422,6 +232437,7 @@ async function handleConfirmBooking(req, res) {
     if (alreadyConfirmed) {
       return res.status(200).json({ success: true, data: { status: "confirmed", alreadyConfirmed: true } });
     }
+    let emailQueued = true;
     try {
       const reservationView = await loadReservationEmailView(bookingId);
       await sendBookingTrigger(
@@ -232429,6 +232445,7 @@ async function handleConfirmBooking(req, res) {
         reservationView ?? { ...bookingData2, status: "confirmed" }
       );
     } catch (emailErr) {
+      emailQueued = false;
       console.error("Failed to send booking confirmation email:", emailErr);
     }
     await writeNotification({
@@ -232439,7 +232456,7 @@ async function handleConfirmBooking(req, res) {
       roomNumber: bookingData2.roomNumber || null,
       bookingRef: bookingData2.bookingRef || null
     });
-    return res.status(200).json({ success: true, data: { status: "confirmed" } });
+    return res.status(200).json({ success: true, data: { status: "confirmed", emailQueued } });
   } catch (error) {
     if (error?.message === "BOOKING_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Booking not found." });
