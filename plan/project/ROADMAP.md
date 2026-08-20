@@ -2,7 +2,7 @@
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
 > Last updated: August 20, 2026 — one fix shipped today (decision #226, v0.274.15). Closed the Spark Rewards Members page React error #31 crash. Still open: #11 (email silent-swallow — needs new `failed_emails` collection + admin banner + retry). Per-fix updates live in the LIVE FIXES TRACKED block below.
 >
-> Last ship: August 20, 2026 (decision #226 — `fix/members-member-since-timestamp`; admin-app 1465/1465 + tsc clean; pending merge).
+> Last ship: August 20, 2026 (decision #226 — `fix/members-member-since-timestamp`; admin-app 1465/1465 + tsc clean; merged via `chore(merge)` @ `d415327`).
 >
 > Previous ship: August 19, 2026 (decisions #225 — `fix/qr-management-mobile-fallback`; merged via `chore(merge)` @ `8fe9f60`).
 >
