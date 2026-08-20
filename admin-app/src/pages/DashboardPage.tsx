@@ -8,10 +8,17 @@ import {
   getDueAmountPreDiscount,
 } from "../utils/pendingPaymentDiscountGate";
 import { StatsCard } from "../components/StatsCard";
+// Per #11 (operator-reported 2026-08-20, tracked in
+// `plan/project/ROADMAP.md §Open Operator-Reported Bugs
+// → #11 row`): the `FailedEmailsBanner` is the
+// desk-facing surface for the `failed_emails`
+// Firestore DLQ. Rendered at the top of the
+// dashboard content (above the stats cards).
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
+import { FailedEmailsBanner } from "../components/FailedEmailsBanner";
 import { useToast } from "../components/Toast";
 import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -840,6 +847,23 @@ export function DashboardPage() {
         <h1 className="font-heading text-3xl text-gray-950 lowercase">dashboard overview</h1>
         <p className="text-xs text-gray-500 mt-1">Real-time room occupancy and housekeeping operations overview.</p>
       </header>
+
+      {/* Per #11 (operator-reported 2026-08-20, tracked in
+          `plan/project/ROADMAP.md §Open Operator-Reported Bugs
+          → #11 row`): the failed-emails banner sits at
+          the top of the dashboard content (above the
+          stats cards) so the desk sees any Resend
+          send-failures on every dashboard load. The
+          banner reads "N emails failed to send" + a
+          click-through to a list of `{ recipient,
+          subject, error, lastAttemptAt, retryCount }`
+          rows. Admin-only — the listener resets the
+          state on non-admin sessions, so a front-desk
+          user sees nothing here. When there are no
+          failures, the banner renders nothing (a
+          persistent "all good" banner would be
+          noise). */}
+      <FailedEmailsBanner />
 
       {/* Stats Cards Row */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">

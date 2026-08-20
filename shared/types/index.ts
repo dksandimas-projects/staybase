@@ -1075,6 +1075,34 @@ export interface Notification {
   createdAt: Date;
 }
 
+// Per #11 (operator-reported 2026-08-20, tracked in
+// `plan/project/ROADMAP.md §Open Operator-Reported Bugs → #11
+// row`): the canonical shape of a row in the
+// `failed_emails` Firestore collection (the DLQ for
+// every Resend send failure). The DLQ is written by
+// `sendEmail` in `guest-app/server/handlers/email.ts`;
+// the admin banner reads the same shape. Fields are
+// the minimum needed for the operator's audit trail
+// (recipient + subject + error + timestamps + retry
+// count) — the `error` field is the canonical message
+// from Resend's API response. The shape is also
+// pinned by the backfill / retention tooling so future
+// crons (e.g. "retry after 24h") have a stable contract
+// to read.
+export interface FailedEmail {
+  id: string;
+  /** Resend's destination address (the guest's email). */
+  recipient: string;
+  /** The email's subject line (the template's resolved subject). */
+  subject: string;
+  /** Resend's error message (or `String(error)` for non-Error rejections). */
+  error: string;
+  /** Server-side `new Date()` at DLQ write time. */
+  lastAttemptAt: Date;
+  /** Number of retry attempts (always 0 today; reserved for the future retry-cron). */
+  retryCount: number;
+}
+
 export type TestRunStatus = "active" | "closed" | "cleanup-in-progress" | "cleaned";
 
 export interface TestRunManifest {

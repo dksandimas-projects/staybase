@@ -20,6 +20,13 @@ import {
   MAX_ROOM_TYPE_PHOTOS,
   Notification,
   type NotificationType,
+  // Per #11 (operator-reported 2026-08-20, tracked in
+  // `plan/project/ROADMAP.md §Open Operator-Reported Bugs
+  // → #11 row`): the canonical shape of a row in the
+  // `failed_emails` Firestore collection (the DLQ for
+  // every Resend send failure). The admin banner's
+  // listener uses this type.
+  FailedEmail,
   PaymentMethodConfig,
   PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
@@ -887,6 +894,15 @@ export interface AdminContextType {
 
   // Notification Center (Phase 12 — decision #120)
   notifications: Notification[];
+  // Per #11 (operator-reported 2026-08-20): the
+  // `failed_emails` collection listener surfaces
+  // here so the dashboard's `FailedEmailsBanner`
+  // can read the DLQ on every render. Admin-only —
+  // front-desk staff reset the state on
+  // non-admin sessions (see the listener
+  // short-circuit).
+  failedEmails: FailedEmail[];
+  failedEmailsLoading: boolean;
   notificationsLoading: boolean;
   unreadNotificationCount: number;
   markNotificationRead: (notificationId: string) => Promise<void>;
@@ -4610,6 +4626,117 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     };
   }, [currentUser]);
 
+  // ── #11 Failed Emails Banner (operator-reported 2026-08-20) ───
+  // The `failed_emails` Firestore collection is the
+  // DLQ for every Resend send failure (per the spec
+  // at `plan/project/ROADMAP.md §Open Operator-Reported
+  // Bugs → #11 row`). The desk-facing surface is the
+  // `FailedEmailsBanner` rendered on the dashboard
+  // — the banner reads "N emails failed to send"
+  // + a click-through to a list of `{ recipient,
+  // subject, error, lastAttemptAt, retryCount }`
+  // rows. The collection is `isAdmin()`-gated
+  // (front-desk staff should not see failed
+  // emails — they can't resolve them without
+  // Resend credentials), so this listener
+  // short-circuits on non-admin roles. The MRB-15-09
+  // force-refresh pattern (below) is borrowed
+  // verbatim from the `notifications` listener
+  // because the same `role`-claim-staleness risk
+  // applies.
+  //
+  // Pre-#11 surface: the `failed_emails` collection
+  // existed (the DLQ write happened in the server's
+  // `sendEmail` wrapper) but nothing in the admin app
+  // read it. The desk only saw the failure via the
+  // `emailQueued: false` toast (the synchronous
+  // surface, shipped in the prior PR). The banner
+  // is the persistent "did we miss anything?"
+  // surface for the desk to scan on dashboard load.
+  const [failedEmails, setFailedEmails] = useState<FailedEmail[]>([]);
+  const [failedEmailsLoading, setFailedEmailsLoading] = useState(true);
+
+  useEffect(() => {
+    // Front-desk staff cannot see the banner
+    // (the `failed_emails` collection is
+    // `isAdmin()`-gated). Reset the state on
+    // logout / role change so a previous
+    // admin's failures don't linger in a
+    // non-admin session.
+    if (!currentUser || currentUser.role !== "admin") {
+      setFailedEmails([]);
+      setFailedEmailsLoading(true);
+      return;
+    }
+    setFailedEmailsLoading(true);
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+
+    // Force-refresh pattern (MRB-15-09): the
+    // `failed_emails` collection is `isAdmin()`-gated,
+    // which reads the `role` custom claim. The
+    // Firestore SDK uses its OWN cached ID token
+    // for the listener handshake — if the cache
+    // is one refresh behind the auth-state callback
+    // (long-idle session, fresh tab, or just-minted
+    // role claim), the listener attaches with a
+    // stale token and `Missing or insufficient
+    // permissions` silently empties the banner.
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+      // Bounded query — never the whole
+      // collection. 100 is enough for the desk
+      // to scan the last few days of failures;
+      // older failures are operational, not
+      // desk-facing. The composite index
+      // `(lastAttemptAt desc)` is the only
+      // one this listener needs. The orderBy
+      // + limit pins the listener to a bounded
+      // shape (Firestore requires an orderBy on
+      // any range/limit query).
+      const failedRef = collection(db, "failed_emails");
+      const failedQuery = query(failedRef, orderBy("lastAttemptAt", "desc"), limit(100));
+      unsubscribe = onSnapshot(
+        failedQuery,
+        (snapshot) => {
+          const docs: FailedEmail[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() || {};
+            // Defensive coercion: the DLQ is
+            // server-side + admin-SDK, so the
+            // shape is canonical. The defensive
+            // parsing handles any future
+            // shape-drift from a manual write
+            // (operator audit trail).
+            return {
+              id: docSnap.id,
+              recipient: String(data.recipient || ""),
+              subject: String(data.subject || ""),
+              error: String(data.error || ""),
+              lastAttemptAt: data.lastAttemptAt && typeof (data.lastAttemptAt as any).toDate === "function"
+                ? (data.lastAttemptAt as any).toDate()
+                : new Date(0),
+              retryCount: Number(data.retryCount || 0)
+            };
+          });
+          setFailedEmails(docs);
+          setFailedEmailsLoading(false);
+        },
+        (error) => {
+          console.error("Error listening to failed_emails collection:", error);
+          setFailedEmailsLoading(false);
+        }
+      );
+    }).catch((refreshErr) => {
+      console.error("Failed to force-refresh ID token for failed_emails listener:", refreshErr);
+      setFailedEmailsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [currentUser]);
+
   const unreadNotificationCount = useMemo(() => {
     if (!currentUser) return 0;
     const myUid = currentUser.uid;
@@ -6838,6 +6965,17 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         unreadNotificationCount,
         markNotificationRead,
         markAllNotificationsRead,
+        // Per #11 (operator-reported 2026-08-20): the
+        // `failedEmails` collection listener's state
+        // surfaces to the dashboard's
+        // `FailedEmailsBanner`. Placed AFTER
+        // `markAllNotificationsRead` so the existing
+        // `phase-12-notification-center.test.ts`
+        // source-text pin (which checks the order of
+        // the notification fields) still passes
+        // without modification.
+        failedEmails,
+        failedEmailsLoading,
         testRuns,
         testRunsLoading,
         createTestRun,
