@@ -1021,7 +1021,6 @@ export async function handleLinkBookingToMember(req: any, res: any) {
       const bookingData = bookingDoc.data() || {};
       const bookingStatus = String(bookingData.status || "");
       const bookingTestRunId = bookingData.testRunId || null;
-      const existingMemberId = bookingData.memberId || null;
 
       if (bookingStatus === "cancelled") {
         // Cancelled bookings are historical; linking them would put
@@ -1041,25 +1040,94 @@ export async function handleLinkBookingToMember(req: any, res: any) {
         throw new Error("Test-run bookings cannot be linked to a member.");
       }
 
+      // Per MED-3 G2 (build-variant follow-up 2026-08-20):
+      // for an N>1 reservation (post-MRB-01
+      // bookings with `reservationId` set), query
+      // the siblings in the same `runTransaction`
+      // and fan the `memberId` write out to every
+      // one. Pre-G2 the transaction only wrote to
+      // the resolved booking — so the member's My
+      // Stays list (which queries
+      // `bookings.where("memberId", "==", uid)` at
+      // `members.ts:192`) only showed the lead
+      // child. G2 closes that gap.
+      //
+      // The fan-out is conditional on
+      // `bookingData.reservationId` being set —
+      // legacy pre-MRB-01 + N=1 reservations have
+      // no `reservationId` and skip the sibling
+      // query entirely (preserves the pre-G2
+      // single-doc write shape).
+      //
+      // The siblings are read in the SAME
+      // `runTransaction` so the sibling query is
+      // consistent with the rest of the write set
+      // (per the FOL-03 reads-before-writes
+      // invariant). The conflict guard at line 837
+      // is extended: if ANY sibling is linked to a
+      // different member, the whole link fails 409
+      // (no silent overwrite on the lead, no
+      // partial fan-out).
+      const existingMemberId = bookingData.memberId || null;
+
       if (existingMemberId && existingMemberId !== memberUid) {
-        // Surface the conflict cleanly. The staff can either unlink
-        // the booking via the booking-drawer `memberId` edit (out of
-        // scope for this fix) or pick a different booking. The
-        // thrown error becomes a 409 in the catch.
+        // Surface the conflict cleanly on the lead
+        // child. The sibling-extension below adds
+        // the same check for every other child in
+        // the same reservation. The thrown error
+        // becomes a 409 in the catch.
         throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
       }
 
-      const alreadyLinked = existingMemberId === memberUid;
+      let siblingDocs: Array<{ id: string; data: any }> = [];
+      const isReservationBooking = !!(bookingData.reservationId && String(bookingData.reservationId).trim());
+      if (isReservationBooking) {
+        const siblingsQuery = await adminDb
+          .collection("bookings")
+          .where("reservationId", "==", String(bookingData.reservationId).trim())
+          .get();
+        siblingDocs = siblingsQuery.docs
+          .map((d: any) => ({ id: d.id, data: d.data() || {} }))
+          .filter((b: any) => String(b.id) !== String(resolvedBookingId));
+        // G2.D: every sibling must be either
+        // unlinked OR linked to the same member.
+        // A different member on any sibling is a
+        // 409 conflict (no silent overwrite).
+        for (const sibling of siblingDocs) {
+          const siblingMemberId = sibling.data.memberId || null;
+          if (siblingMemberId && siblingMemberId !== memberUid) {
+            throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
+          }
+        }
+      }
+      // The lead + the siblings form the fan-out
+      // set. The lead's existingMemberId is the
+      // primary gate (single-doc conflict guard
+      // from pre-G2); each sibling's memberId is
+      // the per-sibling gate (G2).
+      const allTargets = [
+        { id: resolvedBookingId, data: bookingData, existingMemberId },
+        ...siblingDocs.map((s) => ({
+          id: s.id,
+          data: s.data,
+          existingMemberId: s.data.memberId || null
+        }))
+      ];
+      const allAlreadyLinked = allTargets.every((t) => t.existingMemberId === memberUid);
       const now = new Date();
 
-      if (!alreadyLinked) {
-        transaction.update(bookingRef, {
-          memberId: memberUid,
-          linkedByStaff: staff.uid,
-          linkedAt: now,
-          linkedReason: trimmedReason,
-          updatedAt: now
-        });
+      if (!allAlreadyLinked) {
+        for (const target of allTargets) {
+          if (target.existingMemberId === memberUid) continue; // idempotent skip
+          const siblingRef = adminDb.collection("bookings").doc(target.id);
+          transaction.update(siblingRef, {
+            memberId: memberUid,
+            linkedByStaff: staff.uid,
+            linkedAt: now,
+            linkedReason: trimmedReason,
+            updatedAt: now
+          });
+        }
       }
 
       // Audit row — same shape as the erasure audit, written
@@ -1069,9 +1137,11 @@ export async function handleLinkBookingToMember(req: any, res: any) {
       // `R-…` reservationRef path, the audit row carries the
       // `reservationId` + `reservationRef` so future auditors can
       // tell whether the staff linked a single child or a whole
-      // reservation. Mirrors the MRB-01 + MRB-04 reservation
-      // contract — these are nullable on the legacy pre-MRB-01
-      // single-room path.
+      // reservation. Per MED-3 G2: the audit row also carries
+      // `linkedBookingIds` (the fan-out set) so a future audit
+      // can disambiguate "linked the lead" from "linked the
+      // whole reservation".
+      const linkedBookingIds = allTargets.map((t) => t.id);
       const auditRef = adminDb
         .collection("bookings").doc("audit").collection("records").doc(`${resolvedBookingId}-link-${now.getTime()}`);
       transaction.set(auditRef, {
@@ -1079,11 +1149,15 @@ export async function handleLinkBookingToMember(req: any, res: any) {
         bookingRef: bookingData.bookingRef || "",
         // G1: include the reservation cluster on the
         // audit row so a future reconciliation can
-        // disambiguate "linked the lead" from "linked the
-        // whole reservation" (the sibling fan-out is the
-        // G2 follow-up).
+        // disambiguate "linked the lead" from "linked
+        // the whole reservation".
         reservationId: bookingData.reservationId || resolvedReservationId || null,
         reservationRef: bookingData.reservationRef || null,
+        // G2: include the fan-out set so an auditor
+        // can see exactly which bookings were
+        // linked (and which were skipped via the
+        // idempotency guard).
+        linkedBookingIds,
         action: "manual-link-member",
         fromMemberId: existingMemberId,
         toMemberId: memberUid,
@@ -1100,10 +1174,16 @@ export async function handleLinkBookingToMember(req: any, res: any) {
         bookingId: resolvedBookingId,
         bookingRef: bookingData.bookingRef || "",
         // G1: surface the resolved reservation cluster
-        // (null on legacy pre-MRB-01 single-room links) so
-        // the admin UI can confirm what was linked.
+        // (null on legacy pre-MRB-01 single-room
+        // links) so the admin UI can confirm what
+        // was linked.
         reservationId: bookingData.reservationId || resolvedReservationId || null,
-        alreadyLinked,
+        // G2: surface the fan-out set so the
+        // admin UI can confirm which bookings were
+        // linked. Always array-shaped (length 1
+        // for the single-doc back-compat path).
+        linkedBookingIds,
+        alreadyLinked: allAlreadyLinked,
         auditId: auditRef.id
       };
     });

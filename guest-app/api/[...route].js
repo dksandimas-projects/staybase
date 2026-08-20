@@ -235856,38 +235856,67 @@ async function handleLinkBookingToMember(req, res) {
       const bookingData2 = bookingDoc.data() || {};
       const bookingStatus = String(bookingData2.status || "");
       const bookingTestRunId = bookingData2.testRunId || null;
-      const existingMemberId = bookingData2.memberId || null;
       if (bookingStatus === "cancelled") {
         throw new Error("Cancelled bookings cannot be linked to a member.");
       }
       if (bookingTestRunId) {
         throw new Error("Test-run bookings cannot be linked to a member.");
       }
+      const existingMemberId = bookingData2.memberId || null;
       if (existingMemberId && existingMemberId !== memberUid) {
         throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
       }
-      const alreadyLinked = existingMemberId === memberUid;
-      const now = /* @__PURE__ */ new Date();
-      if (!alreadyLinked) {
-        transaction.update(bookingRef, {
-          memberId: memberUid,
-          linkedByStaff: staff.uid,
-          linkedAt: now,
-          linkedReason: trimmedReason,
-          updatedAt: now
-        });
+      let siblingDocs = [];
+      const isReservationBooking = !!(bookingData2.reservationId && String(bookingData2.reservationId).trim());
+      if (isReservationBooking) {
+        const siblingsQuery = await adminDb.collection("bookings").where("reservationId", "==", String(bookingData2.reservationId).trim()).get();
+        siblingDocs = siblingsQuery.docs.map((d) => ({ id: d.id, data: d.data() || {} })).filter((b3) => String(b3.id) !== String(resolvedBookingId));
+        for (const sibling of siblingDocs) {
+          const siblingMemberId = sibling.data.memberId || null;
+          if (siblingMemberId && siblingMemberId !== memberUid) {
+            throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
+          }
+        }
       }
+      const allTargets = [
+        { id: resolvedBookingId, data: bookingData2, existingMemberId },
+        ...siblingDocs.map((s4) => ({
+          id: s4.id,
+          data: s4.data,
+          existingMemberId: s4.data.memberId || null
+        }))
+      ];
+      const allAlreadyLinked = allTargets.every((t3) => t3.existingMemberId === memberUid);
+      const now = /* @__PURE__ */ new Date();
+      if (!allAlreadyLinked) {
+        for (const target of allTargets) {
+          if (target.existingMemberId === memberUid) continue;
+          const siblingRef = adminDb.collection("bookings").doc(target.id);
+          transaction.update(siblingRef, {
+            memberId: memberUid,
+            linkedByStaff: staff.uid,
+            linkedAt: now,
+            linkedReason: trimmedReason,
+            updatedAt: now
+          });
+        }
+      }
+      const linkedBookingIds = allTargets.map((t3) => t3.id);
       const auditRef = adminDb.collection("bookings").doc("audit").collection("records").doc(`${resolvedBookingId}-link-${now.getTime()}`);
       transaction.set(auditRef, {
         bookingId: resolvedBookingId,
         bookingRef: bookingData2.bookingRef || "",
         // G1: include the reservation cluster on the
         // audit row so a future reconciliation can
-        // disambiguate "linked the lead" from "linked the
-        // whole reservation" (the sibling fan-out is the
-        // G2 follow-up).
+        // disambiguate "linked the lead" from "linked
+        // the whole reservation".
         reservationId: bookingData2.reservationId || resolvedReservationId || null,
         reservationRef: bookingData2.reservationRef || null,
+        // G2: include the fan-out set so an auditor
+        // can see exactly which bookings were
+        // linked (and which were skipped via the
+        // idempotency guard).
+        linkedBookingIds,
         action: "manual-link-member",
         fromMemberId: existingMemberId,
         toMemberId: memberUid,
@@ -235903,10 +235932,16 @@ async function handleLinkBookingToMember(req, res) {
         bookingId: resolvedBookingId,
         bookingRef: bookingData2.bookingRef || "",
         // G1: surface the resolved reservation cluster
-        // (null on legacy pre-MRB-01 single-room links) so
-        // the admin UI can confirm what was linked.
+        // (null on legacy pre-MRB-01 single-room
+        // links) so the admin UI can confirm what
+        // was linked.
         reservationId: bookingData2.reservationId || resolvedReservationId || null,
-        alreadyLinked,
+        // G2: surface the fan-out set so the
+        // admin UI can confirm which bookings were
+        // linked. Always array-shaped (length 1
+        // for the single-doc back-compat path).
+        linkedBookingIds,
+        alreadyLinked: allAlreadyLinked,
         auditId: auditRef.id
       };
     });

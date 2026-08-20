@@ -372,4 +372,87 @@ describe("fix/spark-rewards-med-3-link-booking — front-desk manual link (decis
       expect(placeholder, "expected the G1 placeholder").not.toBeNull();
     });
   });
+
+  // ─── 6. MED-3 G2 build-variant follow-up (operator-reported 2026-08-20) ──
+  // Per `plan/features/SPARK-REWARDS.md §Front-desk manual
+  // link` follow-up note: when the staff links a member to
+  // a multi-room reservation, the transaction now fans the
+  // `memberId` write out to every sibling (not just the
+  // lead). Pre-G2, the member's My Stays list
+  // (`handleListMemberStays` at `members.ts:192` queries
+  // `bookings.where("memberId", "==", uid)`) only showed
+  // the lead child — the siblings stayed orphaned.
+  describe("MED-3 G2 — MRB-aware sibling fan-out", () => {
+    // Slice the `runTransaction` body in
+    // `handleLinkBookingToMember` to read the
+    // production code. The body's nested
+    // `transaction.update` calls + the
+    // `siblingsQuery` + the `allTargets` loop
+    // pattern is the G2 contract. The slice uses
+    // the same brace-counting pattern as the G1
+    // helper (skip JSDoc, find body opening).
+    function sliceHandleLinkBody(src: string): string {
+      // Find the function declaration. The body
+      // is the entire `runTransaction(async
+      // (transaction) => { ... })` block. Slice
+      // from the function declaration to the end
+      // of the file (the function is the last
+      // export in the file — the matching `}` is
+      // the file's closing brace).
+      const start = src.indexOf("export async function handleLinkBookingToMember(");
+      if (start < 0) return "";
+      // Skip past the preceding JSDoc.
+      const jsdocEnd = src.lastIndexOf("*/", start);
+      const searchFrom = jsdocEnd > 0 ? jsdocEnd + 2 : start;
+      return src.slice(searchFrom);
+    }
+
+    it("declares the G2 sibling-query block on the post-MRB-01 path (bookingData.reservationId)", () => {
+      // The pre-G2 code only wrote to a single
+      // `bookings/{id}` doc. G2 adds a
+      // `bookings.where("reservationId", "==", ...)`
+      // query + a per-sibling memberId write.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/where\("reservationId", "==", String\(bookingData\.reservationId\)\.trim\(\)\)/);
+    });
+
+    it("iterates allTargets via the per-target existingMemberId check (idempotent skip)", () => {
+      // The G2 fan-out loop must skip siblings
+      // already linked to the same member
+      // (idempotency). The check is
+      // `if (target.existingMemberId === memberUid) continue;`.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/allTargets/);
+      expect(body).toMatch(/target\.existingMemberId === memberUid/);
+    });
+
+    it("extends the conflict guard to siblings (409 if ANY sibling is linked to a different member)", () => {
+      // Pre-G2: the conflict guard was scoped to
+      // the resolved booking only. G2 extends it
+      // to every sibling in the same reservation.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/siblingMemberId\s*&&\s*siblingMemberId\s*!==\s*memberUid/);
+    });
+
+    it("includes linkedBookingIds on the response payload + the audit row", () => {
+      // The G2 audit row + response both carry
+      // `linkedBookingIds` so a future auditor
+      // can see "linked the lead" vs "linked the
+      // whole reservation".
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/linkedBookingIds/);
+    });
+
+    it("computes allAlreadyLinked from every target (the response's alreadyLinked field reflects the FAN-OUT, not just the lead)", () => {
+      // The pre-G2 response's `alreadyLinked` was
+      // scoped to the resolved booking. G2 makes
+      // it reflect the entire fan-out: if ANY
+      // sibling still needs the write, the
+      // response says `alreadyLinked: false` so
+      // the UI surfaces the partial-link state.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/allAlreadyLinked/);
+      expect(body).toMatch(/alreadyLinked:\s*allAlreadyLinked/);
+    });
+  });
 });
