@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.277.1";
+    VERSION2 = "0.277.2";
   }
 });
 
@@ -235971,6 +235971,14 @@ async function handleSendVerificationEmail(req, res) {
     });
   } catch (error) {
     console.error("handleSendVerificationEmail failed:", error);
+    const firebaseErrorCode = typeof error?.errorInfo?.code === "string" && error.errorInfo.code || typeof error?.code === "string" && error.code || "";
+    if (firebaseErrorCode === "auth/unauthorized-continue-uri") {
+      return res.status(500).json({
+        success: false,
+        code: "auth/unauthorized-continue-uri",
+        error: "This site's domain is not allowlisted in the Firebase project's authorized domains list. Add the current hostname (e.g. stg.sparkinnbohol.com) under Firebase Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains, then try again."
+      });
+    }
     return res.status(500).json({
       success: false,
       error: "Failed to send verification email. Please try again."

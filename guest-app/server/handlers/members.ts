@@ -1101,6 +1101,27 @@ export async function handleSendVerificationEmail(req: any, res: any) {
     });
   } catch (error: any) {
     console.error("handleSendVerificationEmail failed:", error);
+    // Per operator report 2026-08-20: a generic 500 here
+    // surfaces to the banner as a useless "try again" message
+    // even when the real cause is a Firebase console config
+    // issue (e.g. `auth/unauthorized-continue-uri` because the
+    // continue-URL domain is not in the project's authorized
+    // domains list). The firebase-admin SDK puts the error code
+    // on both `error.code` and `error.errorInfo.code` — we read
+    // both so the mapping survives any SDK shape changes.
+    const firebaseErrorCode =
+      (typeof error?.errorInfo?.code === "string" && error.errorInfo.code) ||
+      (typeof error?.code === "string" && error.code) ||
+      "";
+    if (firebaseErrorCode === "auth/unauthorized-continue-uri") {
+      return res.status(500).json({
+        success: false,
+        code: "auth/unauthorized-continue-uri",
+        error:
+          "This site's domain is not allowlisted in the Firebase project's authorized domains list. " +
+          "Add the current hostname (e.g. stg.sparkinnbohol.com) under Firebase Console → Authentication → Settings → Authorized domains, then try again."
+      });
+    }
     return res.status(500).json({
       success: false,
       error: "Failed to send verification email. Please try again."
