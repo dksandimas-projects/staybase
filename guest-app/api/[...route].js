@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.280.1";
+    VERSION2 = "0.281.0";
   }
 });
 
@@ -235737,6 +235737,79 @@ var linkBookingToMemberSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(160),
   reason: external_exports.string().trim().min(1).max(500)
 }).strict();
+async function resolveBookingForLink(input) {
+  const trimmed = String(input || "").trim();
+  if (!trimmed) {
+    return { ok: false, code: "BOOKING_NOT_FOUND", message: "Booking was not found." };
+  }
+  if (RESERVATION_REF_REGEX.test(trimmed)) {
+    const reservationDoc = await adminDb.collection("reservations").doc(trimmed).get();
+    if (reservationDoc.exists) {
+      const reservationData = reservationDoc.data() || {};
+      const leadBookingId = String(reservationData.leadBookingId || "").trim();
+      if (leadBookingId) {
+        return {
+          ok: true,
+          bookingId: leadBookingId,
+          reservationId: reservationDoc.id
+        };
+      }
+      const whereFallback = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).get();
+      if (!whereFallback.empty) {
+        const fallbackDoc = whereFallback.docs[0];
+        const fallbackData = fallbackDoc.data() || {};
+        const fallbackLead = String(fallbackData.leadBookingId || "").trim();
+        if (fallbackLead) {
+          return {
+            ok: true,
+            bookingId: fallbackLead,
+            reservationId: fallbackDoc.id
+          };
+        }
+      }
+      return {
+        ok: false,
+        code: "RESERVATION_NOT_FOUND",
+        message: "Reservation was not found or has no lead booking."
+      };
+    }
+    const bookingByReservationId = await adminDb.collection("bookings").where("reservationId", "==", trimmed).limit(1).get();
+    if (!bookingByReservationId.empty) {
+      const matchDoc = bookingByReservationId.docs[0];
+      return {
+        ok: true,
+        bookingId: matchDoc.id,
+        reservationId: trimmed
+      };
+    }
+    return {
+      ok: false,
+      code: "RESERVATION_NOT_FOUND",
+      message: "Reservation was not found."
+    };
+  }
+  if (BOOKING_REF_REGEX.test(trimmed)) {
+    const byBookingRef = await adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1).get();
+    if (!byBookingRef.empty) {
+      const matchDoc = byBookingRef.docs[0];
+      return {
+        ok: true,
+        bookingId: matchDoc.id,
+        reservationId: null
+      };
+    }
+    return {
+      ok: false,
+      code: "BOOKING_NOT_FOUND",
+      message: "Booking was not found."
+    };
+  }
+  return {
+    ok: true,
+    bookingId: trimmed,
+    reservationId: null
+  };
+}
 async function handleLinkBookingToMember(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -235759,16 +235832,26 @@ async function handleLinkBookingToMember(req, res) {
   const trimmedReason = reason.trim();
   try {
     let responseData = {};
+    const resolution = await resolveBookingForLink(bookingId);
+    if (!resolution.ok) {
+      return res.status(404).json({
+        success: false,
+        code: resolution.code,
+        error: resolution.message
+      });
+    }
+    const resolvedBookingId = resolution.bookingId;
+    const resolvedReservationId = resolution.reservationId;
     await adminDb.runTransaction(async (transaction) => {
       const memberRef = adminDb.collection("members").doc(memberUid);
       const memberDoc = await transaction.get(memberRef);
       if (!memberDoc.exists) {
         throw new Error("Member account was not found.");
       }
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingRef = adminDb.collection("bookings").doc(resolvedBookingId);
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
-        throw new Error("Booking was not found.");
+        throw new Error("BOOKING_NOT_FOUND:Booking was not found.");
       }
       const bookingData2 = bookingDoc.data() || {};
       const bookingStatus = String(bookingData2.status || "");
@@ -235794,10 +235877,17 @@ async function handleLinkBookingToMember(req, res) {
           updatedAt: now
         });
       }
-      const auditRef = adminDb.collection("bookings").doc("audit").collection("records").doc(`${bookingId}-link-${now.getTime()}`);
+      const auditRef = adminDb.collection("bookings").doc("audit").collection("records").doc(`${resolvedBookingId}-link-${now.getTime()}`);
       transaction.set(auditRef, {
-        bookingId,
+        bookingId: resolvedBookingId,
         bookingRef: bookingData2.bookingRef || "",
+        // G1: include the reservation cluster on the
+        // audit row so a future reconciliation can
+        // disambiguate "linked the lead" from "linked the
+        // whole reservation" (the sibling fan-out is the
+        // G2 follow-up).
+        reservationId: bookingData2.reservationId || resolvedReservationId || null,
+        reservationRef: bookingData2.reservationRef || null,
         action: "manual-link-member",
         fromMemberId: existingMemberId,
         toMemberId: memberUid,
@@ -235810,8 +235900,12 @@ async function handleLinkBookingToMember(req, res) {
       });
       responseData = {
         memberUid,
-        bookingId,
+        bookingId: resolvedBookingId,
         bookingRef: bookingData2.bookingRef || "",
+        // G1: surface the resolved reservation cluster
+        // (null on legacy pre-MRB-01 single-room links) so
+        // the admin UI can confirm what was linked.
+        reservationId: bookingData2.reservationId || resolvedReservationId || null,
         alreadyLinked,
         auditId: auditRef.id
       };
@@ -235819,8 +235913,27 @@ async function handleLinkBookingToMember(req, res) {
     return res.status(200).json({ success: true, data: responseData });
   } catch (error) {
     const message = error?.message || "We could not link this booking to the member.";
-    const status = message.includes("already linked to a different member") ? 409 : message.includes("was not found") || message.includes("cannot be linked") || message.includes("Cancelled bookings") || message.includes("Test-run bookings") ? 400 : 500;
-    return res.status(status).json({ success: false, error: message });
+    if (message.includes("already linked to a different member")) {
+      return res.status(409).json({ success: false, error: message });
+    }
+    if (message.startsWith("BOOKING_NOT_FOUND:")) {
+      return res.status(404).json({
+        success: false,
+        code: "BOOKING_NOT_FOUND",
+        error: message.replace(/^BOOKING_NOT_FOUND:/, "")
+      });
+    }
+    if (message.startsWith("RESERVATION_NOT_FOUND:")) {
+      return res.status(404).json({
+        success: false,
+        code: "RESERVATION_NOT_FOUND",
+        error: message.replace(/^RESERVATION_NOT_FOUND:/, "")
+      });
+    }
+    if (message.includes("was not found") || message.includes("cannot be linked") || message.includes("Cancelled bookings") || message.includes("Test-run bookings")) {
+      return res.status(400).json({ success: false, error: message });
+    }
+    return res.status(500).json({ success: false, error: message });
   }
 }
 async function handleEraseMemberAccount(req, res) {

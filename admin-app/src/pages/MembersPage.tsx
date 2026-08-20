@@ -439,7 +439,7 @@ export function MembersPage() {
                   required
                   value={linkBookingRef}
                   onChange={(e) => setLinkBookingRef(e.target.value)}
-                  placeholder="e.g. SPK-2026-0142 or booking doc id"
+                  placeholder="e.g. SPK-20260820-00001, R-20260820-00001, or booking doc id"
                   className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
                 />
               </label>
