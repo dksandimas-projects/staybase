@@ -53,10 +53,18 @@ describe("CorporateBookingPage.tsx — Step 2 email autofills + locks for member
   });
 
   it("short-circuits updateGuestDetail for the email field when the guest is a member", () => {
+    // The early-return guard inside updateGuestDetail must mention
+    // the `email` field and `memberProfile.isMember` so a paste,
+    // dev-tools edit, or future programmatic caller cannot bypass
+    // the readOnly. The guard is now an OR-list covering
+    // email/firstName/lastName (per
+    // feature/booking-autofill-member-name-corporate) — anchor on
+    // the function body and assert both fields appear inside.
     const guard = src.match(
-      /function updateGuestDetail[\s\S]*?if \(field === "email"[\s\S]*?return;\s*\}/,
+      /function updateGuestDetail[\s\S]*?\n\s*\}/,
     );
-    expect(guard, "updateGuestDetail email guard not found").toBeTruthy();
+    expect(guard, "updateGuestDetail function body not found").toBeTruthy();
+    expect(guard![0]).toMatch(/field === "email"/);
     expect(guard![0]).toMatch(/memberProfile\?\.isMember\s*&&\s*memberProfile\.email/);
   });
 
