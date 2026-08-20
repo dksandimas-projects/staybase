@@ -1759,7 +1759,7 @@ export function BookingPage() {
               />
             </motion.div>
 
-            <motion.div className="mt-5 grid gap-5 sm:grid-cols-[220px_1fr]" variants={staggerChild}>
+            <motion.div className="mt-5 grid items-start gap-5 sm:grid-cols-[220px_1fr]" variants={staggerChild}>
               <TextField
                 error={touchedFields.guestCount ? guestErrors.guestCount : ""}
                 icon={<Users size={17} />}
