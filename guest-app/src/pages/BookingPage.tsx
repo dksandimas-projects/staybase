@@ -279,22 +279,39 @@ export function BookingPage() {
   );
 
   const [guestDetails, setGuestDetails] = useState({
-    firstName: searchParams.get("firstName") ?? "",
-    lastName: searchParams.get("lastName") ?? "",
-    // Per feature/booking-autofill-member-email: when the guest is
-    // signed in as a Spark Rewards member, pre-fill the Step 2 email
-    // from the member profile. The URL param keeps precedence when
-    // it is explicitly set (e.g. the Step 4 → re-book flow passes an
-    // email via the URL) so the member cannot accidentally have a
-    // different value pinned by an old link. The field is then
-    // rendered as readOnly below — see the email <TextField> for
-    // the matching render-time gate.
+    // Per feature/booking-autofill-member-name: when the guest is
+    // signed in as a Spark Rewards member, pre-fill the Step 2 name
+    // + phone from the member profile. We split `fullName` on the
+    // first space (first name = first token, last name = the rest)
+    // — the same split ProfilePage.tsx uses when it loads the
+    // edit form. The URL params keep precedence (the Step 4 →
+    // re-book flow pins first/last/phone via the URL) so the member
+    // cannot accidentally have a different value pinned by an old
+    // link. The name fields are then rendered as readOnly below —
+    // see the first/last <TextField>s for the matching render-time
+    // gate. Email is handled by the existing email-only block below;
+    // phone stays editable (members may travel on a secondary phone
+    // — per the autofill+lock UX decision 2026-08-20).
+    firstName:
+      searchParams.get("firstName") ??
+      (memberProfile?.isMember && memberProfile.fullName
+        ? memberProfile.fullName.split(" ")[0] ?? ""
+        : ""),
+    lastName:
+      searchParams.get("lastName") ??
+      (memberProfile?.isMember && memberProfile.fullName
+        ? memberProfile.fullName.split(" ").slice(1).join(" ") ?? ""
+        : ""),
     email:
       searchParams.get("email") ??
       (memberProfile?.isMember && memberProfile.email
         ? memberProfile.email
         : ""),
-    phone: searchParams.get("phone") ?? "",
+    phone:
+      searchParams.get("phone") ??
+      (memberProfile?.isMember && memberProfile.phone
+        ? memberProfile.phone
+        : ""),
     guestCount: String((Number(searchParams.get("adults")) || (Number(searchParams.get("guests")) || 2)) + Number(searchParams.get("children") ?? 0)),
     requests: searchParams.get("requests") ?? "",
     consent: false,
@@ -1215,14 +1232,23 @@ export function BookingPage() {
   }
 
   function updateGuestDetail(field: keyof typeof guestDetails, value: string | boolean) {
-    // Per feature/booking-autofill-member-email: when the guest is
-    // signed in as a Spark Rewards member the email is locked to the
-    // member's account email. The <TextField> renders `readOnly`
-    // below so the standard UI can't change it; this no-op guards
+    // Per feature/booking-autofill-member-email + member-name:
+    // when the guest is signed in as a Spark Rewards member the
+    // identity-anchored fields (email + first/last name) are locked
+    // to the member's account. The <TextField>s render `readOnly`
+    // below so the standard UI can't change them; this no-op guards
     // the programmatic path (a paste, a dev-tools edit, or any
-    // future caller of `updateGuestDetail("email", …)`) so the
-    // server-side validation stays in sync with the UI.
-    if (field === "email" && memberProfile?.isMember && memberProfile.email) {
+    // future caller of `updateGuestDetail(...)`) so the server-side
+    // validation stays in sync with the UI. Phone is deliberately
+    // NOT in this list — members may travel on a secondary phone
+    // and need to edit it for a specific booking.
+    if (
+      memberProfile?.isMember &&
+      memberProfile.email &&
+      (field === "email" ||
+        field === "firstName" ||
+        field === "lastName")
+    ) {
       return;
     }
     setGuestDetails((current) => ({
@@ -1734,6 +1760,13 @@ export function BookingPage() {
                 id="firstName"
                 name="firstName"
                 autoComplete="given-name"
+                // Per feature/booking-autofill-member-name: lock the
+                // first/last name fields to the member's account
+                // name. The identity anchor (email + name triple)
+                // stays consistent across bookings. `updateGuestDetail`
+                // short-circuits the same fields above, so the
+                // readOnly here is belt-and-braces.
+                readOnly={!!memberProfile?.isMember}
               />
               <TextField
                 error={touchedFields.lastName ? guestErrors.lastName : ""}
@@ -1747,6 +1780,7 @@ export function BookingPage() {
                 id="lastName"
                 name="lastName"
                 autoComplete="family-name"
+                readOnly={!!memberProfile?.isMember}
               />
             </motion.div>
 
