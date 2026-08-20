@@ -61,21 +61,42 @@ export function useGuestAuth(): GuestAuthContextValue {
   return ctx;
 }
 
-async function registerMember(
-  idToken: string,
-  profile: { fullName?: string; phone?: string; photoUrl?: string; authProvider?: "google" | "email" } = {}
-): Promise<void> {
+async function registerMember(idToken: string, payload: any) {
   const res = await fetch("/api/members/register", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`
     },
-    body: JSON.stringify(profile)
+    body: JSON.stringify(payload)
   });
-  const result = await res.json().catch(() => null);
-  if (!res.ok || !result?.success) {
-    throw new Error(result?.error || `We could not join ${config.rewardsName} right now. Please try again.`);
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+}
+
+async function sendCustomVerificationEmail(user: User): Promise<boolean> {
+  try {
+    const idToken = await user.getIdToken();
+    const res = await fetch("/api/members/send-verification-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`
+      }
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    return true;
+  } catch (err) {
+    console.warn("Custom verification email API failed, falling back to Firebase SDK:", err);
+    await firebaseSendEmailVerification(user);
+    return false;
   }
 }
 
@@ -175,13 +196,10 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
       // verification email right after signup so the
       // email/password user can be promoted to
       // `email_verified === true` (the server gate that protects
-      // email-based booking matches). We don't `await` the
-      // Firebase SDK call here — a verify-email failure must not
-      // block member registration. The "Verify your email" banner
-      // on the next page surfaces the unverified state and offers
-      // a Resend button.
-      void firebaseSendEmailVerification(credential.user).catch((err) => {
-        console.error("sendEmailVerification failed (non-blocking):", err);
+      // email-based booking matches). We call custom Resend email
+      // API with Firebase SDK fallback.
+      void sendCustomVerificationEmail(credential.user).catch((err) => {
+        console.error("sendCustomVerificationEmail failed (non-blocking):", err);
       });
 
       const idToken = await credential.user.getIdToken();
@@ -243,7 +261,7 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
     if (!current) {
       throw new Error("Please sign in before resending the verification email.");
     }
-    await firebaseSendEmailVerification(current);
+    await sendCustomVerificationEmail(current);
     await current.reload();
     setUser(auth.currentUser);
   };

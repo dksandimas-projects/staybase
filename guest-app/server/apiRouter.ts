@@ -10,7 +10,7 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
@@ -1078,6 +1078,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).user = authResult;
     
     return await handleRegisterMember(req, res);
+  }
+
+  if (domain === "members" && action === "send-verification-email" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-send-verification:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many verification email requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    (req as any).user = authResult;
+
+    return await handleSendVerificationEmail(req, res);
   }
 
   if (domain === "members" && action === "stays" && req.method === "GET") {

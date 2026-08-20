@@ -3,6 +3,8 @@ import { generateMemberNumber, validatePointsRedemption } from "@spark-inn/share
 import config from "../../../hotel.config";
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { rebuildRateBreakdown } from "../lib/rate-breakdown";
+import { sendVerificationEmailTrigger } from "./email";
+import { getServerBaseUrl } from "../lib/siteUrl";
 
 const registerMemberSchema = z.object({
   fullName: z.string().trim().max(120).optional().default(""),
@@ -1055,6 +1057,53 @@ export async function handleEraseMemberAccount(req: any, res: any) {
     return res.status(500).json({
       success: false,
       error: "We could not erase your account right now. Please try again."
+    });
+  }
+}
+
+export async function handleSendVerificationEmail(req: any, res: any) {
+  try {
+    const authUser = getAuthUser(req);
+    if (!authUser?.uid || !authUser?.email) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Missing or invalid authentication token."
+      });
+    }
+
+    if (authUser.email_verified === true) {
+      return res.status(200).json({
+        success: true,
+        message: "Email is already verified.",
+        data: { alreadyVerified: true }
+      });
+    }
+
+    const email = authUser.email;
+    const guestName = authUser.name || authUser.displayName || "";
+
+    const actionCodeSettings = {
+      url: `${getServerBaseUrl()}/account/profile?emailVerified=true`,
+      handleCodeInApp: true
+    };
+
+    const verificationLink = await adminAuth.generateEmailVerificationLink(email, actionCodeSettings);
+
+    await sendVerificationEmailTrigger({
+      guestName,
+      email,
+      verificationLink
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification email sent successfully."
+    });
+  } catch (error: any) {
+    console.error("handleSendVerificationEmail failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to send verification email. Please try again."
     });
   }
 }

@@ -79,7 +79,8 @@ type EmailAction =
   | "store-order-delivered"
   | "store-order-cancelled"
   | "staff-new-booking"
-  | "staff-new-payment";
+  | "staff-new-payment"
+  | "spark-rewards-email-verification";
 
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || config.supportEmail;
 const ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || config.supportEmail;
@@ -1706,6 +1707,40 @@ export async function sendVoucherIssuedTrigger(voucher: any) {
   );
 }
 
+function sparkRewardsEmailVerificationEmail(data: { guestName?: string; email: string; verificationLink: string }) {
+  const name = (data.guestName || "").trim();
+  const greetingName = name ? escapeHtml(name) : "Valued Member";
+  return emailLayout({
+    preheader: `Verify your email address for ${config.rewardsName}.`,
+    eyebrow: `${config.rewardsName} Account Verification`,
+    title: "Verify your email address",
+    intro: `Dear ${greetingName}, thank you for joining ${escapeHtml(config.rewardsName)}! Please verify your email address to complete your account registration.`,
+    body: `
+      ${callout("warm", "Unlock Member Privileges", "Verifying your email address links your past bookings to your account, enables early check-in requests, and activates member rates on future stays.")}
+      ${card("Verification link", `
+        <p style="margin: 0 0 16px; color: #374151; font-size: 14px; line-height: 1.6;">
+          Click the button below to verify your email address (<strong>${escapeHtml(data.email)}</strong>). If you didn't create an account with ${escapeHtml(config.brandName)}, you can safely ignore this message.
+        </p>
+        <p style="margin: 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+          If the button below doesn't work, copy and paste this link into your browser:<br>
+          <a href="${escapeHtml(data.verificationLink)}" style="color: ${config.colors.primary}; word-break: break-all;">${escapeHtml(data.verificationLink)}</a>
+        </p>
+      `)}
+    `,
+    ctaLabel: "Verify Email Address",
+    ctaUrl: data.verificationLink
+  });
+}
+
+export async function sendVerificationEmailTrigger(data: { guestName?: string; email: string; verificationLink: string }) {
+  if (!data.email) return;
+  await sendEmail(
+    data.email,
+    `[${config.brandName}] Verify your email address for ${config.rewardsName}`,
+    sparkRewardsEmailVerificationEmail(data)
+  );
+}
+
 // ─── Store order lifecycle emails ──────────────────────────────────
 
 function storeOrderItemsTable(items: any[] = []) {
@@ -2631,6 +2666,13 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         break;
       case "staff-new-payment":
         html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        break;
+      case "spark-rewards-email-verification":
+        html = sparkRewardsEmailVerificationEmail({
+          guestName: "Maria Santos",
+          email: "maria.santos@example.com",
+          verificationLink: siteUrl("/account/profile?emailVerified=true")
+        });
         break;
       default:
         return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });

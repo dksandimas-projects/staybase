@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.274.9";
+    VERSION2 = "0.276.2";
   }
 });
 
@@ -224068,6 +224068,7 @@ __export(email_exports, {
   sendStaffNewPaymentTrigger: () => sendStaffNewPaymentTrigger,
   sendStaffRefundReviewTrigger: () => sendStaffRefundReviewTrigger,
   sendStoreOrderTrigger: () => sendStoreOrderTrigger,
+  sendVerificationEmailTrigger: () => sendVerificationEmailTrigger,
   sendVoucherIssuedTrigger: () => sendVoucherIssuedTrigger
 });
 function escapeHtml(value) {
@@ -225115,6 +225116,38 @@ async function sendVoucherIssuedTrigger(voucher) {
     voucherIssuedEmail(voucher)
   );
 }
+function sparkRewardsEmailVerificationEmail(data) {
+  const name2 = (data.guestName || "").trim();
+  const greetingName = name2 ? escapeHtml(name2) : "Valued Member";
+  return emailLayout({
+    preheader: `Verify your email address for ${hotel_config_default.rewardsName}.`,
+    eyebrow: `${hotel_config_default.rewardsName} Account Verification`,
+    title: "Verify your email address",
+    intro: `Dear ${greetingName}, thank you for joining ${escapeHtml(hotel_config_default.rewardsName)}! Please verify your email address to complete your account registration.`,
+    body: `
+      ${callout("warm", "Unlock Member Privileges", "Verifying your email address links your past bookings to your account, enables early check-in requests, and activates member rates on future stays.")}
+      ${card("Verification link", `
+        <p style="margin: 0 0 16px; color: #374151; font-size: 14px; line-height: 1.6;">
+          Click the button below to verify your email address (<strong>${escapeHtml(data.email)}</strong>). If you didn't create an account with ${escapeHtml(hotel_config_default.brandName)}, you can safely ignore this message.
+        </p>
+        <p style="margin: 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+          If the button below doesn't work, copy and paste this link into your browser:<br>
+          <a href="${escapeHtml(data.verificationLink)}" style="color: ${hotel_config_default.colors.primary}; word-break: break-all;">${escapeHtml(data.verificationLink)}</a>
+        </p>
+      `)}
+    `,
+    ctaLabel: "Verify Email Address",
+    ctaUrl: data.verificationLink
+  });
+}
+async function sendVerificationEmailTrigger(data) {
+  if (!data.email) return;
+  await sendEmail(
+    data.email,
+    `[${hotel_config_default.brandName}] Verify your email address for ${hotel_config_default.rewardsName}`,
+    sparkRewardsEmailVerificationEmail(data)
+  );
+}
 function storeOrderItemsTable(items = []) {
   if (!Array.isArray(items) || items.length === 0) {
     return "<p style='margin: 0; color: #6b7280; font-size: 14px;'>No items.</p>";
@@ -225850,6 +225883,13 @@ async function handleEmailPreview(req, res) {
         break;
       case "staff-new-payment":
         html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        break;
+      case "spark-rewards-email-verification":
+        html = sparkRewardsEmailVerificationEmail({
+          guestName: "Maria Santos",
+          email: "maria.santos@example.com",
+          verificationLink: siteUrl("/account/profile?emailVerified=true")
+        });
         break;
       default:
         return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
@@ -235116,6 +235156,8 @@ init_zod();
 init_shared();
 init_hotel_config();
 init_firebase_admin();
+init_email();
+init_siteUrl();
 var registerMemberSchema = external_exports.object({
   fullName: external_exports.string().trim().max(120).optional().default(""),
   phone: external_exports.string().trim().max(40).optional().default(""),
@@ -235890,6 +235932,46 @@ async function handleEraseMemberAccount(req, res) {
     return res.status(500).json({
       success: false,
       error: "We could not erase your account right now. Please try again."
+    });
+  }
+}
+async function handleSendVerificationEmail(req, res) {
+  try {
+    const authUser = getAuthUser(req);
+    if (!authUser?.uid || !authUser?.email) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Missing or invalid authentication token."
+      });
+    }
+    if (authUser.email_verified === true) {
+      return res.status(200).json({
+        success: true,
+        message: "Email is already verified.",
+        data: { alreadyVerified: true }
+      });
+    }
+    const email = authUser.email;
+    const guestName2 = authUser.name || authUser.displayName || "";
+    const actionCodeSettings = {
+      url: `${getServerBaseUrl()}/account/profile?emailVerified=true`,
+      handleCodeInApp: true
+    };
+    const verificationLink = await adminAuth.generateEmailVerificationLink(email, actionCodeSettings);
+    await sendVerificationEmailTrigger({
+      guestName: guestName2,
+      email,
+      verificationLink
+    });
+    return res.status(200).json({
+      success: true,
+      message: "Verification email sent successfully."
+    });
+  } catch (error) {
+    console.error("handleSendVerificationEmail failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to send verification email. Please try again."
     });
   }
 }
@@ -238141,6 +238223,17 @@ async function handler(req, res) {
     }
     req.user = authResult;
     return await handleRegisterMember(req, res);
+  }
+  if (domain === "members" && action === "send-verification-email" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-send-verification:${ip}`, 5, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many verification email requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    req.user = authResult;
+    return await handleSendVerificationEmail(req, res);
   }
   if (domain === "members" && action === "stays" && req.method === "GET") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-stays:${ip}`, 30, 6e4)) {
