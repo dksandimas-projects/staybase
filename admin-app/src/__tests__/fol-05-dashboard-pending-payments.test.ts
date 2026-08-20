@@ -264,4 +264,38 @@ describe("FOL-05 — dashboard pending payments are reservation-grouped", () => 
       expect(dashboardSrc).toMatch(/rejectionTarget\.reservationId \? "s" : ""/);
     });
   });
+
+  // Per IDG (decision #227, 2026-08-20): the
+  // `PendingPaymentRoom` shape extension that the
+  // dashboard alert card's discount gate reads. The 4
+  // fields mirror the `Booking` contract — the FOL-02
+  // admin mapper (decision #198) already hydrates
+  // them on every snapshot echo; IDG-02 just plumbs
+  // them into the room-derivation loop so the alert
+  // card doesn't need a second Firestore read.
+  describe("IDG-02 — `PendingPaymentRoom` shape extends with 4 discount fields", () => {
+    it("declares `discountType: DiscountType | null` on the `PendingPaymentRoom` type", () => {
+      expect(dashboardSrc).toMatch(
+        /type PendingPaymentRoom = \{[\s\S]{0,2000}?discountType: DiscountType \| null;/
+      );
+    });
+
+    it("declares `discountVerified: boolean | null` on the `PendingPaymentRoom` type", () => {
+      expect(dashboardSrc).toMatch(
+        /type PendingPaymentRoom = \{[\s\S]{0,2000}?discountVerified: boolean \| null;/
+      );
+    });
+
+    it("declares `discountRejected: boolean | null` on the `PendingPaymentRoom` type", () => {
+      expect(dashboardSrc).toMatch(
+        /type PendingPaymentRoom = \{[\s\S]{0,2000}?discountRejected: boolean \| null;/
+      );
+    });
+
+    it("declares `originalTotalPrice: number | null` on the `PendingPaymentRoom` type", () => {
+      expect(dashboardSrc).toMatch(
+        /type PendingPaymentRoom = \{[\s\S]{0,2000}?originalTotalPrice: number \| null;/
+      );
+    });
+  });
 });
