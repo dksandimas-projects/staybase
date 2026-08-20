@@ -82,7 +82,20 @@ type EmailAction =
   | "staff-new-payment"
   | "spark-rewards-email-verification";
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || config.supportEmail;
+// Resolve the underlying address (the part inside < >). We layer a
+// human-readable display name on top so Gmail's "From" line shows
+// "Spark Inn <address>" instead of falling back to the underlying
+// Gmail account's profile display name (which on
+// `sparkinn.dev@gmail.com` reads "bookings" — operator-reported in
+// 2026-08-20). The inbox-list sender column still keys off the
+// Gmail account's profile name on gmail.com addresses; the display
+// name here is what lands in the email-detail "From" line + every
+// non-Gmail client (Outlook, Apple Mail, the Resend activity log).
+const FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || config.supportEmail;
+const FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
+const FROM_EMAIL = FROM_ADDRESS.includes("<")
+  ? FROM_ADDRESS
+  : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;
 const ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || config.supportEmail;
 
 function escapeHtml(value: unknown) {
