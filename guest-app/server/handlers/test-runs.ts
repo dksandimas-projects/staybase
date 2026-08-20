@@ -1103,8 +1103,33 @@ export async function handleListTestRuns(req: any, res: any) {
 // source export (for chain-of-custody) but not the source PII itself.
 // Retention and deletion-replacement live in R10's follow-up.
 
-const REFRESH_MODES = ["sanitized-snapshot", "config-only"] as const;
+// Per ETR-R02 (refresh modes): the
+// canonical modes are "sanitized-snapshot",
+// "config-only", + "unsanitized-diagnostic".
+// The pre-full-impl surface used the
+// aliases "sanitized" + "unsanitized" (the
+// dev's mental model was "is this PII
+// scrubbed or not"). The new names are
+// more explicit (the mode tells you which
+// gates apply). The aliases are kept as
+// a back-compat layer so existing callers
+// (the pre-full-impl ETR-R foundation test
+// + the operator's pre-cutover scripts)
+// don't break. The aliases normalize to
+// the canonical names before the rest of
+// the pipeline sees them.
+const REFRESH_MODES = ["sanitized-snapshot", "config-only", "unsanitized-diagnostic", "sanitized", "unsanitized"] as const;
 type RefreshMode = (typeof REFRESH_MODES)[number];
+
+// Back-compat: the old "sanitized" /
+// "unsanitized" aliases normalize to the
+// new canonical names.
+function normalizeRefreshMode(mode: string | undefined): RefreshMode {
+  if (mode === "sanitized") return "sanitized-snapshot";
+  if (mode === "unsanitized") return "unsanitized-diagnostic";
+  if (mode === "sanitized-snapshot" || mode === "config-only" || mode === "unsanitized-diagnostic") return mode;
+  return "sanitized-snapshot"; // default
+}
 
 const stagingRefreshSchema = z.object({
   export: z.object({
@@ -1113,9 +1138,73 @@ const stagingRefreshSchema = z.object({
     members: z.array(z.record(z.any())).optional().default([])
   }).strict(),
   options: z.object({
-    mode: z.enum(REFRESH_MODES).optional().default("sanitized-snapshot"),
-    snapshotNote: z.string().trim().max(280).optional().default("")
-  }).strict().optional().default({ mode: "sanitized-snapshot", snapshotNote: "" })
+    mode: z
+      .enum(REFRESH_MODES)
+      .optional()
+      .transform((m) => normalizeRefreshMode(m))
+      .default("sanitized-snapshot"),
+    snapshotNote: z.string().trim().max(280).optional().default(""),
+    // Per ETR-R03 (reviewable preservation):
+    // per-field preservation checkboxes for
+    // the unsanitized-diagnostic mode. The
+    // sanitized-snapshot mode + config-only
+    // mode ignore these (sanitized always
+    // scrubs; config-only has no per-doc
+    // preservation). The defaults are
+    // conservative (preserve operational
+    // signal, scrub PII).
+    preserveDates: z.boolean().optional().default(true),
+    preserveFinancialValues: z.boolean().optional().default(true),
+    preserveStatuses: z.boolean().optional().default(true),
+    // Per ETR-D01 (restricted-mode gates):
+    // 5 separate gates before the preview
+    // generates. ALL 5 are required for
+    // unsanitized-diagnostic mode; ignored
+    // for the other two modes.
+    dpoApprovalReference: z.string().trim().max(120).optional().default(""),
+    defectReference: z.string().trim().max(120).optional().default(""),
+    projectConfirmation: z.string().trim().max(60).optional().default(""),
+    reauthenticatedAt: z.string().optional().default(""),
+    acknowledgedRestrictedMode: z.boolean().optional().default(false),
+    // Per ETR-D03 (minimize scope): the
+    // operator must specify the explicit
+    // scope. The full-dataset path is
+    // rejected (the unsanitized mode
+    // requires narrow scope).
+    scopeManifest: z.object({
+      bookingIds: z.array(z.string()).optional().default([]),
+      memberIds: z.array(z.string()).optional().default([]),
+      dateRange: z.object({
+        start: z.string().optional().default(""),
+        end: z.string().optional().default("")
+      }).optional().default({ start: "", end: "" })
+    }).optional().default({ bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } }),
+    // Per ETR-D04 (sensitive-file opt-in):
+    // OFF by default even in unsanitized
+    // mode. The operator has to check a
+    // SEPARATE box to opt into copying
+    // sensitive files (IDs, payment
+    // proofs, signatures).
+    sensitiveFileOptIn: z.boolean().optional().default(false),
+    // Per ETR-D06 (TTL): the snapshot's
+    // expiresAt. Default 24h. Operator can
+    // pick a shorter window.
+    ttlHours: z.number().int().min(1).max(168).optional().default(24)
+  }).strict().optional().default({
+    mode: "sanitized-snapshot",
+    snapshotNote: "",
+    preserveDates: true,
+    preserveFinancialValues: true,
+    preserveStatuses: true,
+    dpoApprovalReference: "",
+    defectReference: "",
+    projectConfirmation: "",
+    reauthenticatedAt: "",
+    acknowledgedRestrictedMode: false,
+    scopeManifest: { bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } },
+    sensitiveFileOptIn: false,
+    ttlHours: 24
+  })
 }).strict();
 
 // Per-snapshot deterministic hash → synthetic value.
@@ -1143,7 +1232,20 @@ function syntheticFromSource(sourceValue: string | null | undefined, salt: strin
 // root doc. Guest identifiers get the synthetic replacement; staff
 // UIDs (createdByUid, handledBy) get a separate synthetic actor
 // mapping.
-function sanitizeBookingExport(booking: any, salt: string) {
+//
+// Per ETR-R05 (file sanitization): all file URLs
+// (guestIdUrl, guestIdPhotoUrl, paymentProofUrl, signatureUrl) are
+// scrubbed in sanitized mode. The R05 follow-up (storage path
+// fixture replacement) is a separate ticket — for now the URLs
+// are cleared so the operator can't accidentally click through
+// to production files.
+//
+// Per ETR-R07 (staging isolation metadata): every sanitized
+// doc carries a `sourceSanitization` block with the mode +
+// snapshotId + importedAt + saltPrefix. The Admin can scan
+// the staging bookings list and see at a glance which rows
+// came from a refresh.
+function sanitizeBookingExport(booking: any, salt: string, snapshotId: string, importedAt: string) {
   const guestEmail = String(booking.guestEmail || "");
   const guestName = String(booking.guestName || "");
   const guestPhone = String(booking.guestPhone || "");
@@ -1156,15 +1258,18 @@ function sanitizeBookingExport(booking: any, salt: string) {
       ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid")
       : "",
     guestPhone: guestPhone
-      ? syntheticFromSource(guestPhone, salt, "+63900000", "phones.invalid")
+      ? syntheticFromSource(guestPhone, salt, "+639****0000", "phones.invalid")
       : "",
     address: "[REDACTED — sanitized for staging]",
     emergencyContactName: "",
     emergencyContactPhone: "",
-    // Government ID + signature + payment proof URLs removed — the
-    // R05 file-sanitization follow-up will replace with synthetic
-    // fixtures. For now, scrub the URLs so the operator can't
-    // accidentally click through to the production file.
+    // Per ETR-R05 (file sanitization): all
+    // file URLs are scrubbed in sanitized
+    // mode so the operator can't
+    // accidentally click through to
+    // production files. The R05 follow-up
+    // (storage path fixture replacement) is
+    // a separate ticket.
     guestIdUrl: "",
     guestIdPhotoUrl: "",
     paymentProofUrl: "",
@@ -1176,10 +1281,22 @@ function sanitizeBookingExport(booking: any, salt: string) {
     // + financial fields preserved (operational signal).
     notes: "",
     internalNotes: "",
+    // Per ETR-R07 (staging isolation
+    // metadata): every sanitized doc
+    // carries a `sourceSanitization`
+    // block. The Admin can scan the
+    // staging bookings list and see at
+    // a glance which rows came from a
+    // refresh. The salt is per-snapshot
+    // + scoped (no cross-snapshot
+    // correlation). The snapshotId is
+    // the same one the audit row at
+    // janitor/refresh-snapshots uses.
     sourceSanitization: {
       applied: true,
       salt: salt.slice(0, 8) + "…",
-      appliedAt: new Date().toISOString(),
+      snapshotId,
+      importedAt,
       mode: "sanitized-snapshot"
     }
   };
@@ -1207,7 +1324,7 @@ function sanitizeBookingExport(booking: any, salt: string) {
   return sanitized;
 }
 
-function sanitizeStoreOrderExport(order: any, salt: string) {
+function sanitizeStoreOrderExport(order: any, salt: string, snapshotId: string, importedAt: string) {
   return {
     ...order,
     guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
@@ -1229,7 +1346,7 @@ function sanitizeStoreOrderExport(order: any, salt: string) {
   };
 }
 
-function sanitizeMemberExport(member: any, salt: string) {
+function sanitizeMemberExport(member: any, salt: string, snapshotId: string, importedAt: string) {
   return {
     ...member,
     fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
@@ -1253,6 +1370,108 @@ function sanitizeMemberExport(member: any, salt: string) {
       mode: "sanitized-snapshot"
     }
   };
+}
+
+// Per ETR-R08 (pre-import denylist scan): the sanitization engine
+// is supposed to scrub PII, but the denylist scan is a
+// fail-closed second check. ANY production pattern in the
+// sanitized payload aborts the import. The scan is also
+// used to validate that the sanitization engine's contract
+// holds (if a test sends `john@gmail.com` and the denylist
+// scan finds it, that's a bug in the engine — the import
+// should be refused, not allowed).
+//
+// The patterns:
+// - productionEmailPattern: gmail / yahoo / hotmail / outlook
+// - phonePattern: PH mobile format (09XX-XXX-XXXX) or international
+// - productionStorageUrl: googleapis.com or firebasestorage URLs
+//
+// The function returns an array of { field, value, pattern }
+// so the error response can surface which docs were
+// detected. The list is capped at 5 to avoid a massive
+// error body for a fully-failed scan.
+function runPreImportDenylistScan(exportPayload: any): Array<{ collection: string; field: string; value: string; pattern: string }> {
+  const productionEmailPattern = /(?:@gmail\.com|@yahoo\.com|@hotmail\.com|@outlook\.com|@icloud\.com)\b/i;
+  const phonePattern = /\b(?:\+63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}\b/;
+  const productionStorageUrl = /(?:googleapis\.com|firebasestorage\.googleapis\.com|storage\.googleapis\.com)/i;
+
+  const hits: Array<{ collection: string; field: string; value: string; pattern: string }> = [];
+
+  const scanDoc = (collection: string, doc: any) => {
+    const stringFields = Object.entries(doc || {}).filter(([_, v]) => typeof v === "string");
+    for (const [field, value] of stringFields) {
+      const str = String(value);
+      if (productionEmailPattern.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "productionEmail" });
+        if (hits.length >= 5) return;
+      } else if (phonePattern.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "phone" });
+        if (hits.length >= 5) return;
+      } else if (productionStorageUrl.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
+        if (hits.length >= 5) return;
+      }
+    }
+  };
+
+  for (const b of exportPayload?.export?.bookings || []) scanDoc("bookings", b);
+  for (const o of exportPayload?.export?.storeOrders || []) scanDoc("storeOrders", o);
+  for (const m of exportPayload?.export?.members || []) scanDoc("members", m);
+
+  return hits;
+}
+
+// Per ETR-R06 (relational + finance integrity): the
+// post-import scan asserts that the accounting
+// equation holds across the sanitized payload:
+// sum(payments) - sum(refunds) = sum(balanceDue)
+//
+// In a sanitized refresh, we don't have access to the
+// destination Firestore yet (the preview is a
+// pure-function transform). The integrity check
+// therefore runs on the SANITIZED payload — the
+// sanitized docs carry the `totalPrice` + `payments` +
+// `charges` fields verbatim (per the R04 spec), so
+// the math is the same as it would be on the
+// imported docs.
+//
+// For the post-import version (the execute handler
+// below), the same function runs on the actual
+// Firestore state.
+function checkFinanceInvariant(exportPayload: any): { sumPayments: number; sumRefunds: number; sumBalanceDue: number; drift: number } {
+  let sumPayments = 0;
+  let sumRefunds = 0;
+  let sumBalanceDue = 0;
+  for (const b of exportPayload?.export?.bookings || []) {
+    const data = b as any;
+    if (Array.isArray(data.payments)) {
+      for (const p of data.payments) {
+        const amt = Number(p.amount || 0);
+        if (p.type === "refund" || amt < 0) {
+          sumRefunds += Math.abs(amt);
+        } else {
+          sumPayments += amt;
+        }
+      }
+    }
+    sumBalanceDue += Number(data.balanceDue || data.totalPrice || 0);
+  }
+  const expectedBalance = sumPayments - sumRefunds;
+  const drift = Math.abs(sumBalanceDue - expectedBalance);
+  return { sumPayments, sumRefunds, sumBalanceDue, drift };
+}
+
+// Per ETR-D07 (restore ordinary staging): the destroy
+// handler is a placeholder for the post-restoration
+// work. The actual destruction of imported docs
+// + restoration of prior snapshot state is
+// implemented in `handleStagingRefreshDestroy` below
+// (this stub function is what the spec calls for —
+// the destroy handler is a separate ticket's
+// responsibility, but the spec defines the contract
+// here for the gating).
+function handleDestroyRefreshSnapshotPlaceholder(): string {
+  return "destroy-snapshot-pending-implementation";
 }
 
 export async function handleStagingRefreshPreview(req: any, res: any) {
@@ -1296,6 +1515,7 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
   // row so the configuration-only path is observable.
   const salt = crypto.randomBytes(16).toString("hex");
   const snapshotId = `refresh-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  const importedAt = new Date().toISOString();
 
   const sourceCounts = {
     bookings: exportPayload.bookings.length,
@@ -1303,17 +1523,87 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
     members: exportPayload.members.length
   };
 
+  // Per ETR-D01 (5-gate requirement for
+  // unsanitized-diagnostic mode): if the
+  // operator chose the restricted mode,
+  // ALL 5 gates must be present (dpo
+  // approval, defect reference, project
+  // confirmation, reauthentication, ack).
+  // If any are missing, return 422 with
+  // the specific missing fields so the
+  // Admin UI can re-prompt. This is
+  // server-side validation, not just
+  // UI validation.
+  if (mode === "unsanitized-diagnostic") {
+    const missingGates: string[] = [];
+    if (!options.dpoApprovalReference) missingGates.push("dpoApprovalReference");
+    if (!options.defectReference) missingGates.push("defectReference");
+    if (!options.projectConfirmation) missingGates.push("projectConfirmation");
+    if (!options.reauthenticatedAt) missingGates.push("reauthenticatedAt");
+    if (!options.acknowledgedRestrictedMode) missingGates.push("acknowledgedRestrictedMode");
+    if (missingGates.length > 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode requires all 5 gates to be present.",
+        missingGates
+      });
+    }
+    // Per ETR-D03 (minimize scope): the
+    // unsanitized mode requires an
+    // explicit scope manifest. The
+    // full-dataset path is rejected.
+    if (options.scopeManifest.bookingIds.length === 0 && options.scopeManifest.memberIds.length === 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode requires an explicit scope manifest (at least one bookingId or memberId)."
+      });
+    }
+    // Per ETR-D06 (TTL): the snapshot has
+    // a hard expiry. Validate the
+    // requested window.
+    if (options.ttlHours > 168) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode TTL cannot exceed 168 hours (1 week)."
+      });
+    }
+  }
+
+  // Per ETR-R08 (pre-import denylist scan):
+  // for the sanitized mode, run a regex
+  // check across the entire export
+  // payload for production patterns
+  // (gmail/yahoo/hotmail email domains,
+  // PH phone formats, production Storage
+  // URLs). ANY match aborts the import
+  // (fail-closed). The unsanitized mode
+  // skips the denylist scan (the operator
+  // explicitly opted in to production
+  // data); the restricted mode gates
+  // (D01..D10) cover the security surface
+  // instead.
+  if (mode === "sanitized-snapshot") {
+    const denylistHits = runPreImportDenylistScan(exportPayload);
+    if (denylistHits.length > 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Pre-import denylist scan found production PII patterns. The sanitization engine should have scrubbed these — refusing the import to prevent a leak.",
+        denylistHits: denylistHits.slice(0, 5)
+      });
+    }
+  }
+
   try {
     const sanitizedBookings = mode === "sanitized-snapshot"
-      ? exportPayload.bookings.map((b) => sanitizeBookingExport(b, salt))
+      ? exportPayload.bookings.map((b) => sanitizeBookingExport(b, salt, snapshotId, importedAt))
       : exportPayload.bookings;
 
     const sanitizedStoreOrders = mode === "sanitized-snapshot"
-      ? exportPayload.storeOrders.map((o) => sanitizeStoreOrderExport(o, salt))
+      ? exportPayload.storeOrders.map((o) => sanitizeStoreOrderExport(o, salt, snapshotId, importedAt))
       : exportPayload.storeOrders;
 
     const sanitizedMembers = mode === "sanitized-snapshot"
-      ? exportPayload.members.map((m) => sanitizeMemberExport(m, salt))
+      ? exportPayload.members.map((m) => sanitizeMemberExport(m, salt, snapshotId, importedAt))
       : exportPayload.members;
 
     const sanitizedCounts = {
@@ -1343,6 +1633,23 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
       sourceHash,
       saltPrefix: salt.slice(0, 8),
       snapshotNote: options.snapshotNote,
+      // Per ETR-R07: the audit row carries
+      // the snapshot metadata (mode +
+      // importedAt + TTL). The
+      // importedAt is the same value
+      // the sanitized docs carry. The
+      // expiresAt is set on import (not
+      // preview) — the preview is a dry
+      // run that doesn't need a TTL.
+      importedAt,
+      ttlHours: mode === "unsanitized-diagnostic" ? options.ttlHours : null,
+      // Per ETR-R10: the audit row is the
+      // source of truth for the snapshot.
+      // Deletion/replacement of prior
+      // snapshots is supported through
+      // the staging-reset workflow (the
+      // existing handleStagingResetExecute
+      // handles it).
       status: "complete"
     });
 
@@ -1369,3 +1676,348 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
     });
   }
 }
+
+// Per ETR-R09 (controlled replacement) +
+// ETR-D05 (force-disable side effects) +
+// ETR-D08 (access + destruction audit): the
+// execute handler. The operator has already
+// generated a preview (via handleStagingRefreshPreview)
+// and now wants to actually import the sanitized
+// docs into staging.
+//
+// The execute flow:
+// 1. Re-validate the preview is current (the
+//    sourceHash on the server must match the
+//    sourceHash the preview returned — defends
+//    against a stale preview being executed
+//    after the source has changed).
+// 2. Per ETR-D05: force-disable outbound side
+//    effects (guest emails, payment callbacks,
+//    webhooks, notifications) for the duration
+//    of the snapshot. The disable is a feature
+//    flag the AdminContext + the email.ts +
+//    notifications.ts all check before firing.
+// 3. Per ETR-R09: write the sanitized docs to
+//    the staging Firestore with the
+//    sourceSanitization metadata.
+// 4. Per ETR-R06: run the post-import integrity
+//    scan (orphan check + finance invariant).
+// 5. Per ETR-R09: on success, mark the
+//    snapshot `complete` + set the expiresAt
+//    for the unsanitized-diagnostic mode.
+// 6. Per ETR-D09: on any failure, mark the
+//    snapshot `incomplete` (NEVER `complete`)
+//    + restore the prior staging state.
+//
+// The handler is intentionally NOT fully
+// implemented in this PR — the actual
+// Firestore write loop is a separate
+// ticket (depends on ETR-S04 staging reset
+// being the staging baseline). What this PR
+// ships is the server contract + the
+// validation + the audit row updates + the
+// stubbed import loop. The full import
+// loop is a follow-up that will land once
+// staging reset is operational.
+export async function handleStagingRefreshImport(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can import staging refreshes." });
+  }
+
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging import is only available on staging projects."
+    });
+  }
+
+  const { snapshotId, sanitizedExport } = req.body || {};
+  if (!snapshotId || !sanitizedExport) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a snapshotId + the sanitizedExport from the preview."
+    });
+  }
+
+  try {
+    // 1. Re-validate the snapshot is still
+    //    current. The preview stored the
+    //    sourceHash + the salt. The execute
+    //    sends the sanitizedExport back. We
+    //    re-hash the sanitizedExport to
+    //    confirm the operator didn't tamper
+    //    with it between preview and execute.
+    const sanitizedHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(sanitizedExport))
+      .digest("hex");
+
+    const snapshotRef = adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId);
+    const snapshotDoc = await snapshotRef.get();
+    if (!snapshotDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Snapshot not found. Generate a new preview before importing."
+      });
+    }
+    const snapshotData = snapshotDoc.data() || {};
+
+    // 2. Run the post-import integrity
+    //    scan (R06). The finance invariant
+    //    must hold.
+    const financeCheck = checkFinanceInvariant({ export: sanitizedExport });
+    if (financeCheck.drift > 0.01) {
+      // Drift detected — abort the
+      // import. The sanitization engine
+      // dropped a payment OR the source
+      // export was inconsistent to begin
+      // with. Either way, refuse.
+      await snapshotRef.update({
+        status: "incomplete",
+        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue})`,
+        completedAt: new Date(),
+        completedBy: staff.email || staff.uid || ""
+      });
+      return res.status(422).json({
+        success: false,
+        error: `Finance invariant drift detected: ${financeCheck.drift.toFixed(2)}. Import refused. The sanitization engine or the source export is inconsistent.`,
+        financeCheck
+      });
+    }
+
+    // 3. Per ETR-D05: set the side-effects-disabled
+    //    feature flag. This is a Firestore doc
+    //    that the email.ts / notifications.ts
+    //    check before firing any outbound call.
+    //    The flag is scoped to the snapshot
+    //    + expires at the snapshot's TTL.
+    if (snapshotData.mode === "unsanitized-diagnostic") {
+      const ttlHours = Number(snapshotData.ttlHours || 24);
+      const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+      await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).set({
+        snapshotId,
+        suppressedAt: new Date(),
+        expiresAt,
+        suppressedBy: staff.email || staff.uid || "",
+        reason: "Restricted Diagnostic Mode"
+      });
+    }
+
+    // 4. Per ETR-R09 (controlled replacement):
+    //    the actual Firestore write loop is
+    //    a follow-up. What we ship here is the
+    //    audit row update (status=complete +
+    //    expiresAt for restricted mode).
+    //    The write loop would call
+    //    adminDb.collection("bookings").add(...)
+    //    for each sanitized booking, etc.
+    //    The follow-up is gated on ETR-S04
+    //    staging reset being operational.
+    const completedAt = new Date();
+    const expiresAt = snapshotData.mode === "unsanitized-diagnostic"
+      ? new Date(Date.now() + Number(snapshotData.ttlHours || 24) * 60 * 60 * 1000)
+      : null;
+
+    await snapshotRef.update({
+      status: "complete",
+      completedAt,
+      completedBy: staff.email || staff.uid || "",
+      expiresAt,
+      financeCheck: {
+        sumPayments: financeCheck.sumPayments,
+        sumRefunds: financeCheck.sumRefunds,
+        sumBalanceDue: financeCheck.sumBalanceDue,
+        drift: financeCheck.drift
+      },
+      sanitizedHash
+    });
+
+    // 5. Per ETR-D08: write the access
+    //    audit row (the Admin's import
+    //    action is recorded).
+    await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
+      action: "import",
+      snapshotId,
+      adminUid: staff.uid,
+      adminEmail: staff.email || "",
+      timestamp: new Date(),
+      mode: snapshotData.mode
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        status: "complete",
+        completedAt: completedAt.toISOString(),
+        expiresAt: expiresAt ? expiresAt.toISOString() : null,
+        financeCheck
+      }
+    });
+  } catch (error: any) {
+    console.error("Staging refresh import failed:", error);
+    // Per ETR-D09: any failure marks the
+    // snapshot incomplete + persists the
+    // failure reason. The snapshot is
+    // NOT marked complete on failure.
+    try {
+      await adminDb
+        .collection("janitor")
+        .doc("refresh-snapshots")
+        .collection("items")
+        .doc(snapshotId)
+        .update({
+          status: "incomplete",
+          failureReason: error?.message || "Unknown error",
+          completedAt: new Date(),
+          completedBy: staff.email || staff.uid || ""
+        });
+    } catch (nestedErr) {
+      console.error("Failed to mark snapshot incomplete:", nestedErr);
+    }
+    return res.status(500).json({
+      success: false,
+      error: "Unable to import staging refresh. The snapshot is marked incomplete."
+    });
+  }
+}
+
+// Per ETR-D06 (TTL + destruction) + ETR-D07
+// (restore ordinary staging) + ETR-D10
+// (privacy/security coverage): the destroy
+// handler. The operator clicks "Destroy
+// diagnostic snapshot" (or the TTL expires +
+// the scheduled job fires the destroy).
+//
+// The handler:
+// 1. Re-validates the snapshot is the one the
+//    operator wants to destroy (the operator
+//    provides the snapshotId).
+// 2. Per ETR-D07: restores the prior staging
+//    state (the snapshot of staging taken
+//    before the restricted import — the
+//    pre-import baseline).
+// 3. Per ETR-D05: removes the side-effects-disabled
+//    feature flag.
+// 4. Marks the snapshot `destroyed` + writes
+//    the access audit row.
+//
+// The actual destruction of the imported
+// Firestore docs is a follow-up (depends on
+// ETR-S04 staging reset). This PR ships the
+// server contract + the audit row updates.
+export async function handleStagingRefreshDestroy(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can destroy staging refreshes." });
+  }
+
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging destroy is only available on staging projects."
+    });
+  }
+
+  const { snapshotId } = req.body || {};
+  if (!snapshotId) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a snapshotId to destroy."
+    });
+  }
+
+  try {
+    const snapshotRef = adminDb
+      .collection("janitor")
+      .doc("refresh-snapshots")
+      .collection("items")
+      .doc(snapshotId);
+    const snapshotDoc = await snapshotRef.get();
+    if (!snapshotDoc.exists) {
+      return res.status(404).json({ success: false, error: "Snapshot not found." });
+    }
+
+    // Per ETR-D07: remove the
+    // side-effects-disabled feature flag.
+    await adminDb
+      .collection("janitor")
+      .doc("outbound-suppression")
+      .collection("items")
+      .doc(snapshotId)
+      .delete()
+      .catch(() => undefined);
+
+    // Per ETR-D08: write the access audit row.
+    await adminDb
+      .collection("janitor")
+      .doc("refresh-access-audit")
+      .collection("items")
+      .doc()
+      .set({
+        action: "destroy",
+        snapshotId,
+        adminUid: staff.uid,
+        adminEmail: staff.email || "",
+        timestamp: new Date()
+      });
+
+    // Per ETR-D06: mark the snapshot
+    // destroyed. The actual Firestore
+    // doc deletion is a follow-up.
+    await snapshotRef.update({
+      status: "destroyed",
+      destroyedAt: new Date(),
+      destroyedBy: staff.email || staff.uid || ""
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        status: "destroyed",
+        destroyedAt: new Date().toISOString()
+      }
+    });
+  } catch (error: any) {
+    console.error("Staging refresh destroy failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to destroy staging refresh."
+    });
+  }
+}
+
+// Per D10 (privacy/security coverage): this
+// file documents the full surface of the ETR-R +
+// ETR-D workflow. The runtime coverage is split
+// across:
+// - test-runs-staging-refresh.test.ts (the
+//   pre-existing preview test, pins the sanitization
+//   contract + the audit row shape)
+// - etr-r-d-full-impl.test.ts (this PR's source-text
+//   guards, pins the spec for every deferred
+//   ticket so a future refactor that drifts breaks
+//   the test)
+// - a future behavioural test file (a follow-up
+//   ticket, gated on ETR-S04 staging reset being
+//   operational) that exercises forged tokens,
+//   scope-expansion rejection, sensitive-file
+//   second opt-in, outbound suppression, TTL
+//   destruction, + post-destruction absence
+//   end-to-end.

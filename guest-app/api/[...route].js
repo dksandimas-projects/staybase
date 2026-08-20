@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.282.0";
+    VERSION2 = "0.284.0";
   }
 });
 
@@ -226958,7 +226958,13 @@ async function handleListTestRuns(req, res) {
     return res.status(500).json({ success: false, error: "Unable to list test runs." });
   }
 }
-var REFRESH_MODES = ["sanitized-snapshot", "config-only"];
+var REFRESH_MODES = ["sanitized-snapshot", "config-only", "unsanitized-diagnostic", "sanitized", "unsanitized"];
+function normalizeRefreshMode(mode) {
+  if (mode === "sanitized") return "sanitized-snapshot";
+  if (mode === "unsanitized") return "unsanitized-diagnostic";
+  if (mode === "sanitized-snapshot" || mode === "config-only" || mode === "unsanitized-diagnostic") return mode;
+  return "sanitized-snapshot";
+}
 var stagingRefreshSchema = external_exports.object({
   export: external_exports.object({
     bookings: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
@@ -226966,9 +226972,69 @@ var stagingRefreshSchema = external_exports.object({
     members: external_exports.array(external_exports.record(external_exports.any())).optional().default([])
   }).strict(),
   options: external_exports.object({
-    mode: external_exports.enum(REFRESH_MODES).optional().default("sanitized-snapshot"),
-    snapshotNote: external_exports.string().trim().max(280).optional().default("")
-  }).strict().optional().default({ mode: "sanitized-snapshot", snapshotNote: "" })
+    mode: external_exports.enum(REFRESH_MODES).optional().transform((m2) => normalizeRefreshMode(m2)).default("sanitized-snapshot"),
+    snapshotNote: external_exports.string().trim().max(280).optional().default(""),
+    // Per ETR-R03 (reviewable preservation):
+    // per-field preservation checkboxes for
+    // the unsanitized-diagnostic mode. The
+    // sanitized-snapshot mode + config-only
+    // mode ignore these (sanitized always
+    // scrubs; config-only has no per-doc
+    // preservation). The defaults are
+    // conservative (preserve operational
+    // signal, scrub PII).
+    preserveDates: external_exports.boolean().optional().default(true),
+    preserveFinancialValues: external_exports.boolean().optional().default(true),
+    preserveStatuses: external_exports.boolean().optional().default(true),
+    // Per ETR-D01 (restricted-mode gates):
+    // 5 separate gates before the preview
+    // generates. ALL 5 are required for
+    // unsanitized-diagnostic mode; ignored
+    // for the other two modes.
+    dpoApprovalReference: external_exports.string().trim().max(120).optional().default(""),
+    defectReference: external_exports.string().trim().max(120).optional().default(""),
+    projectConfirmation: external_exports.string().trim().max(60).optional().default(""),
+    reauthenticatedAt: external_exports.string().optional().default(""),
+    acknowledgedRestrictedMode: external_exports.boolean().optional().default(false),
+    // Per ETR-D03 (minimize scope): the
+    // operator must specify the explicit
+    // scope. The full-dataset path is
+    // rejected (the unsanitized mode
+    // requires narrow scope).
+    scopeManifest: external_exports.object({
+      bookingIds: external_exports.array(external_exports.string()).optional().default([]),
+      memberIds: external_exports.array(external_exports.string()).optional().default([]),
+      dateRange: external_exports.object({
+        start: external_exports.string().optional().default(""),
+        end: external_exports.string().optional().default("")
+      }).optional().default({ start: "", end: "" })
+    }).optional().default({ bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } }),
+    // Per ETR-D04 (sensitive-file opt-in):
+    // OFF by default even in unsanitized
+    // mode. The operator has to check a
+    // SEPARATE box to opt into copying
+    // sensitive files (IDs, payment
+    // proofs, signatures).
+    sensitiveFileOptIn: external_exports.boolean().optional().default(false),
+    // Per ETR-D06 (TTL): the snapshot's
+    // expiresAt. Default 24h. Operator can
+    // pick a shorter window.
+    ttlHours: external_exports.number().int().min(1).max(168).optional().default(24)
+  }).strict().optional().default({
+    mode: "sanitized-snapshot",
+    snapshotNote: "",
+    preserveDates: true,
+    preserveFinancialValues: true,
+    preserveStatuses: true,
+    dpoApprovalReference: "",
+    defectReference: "",
+    projectConfirmation: "",
+    reauthenticatedAt: "",
+    acknowledgedRestrictedMode: false,
+    scopeManifest: { bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } },
+    sensitiveFileOptIn: false,
+    ttlHours: 24
+  })
 }).strict();
 function syntheticFromSource(sourceValue, salt, prefix, domain) {
   if (sourceValue === null || sourceValue === void 0) return "";
@@ -226977,7 +227043,7 @@ function syntheticFromSource(sourceValue, salt, prefix, domain) {
   const h3 = import_node_crypto.default.createHash("sha256").update(`${salt}:${domain}:${normalized}`).digest("hex").slice(0, 8);
   return `${prefix}-${h3}@${domain}`;
 }
-function sanitizeBookingExport(booking, salt) {
+function sanitizeBookingExport(booking, salt, snapshotId, importedAt) {
   const guestEmail = String(booking.guestEmail || "");
   const guestName2 = String(booking.guestName || "");
   const guestPhone = String(booking.guestPhone || "");
@@ -226986,14 +227052,17 @@ function sanitizeBookingExport(booking, salt) {
     ...booking,
     guestName: syntheticFromSource(guestName2, salt, "Guest", "guests.invalid"),
     guestEmail: sourceEmail ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid") : "",
-    guestPhone: guestPhone ? syntheticFromSource(guestPhone, salt, "+63900000", "phones.invalid") : "",
+    guestPhone: guestPhone ? syntheticFromSource(guestPhone, salt, "+639****0000", "phones.invalid") : "",
     address: "[REDACTED \u2014 sanitized for staging]",
     emergencyContactName: "",
     emergencyContactPhone: "",
-    // Government ID + signature + payment proof URLs removed — the
-    // R05 file-sanitization follow-up will replace with synthetic
-    // fixtures. For now, scrub the URLs so the operator can't
-    // accidentally click through to the production file.
+    // Per ETR-R05 (file sanitization): all
+    // file URLs are scrubbed in sanitized
+    // mode so the operator can't
+    // accidentally click through to
+    // production files. The R05 follow-up
+    // (storage path fixture replacement) is
+    // a separate ticket.
     guestIdUrl: "",
     guestIdPhotoUrl: "",
     paymentProofUrl: "",
@@ -227005,10 +227074,22 @@ function sanitizeBookingExport(booking, salt) {
     // + financial fields preserved (operational signal).
     notes: "",
     internalNotes: "",
+    // Per ETR-R07 (staging isolation
+    // metadata): every sanitized doc
+    // carries a `sourceSanitization`
+    // block. The Admin can scan the
+    // staging bookings list and see at
+    // a glance which rows came from a
+    // refresh. The salt is per-snapshot
+    // + scoped (no cross-snapshot
+    // correlation). The snapshotId is
+    // the same one the audit row at
+    // janitor/refresh-snapshots uses.
     sourceSanitization: {
       applied: true,
       salt: salt.slice(0, 8) + "\u2026",
-      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      snapshotId,
+      importedAt,
       mode: "sanitized-snapshot"
     }
   };
@@ -227028,7 +227109,7 @@ function sanitizeBookingExport(booking, salt) {
   }
   return sanitized;
 }
-function sanitizeStoreOrderExport(order, salt) {
+function sanitizeStoreOrderExport(order, salt, snapshotId, importedAt) {
   return {
     ...order,
     guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
@@ -227045,7 +227126,7 @@ function sanitizeStoreOrderExport(order, salt) {
     }
   };
 }
-function sanitizeMemberExport(member, salt) {
+function sanitizeMemberExport(member, salt, snapshotId, importedAt) {
   return {
     ...member,
     fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
@@ -227065,6 +227146,54 @@ function sanitizeMemberExport(member, salt) {
       mode: "sanitized-snapshot"
     }
   };
+}
+function runPreImportDenylistScan(exportPayload) {
+  const productionEmailPattern = /(?:@gmail\.com|@yahoo\.com|@hotmail\.com|@outlook\.com|@icloud\.com)\b/i;
+  const phonePattern = /\b(?:\+63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}\b/;
+  const productionStorageUrl = /(?:googleapis\.com|firebasestorage\.googleapis\.com|storage\.googleapis\.com)/i;
+  const hits = [];
+  const scanDoc = (collection, doc) => {
+    const stringFields = Object.entries(doc || {}).filter(([_2, v6]) => typeof v6 === "string");
+    for (const [field, value] of stringFields) {
+      const str = String(value);
+      if (productionEmailPattern.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "productionEmail" });
+        if (hits.length >= 5) return;
+      } else if (phonePattern.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "phone" });
+        if (hits.length >= 5) return;
+      } else if (productionStorageUrl.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
+        if (hits.length >= 5) return;
+      }
+    }
+  };
+  for (const b3 of exportPayload?.export?.bookings || []) scanDoc("bookings", b3);
+  for (const o2 of exportPayload?.export?.storeOrders || []) scanDoc("storeOrders", o2);
+  for (const m2 of exportPayload?.export?.members || []) scanDoc("members", m2);
+  return hits;
+}
+function checkFinanceInvariant(exportPayload) {
+  let sumPayments = 0;
+  let sumRefunds = 0;
+  let sumBalanceDue = 0;
+  for (const b3 of exportPayload?.export?.bookings || []) {
+    const data = b3;
+    if (Array.isArray(data.payments)) {
+      for (const p of data.payments) {
+        const amt = Number(p.amount || 0);
+        if (p.type === "refund" || amt < 0) {
+          sumRefunds += Math.abs(amt);
+        } else {
+          sumPayments += amt;
+        }
+      }
+    }
+    sumBalanceDue += Number(data.balanceDue || data.totalPrice || 0);
+  }
+  const expectedBalance = sumPayments - sumRefunds;
+  const drift = Math.abs(sumBalanceDue - expectedBalance);
+  return { sumPayments, sumRefunds, sumBalanceDue, drift };
 }
 async function handleStagingRefreshPreview(req, res) {
   if (req.method !== "POST") {
@@ -227094,15 +227223,53 @@ async function handleStagingRefreshPreview(req, res) {
   const mode = options.mode;
   const salt = import_node_crypto.default.randomBytes(16).toString("hex");
   const snapshotId = `refresh-${Date.now()}-${import_node_crypto.default.randomBytes(4).toString("hex")}`;
+  const importedAt = (/* @__PURE__ */ new Date()).toISOString();
   const sourceCounts = {
     bookings: exportPayload.bookings.length,
     storeOrders: exportPayload.storeOrders.length,
     members: exportPayload.members.length
   };
+  if (mode === "unsanitized-diagnostic") {
+    const missingGates = [];
+    if (!options.dpoApprovalReference) missingGates.push("dpoApprovalReference");
+    if (!options.defectReference) missingGates.push("defectReference");
+    if (!options.projectConfirmation) missingGates.push("projectConfirmation");
+    if (!options.reauthenticatedAt) missingGates.push("reauthenticatedAt");
+    if (!options.acknowledgedRestrictedMode) missingGates.push("acknowledgedRestrictedMode");
+    if (missingGates.length > 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode requires all 5 gates to be present.",
+        missingGates
+      });
+    }
+    if (options.scopeManifest.bookingIds.length === 0 && options.scopeManifest.memberIds.length === 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode requires an explicit scope manifest (at least one bookingId or memberId)."
+      });
+    }
+    if (options.ttlHours > 168) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode TTL cannot exceed 168 hours (1 week)."
+      });
+    }
+  }
+  if (mode === "sanitized-snapshot") {
+    const denylistHits = runPreImportDenylistScan(exportPayload);
+    if (denylistHits.length > 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Pre-import denylist scan found production PII patterns. The sanitization engine should have scrubbed these \u2014 refusing the import to prevent a leak.",
+        denylistHits: denylistHits.slice(0, 5)
+      });
+    }
+  }
   try {
-    const sanitizedBookings = mode === "sanitized-snapshot" ? exportPayload.bookings.map((b3) => sanitizeBookingExport(b3, salt)) : exportPayload.bookings;
-    const sanitizedStoreOrders = mode === "sanitized-snapshot" ? exportPayload.storeOrders.map((o2) => sanitizeStoreOrderExport(o2, salt)) : exportPayload.storeOrders;
-    const sanitizedMembers = mode === "sanitized-snapshot" ? exportPayload.members.map((m2) => sanitizeMemberExport(m2, salt)) : exportPayload.members;
+    const sanitizedBookings = mode === "sanitized-snapshot" ? exportPayload.bookings.map((b3) => sanitizeBookingExport(b3, salt, snapshotId, importedAt)) : exportPayload.bookings;
+    const sanitizedStoreOrders = mode === "sanitized-snapshot" ? exportPayload.storeOrders.map((o2) => sanitizeStoreOrderExport(o2, salt, snapshotId, importedAt)) : exportPayload.storeOrders;
+    const sanitizedMembers = mode === "sanitized-snapshot" ? exportPayload.members.map((m2) => sanitizeMemberExport(m2, salt, snapshotId, importedAt)) : exportPayload.members;
     const sanitizedCounts = {
       bookings: sanitizedBookings.length,
       storeOrders: sanitizedStoreOrders.length,
@@ -227119,6 +227286,23 @@ async function handleStagingRefreshPreview(req, res) {
       sourceHash,
       saltPrefix: salt.slice(0, 8),
       snapshotNote: options.snapshotNote,
+      // Per ETR-R07: the audit row carries
+      // the snapshot metadata (mode +
+      // importedAt + TTL). The
+      // importedAt is the same value
+      // the sanitized docs carry. The
+      // expiresAt is set on import (not
+      // preview) — the preview is a dry
+      // run that doesn't need a TTL.
+      importedAt,
+      ttlHours: mode === "unsanitized-diagnostic" ? options.ttlHours : null,
+      // Per ETR-R10: the audit row is the
+      // source of truth for the snapshot.
+      // Deletion/replacement of prior
+      // snapshots is supported through
+      // the staging-reset workflow (the
+      // existing handleStagingResetExecute
+      // handles it).
       status: "complete"
     });
     return res.status(200).json({
@@ -227141,6 +227325,176 @@ async function handleStagingRefreshPreview(req, res) {
     return res.status(500).json({
       success: false,
       error: "Unable to generate sanitized staging refresh."
+    });
+  }
+}
+async function handleStagingRefreshImport(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can import staging refreshes." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging import is only available on staging projects."
+    });
+  }
+  const { snapshotId, sanitizedExport } = req.body || {};
+  if (!snapshotId || !sanitizedExport) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a snapshotId + the sanitizedExport from the preview."
+    });
+  }
+  try {
+    const sanitizedHash = import_node_crypto.default.createHash("sha256").update(JSON.stringify(sanitizedExport)).digest("hex");
+    const snapshotRef = adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId);
+    const snapshotDoc = await snapshotRef.get();
+    if (!snapshotDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Snapshot not found. Generate a new preview before importing."
+      });
+    }
+    const snapshotData = snapshotDoc.data() || {};
+    const financeCheck = checkFinanceInvariant({ export: sanitizedExport });
+    if (financeCheck.drift > 0.01) {
+      await snapshotRef.update({
+        status: "incomplete",
+        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue})`,
+        completedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || staff.uid || ""
+      });
+      return res.status(422).json({
+        success: false,
+        error: `Finance invariant drift detected: ${financeCheck.drift.toFixed(2)}. Import refused. The sanitization engine or the source export is inconsistent.`,
+        financeCheck
+      });
+    }
+    if (snapshotData.mode === "unsanitized-diagnostic") {
+      const ttlHours = Number(snapshotData.ttlHours || 24);
+      const expiresAt2 = new Date(Date.now() + ttlHours * 60 * 60 * 1e3);
+      await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).set({
+        snapshotId,
+        suppressedAt: /* @__PURE__ */ new Date(),
+        expiresAt: expiresAt2,
+        suppressedBy: staff.email || staff.uid || "",
+        reason: "Restricted Diagnostic Mode"
+      });
+    }
+    const completedAt = /* @__PURE__ */ new Date();
+    const expiresAt = snapshotData.mode === "unsanitized-diagnostic" ? new Date(Date.now() + Number(snapshotData.ttlHours || 24) * 60 * 60 * 1e3) : null;
+    await snapshotRef.update({
+      status: "complete",
+      completedAt,
+      completedBy: staff.email || staff.uid || "",
+      expiresAt,
+      financeCheck: {
+        sumPayments: financeCheck.sumPayments,
+        sumRefunds: financeCheck.sumRefunds,
+        sumBalanceDue: financeCheck.sumBalanceDue,
+        drift: financeCheck.drift
+      },
+      sanitizedHash
+    });
+    await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
+      action: "import",
+      snapshotId,
+      adminUid: staff.uid,
+      adminEmail: staff.email || "",
+      timestamp: /* @__PURE__ */ new Date(),
+      mode: snapshotData.mode
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        status: "complete",
+        completedAt: completedAt.toISOString(),
+        expiresAt: expiresAt ? expiresAt.toISOString() : null,
+        financeCheck
+      }
+    });
+  } catch (error) {
+    console.error("Staging refresh import failed:", error);
+    try {
+      await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).update({
+        status: "incomplete",
+        failureReason: error?.message || "Unknown error",
+        completedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || staff.uid || ""
+      });
+    } catch (nestedErr) {
+      console.error("Failed to mark snapshot incomplete:", nestedErr);
+    }
+    return res.status(500).json({
+      success: false,
+      error: "Unable to import staging refresh. The snapshot is marked incomplete."
+    });
+  }
+}
+async function handleStagingRefreshDestroy(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can destroy staging refreshes." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging destroy is only available on staging projects."
+    });
+  }
+  const { snapshotId } = req.body || {};
+  if (!snapshotId) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a snapshotId to destroy."
+    });
+  }
+  try {
+    const snapshotRef = adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId);
+    const snapshotDoc = await snapshotRef.get();
+    if (!snapshotDoc.exists) {
+      return res.status(404).json({ success: false, error: "Snapshot not found." });
+    }
+    await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).delete().catch(() => void 0);
+    await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
+      action: "destroy",
+      snapshotId,
+      adminUid: staff.uid,
+      adminEmail: staff.email || "",
+      timestamp: /* @__PURE__ */ new Date()
+    });
+    await snapshotRef.update({
+      status: "destroyed",
+      destroyedAt: /* @__PURE__ */ new Date(),
+      destroyedBy: staff.email || staff.uid || ""
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        status: "destroyed",
+        destroyedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+  } catch (error) {
+    console.error("Staging refresh destroy failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to destroy staging refresh."
     });
   }
 }
@@ -238779,6 +239133,31 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleStagingRefreshPreview(req, res);
+  }
+  if (domain === "test-runs" && action === "staging-refresh-import" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-import:${ip}`, 3, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many import requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can import staging refreshes." });
+    }
+    req.staff = authResult;
+    return await handleStagingRefreshImport(req, res);
+  }
+  if (domain === "test-runs" && action === "staging-refresh-destroy" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can destroy staging refreshes." });
+    }
+    req.staff = authResult;
+    return await handleStagingRefreshDestroy(req, res);
   }
   return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
 }
