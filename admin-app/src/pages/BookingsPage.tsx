@@ -2453,9 +2453,34 @@ export function BookingsPage() {
     if (!selectedBooking) return;
     setConfirmBookingPending(true);
     try {
-      await updateBookingStatus(selectedBooking.id, "confirmed");
+      // Per #11 (operator-reported 2026-08-20, tracked in
+      // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+      // #11 row`): the `updateBookingStatus` return value
+      // now carries the `emailQueued: boolean` flag from
+      // the server's `handleConfirmBooking` response.
+      // The toast branches on the flag — true → "Booking
+      // confirmed, email queued" (the pre-#11 happy path);
+      // false → "Booking confirmed, email FAILED — see
+      // banner" (the post-#11 desk-facing surface for the
+      // silent-swallow fix). The `failed_emails` Firestore
+      // collection has the durable audit trail; the
+      // AdminContext `failed_emails/` listener (deferred
+      // follow-up) is what will render the banner.
+      const result = await updateBookingStatus(selectedBooking.id, "confirmed");
       setSelectedBooking(prev => prev ? { ...prev, status: "confirmed" } : null);
       setShowConfirmBooking(false);
+      // The toast is gated on `result` being non-null AND
+      // `emailQueued === false` — other branches (older
+      // server builds, or the future pre-flight refresh
+      // path) return `null` and the toast stays silent.
+      if (result && result.emailQueued === false) {
+        toast.warning(
+          "Email delivery failed",
+          "Booking confirmed, but confirmation email failed to send. The desk banner lists the failure."
+        );
+      } else {
+        toast.success("Booking confirmed", "Email queued");
+      }
     } catch (err: any) {
       toast.error("Failed to confirm booking", err?.message || "Please try again.");
     } finally {
@@ -2729,8 +2754,28 @@ export function BookingsPage() {
     if (!verifySuccess) return;
     setConfirmingBookingFromSuccess(true);
     try {
-      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
-      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      // Per #11 (operator-reported 2026-08-20, tracked in
+      // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+      // #11 row`): this is the same `booking-confirmed`
+      // path as the drawer confirm (both call
+      // `updateBookingStatus(..., "confirmed")` →
+      // server `handleConfirmBooking` → fires the
+      // `booking-confirmed` email). The post-#11 toast
+      // branches on the server's `emailQueued` flag
+      // so the desk sees the email state in BOTH
+      // entry points (drawer confirm + post-verify
+      // success modal). The pre-#11 happy-path toast
+      // text is preserved when `emailQueued` is
+      // `true` (or `null` from an older server build).
+      const result = await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      if (result && result.emailQueued === false) {
+        toast.warning(
+          "Email delivery failed",
+          `${verifySuccess.booking.bookingRef} is confirmed, but the confirmation email failed. See the desk banner.`
+        );
+      } else {
+        toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      }
     } catch (err: any) {
       toast.error("Failed to confirm booking", err?.message || "Please try again.");
     } finally {
