@@ -1,10 +1,12 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 19, 2026 — six fixes shipped today (decisions #220-#225, v0.274.7 → v0.274.14). Closed #20/#21 + RM-05 + BK-05 + #1 + B-10 + B-10c + #18 + Q-03 + #22. Still open: #11 (email silent-swallow — needs new `failed_emails` collection + admin banner + retry). Per-fix updates live in the LIVE FIXES TRACKED block below.
+> Last updated: August 20, 2026 — one fix shipped today (decision #226, v0.274.15). Closed the Spark Rewards Members page React error #31 crash. Still open: #11 (email silent-swallow — needs new `failed_emails` collection + admin banner + retry). Per-fix updates live in the LIVE FIXES TRACKED block below.
 >
-> Last ship: August 19, 2026 (decisions #225 — `fix/qr-management-mobile-fallback`; admin-app 1459/1459 + tsc clean; merged via `chore(merge)` @ `8fe9f60`).
+> Last ship: August 20, 2026 (decision #226 — `fix/members-member-since-timestamp`; admin-app 1465/1465 + tsc clean; pending merge).
 >
-> Previous ship: August 19, 2026 (decisions #224 — `fix/admin-header-mobile-layout`; merged via `chore(merge)` @ `ba644af`).
+> Previous ship: August 19, 2026 (decisions #225 — `fix/qr-management-mobile-fallback`; merged via `chore(merge)` @ `8fe9f60`).
+>
+> Earlier ship: August 19, 2026 (decisions #224 — `fix/admin-header-mobile-layout`; merged via `chore(merge)` @ `ba644af`).
 >
 > Earlier ship: August 19, 2026 (decisions #223 — `fix/booking-uploads-upload-timeout`; merged via `chore(merge)` @ `98a2873`).
 >
@@ -426,6 +428,10 @@ Once the booking is one doc with one lifecycle, the next round of features is mu
 
 ### Open Operator-Reported Bugs — Verification 2026-08-19 (REVISED + LIVE FIXES TRACKED)
 > Source: the operator's Spark-Inn-Manual-Test-Cases bug dump (Guest App Tests, Admin App Tests, Other Bugs Found tabs), 2026-08-19. The agent + 3 leaf subagents (delegation `deleg_894e86c0`) walked each item against current `dev` HEAD source. **Of the 20 actionable items, 8 are already fixed, 1 is environmental/config, 1 is admin-UI-only (role gate), and 10 are still open real bugs.** Subagent cross-checking surfaced 4 corrections to the agent's first-pass verdicts: BK-05 (cancel reason), #11 (confirmation email), #18 (wordmark overlap), Q-03/#22 (detached `<a>` download) — see the **🔁 Revision log** at the bottom of this section for the row-level deltas. All findings carry the file:line ref + the verbatim code excerpt that proves the verdict.
+
+#### ✅ Live fix shipped (2026-08-20, decision #226)
+
+- **Members page React error #31** — `Member.memberSince` mapper now normalizes Firestore Timestamp → ISO string (shipped 2026-08-20 on `fix/members-member-since-timestamp`, decision #226). Opening `/members` on production + staging crashed with React error #31 ("object with keys {seconds, nanoseconds}") — every operator who opened the page hit the crash. Trace: `MembersPage.tsx:225` (`<p>{row.memberSince}</p>`) and `:326` (`<span>{selectedMember.memberSince}</span>`) render `memberSince` raw. The mapper at `AdminContext.tsx:3040` was `memberSince: data.memberSince || ""` — a raw pass-through. The server writes `memberSince: new Date()` at `guest-app/server/handlers/members.ts:243,258,285`; the Admin SDK auto-converts `Date` → Firestore `Timestamp` on store, so the mapper leaked `{seconds, nanoseconds}` objects onto React state. Fix mirrors the same `toDate`-guarded pattern used at `MembersPage.tsx:58-60` (drawer `pointsHistory`), `IntercomPage.tsx:495` (`intercomMessages.timestamp`), and `ReportsPage.tsx:1703` (`toDate(m.memberSince)?.toISOString()` — already the canonical shape for this contract): `memberSince: data.memberSince?.toDate ? data.memberSince.toDate().toISOString() : (data.memberSince || "")`. Regression: 1 new test file `admin-app/src/__tests__/members-member-since-timestamp.test.ts` (6 source-text + runtime guards: positive pin on the new mapper shape, negative pin on the raw pass-through, consumer pins on `row.memberSince` + `selectedMember.memberSince`, runtime fixture pin for Firestore Timestamp round-trip, runtime backwards-compat pin for non-Timestamp strings — no double-conversion). 1465/1465 admin-app tests pass (was 1459 before; +6 net); tsc clean. Negative-test confirmation: revert the mapper to raw pass-through → 2 source-text pins fail with labeled messages naming the missing contract.
 
 #### ✅ Live fix shipped (2026-08-19, decisions #220)
 

@@ -3037,7 +3037,41 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                 photoUrl: data.photoUrl || "",
                 authProvider: data.authProvider || "email",
                 isMember: data.isMember !== false,
-                memberSince: data.memberSince || "",
+                // Per decision #226 (2026-08-20): the server's
+                // `/api/members/register` handler writes `memberSince:
+                // new Date()` (`guest-app/server/handlers/members.ts:243,258,285`),
+                // and the Admin SDK auto-converts `Date` to a Firestore
+                // `Timestamp` on store. The TS contract says `Member.memberSince:
+                // string` but the runtime shape is `{seconds, nanoseconds,
+                // toDate()}` — the pre-#226 raw pass-through leaked the
+                // Timestamp onto React state and React error #31 fired when
+                // `MembersPage.tsx:225,326` rendered `{row.memberSince}` /
+                // `{selectedMember.memberSince}` as a JSX child ("object
+                // with keys {seconds, nanoseconds}"). Convert via the
+                // `toDate()` guard (mirrors `MembersPage.tsx:58-60` for the
+                // drawer's `pointsHistory` and `IntercomPage.tsx:495` for
+                // `intercomMessages.timestamp`); fall back to the raw value
+                // for legacy docs that already have `memberSince` as a
+                // string.
+                // Per decision #226 (2026-08-20): the server's
+                // `/api/members/register` handler writes `memberSince:
+                // new Date()` (`guest-app/server/handlers/members.ts:243,258,285`),
+                // and the Admin SDK auto-converts `Date` to a Firestore
+                // `Timestamp` on store. The TS contract says `Member.memberSince:
+                // string` but the runtime shape is `{seconds, nanoseconds,
+                // toDate()}` — the pre-#226 raw pass-through leaked the
+                // Timestamp onto React state and React error #31 fired when
+                // `MembersPage.tsx:225,326` rendered `{row.memberSince}` /
+                // `{selectedMember.memberSince}` as a JSX child ("object
+                // with keys {seconds, nanoseconds}"). Convert via the
+                // `toDate()` guard (mirrors `MembersPage.tsx:58-60` for the
+                // drawer's `pointsHistory` and `IntercomPage.tsx:495` for
+                // `intercomMessages.timestamp`); fall back to the raw value
+                // for legacy docs that already have `memberSince` as a
+                // string.
+                memberSince: data.memberSince?.toDate
+                  ? data.memberSince.toDate().toISOString()
+                  : (data.memberSince || ""),
                 rewardsPoints: data.rewardsPoints || 0,
                 tier: data.tier || "standard",
                 isActive: data.isActive !== false,
