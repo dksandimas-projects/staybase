@@ -219,7 +219,14 @@ describe("/api/members/link-booking (MED-3)", () => {
     expect(mockSet).not.toHaveBeenCalled();
   });
 
-  test("rejects when the booking does not exist (400)", async () => {
+  // Per MED-3 G1 (build-variant follow-up 2026-08-20):
+  // the booking-not-found status was tightened from 400
+  // to 404 with a structured `code: BOOKING_NOT_FOUND`
+  // on the JSON response so the toast can branch on
+  // code, not prose (per `silent-rate-limit-fallback`
+  // skill's AFTER pattern). The test was renamed +
+  // tightened to match.
+  test("rejects when the booking does not exist (404 + code BOOKING_NOT_FOUND)", async () => {
     mockGet.mockImplementation(async (ref: any) => {
       if (ref.path === "members/member_1") return mockMemberDoc;
       if (ref.path === "bookings/booking_1") return { exists: false, data: vi.fn() };
@@ -228,8 +235,9 @@ describe("/api/members/link-booking (MED-3)", () => {
     const res = mockResponse();
     await handleLinkBookingToMember(baseAdminReq, res);
 
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.status).toHaveBeenCalledWith(404);
     const payload = (res.json as any).mock.calls[0][0];
+    expect(payload.code).toBe("BOOKING_NOT_FOUND");
     expect(payload.error).toMatch(/booking was not found/i);
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockSet).not.toHaveBeenCalled();
