@@ -21,7 +21,7 @@ import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
-import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
+import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -1611,6 +1611,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleStagingRefreshPreview(req, res);
+  }
+
+  // Per ETR-R09 (controlled replacement):
+  // the import endpoint takes the
+  // sanitizedExport from the preview +
+  // writes the docs to staging. Server
+  // contract + audit row + finance
+  // invariant are in
+  // handleStagingRefreshImport.
+  if (domain === "test-runs" && action === "staging-refresh-import" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-import:${ip}`, 3, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many import requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can import staging refreshes." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingRefreshImport(req, res);
+  }
+
+  // Per ETR-D06 (TTL + destruction) +
+  // ETR-D07 (restore ordinary staging): the
+  // destroy endpoint. The operator clicks
+  // "Destroy diagnostic snapshot" or the
+  // TTL expires + the scheduled job fires
+  // the destroy.
+  if (domain === "test-runs" && action === "staging-refresh-destroy" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can destroy staging refreshes." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingRefreshDestroy(req, res);
   }
 
   // Fallback 404

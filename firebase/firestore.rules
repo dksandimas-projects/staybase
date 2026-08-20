@@ -536,5 +536,35 @@ service cloud.firestore {
       allow read: if isStaff();
       allow update, delete: if false;
     }
+
+    // Per ETR-R07 (staging isolation metadata) +
+    // ETR-D02 (Restricted Diagnostic Mode locks
+    // everyday staging): the refresh-snapshot
+    // docs in `janitor/refresh-snapshots/{snapshotId}`
+    // are read by Admin only (front-desk staff
+    // should never see production data leaked
+    // into staging). The `outbound-suppression`
+    // collection is also Admin-only. Both
+    // collections are written by the server
+    // (no client writes).
+    match /janitor/refresh-snapshots/{snapshotId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+    match /janitor/refresh-snapshots/{snapshotId}/items/{itemId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+    match /janitor/outbound-suppression/{snapshotId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+    match /janitor/refresh-access-audit/{auditId} {
+      // The access audit is written by the
+      // server + read by Admin (for the
+      // audit-log view in Settings).
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
   }
 }
