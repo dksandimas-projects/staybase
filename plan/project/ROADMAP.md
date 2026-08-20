@@ -1,12 +1,14 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 19, 2026 — four fixes shipped today (decisions #220, #221, #222, #223, v0.274.7 → v0.274.10). Closed #20/#21 + RM-05 + BK-05 + #1 + B-10 + B-10c. Still open: #11 (email silent-swallow), #22/Q-03 (QR mobile — Safari `<a>` + window.open), #18 (admin wordmark overlaps bell). Per-fix updates live in the LIVE FIXES TRACKED block below.
+> Last updated: August 19, 2026 — five fixes shipped today (decisions #220-#224, v0.274.7 → v0.274.13). Closed #20/#21 + RM-05 + BK-05 + #1 + B-10 + B-10c + #18. Still open: #11 (email silent-swallow), #22/Q-03 (QR mobile — Safari `<a>` + window.open). Per-fix updates live in the LIVE FIXES TRACKED block below.
 >
-> Last ship: August 19, 2026 (decisions #223 — `fix/booking-uploads-upload-timeout`; shared 566/566 + admin 1444/1444 + guest-app tsc clean; merged via `chore(merge)` @ `98a2873`).
+> Last ship: August 19, 2026 (decisions #224 — `fix/admin-header-mobile-layout`; admin-app 1450/1450 + tsc clean; merged via `chore(merge)` @ `ba644af`).
 >
-> Previous ship: August 19, 2026 (decisions #222 — `fix/hero-images-size-token`; merged via `chore(merge)` @ `5f7a863`).
+> Previous ship: August 19, 2026 (decisions #223 — `fix/booking-uploads-upload-timeout`; merged via `chore(merge)` @ `98a2873`).
 >
-> Earlier ship: August 19, 2026 (decisions #221 — `fix/bookings-cancel-reason-required`; merged via `chore(merge)` @ `5867f29`).
+> Earlier ship: August 19, 2026 (decisions #222 — `fix/hero-images-size-token`; merged via `chore(merge)` @ `5f7a863`).
+>
+> Earlier today: August 19, 2026 (decisions #221 — `fix/bookings-cancel-reason-required`; merged via `chore(merge)` @ `5867f29`).
 >
 > Earliest today: August 19, 2026 (decisions #220 — `fix/admin-listener-and-permission-gates`; merged via `chore(merge)` @ `2112ca4`).
 >
