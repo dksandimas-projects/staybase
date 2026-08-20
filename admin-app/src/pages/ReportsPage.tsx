@@ -23,7 +23,8 @@ import config from "@config";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
-import { collection, collectionGroup, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, collectionGroup, doc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, Timestamp, updateDoc, where, type QueryDocumentSnapshot } from "firebase/firestore";
+import { auth } from "../firebase/auth";
 import { db } from "../firebase/config";
 import {
   normalizePaymentMethodBucket,
@@ -3984,10 +3985,233 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Per FLR-03 (2026-08-20, tracked in
+  // `plan/project/ROADMAP.md §FLR-03`): the
+  // Daily Close transactions table is
+  // paginated at the listener level
+  // (limit(50) + startAfter cursor) so the
+  // page stays fast at the 1-year trigger
+  // (and beyond). The pre-FLR-03 surface
+  // loaded every payment + refund in the
+  // selected date into the table at once
+  // — fine at 14 rooms, linear forever on
+  // Blaze. The post-FLR-03 surface
+  // lazy-loads 50 at a time with a "Load
+  // more" button. The aggregation consumers
+  // (`dailySummary`, `totalRecordedNet`,
+  // `totalCountedNet`, `totalVariance`)
+  // continue to read the un-paginated
+  // `payments` + `dayPayments` props so
+  // they're unaffected by the table
+  // pagination — the 50-row cap is purely
+  // a render-boundary optimization for the
+  // ledger view, not a data-availability
+  // limit.
+  const [paginatedDayPayments, setPaginatedDayPayments] = useState<ReportPayment[]>([]);
+  const [paginatedDayRefunds, setPaginatedDayRefunds] = useState<ReportPayment[]>([]);
+  // The lastDoc per collection is the
+  // startAfter() cursor for the next page.
+  // null when no page has been loaded yet
+  // (the listener re-queries on every
+  // dateStr change so the cursor resets).
+  const [paymentsLastDoc, setPaymentsLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [refundsLastDoc, setRefundsLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  // When true, the user has clicked "Load
+  // more" — the next listener attach
+  // appends to the existing state instead
+  // of replacing it. Resets on dateStr
+  // change.
+  const [loadMorePayments, setLoadMorePayments] = useState(false);
+  const [loadMoreRefunds, setLoadMoreRefunds] = useState(false);
+  // The page size — kept as a constant
+  // here + in the test file (the
+  // "Load more" button condition is
+  // `paginatedDayPayments.length === 50`,
+  // not `>= 50` — the listener can return
+  // < 50 docs on the last page, which is
+  // fine, we just hide the button in that
+  // case).
+  const PAGE_SIZE = 50;
+
   // Check if a daily close document already exists for this date
   const existingClose = useMemo(() => {
     return dailyCloses.find((c) => c.id === dateStr);
   }, [dailyCloses, dateStr]);
+
+  // Per FLR-03: the paginated listener for
+  // the Daily Close transactions table.
+  // The listener is date-bounded (the
+  // hotel-timezone dayStart/dayEnd computed
+  // from `dateStr`) so the listener only
+  // fetches the payments + refunds for the
+  // currently-viewed date. The cursor
+  // (startAfter) is per-date — the dateStr
+  // change resets the state so the cursor
+  // doesn't carry over from a different
+  // day. The aggregation consumers
+  // (`dailySummary`, totals) continue to
+  // read the un-paginated `payments` prop.
+  useEffect(() => {
+    // Reset paginated state on date change
+    // so a stale cursor from a different
+    // day doesn't leak into the new view.
+    setPaginatedDayPayments([]);
+    setPaginatedDayRefunds([]);
+    setPaymentsLastDoc(null);
+    setRefundsLastDoc(null);
+    setLoadMorePayments(false);
+    setLoadMoreRefunds(false);
+    // Compute the day boundaries in the
+    // hotel timezone so the listener
+    // matches the `dayPayments` client-side
+    // filter (which keys on the same
+    // `dateKeyInTimeZone` helper).
+    const dayStart = Timestamp.fromDate(new Date(`${dateStr}T00:00:00`));
+    const dayEnd = Timestamp.fromDate(new Date(`${dateStr}T23:59:59.999`));
+    const cancelled = { value: false };
+    let unsubPayments: (() => void) | undefined;
+    let unsubRefunds: (() => void) | undefined;
+    // Per MRB-15-09 force-refresh pattern
+    // (the payments/refunds collectionGroups
+    // are isStaff-gated, so a stale token
+    // would deny the read). Same pattern as
+    // the notifications + failed_emails
+    // listeners.
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled.value) return;
+      // Payments listener. Initial page:
+      // limit(50) ordered by recordedAt desc.
+      // The `startAfter(paymentsLastDoc)` is
+      // applied via the conditional query
+      // (the `loadMorePayments` flag is the
+      // gate).
+      const paymentsQuery = query(
+        collectionGroup(db, "payments"),
+        where("recordedAt", ">=", dayStart),
+        where("recordedAt", "<=", dayEnd),
+        orderBy("recordedAt", "desc"),
+        ...(loadMorePayments && paymentsLastDoc ? [startAfter(paymentsLastDoc)] : [limit(PAGE_SIZE)])
+      );
+      unsubPayments = onSnapshot(
+        paymentsQuery,
+        (snapshot) => {
+          // The lastDoc is the cursor for the
+          // NEXT page. Snapshot.docs is the
+          // current page (up to PAGE_SIZE).
+          const lastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+          if (lastDoc) setPaymentsLastDoc(lastDoc);
+          // Map the docs into the same
+          // ReportPayment shape the
+          // un-paginated payments listener
+          // uses. The mapper logic is
+          // duplicated here (vs extracted
+          // into a shared helper) because the
+          // un-paginated mapper is already
+          // 30+ lines + the dedup logic
+          // (payments vs refunds) is simpler
+          // when the caller is the source of
+          // truth. If a future refactor
+          // extracts a `mapPaymentDoc(doc)`
+          // helper, both listeners can use it.
+          const page: ReportPayment[] = snapshot.docs.map((paymentDoc) => {
+            const data = paymentDoc.data();
+            const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
+            const isStoreTender = data.source === "store-order";
+            const sourceId = isStoreTender ? String(data.sourceId || parentDocumentId) : parentDocumentId;
+            // Per RPT-06: mirror the refund
+            // listener's reservation-path
+            // detection (post-MRB-01
+            // reservation-scope payments live
+            // at reservations/{id}/payments/{id}
+            // — the data.bookingId stamp is
+            // the per-room attribution).
+            const isReservationPayment = !isStoreTender && paymentDoc.ref.path.startsWith("reservations/");
+            return {
+              id: paymentDoc.id,
+              type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
+              source: isStoreTender ? "store-order" : "booking",
+              sourceId,
+              bookingId: isStoreTender ? `store:${sourceId}` : (isReservationPayment ? String(data.bookingId || parentDocumentId) : parentDocumentId),
+              bookingRef: isStoreTender ? String(data.orderRef || sourceId) : "",
+              roomNumber: isStoreTender ? String(data.roomNumber || "") : "",
+              guestName: isStoreTender ? String(data.guestName || "") : "",
+              amount: Number(data.amount || 0),
+              method: String(data.method || "unknown"),
+              transactionReference: data.transactionReference ? String(data.transactionReference) : null,
+              note: String(data.note || ""),
+              reason: data.reason ? String(data.reason) : null,
+              approvedBy: data.approvedBy ? String(data.approvedBy) : null,
+              recordedBy: String(data.recordedBy || "staff"),
+              recordedAt: toDate(data.recordedAt)
+            };
+          });
+          // Append or replace based on the
+          // loadMorePayments flag (the
+          // listener re-attaches with the
+          // new query on every state change,
+          // so the right `set` semantics here
+          // is: first page = replace, "Load
+          // more" = append).
+          setPaginatedDayPayments((prev) => (loadMorePayments ? [...prev, ...page] : page));
+        },
+        (error) => {
+          console.error("Failed to load paginated payments:", error);
+        }
+      );
+      // Refunds listener — same shape.
+      const refundsQuery = query(
+        collectionGroup(db, "refunds"),
+        where("recordedAt", ">=", dayStart),
+        where("recordedAt", "<=", dayEnd),
+        orderBy("recordedAt", "desc"),
+        ...(loadMoreRefunds && refundsLastDoc ? [startAfter(refundsLastDoc)] : [limit(PAGE_SIZE)])
+      );
+      unsubRefunds = onSnapshot(
+        refundsQuery,
+        (snapshot) => {
+          const lastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+          if (lastDoc) setRefundsLastDoc(lastDoc);
+          const page: ReportPayment[] = snapshot.docs.map((refundDoc) => {
+            const data = refundDoc.data();
+            const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
+            const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
+            const bookingId = isReservationRefund
+              ? String(data.bookingId || parentDocumentId)
+              : parentDocumentId;
+            return {
+              id: refundDoc.id,
+              type: "refund",
+              source: "booking",
+              sourceId: bookingId,
+              bookingId,
+              bookingRef: "",
+              roomNumber: "",
+              guestName: "",
+              amount: Number(data.amount || 0),
+              method: String(data.method || "unknown"),
+              transactionReference: data.transactionReference ? String(data.transactionReference) : null,
+              note: String(data.note || ""),
+              reason: data.reason ? String(data.reason) : null,
+              approvedBy: data.approvedBy ? String(data.approvedBy) : null,
+              recordedBy: String(data.recordedBy || "staff"),
+              recordedAt: toDate(data.recordedAt)
+            };
+          });
+          setPaginatedDayRefunds((prev) => (loadMoreRefunds ? [...prev, ...page] : page));
+        },
+        (error) => {
+          console.error("Failed to load paginated refunds:", error);
+        }
+      );
+    }).catch((refreshErr: unknown) => {
+      console.error("Failed to force-refresh ID token for paginated ledger listener:", refreshErr);
+    });
+    return () => {
+      cancelled.value = true;
+      if (unsubPayments) unsubPayments();
+      if (unsubRefunds) unsubRefunds();
+    };
+  }, [dateStr, loadMorePayments, loadMoreRefunds, paymentsLastDoc, refundsLastDoc, toDate]);
 
   // Filter payments for selected date, keyed on the hotel-timezone calendar
   // day so the ledger matches the "Collections by day" grouping regardless of
@@ -4413,7 +4637,24 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {dayPayments.map((p) => (
+                  {/*
+                    Per FLR-03: the table maps over
+                    the PAGINATED state
+                    ([...paginatedDayPayments,
+                    ...paginatedDayRefunds]) instead
+                    of the full un-paginated
+                    `dayPayments`. The aggregation
+                    consumers above
+                    (dailySummary,
+                    totalRecordedNet) still use the
+                    un-paginated `dayPayments` —
+                    the pagination is a render-only
+                    optimization for the table view.
+                    No data is lost: the "Load more"
+                    button below the table fetches
+                    the next page on demand.
+                  */}
+                  {[...paginatedDayPayments, ...paginatedDayRefunds].map((p) => (
                     <tr key={p.id}>
                       <td className="px-3 py-2 font-semibold text-gray-900">{p.bookingRef}</td>
                       <td className="px-3 py-2 text-gray-600">
@@ -4430,7 +4671,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
                       </td>
                     </tr>
                   ))}
-                  {dayPayments.length === 0 && (
+                  {paginatedDayPayments.length === 0 && paginatedDayRefunds.length === 0 && (
                     <tr>
                       <td colSpan={7} className="p-6 text-center text-gray-400">
                         No transactions recorded on this date.
@@ -4440,6 +4681,47 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, s
                 </tbody>
               </table>
             </div>
+
+            {/*
+              Per FLR-03: the "Load more" button
+              pair. Each button is only shown
+              when the current page is at the
+              limit (50 docs) — a sign there's
+              likely more data. Clicking
+              toggles the `loadMorePayments` /
+              `loadMoreRefunds` flag which
+              causes the listener to re-attach
+              with the startAfter() cursor.
+            */}
+            {(paginatedDayPayments.length === 50 || paginatedDayRefunds.length === 50) && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-2">
+                <p className="text-[10px] text-gray-500">
+                  Showing {paginatedDayPayments.length + paginatedDayRefunds.length}{paginatedDayPayments.length === 50 || paginatedDayRefunds.length === 50 ? "+" : ""} transactions for {dateStr}
+                </p>
+                <div className="flex gap-2">
+                  {paginatedDayPayments.length === 50 && (
+                    <button
+                      type="button"
+                      onClick={() => setLoadMorePayments(true)}
+                      data-testid="flr03-load-more"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    >
+                      Load more payments
+                    </button>
+                  )}
+                  {paginatedDayRefunds.length === 50 && (
+                    <button
+                      type="button"
+                      onClick={() => setLoadMoreRefunds(true)}
+                      data-testid="flr03-load-more-refunds"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    >
+                      Load more refunds
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
