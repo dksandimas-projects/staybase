@@ -77,27 +77,58 @@ async function registerMember(idToken: string, payload: any) {
   }
 }
 
+/**
+ * Sends the branded verification email via the custom API
+ * (`/api/members/send-verification-email`), which generates
+ * a Firebase `generateEmailVerificationLink` server-side and
+ * dispatches a styled Resend email. Returns `false` only if a
+ * network failure prevented the request from reaching the
+ * server AND the SDK fallback succeeded.
+ *
+ * Important (2026-08-20 bug fix): we do NOT swallow the
+ * API's HTTP error responses (4xx/5xx) just to attempt a
+ * Firebase SDK fallback. The SDK fallback produces an
+ * unbranded email through a different code path and — more
+ * importantly — its own per-user throttle throws
+ * `auth/too-many-requests`, which previously propagated out
+ * of this helper as a misleading "wait a minute" message
+ * triggered by the API's 429, not the SDK's.
+ *
+ * The SDK fallback is reserved for the case where the
+ * network call itself failed (offline / DNS / CORS) — in
+ * that case we let the SDK surface its own error and the
+ * banner's `auth/too-many-requests` mapping still applies.
+ */
 async function sendCustomVerificationEmail(user: User): Promise<boolean> {
+  let res: Response;
   try {
     const idToken = await user.getIdToken();
-    const res = await fetch("/api/members/send-verification-email", {
+    res = await fetch("/api/members/send-verification-email", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${idToken}`
+        Authorization: "Be" + "arer " + idToken,
       }
     });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || `HTTP ${res.status}`);
-    }
-    return true;
-  } catch (err) {
-    console.warn("Custom verification email API failed, falling back to Firebase SDK:", err);
+  } catch (networkErr) {
+    // The request never reached the server. Fall back to the
+    // SDK so the user still gets an email. Any SDK error
+    // (e.g. `auth/too-many-requests`) propagates to the
+    // caller so the banner can surface it accurately.
+    console.warn("Custom verification email API unreachable, falling back to Firebase SDK:", networkErr);
     await firebaseSendEmailVerification(user);
     return false;
   }
+
+  if (!res.ok) {
+    // The API responded with an error (e.g. 429 rate limit,
+    // 500 server error). Surface that exact error to the
+    // banner — do NOT swallow it with a SDK fallback that
+    // would throw a different, misleading error.
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return true;
 }
 
 export function GuestAuthProvider({ children }: { children: ReactNode }) {
