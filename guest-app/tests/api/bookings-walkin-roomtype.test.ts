@@ -46,13 +46,12 @@ const nextWeekday = (targetDay: number) => {
   d.setUTCDate(d.getUTCDate() + days);
   return d;
 };
-// Tue → Thu (2 weekday nights) and Sat → Tue (2 weekend
-// nights: Sat + Sun). The original test used Sat → Mon
-// which is only 1 night (Sat) — the comment claimed 2
-// nights but the math didn't work. Sat → Tue gives the
-// intended 2 weekend nights.
-const WEEKDAY_CHECKIN = fmtDate(nextWeekday(2));
-const WEEKDAY_CHECKOUT = fmtDate(nextWeekday(4));
+// Tue → Thu (2 weekday nights)
+const _weekdayInDate = nextWeekday(2);
+const WEEKDAY_CHECKIN = fmtDate(_weekdayInDate);
+const _weekdayOutDate = new Date(_weekdayInDate);
+_weekdayOutDate.setUTCDate(_weekdayOutDate.getUTCDate() + 2);
+const WEEKDAY_CHECKOUT = fmtDate(_weekdayOutDate);
 // Compute WEEKEND_CHECKIN + 2 days (Mon → Wed would be
 // +2 too, but Sun + 2 = Tue is what we want for "Sat +
 // Sun weekend nights"). The checkin is on Sat, the

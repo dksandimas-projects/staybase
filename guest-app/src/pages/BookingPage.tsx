@@ -39,8 +39,6 @@ import {
   calculatePercentDiscount,
   calculateVoucherBase,
   calculateBreakfastAddOn,
-  calculateExtraBedAddOn,
-  requiredExtraBedsFor,
   // Per B-10 / B-10c / decision #223 (2026-08-19): the
   // upload-timeout helper. Wraps `uploadBytes(...)` on Firebase
   // Storage in a `Promise.race` so a hung connection (mobile
@@ -49,7 +47,9 @@ import {
   // `shared/utils/uploads.ts` for the rationale + the
   // 90s default.
   raceUploadWithTimeout,
-  DEFAULT_UPLOAD_TIMEOUT_MS
+  DEFAULT_UPLOAD_TIMEOUT_MS,
+  calculateExtraBedAddOn,
+  requiredExtraBedsFor
 } from "@spark-inn/shared";
 // Per CHD-11 (2026-08-04, per decision #184): the per-type
 // capacity-fit indicator derivation. The helper is the
