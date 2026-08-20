@@ -24,11 +24,18 @@ import { StaysPage } from "./pages/StaysPage";
 import { TermsPage } from "./pages/TermsPage";
 
 export function ScrollToTop() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
 
   useEffect(() => {
+    // Scroll to top on every route change — including in-page step changes
+    // driven by search params (e.g. the booking flow at `/book` advances
+    // steps via `?step=guest-details|review|...` without changing the
+    // pathname). Without watching `search`, advancing a step leaves the
+    // viewport pinned at the previous step's scroll offset, which is
+    // confusing on long forms where the next step's primary CTA sits
+    // at the top of the new view.
     window.scrollTo(0, 0);
-  }, [pathname]);
+  }, [pathname, search]);
 
   return null;
 }
