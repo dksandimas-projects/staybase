@@ -133,13 +133,19 @@ export function NotificationBell() {
   if (isMobile) {
     return (
       <>
+        {/* Per #18 / decision #224 (2026-08-19): the bell button
+            keeps its `shrink-0` so flexbox can't compress it
+            when the absolute wordmark overflows in the centre zone
+            on a narrow viewport. The `data-testid` marker pins the
+            contract for the e2e suite. */}
         <button
           ref={bellButtonRef}
           type="button"
           onClick={() => setIsPanelOpen(true)}
           aria-label={`Notifications, ${unreadNotificationCount} unread`}
           aria-expanded={isPanelOpen}
-          className="relative flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200"
+          data-testid="notif-bell"
+          className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200"
           title="Notifications"
         >
           <Bell size={18} aria-hidden="true" />
@@ -164,7 +170,13 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="relative">
+    // Per #18 / decision #224 (2026-08-19): the desktop bell
+    // wrapper is `shrink-0` + `relative`. Pre-#224 the `<div>`
+    // was just `relative` — flexbox could squeeze the bell
+    // button under the absolutely-positioned wordmark when the
+    // viewport narrowed. The `data-testid` marker pins the
+    // contract for the e2e suite.
+    <div className="relative shrink-0" data-testid="notif-bell-wrap">
       <button
         ref={bellButtonRef}
         type="button"
@@ -172,7 +184,8 @@ export function NotificationBell() {
         aria-label={`Notifications, ${unreadNotificationCount} unread`}
         aria-expanded={isPanelOpen}
         aria-haspopup="dialog"
-        className="relative flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200"
+        data-testid="notif-bell"
+        className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200"
         title="Notifications"
       >
         <Bell size={18} aria-hidden="true" />
