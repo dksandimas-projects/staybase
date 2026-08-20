@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.276.2";
+    VERSION2 = "0.277.0";
   }
 });
 
@@ -225902,7 +225902,7 @@ async function handleEmailPreview(req, res) {
     return res.status(500).json({ success: false, error: message });
   }
 }
-var import_jspdf, FROM_EMAIL, ADMIN_EMAIL;
+var import_jspdf, FROM_ADDRESS, FROM_DISPLAY_NAME, FROM_EMAIL, ADMIN_EMAIL;
 var init_email = __esm({
   "server/handlers/email.ts"() {
     "use strict";
@@ -225913,7 +225913,9 @@ var init_email = __esm({
     init_resend();
     init_siteUrl();
     init_shared();
-    FROM_EMAIL = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
+    FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
+    FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
+    FROM_EMAIL = FROM_ADDRESS.includes("<") ? FROM_ADDRESS : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;
     ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail;
   }
 });
