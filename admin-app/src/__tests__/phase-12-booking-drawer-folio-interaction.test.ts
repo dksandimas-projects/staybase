@@ -99,6 +99,27 @@ describe("Phase 12 — booking drawer folio interaction (BDUX-05g)", () => {
     expect(pageSrc).toMatch(/voucher/);
   });
 
+  // Per DSC-05 (2026-08-20, decision #228): the rejected branch of
+  // the discount lifecycle is reversible — when a Senior/PWD ID has
+  // been rejected, the folio must surface a `Re-verify ID` button so
+  // the desk can verify the (physically re-checked or OSCA-resubmitted)
+  // ID. The `Apply discount` button stays hidden on rejection (the
+  // existing `!hasVoucherOrDiscount` gate keeps it hidden because
+  // `discountType` is still set post-rejection). Net behaviour:
+  // verified → `Apply discount` hidden (per the pre-DSC-05 contract
+  // above); rejected → `Apply discount` hidden, `Re-verify ID`
+  // visible; nothing applied → `Apply discount` visible, `Re-verify
+  // ID` hidden.
+  it("shows the folio `Re-verify ID` button when the Senior/PWD discount was rejected (DSC-05)", () => {
+    expect(pageSrc).toContain("Re-verify ID");
+    // The render gate: discountRejected && RESCHEDULABLE_STATUSES
+    // includes the status. Pin the helper const + the
+    // RESCHEDULABLE_STATUSES reference inside the gate.
+    expect(pageSrc).toMatch(
+      /canReverify\s*=\s*!!selectedBooking\.discountRejected\s*&&\s*RESCHEDULABLE_STATUSES\.includes\(selectedBooking\.status\)/
+    );
+  });
+
   it("shows current discount and voucher info when present", () => {
     expect(pageSrc).toContain("Discount or voucher");
     expect(pageSrc).toMatch(/discountType/);
