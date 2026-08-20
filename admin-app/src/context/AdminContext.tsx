@@ -609,7 +609,14 @@ export interface AdminContextType {
     // reservation-scope selector to the server.
     // Other status transitions ignore the field.
     options?: { scope?: "room" | "reservation" }
-  ) => void | Promise<void>;
+  // Per #11 (operator-reported 2026-08-20): the
+  // returned object carries the `emailQueued`
+  // flag for the `booking-confirmed` server
+  // response. Other status transitions return
+  // `null` or an object without `emailQueued`.
+  // Back-compat safe — existing callers that
+  // don't read the return value still work.
+  ) => Promise<{ emailQueued?: boolean } | null>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
@@ -2183,7 +2190,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // transitions ignore it (the field is silently
     // dropped on the wire).
     options?: { scope?: "room" | "reservation" }
-  ) => {
+  ): Promise<{ emailQueued?: boolean } | null> => {
     try {
       const currentBooking = bookings.find((b) => b.id === bookingId);
       const isStatusChanging = currentBooking ? currentBooking.status !== status : true;
@@ -2195,7 +2202,10 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           updatedAt: serverTimestamp(),
           handledBy: currentUser?.uid || currentUser?.email || "staff"
         });
-        return;
+        // No server round-trip → no `emailQueued`
+        // flag to surface. The caller can ignore
+        // the `null` return.
+        return null;
       }
 
       if (status === "cancelled") {
@@ -2221,6 +2231,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
+        return data?.data ?? null;
       } else if (status === "confirmed") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/confirm`, {
@@ -2235,6 +2246,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to confirm booking via server API.");
         }
+        // Per #11 (operator-reported 2026-08-20, tracked in
+        // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+        // #11 row`): the `handleConfirmBooking` server
+        // response now carries `emailQueued: boolean` so
+        // the desk's confirm-booking UI can branch on the
+        // email state (toast reads "Booking confirmed,
+        // email queued" / "Booking confirmed, email failed
+        // — see banner"). The AdminContext surfaces
+        // this flag through the function's return value
+        // so `BookingsPage.handleConfirmBooking` can
+        // pick it up without re-fetching the server.
+        return data?.data ?? null;
       } else if (status === "payment-confirmed") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/mark-payment-confirmed`, {
@@ -2249,6 +2272,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to confirm payment via server API.");
         }
+        return data?.data ?? null;
       } else if (status === "checked-out") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkout`, {
@@ -2269,6 +2293,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           }
           throw new Error(data.error || "Failed to checkout booking via server API.");
         }
+        return data?.data ?? null;
       } else if (status === "checked-in") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkin`, {
@@ -2283,12 +2308,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to check in booking via server API.");
         }
+        return data?.data ?? null;
       } else {
         throw new Error(`Unsupported client-side booking status transition: ${status}`);
       }
+      // Unreachable: every branch above either
+      // returns or throws. The `return` here
+      // satisfies the Promise<… | null> return
+      // type for the strict TS compiler; the
+      // `throw new Error(...)` above is the only
+      // way to land in the catch block.
+      return null;
     } catch (error) {
       console.error("Error updating booking status:", error);
       notify.error("Failed to update booking status", error instanceof Error ? error.message : String(error));
+      // The error path always returns null (no
+      // emailQueued flag to surface).
+      return null;
     }
   };
 

@@ -707,8 +707,28 @@ export function DashboardPage() {
     if (!verifySuccess) return;
     setConfirmingBookingFromSuccess(true);
     try {
-      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
-      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      // Per #11 (operator-reported 2026-08-20, tracked in
+      // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+      // #11 row`): this is the same `booking-confirmed`
+      // path as the drawer confirm + the BookingsPage
+      // post-verify modal. All three call
+      // `updateBookingStatus(..., "confirmed")` → server
+      // `handleConfirmBooking` → fires the
+      // `booking-confirmed` email. The post-#11 toast
+      // branches on the server's `emailQueued` flag so
+      // the desk sees the email state on EVERY entry
+      // point. The pre-#11 happy-path toast text is
+      // preserved when `emailQueued` is `true` (or `null`
+      // from an older server build).
+      const result = await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      if (result && result.emailQueued === false) {
+        toast.warning(
+          "Email delivery failed",
+          `${verifySuccess.booking.bookingRef} is confirmed, but the confirmation email failed. See the desk banner.`
+        );
+      } else {
+        toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      }
     } catch (err: any) {
       toast.error("Failed to confirm booking", err?.message || "Please try again.");
     } finally {
