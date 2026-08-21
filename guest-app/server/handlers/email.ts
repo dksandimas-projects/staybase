@@ -14,7 +14,7 @@ import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn
 // `getTomorrowConfirmedBookings` (below) uses the shared
 // helper to anchor "today" in the property's timezone, then
 // adds 1 day for the "tomorrow at 00:00 local" range.
-import { getManilaDateInfo } from "@spark-inn/shared";
+import { writeNotification } from "../lib/notifications";
 
 type EmailAction =
   | "booking-submitted"
@@ -2350,6 +2350,24 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
       });
 
       await sendEarlyCheckinRequestTrigger(booking, request);
+      // Per EC-01 (2026-08-21): fan out a `notifications` doc
+      // so the staff bell + dashboard widget pick it up in
+      // addition to the email above. Mirrors the post-NC-01
+      // pattern — MUST be awaited (not `void`-ed), so Vercel
+      // cannot freeze/recycle between the email and the doc
+      // write. Title is PII-safe: bookingRef + room number
+      // only — never guestEmail. Room number is looked up from
+      // the booking's `roomNumber` field (may be `null` for
+      // confirmed-but-pre-room-assignment stays; writeNotification
+      // handles null gracefully).
+      await writeNotification({
+        type: "early-checkin-request",
+        title: `Early check-in requested — ${booking.bookingRef || "pending"}`,
+        entityType: "booking",
+        entityId: booking.id,
+        roomNumber: (booking as any).roomNumber ?? null,
+        bookingRef: booking.bookingRef ?? null
+      });
       return res.status(200).json({ success: true });
     }
 

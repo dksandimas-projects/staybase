@@ -212,9 +212,21 @@ These are documented here for awareness. Define before starting Phase 2:
 - [x] Never log PII in the request/resolve handlers (per Hard Rules)
 - [x] Existing rate limit on the email endpoint continues to cover request submission
 
+### Phase 12 addendum — persistent admin alerts + dashboard widget (decision EC-01, 2026-08-21, `feature/early-checkin-admin-alerts`)
+
+> Closes the operator-reported gap: the email-only delivery meant the request was easy to miss when the desk was busy or the tab was backgrounded. Now staff see the request as soon as it lands — in the bell badge on every page + a dedicated dashboard widget with one-click Approve / Decline.
+
+- [x] Server: `/api/email?action=early-checkin-request` additionally writes a `notifications` doc (`type: "early-checkin-request"`, `entityType: "booking"`, `entityId: booking.id`) **awaited** in-line (per NC-01 post-ship review — not `void`-ed). Title is PII-safe: `Early check-in requested — ${bookingRef}` only. Existing `sendEarlyCheckinRequestTrigger` email is unchanged and remains the primary delivery channel.
+- [x] Shared: `NotificationType` union extended with `"early-checkin-request"`. `NotificationBell` `NOTIFICATION_TYPE_META` gains the entry — `CalendarClock` icon, `bg-amber-50` palette. Bell deep-link routes to `/dashboard?focus=early-checkin&bookingId=…` (consumed once + stripped from URL bar so reload doesn't re-trigger).
+- [x] Admin: new "Early check-in requests" card on `DashboardPage.tsx`, sibling to the pending-payments card. One row per `earlyCheckIn.status === "requested"` booking; hidden when no requests are pending. **Approve** + **Decline** per row; Decline uses shared `ConfirmForm` with required reason. Reuses existing `/api/bookings/early-checkin-resolve` — **no new Vercel function**.
+- [x] Sound: distinct synthesized waveform in `AdminContext.playSynthNotification` — two short ascending triangle tones (523.25 / 698.46 Hz, 180 ms apart). Respects existing mute (`soundsEnabled` / per-staff `localStorage`, Decision #97).
+- [x] Tests: `admin-app/src/__tests__/dashboard-early-checkin.test.ts` adds 10 source-text pins (shared type extension, awaited server write, bell entry + deep-link routing, dashboard derivation + `resolveEarlyCheckin` wiring + Approve/Decline buttons + `ConfirmForm` usage, regression sanity). `tsc -p admin-app` + `tsc -p api` both clean. `admin-app` 1581/1581 + `shared` 569/569 green; pre-existing `test-runs-staging-refresh` + `audit-guest-sev2-2026-07-07` failures present on `dev` HEAD before this PR.
+- [x] MD sync: `plan/docs/DECISIONS-FEATURES.md` entry `EC-01`.
+
 ### Out of scope
 
 - The dormant `isEarlyCheckInRequest` intercom-message flag stays dormant — intercom delivery remains deferred per `plan/features/INTERCOM-INBOX.md §Preserve early check-in request metadata`. This workflow is email + booking-document only.
+- Browser push / Web Notifications API (system-level toasts when the tab is closed) — needs Firebase Cloud Messaging, out of stack per `NOTIFICATION-CENTER.md §Out of scope`.
 
 ### Manual QA (when built)
 

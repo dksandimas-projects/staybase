@@ -890,7 +890,7 @@ export interface AdminContextType {
   unreadIntercomCount: number;
   soundsEnabled: boolean;
   setSoundsEnabled: (enabled: boolean) => void;
-  playSynthNotification: (type: "booking" | "payment" | "message" | "arrival" | "departure") => void;
+  playSynthNotification: (type: "booking" | "payment" | "message" | "arrival" | "departure" | "early-checkin-request") => void;
 
   // Notification Center (Phase 12 — decision #120)
   notifications: Notification[];
@@ -3326,7 +3326,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     };
   }, []);
 
-  const playSynthNotification = useCallback((type: "booking" | "payment" | "message" | "arrival" | "departure") => {
+  const playSynthNotification = useCallback((type: "booking" | "payment" | "message" | "arrival" | "departure" | "early-checkin-request") => {
     if (!soundsEnabledRef.current) return;
     // Bail before touching the AudioContext. The gesture handler above is
     // the only place that constructs it — if the staff signed in via deep
@@ -3418,6 +3418,29 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           gain.connect(ctx.destination);
           osc.start(now + index * 0.1);
           osc.stop(now + index * 0.1 + 0.25);
+        });
+        // Per EC-01 (2026-08-21): the Spark Rewards
+        // early-check-in waveform. Two soft ascending
+        // sine tones with a short pause — reads as
+        // "time-sensitive, awaiting your call" and is
+        // distinct from `arrival` (no pause, higher
+        // pitch pair) and `booking` (triangle wave,
+        // longer arpeggio). Triangle base distinguishes
+        // it from the message chime too.
+      } else if (type === "early-checkin-request") {
+        const notes = [523.25, 698.46];
+        notes.forEach((freq, index) => {
+          const start = now + index * 0.18;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0.09, start);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + 0.22);
         });
       }
     } catch (e) {

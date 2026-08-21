@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { collection, doc } from "firebase/firestore";
 import { getManilaDateInfo, type DiscountType } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
@@ -18,9 +18,10 @@ import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
+import { ConfirmForm } from "../components/ConfirmForm";
 import { FailedEmailsBanner } from "../components/FailedEmailsBanner";
 import { useToast } from "../components/Toast";
-import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
+import { BedDouble, Building2, CalendarDays, CalendarClock, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -147,11 +148,65 @@ type PendingPaymentItem = {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, reservations, reservationPaidAmount } = useAdmin();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, resolveEarlyCheckin, reservations, reservationPaidAmount } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
   const [corporateHelpOpen, setCorporateHelpOpen] = useState(false);
+
+  // Per EC-01 (2026-08-21): the early-check-in approval
+  // widget. When the bell panel deep-links to
+  // `/dashboard?focus=early-checkin&bookingId=...`, this ref
+  // scrolls + briefly highlights the matching row so staff
+  // know which one the alert was about. Cleared after 4s.
+  // The `bookingId` query param is consumed once and removed
+  // from the URL to keep the address bar clean on reload.
+  const focusedEarlyCheckinRowRef = useRef<HTMLDivElement | null>(null);
+  const [focusedEarlyCheckinBookingId, setFocusedEarlyCheckinBookingId] = useState<string | null>(null);
+  useEffect(() => {
+    const focusParam = searchParams.get("focus");
+    const bookingIdParam = searchParams.get("bookingId");
+    if (focusParam !== "early-checkin" || !bookingIdParam) return;
+    setFocusedEarlyCheckinBookingId(bookingIdParam);
+    // Strip the params after capture so reload doesn't re-trigger.
+    const next = new URLSearchParams(searchParams);
+    next.delete("focus");
+    next.delete("bookingId");
+    setSearchParams(next, { replace: true });
+    // Scroll + flash highlight after the row mounts.
+    const t = setTimeout(() => {
+      focusedEarlyCheckinRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+    const clear = setTimeout(() => setFocusedEarlyCheckinBookingId(null), 4000);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(clear);
+    };
+  }, [searchParams, setSearchParams]);
+
+  // Per EC-01 (2026-08-21): list every booking that has a
+  // Spark Rewards early check-in request still waiting for
+  // staff action. Filter is derived from the existing
+  // bookings snapshot (no second listener). Sort: oldest
+  // requested first — these are the ones staff should clear
+  // first so no one waits.
+  const pendingEarlyCheckIns = useMemo(() => {
+    return bookings
+      .filter((b) => b.earlyCheckIn?.status === "requested")
+      .slice()
+      .sort((a, b) => {
+        const aT = a.earlyCheckIn?.requestedAt ? new Date(a.earlyCheckIn.requestedAt).getTime() : 0;
+        const bT = b.earlyCheckIn?.requestedAt ? new Date(b.earlyCheckIn.requestedAt).getTime() : 0;
+        return aT - bT;
+      });
+  }, [bookings]);
+
+  // Decline confirmation state — mirrors the
+  // reject-payment card's `rejectScope` pattern. When set, the
+  // ConfirmForm opens with a required reason.
+  const [declineEarlyCheckinBooking, setDeclineEarlyCheckinBooking] = useState<Booking | null>(null);
+  const [resolveEarlyCheckinBusy, setResolveEarlyCheckinBusy] = useState<string | null>(null);
 
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15). The pending-payment
@@ -1109,6 +1164,137 @@ export function DashboardPage() {
               )}
             </div>
           </div>
+
+          {/* Per EC-01 (2026-08-21): the Spark Rewards early
+              check-in approval widget. Sits beside (and styled
+              like) the pending-payments card — same warm
+              attention treatment, same row pattern. Hidden when
+              no requests are pending so the dashboard does not
+              show an empty alert (per DASHBOARD-OVERVIEW.md §Edge
+              Cases). One row per booking with
+              `earlyCheckIn.status === "requested"`; Approve and
+              Decline actions call the existing
+              `AdminContext.resolveEarlyCheckin` action (no new
+              API route, stays under the Vercel 12-function cap). */}
+          {pendingEarlyCheckIns.length > 0 && (
+            <div className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100" data-testid="early-checkin-widget">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
+                  <CalendarClock size={18} className="text-amber-700" />
+                  early check-in requests
+                </h2>
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                  {pendingEarlyCheckIns.length} pending
+                </span>
+              </div>
+              <div className="space-y-3">
+                {pendingEarlyCheckIns.map((b) => {
+                  const isFocused = b.id === focusedEarlyCheckinBookingId;
+                  const requestedTime = b.earlyCheckIn?.requestedTime || "—";
+                  const notes = b.earlyCheckIn?.notes?.trim();
+                  const isBusy = resolveEarlyCheckinBusy === b.id;
+                  return (
+                    <div
+                      key={b.id}
+                      ref={isFocused ? focusedEarlyCheckinRowRef : undefined}
+                      className={`grid gap-3 rounded-lg border p-3 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center ${isFocused ? "border-primary bg-primary/5 ring-2 ring-primary/30" : "border-amber-200 bg-white/85"}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-bold text-gray-900">{b.bookingRef || b.id}</p>
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800">
+                            early check-in requested
+                          </span>
+                          {b.roomNumber && (
+                            <span className="inline-flex items-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-700">
+                              Room {b.roomNumber}
+                            </span>
+                          )}
+                        </div>
+                        <p className="truncate text-xs text-gray-600">
+                          {b.guestName} · requested {requestedTime}
+                          {b.checkIn ? ` · check-in ${b.checkIn}` : ""}
+                        </p>
+                        {notes && (
+                          <p className="mt-0.5 text-[11px] italic text-gray-500">
+                            "{notes}"
+                          </p>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setDeclineEarlyCheckinBooking(b)}
+                          disabled={isBusy}
+                          className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Decline the early check-in request"
+                          data-testid="early-checkin-decline"
+                        >
+                          <XCircle size={14} />
+                          Decline
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setResolveEarlyCheckinBusy(b.id);
+                            const result = await resolveEarlyCheckin(b.id, "approved");
+                            setResolveEarlyCheckinBusy(null);
+                            if (result?.success) {
+                              toast.success("Early check-in approved", `Notified ${b.guestName}.`);
+                            } else {
+                              toast.error("Could not approve", result?.error || "Try again.");
+                            }
+                          }}
+                          disabled={isBusy}
+                          className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary sm:col-auto"
+                          title="Approve the early check-in request"
+                          data-testid="early-checkin-approve"
+                        >
+                          <Check size={14} />
+                          Approve
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Per EC-01 (2026-08-21): inline ConfirmForm for
+              the Decline flow. We render it always — but
+              inside a guard that returns `null` when the
+              parent state is closed — so the ConfirmForm
+              component's internal `useState` for the reason
+              textarea is preserved across open/close cycles
+              (avoids the user losing what they typed on
+              accidental dismiss). The reason is passed
+              through to `resolveEarlyCheckin(..., "declined",
+              reason)` which the server already wires to the
+              guest decline email (per the Phase 12 spec). */}
+          {declineEarlyCheckinBooking && (
+            <ConfirmForm
+              title="Decline early check-in"
+              message={`Decline ${declineEarlyCheckinBooking.guestName}'s early check-in request for ${declineEarlyCheckinBooking.bookingRef || "this booking"}? The guest will receive an email with your reason.`}
+              confirmLabel="Decline request"
+              variant="danger"
+              reasonRequired
+              reasonLabel="Reason for declining (sent to guest)"
+              onCancel={() => setDeclineEarlyCheckinBooking(null)}
+              onConfirm={async (reason) => {
+                const target = declineEarlyCheckinBooking;
+                setResolveEarlyCheckinBusy(target.id);
+                setDeclineEarlyCheckinBooking(null);
+                const result = await resolveEarlyCheckin(target.id, "declined", reason);
+                setResolveEarlyCheckinBusy(null);
+                if (result?.success) {
+                  toast.success("Early check-in declined", `Notified ${target.guestName}.`);
+                } else {
+                  toast.error("Could not decline", result?.error || "Try again.");
+                }
+              }}
+            />
+          )}
 
           {(overdueCheckouts.length > 0 || newCorporateInquiries.length > 0) && (
             <div className="space-y-5">

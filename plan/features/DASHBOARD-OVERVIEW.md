@@ -30,6 +30,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [x] Room status grid — one cell per room (all active rooms), shows room number, type, booking status badge, housekeeping status badge
 - [x] Housekeeping status toggle per room — Clean / Dirty / In Progress — tap/click cycles through states, instant Firestore update
 - [x] Pending payment alerts section — list of bookings with status `"payment-uploaded"`, guest name, room, date submitted, Confirm Payment CTA; warm attention styling when non-empty
+- [x] **Early check-in requests section** (EC-01, 2026-08-21) — list of bookings with `earlyCheckIn.status === "requested"`, guest name, requested time, optional guest notes, room number, **Approve** + **Decline** buttons per row; Decline opens the shared `ConfirmForm` with a required reason; hidden entirely when no requests are pending (no empty alert per §Edge Cases); sibling to + styled like the pending-payments card
 - [x] New corporate inquiries section — shown only when `corporateInquiries` has `status: "new"` rows; each row shows company, contact, requested room count, opens `/corporate?inquiryId=...`, and includes a tooltip explaining that only fresh/new leads appear here
 - [x] Today's check-ins list — bookings with `checkIn = today` and status `"confirmed"`; compact muted row when empty
 - [x] Today's check-outs list — bookings with `checkOut = today` and status `"checked-in"`; compact muted row when empty
@@ -44,7 +45,8 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [x] Stat cards computed from Firestore queries — occupancy from room statuses; revenue from `payment-confirmed`, `confirmed`, `checked-in`, and `checked-out` bookings checking in this month, matching the Reports revenue basis
 - [x] Room grid: `onSnapshot` on `rooms` collection — all rooms always shown regardless of status
 - [x] Housekeeping toggle: `updateDoc` on `rooms/{roomId}` — update `housekeepingStatus` field
-- [x] Pending payments: query `bookings` where `status == "payment-uploaded"`, ordered by `createdAt`
+- [x] **Pending early check-ins**: query `bookings` where `earlyCheckIn.status === "requested"` — derived from the existing `bookings` `onSnapshot`, no second listener; sorted oldest-requested first so staff clear the longest-waiting requests first
+- [x] **Early check-in Approve / Decline actions** (EC-01): call the existing `AdminContext.resolveEarlyCheckin(bookingId, "approved" | "declined", staffNote?)` which hits the existing `POST /api/bookings/early-checkin-resolve` route — no new API surface, no new Vercel function
 - [x] New corporate inquiries: use the existing `AdminContext.corporateInquiries` snapshot and filter `status == "new"` for dashboard action cards
 - [x] Today's check-ins: query `bookings` where `checkIn` is today AND `status == "confirmed"`
 - [x] Today's check-outs: query `bookings` where `checkOut` is today AND `status == "checked-in"`
