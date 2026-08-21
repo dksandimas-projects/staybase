@@ -1411,7 +1411,25 @@ export function DashboardPage() {
               <span className="text-xs font-bold text-gray-400">{todaysArrivals.length}</span>
             </div>
             <div className="space-y-2">
-              {todaysArrivals.length > 0 ? todaysArrivals.map((booking) => (
+              {todaysArrivals.length > 0 ? todaysArrivals.map((booking) => {
+                // Per feat/early-checkin-arrivals-badge (2026-08-21):
+                // the approved-early-check-in badge for today's
+                // arrivals. Gated on `earlyCheckIn.status === "approved"`
+                // so declined / pending requests don't surface
+                // here (the pending widget at the top of the
+                // dashboard handles decision-making; declined
+                // requests live in the drawer's audit trail).
+                // The badge text follows the existing
+                // `confirmedTime || requestedTime` precedence
+                // already used in the guest email helper +
+                // StaysPage + RewardsPage — when staff override
+                // the guest's requested time, the badge
+                // reflects the staff override (what the front
+                // desk committed to).
+                const earlyCheckIn = booking.earlyCheckIn;
+                const earlyCheckInTime = earlyCheckIn?.confirmedTime || earlyCheckIn?.requestedTime;
+                const hasApprovedEarlyCheckIn = earlyCheckIn?.status === "approved" && Boolean(earlyCheckInTime);
+                return (
                 <button
                   key={booking.id}
                   type="button"
@@ -1420,11 +1438,24 @@ export function DashboardPage() {
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
-                    <span className="block text-[10px] font-semibold text-gray-500">Room {booking.roomNumber || "TBD"} · {booking.bookingRef}</span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold text-gray-500">
+                      <span>Room {booking.roomNumber || "TBD"} · {booking.bookingRef}</span>
+                      {hasApprovedEarlyCheckIn && (
+                        <span
+                          data-testid="early-checkin-arrival-badge"
+                          title={`Early check-in approved for ${earlyCheckInTime}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                        >
+                          <Check size={10} aria-hidden="true" />
+                          early {earlyCheckInTime}
+                        </span>
+                      )}
+                    </span>
                   </span>
                   <ArrowRight size={14} className="shrink-0 text-gray-400" />
                 </button>
-              )) : (
+                );
+              }) : (
                 <p className="text-xs font-semibold text-gray-500">None scheduled today.</p>
               )}
             </div>

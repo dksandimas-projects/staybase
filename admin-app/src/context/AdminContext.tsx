@@ -377,6 +377,12 @@ export interface Booking {
   testRunId?: string | null;
   breakfastSelections?: Record<string, string>;
   breakfastServed?: Record<string, boolean>;
+  // Per EC-02 (2026-08-21): `confirmedTime` is the staff-approved
+  // override of the guest's `requestedTime` — when staff
+  // approves the request at the guest's original time, the
+  // server falls back to `requestedTime` so this field is
+  // null in that case. See `handleResolveEarlyCheckin` in
+  // `guest-app/server/handlers/bookings.ts`.
   earlyCheckIn?: {
     status: "requested" | "approved" | "declined";
     requestedTime: string;
@@ -385,6 +391,7 @@ export interface Booking {
     resolvedAt: string | null;
     resolvedBy: string | null;
     staffNote: string | null;
+    confirmedTime?: string | null;
   } | null;
 }
 
