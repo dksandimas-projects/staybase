@@ -1633,7 +1633,14 @@ function earlyCheckinRequestEmail(booking: any, request: any) {
     preheader: `Early check-in request for ${booking.bookingRef} from ${booking.guestName}.`,
     eyebrow: "Early check-in request",
     title: "A member has requested early check-in",
-    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk — subject to availability.`,
+    // Per EC-02 (2026-08-21): the intro now names the
+    // approval loop explicitly so the receiving operator knows
+    // they need to either approve or decline from the booking
+    // drawer / dashboard widget — and that the guest will
+    // receive a confirmation email regardless of the outcome.
+    // The strong disclaimer copy is the same wording used on
+    // the guest-facing button on Step 4 of the booking flow.
+    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk — subject to availability, not guaranteed, and requires your approval. The guest will receive an email once you approve or decline.`,
     body: `
       ${card("Booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
         ${row("Booking ref", booking.bookingRef)}
@@ -2292,6 +2299,38 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
     }
 
     if (action === "early-checkin-request") {
+      // Per EC-02 (2026-08-21): defense-in-depth gate on the
+      // admin Rewards Settings toggle. The guest-side UI hides
+      // the button when `earlyCheckInEnabled === false`, but a
+      // member could craft a direct API call regardless. Re-read
+      // `settings/rewardsConfig` on every request (not memoized
+      // — the admin toggle can flip at any time) and reject
+      // with 403 if disabled. Mirrors the existing
+      // `memberDiscountEnabled` / `pointsEnabled` reads at
+      // `guest-app/server/handlers/bookings.ts:2582` /
+      // `:11102`. The flag defaults to `true` (the pre-EC-02
+      // behavior) when absent — non-breaking for deployments
+      // that haven't explicitly turned the perk off.
+      try {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsSnap = await rewardsRef.get();
+        const rewardsCfg = rewardsSnap.exists ? rewardsSnap.data() : null;
+        if (rewardsCfg && rewardsCfg.earlyCheckInEnabled === false) {
+          return res.status(403).json({
+            success: false,
+            error: "Early check-in requests are currently disabled by the hotel."
+          });
+        }
+      } catch (gateErr) {
+        // Per the existing pattern at bookings.ts:2582-2586
+        // (the catch is logged + the perk proceeds with the
+        // default-true assumption so a transient read failure
+        // doesn't accidentally lock members out). The
+        // console.error matches the admin-notification write
+        // pattern at lib/notifications.ts:74.
+        console.error("[early-checkin] Failed to read rewardsConfig gate:", gateErr);
+      }
+
       const hasStaff = Boolean((req as any).staff?.success);
       const booking = await findBooking(req, { requireGuestMatch: !hasStaff });
       if (!booking) {

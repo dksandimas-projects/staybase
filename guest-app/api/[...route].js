@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.286.3";
+    VERSION2 = "0.287.1";
   }
 });
 
@@ -225109,7 +225109,14 @@ function earlyCheckinRequestEmail(booking, request) {
     preheader: `Early check-in request for ${booking.bookingRef} from ${booking.guestName}.`,
     eyebrow: "Early check-in request",
     title: "A member has requested early check-in",
-    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk \u2014 subject to availability.`,
+    // Per EC-02 (2026-08-21): the intro now names the
+    // approval loop explicitly so the receiving operator knows
+    // they need to either approve or decline from the booking
+    // drawer / dashboard widget — and that the guest will
+    // receive a confirmation email regardless of the outcome.
+    // The strong disclaimer copy is the same wording used on
+    // the guest-facing button on Step 4 of the booking flow.
+    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk \u2014 subject to availability, not guaranteed, and requires your approval. The guest will receive an email once you approve or decline.`,
     body: `
       ${card("Booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
         ${row("Booking ref", booking.bookingRef)}
@@ -225639,6 +225646,19 @@ async function handleEmailTrigger(req, res, action) {
       return res.status(200).json({ success: true });
     }
     if (action === "early-checkin-request") {
+      try {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsSnap = await rewardsRef.get();
+        const rewardsCfg = rewardsSnap.exists ? rewardsSnap.data() : null;
+        if (rewardsCfg && rewardsCfg.earlyCheckInEnabled === false) {
+          return res.status(403).json({
+            success: false,
+            error: "Early check-in requests are currently disabled by the hotel."
+          });
+        }
+      } catch (gateErr) {
+        console.error("[early-checkin] Failed to read rewardsConfig gate:", gateErr);
+      }
       const hasStaff2 = Boolean(req.staff?.success);
       const booking2 = await findBooking(req, { requireGuestMatch: !hasStaff2 });
       if (!booking2) {
