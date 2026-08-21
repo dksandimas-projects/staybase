@@ -34,6 +34,13 @@ interface RewardsConfig {
   pointsPerHundred: number;
   memberDiscountEnabled: boolean;
   memberDiscountPct: number;
+  // Per EC-02 (2026-08-21): the admin toggle that hides
+  // the "Request Early Check-In" button on both the
+  // RewardsPage and the booking confirmation flow. The
+  // default value of `true` in DEFAULT_REWARDS_CONFIG means
+  // pre-EC-02 deployments keep the perk on until the
+  // admin explicitly turns it off via Settings → Rewards.
+  earlyCheckInEnabled: boolean;
 }
 
 const DEFAULT_REWARDS_CONFIG: RewardsConfig = {
@@ -42,7 +49,8 @@ const DEFAULT_REWARDS_CONFIG: RewardsConfig = {
   pointsPerBooking: 50,
   pointsPerHundred: 10,
   memberDiscountEnabled: true,
-  memberDiscountPct: 10
+  memberDiscountPct: 10,
+  earlyCheckInEnabled: true
 };
 
 function toDateStr(value: any): string {
@@ -91,7 +99,12 @@ export function RewardsPage() {
             pointsPerBooking: Number(data.pointsPerBooking ?? DEFAULT_REWARDS_CONFIG.pointsPerBooking),
             pointsPerHundred: Number(data.pointsPerHundred ?? DEFAULT_REWARDS_CONFIG.pointsPerHundred),
             memberDiscountEnabled: data.memberDiscountEnabled !== false,
-            memberDiscountPct: Number(data.memberDiscountPct ?? DEFAULT_REWARDS_CONFIG.memberDiscountPct)
+            memberDiscountPct: Number(data.memberDiscountPct ?? DEFAULT_REWARDS_CONFIG.memberDiscountPct),
+            // Per EC-02 (2026-08-21): default to true when
+            // absent so pre-EC-02 deployments keep the perk
+            // on. The admin Settings → Rewards toggle is the
+            // single source of truth for hiding the button.
+            earlyCheckInEnabled: data.earlyCheckInEnabled !== false
           });
         }
       } catch (err) {
@@ -299,13 +312,25 @@ export function RewardsPage() {
               Surface the banner instead of opening the modal so
               the user gets a clear next step.
             */}
+            {/*
+              Per EC-02 (2026-08-21): the existing "Request
+              Early Check-In" button on the RewardsPage is
+              now gated on the admin toggle
+              `settings/rewardsConfig.earlyCheckInEnabled`.
+              When off, the entire button disappears — not
+              just disabled — so the perk is not advertised
+              to members at all. The toggle defaults to
+              enabled (pre-EC-02 behavior) so existing
+              deployments keep the perk on until the admin
+              explicitly turns it off.
+            */}
             {user?.emailVerified === false ? (
               <EmailVerifyBanner reason="early-checkin" />
-            ) : (
+            ) : rewardsConfig.earlyCheckInEnabled !== false ? (
               <GhostButton onClick={() => setShowEarlyCheckIn(true)} className="text-[10px]">
                 Request Early Check-In
               </GhostButton>
-            )}
+            ) : null}
           </div>
         </div>
 

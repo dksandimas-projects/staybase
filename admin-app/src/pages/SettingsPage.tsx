@@ -1864,6 +1864,18 @@ export function SettingsPage() {
 
 
   // 3. Rewards Config states
+  // Per EC-02 (2026-08-21): the `earlyCheckInEnabled` toggle
+  // joins the existing `pointsEnabled` + `memberDiscountEnabled`
+  // toggles in the Rewards tab. When off, the booking flow
+  // hides the "Request Early Check-In" button on Step 4 (the
+  // confirmation page) AND the guest-app server rejects the
+  // write with 403 (defense-in-depth — never trust the
+  // client per Hard Rule #1). The toggle defaults to true so
+  // existing deployments keep the perk on until the admin
+  // explicitly turns it off.
+  const [earlyCheckInEnabled, setEarlyCheckInEnabled] = useState<boolean>(
+    rewardsConfig.earlyCheckInEnabled !== false
+  );
   const [pointsEnabled, setPointsEnabled] = useState(rewardsConfig.pointsEnabled);
   const [earningMode, setEarningMode] = useState<"per-booking" | "per-spend">(rewardsConfig.earningMode);
   const [pointsPerBooking, setPointsPerBooking] = useState(String(rewardsConfig.pointsPerBooking));
@@ -2070,6 +2082,12 @@ export function SettingsPage() {
     setPointsRedemptionRate(String(rewardsConfig.pointsRedemptionRate ?? 100));
     setMemberDiscountEnabled(rewardsConfig.memberDiscountEnabled !== false);
     setMemberDiscountPct(String(rewardsConfig.memberDiscountPct ?? 10));
+    // Per EC-02 (2026-08-21): rehydrate the early-check-in
+    // toggle alongside the other Rewards-tab fields when the
+    // `useEffect` fires after a snapshot update. Default to
+    // true when absent so pre-EC-02 deployments keep the perk
+    // on until the admin explicitly turns it off.
+    setEarlyCheckInEnabled(rewardsConfig.earlyCheckInEnabled !== false);
     setHomepageHeroEyebrow(websiteContent.homepage?.heroEyebrow || "");
     setHomepageHeroHeading(websiteContent.homepage?.heroHeading || "");
     setHomepageHeroSubtext(websiteContent.homepage?.heroSubtext || "");
@@ -2684,6 +2702,13 @@ export function SettingsPage() {
 
   const handleSaveRewards = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Per EC-02 (2026-08-21): the early-check-in toggle rides
+    // on the same `updateSettings("rewardsConfig", {...})`
+    // write as the other Rewards-tab fields. One save
+    // persists the whole tab so the admin never sees a
+    // partial update. The flag defaults to true server-side
+    // (via `rewardsConfig.earlyCheckInEnabled !== false`) so a
+    // missing field on the legacy doc is treated as enabled.
     await runSettingsSave("rewards", "Rewards settings saved", () => updateSettings("rewardsConfig", {
       pointsEnabled,
       earningMode,
@@ -2691,7 +2716,8 @@ export function SettingsPage() {
       pointsPerHundred: parseFloat(pointsPerHundred) || 0,
       pointsRedemptionRate: parseFloat(pointsRedemptionRate) || 0,
       memberDiscountEnabled,
-      memberDiscountPct: parseFloat(memberDiscountPct) || 0
+      memberDiscountPct: parseFloat(memberDiscountPct) || 0,
+      earlyCheckInEnabled
     }));
   };
 
@@ -4403,6 +4429,35 @@ export function SettingsPage() {
                     }`} />
                   </button>
                   Enable Member Base Room Discount
+                </label>
+
+                {/* Per EC-02 (2026-08-21): the early-check-in
+                    perk toggle. Sits alongside the existing
+                    points + member-discount toggles so the
+                    admin sees all loyalty perks in one block.
+                    The label copy spells out the side-effect
+                    (hides the guest button + rejects the API)
+                    so the admin understands the toggle's scope
+                    before flipping it. */}
+                <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setEarlyCheckInEnabled(!earlyCheckInEnabled)}
+                    aria-label="Toggle Spark Rewards early check-in requests"
+                    className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                      earlyCheckInEnabled ? "bg-primary" : "bg-gray-200"
+                    }`}
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      earlyCheckInEnabled ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  <span>
+                    Allow Spark Rewards Early Check-In Requests
+                    <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
+                      When off, the button disappears from the booking confirmation page and the server rejects new requests with 403. Pending + historical requests on existing bookings stay visible until resolved.
+                    </span>
+                  </span>
                 </label>
               </div>
 
