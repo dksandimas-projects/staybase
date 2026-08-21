@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.285.0";
+    VERSION2 = "0.286.0";
   }
 });
 
@@ -229325,6 +229325,19 @@ async function handleCreateBooking(req, res) {
         corporateCode: corporateDetails2.corporateCode,
         companyName: corporateDetails2.companyName,
         specialRequests: guestDetails.requests || "",
+        // Per the intercom-verify-guest permanent fix
+        // (2026-08-21): persist the structured `guestDetails`
+        // sub-object so the intercom verifier can match against
+        // the real `lastName`. The top-level `guestName`
+        // (concatenated `${first} ${last}`) remains for every
+        // existing reader — drawer, table, PDF, email — and is
+        // no longer the source of truth for verification.
+        guestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
         // Per PEX-01 (2026-08-01, per decision #147): the
         // snapshotted deadline. Computed from the admin's
@@ -230522,6 +230535,17 @@ async function handleCreateWalkin(req, res) {
         corporateCode: "",
         companyName: "",
         specialRequests: guestDetails.requests || "",
+        // Per the intercom-verify-guest permanent fix
+        // (2026-08-21): walk-in bookings now persist the same
+        // structured `guestDetails` as the online flow so the
+        // intercom verifier has a real `lastName` to match
+        // against — see the matching block on the online path.
+        guestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         status: status || "confirmed",
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): walkin
@@ -235195,7 +235219,16 @@ var inquirySchema = external_exports.object({
   phone: external_exports.string().trim().min(6).max(40),
   numRooms: external_exports.coerce.number().int().min(1).max(500),
   preferredDates: external_exports.union([InquiryPreferredDatesSchema, external_exports.string().trim().min(1).max(160)]),
-  specialRequirements: external_exports.string().trim().max(2e3).optional().default("")
+  specialRequirements: external_exports.string().trim().max(2e3).optional().default(""),
+  // Per the intercom-verify-guest permanent fix (2026-08-21):
+  // when the inquiry form knows the contact's first + last
+  // names as separate fields, persist them structured so the
+  // converted booking can carry a structured `guestDetails`
+  // sub-object (no more split-on-whitespace guessing).
+  // Optional for backwards-compat with older inquiry forms
+  // that only send `contactPerson`.
+  firstName: external_exports.string().trim().min(1).max(80).optional(),
+  lastName: external_exports.string().trim().min(1).max(80).optional()
 }).strict();
 var convertInquirySchema = external_exports.object({
   inquiryId: external_exports.string().trim().min(1).max(160),
@@ -235431,9 +235464,27 @@ async function handleConvertInquiryToBooking(req, res) {
         throw new Error("The converted booking total is invalid.");
       }
       const contactName = String(inquiryData.contactPerson || "").trim();
-      const [firstName, ...rest] = contactName.split(/\s+/);
-      const lastName = rest.length > 0 ? rest.join(" ") : "\u2014";
-      const guestName2 = `${firstName || "Corporate"} ${lastName}`.trim();
+      const storedFirstName = String(inquiryData.firstName || "").trim();
+      const storedLastName = String(inquiryData.lastName || "").trim();
+      let firstName;
+      let lastName;
+      if (storedFirstName && storedLastName) {
+        firstName = storedFirstName;
+        lastName = storedLastName;
+      } else if (storedFirstName) {
+        firstName = storedFirstName;
+        const rest = contactName.split(/\s+/).filter(Boolean);
+        lastName = rest.length > 1 ? rest.slice(1).join(" ") : rest[0] || "\u2014";
+      } else if (storedLastName) {
+        lastName = storedLastName;
+        const rest = contactName.split(/\s+/).filter(Boolean);
+        firstName = rest[0] || "Corporate";
+      } else {
+        const [first, ...rest] = contactName.split(/\s+/);
+        firstName = first || "Corporate";
+        lastName = rest.length > 0 ? rest.join(" ") : "\u2014";
+      }
+      const guestName2 = `${firstName} ${lastName}`.trim();
       const guestEmail = String(inquiryData.email || "").trim().toLowerCase();
       const guestPhone = String(inquiryData.phone || "").trim();
       const companyName = String(inquiryData.companyName || "").trim();
@@ -235445,6 +235496,15 @@ async function handleConvertInquiryToBooking(req, res) {
         guestName: guestName2,
         guestEmail,
         guestPhone,
+        // Per the intercom-verify-guest permanent fix
+        // (2026-08-21): persist structured guestDetails so the
+        // verifier matches against the real last name.
+        guestDetails: {
+          firstName,
+          lastName,
+          email: guestEmail,
+          phone: guestPhone
+        },
         numGuests: guests,
         checkIn: checkInDate,
         checkOut: checkOutDate,
@@ -237616,9 +237676,7 @@ function normalizeName(value) {
 function getBookingLastName(data) {
   const guestDetails = data.guestDetails && typeof data.guestDetails === "object" ? data.guestDetails : {};
   const explicitLastName = guestDetails.lastName || data.guestLastName || data.lastName;
-  if (explicitLastName) return normalizeName(explicitLastName);
-  const nameParts = String(data.guestName || "").trim().split(/\s+/).filter(Boolean);
-  return normalizeName(nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || "");
+  return explicitLastName ? normalizeName(explicitLastName) : "";
 }
 function getPublicBookingSummary(docSnap) {
   const data = docSnap.data();

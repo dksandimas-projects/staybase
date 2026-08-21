@@ -110,12 +110,21 @@ describe("Phase 11.6 Batch 9 — convert corporate inquiry to booking (audit S4.
     });
 
     it("handler pre-fills guest info from the inquiry contactPerson / email / phone", () => {
-      // The contactPerson field is split into firstName / lastName.
-      expect(handlerSrc).toMatch(
-        /const\s+\[firstName\s*,\s*\.\.\.rest\]\s*=\s*contactName\.split\(/
-      );
+      // Per the intercom-verify-guest permanent fix (2026-08-21):
+      // structured `firstName` / `lastName` on the inquiry are
+      // the source of truth when present. The split-on-whitespace
+      // fallback is preserved only for legacy inquiries that
+      // don't carry the structured fields. The converted booking
+      // ALWAYS persists a structured `guestDetails` sub-object so
+      // the intercom verifier has a real `lastName` to match.
+      expect(handlerSrc).toMatch(/storedFirstName\s*=\s*String\(inquiryData\.firstName/);
+      expect(handlerSrc).toMatch(/storedLastName\s*=\s*String\(inquiryData\.lastName/);
+      // Email/phone still come straight from the inquiry.
       expect(handlerSrc).toMatch(/guestEmail\s*=\s*String\(inquiryData\.email/);
       expect(handlerSrc).toMatch(/guestPhone\s*=\s*String\(inquiryData\.phone/);
+      // Structured `guestDetails` is persisted on the newBooking
+      // doc.
+      expect(handlerSrc).toMatch(/guestDetails:\s*\{[\s\S]*?firstName,[\s\S]*?lastName,/);
     });
   });
 
