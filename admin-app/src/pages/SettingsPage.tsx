@@ -24,7 +24,7 @@ import {
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
   Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw,
-  ChevronDown, ChevronUp, FlaskConical, Tag, Percent
+  ChevronDown, ChevronUp, FlaskConical, Tag, Percent, Database
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -1919,6 +1919,30 @@ export function SettingsPage() {
   const [stagingResetProjectName, setStagingResetProjectName] = useState("");
   const [showStagingResetModal, setShowStagingResetModal] = useState(false);
 
+  // Staging Refresh (ETR-R): the
+  // "Refresh Staging From Production"
+  // section. The 5-gate state for the
+  // unsanitized-diagnostic mode + the
+  // scope manifest + the preview
+  // result.
+  const [refreshMode, setRefreshMode] = useState<"sanitized-snapshot" | "config-only" | "unsanitized-diagnostic">("sanitized-snapshot");
+  const [refreshDpoApproval, setRefreshDpoApproval] = useState("");
+  const [refreshDefectReference, setRefreshDefectReference] = useState("");
+  const [refreshProjectConfirmation, setRefreshProjectConfirmation] = useState("");
+  const [refreshAcknowledged, setRefreshAcknowledged] = useState(false);
+  const [refreshScopeBookingIds, setRefreshScopeBookingIds] = useState("");
+  const [refreshScopeMemberIds, setRefreshScopeMemberIds] = useState("");
+  const [refreshTtlHours, setRefreshTtlHours] = useState(24);
+  const [refreshSensitiveFileOptIn, setRefreshSensitiveFileOptIn] = useState(false);
+  const [refreshPreview, setRefreshPreview] = useState<any>(null);
+  const [refreshSnapshotId, setRefreshSnapshotId] = useState<string | null>(null);
+  const [refreshLoading, setRefreshLoading] = useState<"preview" | "import" | "destroy" | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [showRefreshModal, setShowRefreshModal] = useState(false);
+  const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
+  const [destroyConfirmText, setDestroyConfirmText] = useState("");
+  const [refreshExportJson, setRefreshExportJson] = useState<string>("");
+
   // Breakfast item CRUD states
   const [isBreakfastItemModalOpen, setIsBreakfastItemModalOpen] = useState(false);
   const [editingSilogItem, setEditingSilogItem] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
@@ -2212,6 +2236,177 @@ export function SettingsPage() {
       toast.error("Failed to preview", err?.message || "Could not reach server.");
     } finally {
       setStagingResetLoading(false);
+    }
+  };
+
+  // Staging Refresh handlers (ETR-R).
+  // The 3-step flow: preview → import
+  // → destroy. The preview returns a
+  // snapshotId + the sanitizedExport;
+  // the import writes it to staging;
+  // the destroy reverses the import.
+  // Per the spec at
+  // `plan/features/ENVIRONMENT-TEST-RESET.md`:
+  // the sanitized mode requires no
+  // gates; the unsanitized-diagnostic
+  // mode requires 5 server-enforced
+  // gates (D01..D05) + a scope
+  // manifest (D03) + a sensitive-file
+  // opt-in (D04).
+  const handleRefreshPreview = async () => {
+    setRefreshError(null);
+    // Parse the export JSON. The
+    // operator pastes in the JSON they
+    // exported from production
+    // (via the `scripts/export-prod-data.mjs`
+    // script or equivalent).
+    let exportPayload: any;
+    try {
+      exportPayload = JSON.parse(refreshExportJson);
+    } catch (err: any) {
+      setRefreshError(`Invalid export JSON: ${err?.message || "parse failed"}`);
+      return;
+    }
+    if (!exportPayload?.export?.bookings || !exportPayload?.export?.storeOrders || !exportPayload?.export?.members) {
+      setRefreshError("Export must have `export.bookings`, `export.storeOrders`, `export.members`.");
+      return;
+    }
+    // For unsanitized mode, validate
+    // the 5 gates client-side first
+    // (so the user gets immediate
+    // feedback; the server still
+    // re-validates).
+    if (refreshMode === "unsanitized-diagnostic") {
+      if (!refreshDpoApproval) { setRefreshError("DPO approval reference is required for restricted mode."); return; }
+      if (!refreshDefectReference) { setRefreshError("Defect reference is required for restricted mode."); return; }
+      if (!refreshProjectConfirmation) { setRefreshError("Project confirmation is required for restricted mode."); return; }
+      if (!refreshAcknowledged) { setRefreshError("You must acknowledge that this is real PII."); return; }
+      const bookingIds = refreshScopeBookingIds.split(",").map(s => s.trim()).filter(Boolean);
+      const memberIds = refreshScopeMemberIds.split(",").map(s => s.trim()).filter(Boolean);
+      if (bookingIds.length === 0 && memberIds.length === 0) {
+        setRefreshError("Restricted mode requires an explicit scope (at least one bookingId or memberId).");
+        return;
+      }
+    }
+    try {
+      setRefreshLoading("preview");
+      const token = await auth.currentUser?.getIdToken(true);
+      const body: any = {
+        export: exportPayload.export,
+        options: {
+          mode: refreshMode,
+          dpoApprovalReference: refreshDpoApproval,
+          defectReference: refreshDefectReference,
+          projectConfirmation: refreshProjectConfirmation,
+          reauthenticatedAt: new Date().toISOString(),
+          acknowledgedRestrictedMode: refreshAcknowledged,
+          scopeManifest: {
+            bookingIds: refreshScopeBookingIds.split(",").map(s => s.trim()).filter(Boolean),
+            memberIds: refreshScopeMemberIds.split(",").map(s => s.trim()).filter(Boolean)
+          },
+          ttlHours: refreshTtlHours,
+          sensitiveFileOptIn: refreshSensitiveFileOptIn
+        }
+      };
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/staging-refresh-preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRefreshPreview(data.data);
+        setRefreshSnapshotId(data.data.snapshotId);
+        setShowRefreshModal(true);
+      } else {
+        if (data?.missingGates) {
+          setRefreshError(`Missing gates: ${data.missingGates.join(", ")}`);
+        } else {
+          setRefreshError(data.error || "Preview failed.");
+        }
+      }
+    } catch (err: any) {
+      setRefreshError(err?.message || "Could not reach server.");
+    } finally {
+      setRefreshLoading(null);
+    }
+  };
+
+  const handleRefreshImport = async () => {
+    if (!refreshPreview || !refreshSnapshotId) return;
+    setRefreshError(null);
+    try {
+      setRefreshLoading("import");
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/staging-refresh-import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          snapshotId: refreshSnapshotId,
+          sanitizedExport: refreshPreview.sanitizedExport
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const summary = data.data?.writeSummary;
+        const parts: string[] = [];
+        if (summary) {
+          parts.push(`${summary.bookingsWritten} bookings`);
+          parts.push(`${summary.storeOrdersWritten} store orders`);
+          parts.push(`${summary.membersWritten} members`);
+          if (summary.bookingsDropped) parts.push(`(${summary.bookingsDropped} dropped by scope)`);
+          if (summary.membersDropped) parts.push(`(${summary.membersDropped} members dropped)`);
+        }
+        toast.success("Refresh imported", parts.join(", ") || "Import complete.");
+        setShowRefreshModal(false);
+        setRefreshPreview(null);
+        setRefreshSnapshotId(null);
+      } else {
+        setRefreshError(data.error || "Import failed.");
+      }
+    } catch (err: any) {
+      setRefreshError(err?.message || "Could not reach server.");
+    } finally {
+      setRefreshLoading(null);
+    }
+  };
+
+  const handleRefreshDestroy = async () => {
+    if (!refreshSnapshotId) return;
+    setRefreshError(null);
+    try {
+      setRefreshLoading("destroy");
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/staging-refresh-destroy`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ snapshotId: refreshSnapshotId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const dd = data.data;
+        toast.success("Snapshot destroyed", `${dd.deletedBookings || 0} bookings + ${dd.deletedStoreOrders || 0} orders + ${dd.deletedMembers || 0} members removed.`);
+        setShowDestroyConfirm(false);
+        setShowRefreshModal(false);
+        setRefreshPreview(null);
+        setRefreshSnapshotId(null);
+        setDestroyConfirmText("");
+      } else {
+        setRefreshError(data.error || "Destroy failed.");
+      }
+    } catch (err: any) {
+      setRefreshError(err?.message || "Could not reach server.");
+    } finally {
+      setRefreshLoading(null);
     }
   };
 
@@ -6189,6 +6384,195 @@ export function SettingsPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Refresh Staging From Production (ETR-R) */}
+                  <div className="border-t border-blue-200 pt-6 mt-8">
+                    <div className="rounded-lg border border-blue-300 p-5 space-y-4">
+                      <div className="flex items-center gap-2.5">
+                        <RefreshCw size={16} className="text-blue-600" />
+                        <h4 className="font-bold text-blue-800">Refresh Staging From Production</h4>
+                      </div>
+                      <p className="text-blue-700 text-xs leading-relaxed">
+                        Copy production data into staging for bug reproduction or load testing.{" "}
+                        <strong className="block mt-1">This is a staging-only action.</strong>
+                        Three modes:{" "}
+                        <span className="font-mono">sanitized-snapshot</span> (PII replaced),{" "}
+                        <span className="font-mono">config-only</span> (no bookings/orders), or{" "}
+                        <span className="font-mono">unsanitized-diagnostic</span> (real PII with 5 server-enforced gates).
+                      </p>
+                      {stagingResetAvailable ? (
+                        <div className="space-y-4">
+                          {/* Mode toggle */}
+                          <div>
+                            <label className="block text-xs font-bold text-gray-900 mb-1.5">Mode</label>
+                            <div className="flex gap-2">
+                              {(["sanitized-snapshot", "config-only", "unsanitized-diagnostic"] as const).map((m) => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => setRefreshMode(m)}
+                                  className={`min-h-[36px] rounded-lg border px-3 text-[11px] font-semibold transition ${
+                                    refreshMode === m
+                                      ? "border-blue-500 bg-blue-50 text-blue-800"
+                                      : "border-gray-250 bg-white text-gray-700 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  {m}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Export JSON input */}
+                          <div>
+                            <label className="block text-xs font-bold text-gray-900 mb-1.5">
+                              Production export (JSON)
+                            </label>
+                            <p className="text-[10px] text-gray-500 mb-1.5">
+                              Paste the JSON from <code>scripts/export-prod-data.mjs</code>. Must have{" "}
+                              <code>export.bookings</code>, <code>export.storeOrders</code>,{" "}
+                              <code>export.members</code>.
+                            </p>
+                            <textarea
+                              value={refreshExportJson}
+                              onChange={(e) => setRefreshExportJson(e.target.value)}
+                              placeholder='{ "export": { "bookings": [...], "storeOrders": [...], "members": [...] } }'
+                              className="w-full h-32 rounded-lg border border-gray-200 px-3 py-2 text-[10px] font-mono focus:border-blue-400 focus:outline-none"
+                            />
+                          </div>
+
+                          {/* Restricted-mode gates (only show when unsanitized-diagnostic) */}
+                          {refreshMode === "unsanitized-diagnostic" && (
+                            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3">
+                              <p className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
+                                <Lock size={14} /> 5 server-enforced gates (all required)
+                              </p>
+                              <div>
+                                <label className="block text-[11px] font-bold text-amber-900 mb-1">DPO approval reference</label>
+                                <input
+                                  type="text"
+                                  value={refreshDpoApproval}
+                                  onChange={(e) => setRefreshDpoApproval(e.target.value)}
+                                  placeholder="DPO-2026-08-21-verbatim"
+                                  className="w-full rounded-lg border border-amber-200 px-3 py-2 text-xs focus:border-amber-400 focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-amber-900 mb-1">Defect / issue reference</label>
+                                <input
+                                  type="text"
+                                  value={refreshDefectReference}
+                                  onChange={(e) => setRefreshDefectReference(e.target.value)}
+                                  placeholder="INV-1234"
+                                  className="w-full rounded-lg border border-amber-200 px-3 py-2 text-xs focus:border-amber-400 focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-amber-900 mb-1">Project confirmation (type the staging project name)</label>
+                                <input
+                                  type="text"
+                                  value={refreshProjectConfirmation}
+                                  onChange={(e) => setRefreshProjectConfirmation(e.target.value)}
+                                  placeholder="spark-inn-staging"
+                                  className="w-full rounded-lg border border-amber-200 px-3 py-2 text-xs focus:border-amber-400 focus:outline-none font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-amber-900 mb-1">Scope (booking IDs, comma-separated)</label>
+                                <input
+                                  type="text"
+                                  value={refreshScopeBookingIds}
+                                  onChange={(e) => setRefreshScopeBookingIds(e.target.value)}
+                                  placeholder="bk-abc123, bk-def456"
+                                  className="w-full rounded-lg border border-amber-200 px-3 py-2 text-xs focus:border-amber-400 focus:outline-none font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-amber-900 mb-1">Scope (member IDs, comma-separated)</label>
+                                <input
+                                  type="text"
+                                  value={refreshScopeMemberIds}
+                                  onChange={(e) => setRefreshScopeMemberIds(e.target.value)}
+                                  placeholder="mem-789, mem-012"
+                                  className="w-full rounded-lg border border-amber-200 px-3 py-2 text-xs focus:border-amber-400 focus:outline-none font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-amber-900 mb-1">TTL (hours, max 168 = 1 week)</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={168}
+                                  value={refreshTtlHours}
+                                  onChange={(e) => setRefreshTtlHours(Number(e.target.value))}
+                                  className="w-32 rounded-lg border border-amber-200 px-3 py-2 text-xs focus:border-amber-400 focus:outline-none font-mono"
+                                />
+                              </div>
+                              <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                                <label className="flex items-start gap-2 text-[11px] font-bold text-red-900">
+                                  <input
+                                    type="checkbox"
+                                    checked={refreshSensitiveFileOptIn}
+                                    onChange={(e) => setRefreshSensitiveFileOptIn(e.target.checked)}
+                                    className="mt-0.5"
+                                  />
+                                  <span>
+                                    Include sensitive files (IDs, payment proofs, signatures) — usually leave UNCHECKED.
+                                  </span>
+                                </label>
+                              </div>
+                              <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                                <label className="flex items-start gap-2 text-[11px] font-bold text-red-900">
+                                  <input
+                                    type="checkbox"
+                                    checked={refreshAcknowledged}
+                                    onChange={(e) => setRefreshAcknowledged(e.target.checked)}
+                                    className="mt-0.5"
+                                  />
+                                  <span>
+                                    I acknowledge that this brings real production PII (names, emails, phone numbers,
+                                    payment data) into staging. Side effects (emails, webhooks, notifications) will
+                                    be force-disabled for the snapshot duration.
+                                  </span>
+                                </label>
+                              </div>
+                            </div>
+                          )}
+
+                          {refreshError && (
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                              <strong>Error:</strong> {refreshError}
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleRefreshPreview}
+                              disabled={refreshLoading !== null}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-800 hover:bg-blue-100 disabled:opacity-50 transition"
+                            >
+                              <RefreshCw size={14} className={refreshLoading === "preview" ? "animate-spin" : ""} />
+                              {refreshLoading === "preview" ? "Generating preview..." : "Generate preview"}
+                            </button>
+                            {refreshLoading && <span className="text-xs text-gray-500">Working...</span>}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                          This control is disabled on production. Open the{" "}
+                          <a
+                            href={`https://stg-admin.${config.domain}`}
+                            className="font-bold underline underline-offset-2"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            staging Admin app
+                          </a>{" "}
+                          to refresh staging from production.
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </>
               )}
             </div>
@@ -7093,6 +7477,166 @@ export function SettingsPage() {
             >
               <Trash2 size={14} />
               {stagingResetLoading ? "Resetting..." : "Execute reset"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Staging Refresh preview modal (ETR-R) */}
+      <Modal
+        title="Refresh preview"
+        open={showRefreshModal}
+        onClose={() => {
+          setShowRefreshModal(false);
+          setRefreshError(null);
+        }}
+      >
+        <div className="space-y-5 text-xs">
+          {refreshPreview && (
+            <>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900 space-y-2">
+                <p className="font-bold">Sanitized export summary</p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[11px]">
+                  <span>Mode:</span>
+                  <span className="font-mono font-bold">{refreshPreview.options?.mode || refreshMode}</span>
+                  <span>Snapshot ID:</span>
+                  <span className="font-mono text-[10px]">{refreshSnapshotId}</span>
+                  <span>Bookings (sanitized):</span>
+                  <span className="font-bold">{refreshPreview.sanitizedCounts?.bookings ?? refreshPreview.sanitizedExport?.bookings?.length ?? 0}</span>
+                  <span>Store orders (sanitized):</span>
+                  <span className="font-bold">{refreshPreview.sanitizedCounts?.storeOrders ?? refreshPreview.sanitizedExport?.storeOrders?.length ?? 0}</span>
+                  <span>Members (sanitized):</span>
+                  <span className="font-bold">{refreshPreview.sanitizedCounts?.members ?? refreshPreview.sanitizedExport?.members?.length ?? 0}</span>
+                  <span>Source hash (SHA-256):</span>
+                  <span className="font-mono text-[10px] truncate" title={refreshPreview.sourceHash}>
+                    {refreshPreview.sourceHash ? `${refreshPreview.sourceHash.slice(0, 16)}…` : "—"}
+                  </span>
+                  <span>Sanitization version:</span>
+                  <span className="font-mono">{refreshPreview.sanitizationVersion || "1.0"}</span>
+                </div>
+              </div>
+
+              {refreshPreview.denylistHits && refreshPreview.denylistHits.length > 0 && (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-900 space-y-2">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle size={14} />
+                    Denylist hits found — import will fail closed
+                  </p>
+                  <ul className="list-disc list-inside text-[11px] space-y-1">
+                    {refreshPreview.denylistHits.map((hit: any, i: number) => (
+                      <li key={i}>
+                        <span className="font-mono">{hit.collection}</span> / <span className="font-mono">{hit.field}</span> matched{" "}
+                        <span className="font-mono">{hit.pattern}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {refreshPreview.mode === "unsanitized-diagnostic" && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 space-y-2">
+                  <p className="font-bold">Restricted Diagnostic Mode is active</p>
+                  <ul className="list-disc list-inside text-[11px] space-y-0.5">
+                    <li>Real PII lands in staging (PII sanitization is OFF)</li>
+                    <li>Side effects (emails, webhooks, notifications) are force-disabled</li>
+                    <li>Auto-destroy at: {refreshPreview.expiresAt ? new Date(refreshPreview.expiresAt).toLocaleString() : "24h from import"}</li>
+                  </ul>
+                </div>
+              )}
+
+              {refreshError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  <strong>Error:</strong> {refreshError}
+                </div>
+              )}
+
+              <div className="flex justify-between gap-2 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowDestroyConfirm(true)}
+                  disabled={refreshLoading !== null || refreshPreview.alreadyImported !== true}
+                  title={refreshPreview.alreadyImported !== true ? "Import first, then destroy" : ""}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-4 text-xs font-semibold text-red-800 transition hover:bg-red-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Trash2 size={14} />
+                  {refreshLoading === "destroy" ? "Destroying..." : "Destroy snapshot"}
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRefreshModal(false);
+                      setRefreshError(null);
+                    }}
+                    className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRefreshImport}
+                    disabled={refreshLoading !== null || refreshPreview.alreadyImported === true || (refreshPreview.denylistHits && refreshPreview.denylistHits.length > 0)}
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-blue-600 px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 active:scale-95"
+                  >
+                    <Database size={14} />
+                    {refreshLoading === "import" ? "Importing..." : refreshPreview.alreadyImported ? "Already imported" : "Import to staging"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Staging Refresh destroy confirmation modal (ETR-R) */}
+      <Modal
+        title="Destroy refresh snapshot?"
+        open={showDestroyConfirm}
+        onClose={() => {
+          setShowDestroyConfirm(false);
+          setDestroyConfirmText("");
+        }}
+      >
+        <div className="space-y-5 text-xs">
+          <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-red-800 space-y-2">
+            <p className="font-bold flex items-center gap-2">
+              <AlertTriangle size={14} />
+              This will permanently delete every booking, store order, and member imported by this snapshot.
+            </p>
+            <p className="text-[11px]">
+              The query key is <code className="font-mono">sourceSanitization.snapshotId</code>. Docs that
+              were not imported by this snapshot are NOT affected.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="font-bold text-gray-900">Type <code className="text-red-600">DESTROY SNAPSHOT</code> to confirm:</p>
+            <input
+              type="text"
+              value={destroyConfirmText}
+              onChange={(e) => setDestroyConfirmText(e.target.value)}
+              placeholder="DESTROY SNAPSHOT"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-red-400 focus:outline-none font-mono"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => {
+                setShowDestroyConfirm(false);
+                setDestroyConfirmText("");
+              }}
+              className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleRefreshDestroy}
+              disabled={refreshLoading === "destroy" || destroyConfirmText !== "DESTROY SNAPSHOT"}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-red-600 px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50 active:scale-95"
+            >
+              <Trash2 size={14} />
+              {refreshLoading === "destroy" ? "Destroying..." : "Destroy snapshot"}
             </button>
           </div>
         </div>
