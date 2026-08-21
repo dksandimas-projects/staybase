@@ -1058,7 +1058,21 @@ export type NotificationType =
   // notification is best-effort and can be
   // reconstructed from the stored snapshot + the
   // refunds subcollection.
-  | "cancellation-refund";
+  | "cancellation-refund"
+  // Per EC-01 (2026-08-21): the early-checkin-request surface.
+  // Fires from the guest-app
+  // `/api/email?action=early-checkin-request` handler after the
+  // booking `earlyCheckIn` map is persisted. The bell panel
+  // picks it up via the existing `onSnapshot` listener and
+  // deep-links to the dashboard widget
+  // (`/dashboard?focus=early-checkin&bookingId=…`) so staff
+  // land directly on the Approve / Decline controls. The
+  // existing staff email (per `plan/features/EMAIL-PDF-STORAGE.md
+  // §earlyCheckinRequestEmail`) is unchanged — the
+  // notification is additive. Read state is per-staff via the
+  // existing `readBy` map; the 30-day retention cron covers
+  // it for free.
+  | "early-checkin-request";
 
 export type NotificationEntityType = "booking" | "storeOrder" | "intercom";
 

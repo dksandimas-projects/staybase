@@ -1,8 +1,11 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 20, 2026 — **operator-bug backlog now empty** (all 5 remaining items from the manual test dump are shipped — RM-05 in decision #220, BK-05 in #221, #18 in #224, B-10/B-10c in #223, #22/Q-03 in #218). Earlier today shipped: IDG (decision #229, v0.281.0) on `feat/idg-discount-id-precheck`; MED-3 G1 + G2 on `fix/med-3-lookup-by-ref` + `fix/med-3-sibling-fanout-and-backfill`; #11 booking-confirmation email DLQ + emailQueued response + admin banner across `fix/email-failed-delivery-retry` (decision #230) + `fix/email-queued-toast` (decision #231). The 5-bug operator backlog (the only Tier 1 work that was buildable + still open as of Aug 19) is now closed. Still open: #11 env check (RESEND_API_KEY in Vercel prod + verified FROM_EMAIL domain) + the Tier 2 cutover work (PC-05 backups, PC-06 launch, Phase 10 ops, owner content decisions for 11.8/11.9, FLR-03 at scale, ETR-R02..D10). Per-fix updates live in the LIVE FIXES TRACKED block below.
+> Last updated: August 21, 2026 — **EC-01 shipped** (`feature/early-checkin-admin-alerts`): Spark Rewards early check-in requests now surface in the persistent `notifications` bell + a new dashboard widget with Approve / Decline actions. 1581/1581 admin-app tests + 569/569 shared tests green; `tsc -p admin-app` + `tsc -p api` both clean; no new Vercel function (reuses `POST /api/bookings/early-checkin-resolve`).
+> Last ship: August 21, 2026 (EC-01).
 
-> Last ship: August 20, 2026 (the operator-bug backlog MD sync — RM-05, BK-05, #18, B-10/B-10c, #22/Q-03 are all confirmed shipped via decisions #220/#221/#224/#223/#218; this commit refreshes the ROADMAP rows to reflect the actual code state).
+> Last ship: August 21, 2026 (EC-01 — `feature/early-checkin-admin-alerts`; admin-app 1581/1581 + shared 569/569 + tsc clean; Spark Rewards early check-in requests now fan out to the persistent bell + a new dashboard widget with Approve/Decline controls).
+
+> Previous ship: August 20, 2026 (the operator-bug backlog MD sync — RM-05, BK-05, #18, B-10/B-10c, #22/Q-03 are all confirmed shipped via decisions #220/#221/#224/#223/#218; this commit refreshes the ROADMAP rows to reflect the actual code state).
 
 > Previous ship: August 20, 2026 (decision #231 — `fix/email-queued-toast`; admin-app 1547/1547 + tsc clean; AdminContext return shape + 3 toast-branch contracts + 14 net new source-text guards).
 
@@ -43,7 +46,7 @@
 | 0 — Foundation · 0.5 — Wireframes · 1 — Guest Shell · 2 — Admin Shell & Auth · 3 — Rooms · 4 — Guest Booking · 5 — Admin Bookings · 6 — Email · 7 — Corporate & Vouchers · 9 — Remaining Features | ✅ All shipped | 0 — details in [`plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md`](plan/project/archive/ROADMAP-ARCHIVE-2026-08-02.md) |
 | 8 — Intercom | ✅ Built (19/29) | 10 manual E2E QA items (§Phase 8 QA below) |
 | 10 — Security & Polish | 🔄 7/12 | 5 operational/QA items (§Phase 10 below) |
-| 10B — Spark Rewards | 🔄 13/14 | 1 operational item (§Phase 10B below) |
+| 10B — Spark Rewards | 🔄 14/15 | 1 operational item (§Phase 10B below) — early check-in now surfaces in the dashboard widget + admin bell (decision EC-01, `feature/early-checkin-admin-alerts`) |
 | 11 — Staging & Launch | 🔄 2/16 | 14 operational items + production cutover (§Phase 11 below) |
 | 11.5/11.6 — Audit Fixes & Launch-Readiness (50 items) | ✅ All 50 shipped 2026-06-16 | 0 — details in archive |
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |

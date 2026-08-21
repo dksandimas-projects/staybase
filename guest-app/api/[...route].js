@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.286.0";
+    VERSION2 = "0.286.3";
   }
 });
 
@@ -224050,6 +224050,82 @@ var init_shared = __esm({
   }
 });
 
+// server/lib/notifications.ts
+var notifications_exports = {};
+__export(notifications_exports, {
+  pruneNotifications: () => pruneNotifications,
+  writeNotification: () => writeNotification
+});
+async function writeNotification(input) {
+  try {
+    const title = String(input.title || "").trim().slice(0, MAX_TITLE_LENGTH);
+    const entityId = String(input.entityId || "").trim().slice(0, MAX_ID_LENGTH);
+    if (!title || !entityId) {
+      console.warn("[notifications] Skipping write \u2014 missing required field:", {
+        hasTitle: !!title,
+        hasEntityId: !!entityId
+      });
+      return;
+    }
+    const roomNumber = input.roomNumber != null ? String(input.roomNumber).trim().slice(0, MAX_ROOM_LENGTH) : null;
+    const bookingRef = input.bookingRef != null ? String(input.bookingRef).trim().slice(0, MAX_REF_LENGTH) : null;
+    await adminDb.collection("notifications").add({
+      type: input.type,
+      title,
+      entityType: input.entityType,
+      entityId,
+      roomNumber: roomNumber || null,
+      bookingRef: bookingRef || null,
+      readBy: {},
+      createdBy: "system",
+      createdAt: Timestamp.now()
+    });
+  } catch (err) {
+    console.error("[notifications] Failed to write notification:", err);
+  }
+}
+async function pruneNotifications(maxAgeMs, batchSize = 500) {
+  const cutoff = new Date(Date.now() - maxAgeMs);
+  const snap = await adminDb.collection("notifications").where("createdAt", "<", Timestamp.fromDate(cutoff)).orderBy("createdAt", "asc").limit(batchSize).get();
+  const deletedIds = [];
+  if (snap.docs.length === 0) {
+    return {
+      scanned: 0,
+      deleted: 0,
+      deletedIds,
+      cutoffIso: cutoff.toISOString()
+    };
+  }
+  const writer = adminDb.bulkWriter();
+  const queue = snap.docs.map(
+    (docSnap) => writer.delete(docSnap.ref).then(() => docSnap.id).catch((err) => {
+      console.error(`[notifications-prune] Failed to delete ${docSnap.id}:`, err);
+      return null;
+    })
+  );
+  await writer.close();
+  const settled = await Promise.all(queue);
+  const successful = settled.filter((id) => id !== null);
+  return {
+    scanned: snap.docs.length,
+    deleted: successful.length,
+    deletedIds: successful,
+    cutoffIso: cutoff.toISOString()
+  };
+}
+var MAX_TITLE_LENGTH, MAX_ID_LENGTH, MAX_ROOM_LENGTH, MAX_REF_LENGTH;
+var init_notifications = __esm({
+  "server/lib/notifications.ts"() {
+    "use strict";
+    init_firestore();
+    init_firebase_admin();
+    MAX_TITLE_LENGTH = 160;
+    MAX_ID_LENGTH = 64;
+    MAX_ROOM_LENGTH = 12;
+    MAX_REF_LENGTH = 40;
+  }
+});
+
 // server/handlers/email.ts
 var email_exports = {};
 __export(email_exports, {
@@ -225609,6 +225685,14 @@ async function handleEmailTrigger(req, res, action) {
         earlyCheckIn
       });
       await sendEarlyCheckinRequestTrigger(booking2, request);
+      await writeNotification({
+        type: "early-checkin-request",
+        title: `Early check-in requested \u2014 ${booking2.bookingRef || "pending"}`,
+        entityType: "booking",
+        entityId: booking2.id,
+        roomNumber: booking2.roomNumber ?? null,
+        bookingRef: booking2.bookingRef ?? null
+      });
       return res.status(200).json({ success: true });
     }
     if (action === "voucher-issued") {
@@ -225928,86 +226012,11 @@ var init_email = __esm({
     init_resend();
     init_siteUrl();
     init_shared();
+    init_notifications();
     FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
     FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
     FROM_EMAIL = FROM_ADDRESS.includes("<") ? FROM_ADDRESS : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;
     ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail;
-  }
-});
-
-// server/lib/notifications.ts
-var notifications_exports = {};
-__export(notifications_exports, {
-  pruneNotifications: () => pruneNotifications,
-  writeNotification: () => writeNotification
-});
-async function writeNotification(input) {
-  try {
-    const title = String(input.title || "").trim().slice(0, MAX_TITLE_LENGTH);
-    const entityId = String(input.entityId || "").trim().slice(0, MAX_ID_LENGTH);
-    if (!title || !entityId) {
-      console.warn("[notifications] Skipping write \u2014 missing required field:", {
-        hasTitle: !!title,
-        hasEntityId: !!entityId
-      });
-      return;
-    }
-    const roomNumber = input.roomNumber != null ? String(input.roomNumber).trim().slice(0, MAX_ROOM_LENGTH) : null;
-    const bookingRef = input.bookingRef != null ? String(input.bookingRef).trim().slice(0, MAX_REF_LENGTH) : null;
-    await adminDb.collection("notifications").add({
-      type: input.type,
-      title,
-      entityType: input.entityType,
-      entityId,
-      roomNumber: roomNumber || null,
-      bookingRef: bookingRef || null,
-      readBy: {},
-      createdBy: "system",
-      createdAt: Timestamp.now()
-    });
-  } catch (err) {
-    console.error("[notifications] Failed to write notification:", err);
-  }
-}
-async function pruneNotifications(maxAgeMs, batchSize = 500) {
-  const cutoff = new Date(Date.now() - maxAgeMs);
-  const snap = await adminDb.collection("notifications").where("createdAt", "<", Timestamp.fromDate(cutoff)).orderBy("createdAt", "asc").limit(batchSize).get();
-  const deletedIds = [];
-  if (snap.docs.length === 0) {
-    return {
-      scanned: 0,
-      deleted: 0,
-      deletedIds,
-      cutoffIso: cutoff.toISOString()
-    };
-  }
-  const writer = adminDb.bulkWriter();
-  const queue = snap.docs.map(
-    (docSnap) => writer.delete(docSnap.ref).then(() => docSnap.id).catch((err) => {
-      console.error(`[notifications-prune] Failed to delete ${docSnap.id}:`, err);
-      return null;
-    })
-  );
-  await writer.close();
-  const settled = await Promise.all(queue);
-  const successful = settled.filter((id) => id !== null);
-  return {
-    scanned: snap.docs.length,
-    deleted: successful.length,
-    deletedIds: successful,
-    cutoffIso: cutoff.toISOString()
-  };
-}
-var MAX_TITLE_LENGTH, MAX_ID_LENGTH, MAX_ROOM_LENGTH, MAX_REF_LENGTH;
-var init_notifications = __esm({
-  "server/lib/notifications.ts"() {
-    "use strict";
-    init_firestore();
-    init_firebase_admin();
-    MAX_TITLE_LENGTH = 160;
-    MAX_ID_LENGTH = 64;
-    MAX_ROOM_LENGTH = 12;
-    MAX_REF_LENGTH = 40;
   }
 });
 

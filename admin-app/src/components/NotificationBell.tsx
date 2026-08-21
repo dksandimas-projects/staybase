@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, Check, X, ShoppingBag, CalendarCheck, CalendarX, CreditCard, MessageSquareText, Inbox, Wallet } from "lucide-react";
+import { Bell, Check, X, ShoppingBag, CalendarCheck, CalendarX, CreditCard, MessageSquareText, Inbox, Wallet, CalendarClock } from "lucide-react";
 import { useAdmin } from "../context/AdminContext";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { Drawer } from "./Drawer";
@@ -38,7 +38,17 @@ const NOTIFICATION_TYPE_META: Record<NotificationType, {
   // each state-change transition (e.g.
   // "Refund partially refunded — SI-…
   // (pending-processing → partially-processed)").
-  "cancellation-refund": { label: "Cancellation refund", icon: Wallet, bgClass: "bg-amber-50", iconClass: "text-amber-600" }
+  "cancellation-refund": { label: "Cancellation refund", icon: Wallet, bgClass: "bg-amber-50", iconClass: "text-amber-600" },
+  // Per EC-01 (2026-08-21): the early-checkin-request
+  // surface. Spark Rewards members can request an early
+  // arrival; staff see the request as a persistent alert
+  // (in addition to the email) and approve/decline from
+  // the dashboard widget. Uses the
+  // `CalendarClock`-style icon (ClockFace) and the amber
+  // palette so it reads as "time-sensitive, awaiting
+  // your call" — visually distinct from a regular
+  // booking (primary) and a payment (emerald).
+  "early-checkin-request": { label: "Early check-in", icon: CalendarClock, bgClass: "bg-amber-50", iconClass: "text-amber-600" }
 };
 
 const PANEL_DESKTOP_WIDTH = 380;
@@ -56,6 +66,21 @@ function formatRelative(date: Date): string {
 function resolveDeepLink(n: Notification): { path: string; open: "drawer" | "tab" } | null {
   switch (n.entityType) {
     case "booking":
+      // Per EC-01 (2026-08-21): early-checkin-request
+      // notifications deep-link to the dashboard widget
+      // (where the Approve / Decline controls live),
+      // not the booking drawer (where the same controls
+      // exist but require a click first). The widget
+      // also surfaces the count + room breakdown at a
+      // glance, which is the primary staff workflow.
+      // The widget reads the `focus=early-checkin` query
+      // param to auto-scroll/highlight the matching row.
+      if (n.type === "early-checkin-request") {
+        return {
+          path: `/dashboard?focus=early-checkin&bookingId=${encodeURIComponent(n.entityId)}`,
+          open: "tab"
+        };
+      }
       return { path: `/bookings?bookingId=${encodeURIComponent(n.entityId)}`, open: "drawer" };
     case "storeOrder":
       // The store-order list + drawer live inside the
