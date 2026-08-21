@@ -2805,6 +2805,19 @@ export async function handleCreateBooking(req: any, res: any) {
         corporateCode: corporateDetails.corporateCode,
         companyName: corporateDetails.companyName,
         specialRequests: guestDetails.requests || "",
+        // Per the intercom-verify-guest permanent fix
+        // (2026-08-21): persist the structured `guestDetails`
+        // sub-object so the intercom verifier can match against
+        // the real `lastName`. The top-level `guestName`
+        // (concatenated `${first} ${last}`) remains for every
+        // existing reader — drawer, table, PDF, email — and is
+        // no longer the source of truth for verification.
+        guestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
         // Per PEX-01 (2026-08-01, per decision #147): the
         // snapshotted deadline. Computed from the admin's
@@ -4552,6 +4565,17 @@ export async function handleCreateWalkin(req: any, res: any) {
         corporateCode: "",
         companyName: "",
         specialRequests: guestDetails.requests || "",
+        // Per the intercom-verify-guest permanent fix
+        // (2026-08-21): walk-in bookings now persist the same
+        // structured `guestDetails` as the online flow so the
+        // intercom verifier has a real `lastName` to match
+        // against — see the matching block on the online path.
+        guestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         status: status || "confirmed",
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): walkin

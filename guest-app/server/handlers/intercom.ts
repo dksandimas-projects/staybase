@@ -37,15 +37,33 @@ function normalizeName(value: unknown) {
     .replace(/\s+/g, " ");
 }
 
-function getBookingLastName(data: FirebaseFirestore.DocumentData) {
+// Per the intercom-verify-guest permanent fix (2026-08-21):
+// `getBookingLastName` is the single source of truth for what
+// the guest must type to unlock the in-room intercom. It reads
+// ONLY from the structured `guestDetails.lastName` field on the
+// booking doc — never the concatenated `guestName` top-level
+// string. The legacy split-on-whitespace fallback was retired
+// because it silently invented a "last name" by treating
+// everything after the first token of the full name as the
+// family name (e.g. for `guestName: "Maria Clara Santos"` it
+// returned "Clara Santos" — rejecting the real last name and
+// accepting the second given name). Booking write paths now
+// persist a structured `guestDetails: { firstName, lastName,
+// email, phone }` on every booking doc, so this function has
+// a real, structured value to read.
+//
+// Exported for unit-testability — see
+// `guest-app/tests/api/intercom-lastname-persistence.test.ts`.
+export function getBookingLastName(data: FirebaseFirestore.DocumentData) {
   const guestDetails = data.guestDetails && typeof data.guestDetails === "object"
     ? data.guestDetails
     : {};
+  // Strict: only the structured lastName counts. Returning ""
+  // when the field is missing causes the verifier to reject
+  // with 403 (front desk re-verifies) instead of silently
+  // accepting a wrong last name.
   const explicitLastName = guestDetails.lastName || data.guestLastName || data.lastName;
-  if (explicitLastName) return normalizeName(explicitLastName);
-
-  const nameParts = String(data.guestName || "").trim().split(/\s+/).filter(Boolean);
-  return normalizeName(nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || "");
+  return explicitLastName ? normalizeName(explicitLastName) : "";
 }
 
 function getPublicBookingSummary(docSnap: FirebaseFirestore.QueryDocumentSnapshot) {

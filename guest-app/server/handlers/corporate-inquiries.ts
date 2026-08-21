@@ -21,7 +21,16 @@ const inquirySchema = z.object({
   phone: z.string().trim().min(6).max(40),
   numRooms: z.coerce.number().int().min(1).max(500),
   preferredDates: z.union([InquiryPreferredDatesSchema, z.string().trim().min(1).max(160)]),
-  specialRequirements: z.string().trim().max(2000).optional().default("")
+  specialRequirements: z.string().trim().max(2000).optional().default(""),
+  // Per the intercom-verify-guest permanent fix (2026-08-21):
+  // when the inquiry form knows the contact's first + last
+  // names as separate fields, persist them structured so the
+  // converted booking can carry a structured `guestDetails`
+  // sub-object (no more split-on-whitespace guessing).
+  // Optional for backwards-compat with older inquiry forms
+  // that only send `contactPerson`.
+  firstName: z.string().trim().min(1).max(80).optional(),
+  lastName: z.string().trim().min(1).max(80).optional()
 }).strict();
 
 const convertInquirySchema = z.object({
@@ -348,13 +357,43 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
         throw new Error("The converted booking total is invalid.");
       }
 
-      // 8. Guest details from inquiry. Split `contactPerson` into
-      // first/last; the inquiry is always a real contact, so the
-      // [firstName, lastName] split is safe.
+      // 8. Guest details from inquiry. Prefer the structured
+      // `firstName` / `lastName` fields on the inquiry when the
+      // form sent them (per the intercom-verify-guest permanent
+      // fix, 2026-08-21); fall back to splitting `contactPerson`
+      // only as a last resort for legacy inquiries that don't
+      // carry the split fields. The converted booking ALWAYS
+      // carries a structured `guestDetails` sub-object so the
+      // intercom verifier has a real `lastName` to match.
       const contactName = String(inquiryData.contactPerson || "").trim();
-      const [firstName, ...rest] = contactName.split(/\s+/);
-      const lastName = rest.length > 0 ? rest.join(" ") : "—";
-      const guestName = `${firstName || "Corporate"} ${lastName}`.trim();
+      const storedFirstName = String(inquiryData.firstName || "").trim();
+      const storedLastName = String(inquiryData.lastName || "").trim();
+      let firstName: string;
+      let lastName: string;
+      if (storedFirstName && storedLastName) {
+        firstName = storedFirstName;
+        lastName = storedLastName;
+      } else if (storedFirstName) {
+        firstName = storedFirstName;
+        const rest = contactName.split(/\s+/).filter(Boolean);
+        lastName = rest.length > 1 ? rest.slice(1).join(" ") : (rest[0] || "—");
+      } else if (storedLastName) {
+        lastName = storedLastName;
+        const rest = contactName.split(/\s+/).filter(Boolean);
+        firstName = rest[0] || "Corporate";
+      } else {
+        // Legacy fallback: split the flat contactPerson string.
+        // Still better than silently dropping the last name
+        // because the booking now carries structured
+        // guestDetails (this fallback is documented as
+        // approximate, not authoritative — for compound given
+        // names like "Maria Clara" the last name will read
+        // "Clara" until the inquiry form is upgraded).
+        const [first, ...rest] = contactName.split(/\s+/);
+        firstName = first || "Corporate";
+        lastName = rest.length > 0 ? rest.join(" ") : "—";
+      }
+      const guestName = `${firstName} ${lastName}`.trim();
       const guestEmail = String(inquiryData.email || "").trim().toLowerCase();
       const guestPhone = String(inquiryData.phone || "").trim();
       const companyName = String(inquiryData.companyName || "").trim();
@@ -367,6 +406,15 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
         guestName,
         guestEmail,
         guestPhone,
+        // Per the intercom-verify-guest permanent fix
+        // (2026-08-21): persist structured guestDetails so the
+        // verifier matches against the real last name.
+        guestDetails: {
+          firstName,
+          lastName,
+          email: guestEmail,
+          phone: guestPhone
+        },
         numGuests: guests,
         checkIn: checkInDate,
         checkOut: checkOutDate,
