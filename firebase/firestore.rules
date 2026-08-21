@@ -573,7 +573,7 @@ service cloud.firestore {
     // an outbound call that this flag would
     // gate).
     match /janitor/outbound-suppression/{snapshotId} {
-      allow read: if isAdmin() && resource.data.expiresAt.toMillis() > now;
+      allow read: if isAdmin() && resource.data.expiresAt.toMillis() > request.time.toMillis();
       allow create, update, delete: if false;
     }
     match /janitor/refresh-access-audit/{auditId} {
