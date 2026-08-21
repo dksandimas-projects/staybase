@@ -287,6 +287,56 @@ describe("intercom verify-guest — permanent last-name fix", () => {
     });
   });
 
+  describe("corporate inquiry form — CorporateStaysPage wire payload", () => {
+    // Per the intercom-verify-guest permanent fix extension
+    // (2026-08-21, corporate inquiry form upgrade): the
+    // public inquiry form must collect first + last name as
+    // separate fields and send both to the API. Without
+    // this, every inquiry-derived booking still relies on
+    // the legacy split-on-whitespace fallback in
+    // `handleConvertInquiryToBooking`, so the converted
+    // booking's `guestDetails.lastName` is approximate for
+    // compound given names like "Maria Clara".
+    const pageSrc = readFileSync(
+      resolve(__dirname, "../../src/pages/CorporateStaysPage.tsx"),
+      "utf8"
+    );
+
+    it("declares separate firstName and lastName state hooks", () => {
+      expect(pageSrc).toMatch(
+        /const\s+\[firstName\s*,\s*setFirstName\]\s*=\s*useState/
+      );
+      expect(pageSrc).toMatch(
+        /const\s+\[lastName\s*,\s*setLastName\]\s*=\s*useState/
+      );
+    });
+
+    it("renders First name + Last name inputs with autoComplete hints", () => {
+      expect(pageSrc).toMatch(/autoComplete="given-name"/);
+      expect(pageSrc).toMatch(/autoComplete="family-name"/);
+    });
+
+    it("the inquiry wire payload sends structured firstName + lastName", () => {
+      // Slice the JSON.stringify body that POSTs to
+      // /api/corporate/inquiry. Anchor on the unique
+      // fetch URL.
+      const wireMatch = pageSrc.match(
+        /fetch\("\/api\/corporate\/inquiry"[\s\S]*?body:\s*JSON\.stringify\(\s*\{[\s\S]*?\}\s*\)/
+      );
+      expect(wireMatch, "the inquiry fetch body literal must exist in CorporateStaysPage.tsx").not.toBeNull();
+      const wire = wireMatch![0];
+      expect(wire).toMatch(/firstName:/);
+      expect(wire).toMatch(/lastName:/);
+    });
+
+    it("the legacy single contactPerson input is gone", () => {
+      // The old single input must not exist on the form
+      // anymore. We check the literal label string so a
+      // future regression that re-introduces it is caught.
+      expect(pageSrc).not.toMatch(/Contact Person\s*<span/);
+    });
+  });
+
   describe("corporate-inquiry conversion write site — handleConvertInquiryToBooking", () => {
     const corporateSrc = readFileSync(
       resolve(__dirname, "../../server/handlers/corporate-inquiries.ts"),

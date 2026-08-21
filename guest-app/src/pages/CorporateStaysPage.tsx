@@ -66,7 +66,16 @@ export function CorporateStaysPage() {
 
   // Form states
   const [companyName, setCompanyName] = useState("");
-  const [contactPerson, setContactPerson] = useState("");
+  // Per the intercom-verify-guest permanent fix extension
+  // (2026-08-21, corporate inquiry form upgrade): collect
+  // first + last name as separate fields so the inquiry
+  // wire carries structured names. The server
+  // (`handleConvertInquiryToBooking`) prefers structured
+  // fields over splitting `contactPerson`, so converted
+  // bookings get an authoritative `guestDetails.lastName`
+  // even for compound given names like "Maria Clara".
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [roomsCount, setRoomsCount] = useState("1");
@@ -233,7 +242,7 @@ export function CorporateStaysPage() {
     }
 
     // Validation
-    if (!companyName.trim() || !contactPerson.trim() || !email.trim() || !phone.trim() || !preferredDateFrom.trim() || !preferredDateTo.trim()) {
+    if (!companyName.trim() || !firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim() || !preferredDateFrom.trim() || !preferredDateTo.trim()) {
       setFormError("Please fill out all required fields.");
       return;
     }
@@ -258,7 +267,17 @@ export function CorporateStaysPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           companyName,
-          contactPerson,
+          // Structured first + last name. The server prefers
+          // these over a flat `contactPerson` (see
+          // `handleConvertInquiryToBooking`). `contactPerson`
+          // is derived server-side as `${firstName} ${lastName}`
+          // for any legacy reader that still inspects the
+          // field — see the schema + handler comments in
+          // `guest-app/server/handlers/corporate-inquiries.ts`.
+          // Explicit key/value (not shorthand) for symmetry with
+          // /corporate/book — easier to grep, easier to log.
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
           email,
           phone,
           numRooms: Number(roomsCount),
@@ -277,7 +296,8 @@ export function CorporateStaysPage() {
       setIsSubmitting(false);
       setIsSubmitted(true);
       setCompanyName("");
-      setContactPerson("");
+      setFirstName("");
+      setLastName("");
       setEmail("");
       setPhone("");
       setRoomsCount("1");
@@ -681,21 +701,45 @@ export function CorporateStaysPage() {
                     />
                   </label>
 
-                  {/* Contact Person */}
-                  <label className="grid gap-2 text-sm font-medium text-gray-700">
-                    <span className="flex items-center gap-1.5">
-                      <User size={16} className="text-gray-400" />
-                      Contact Person <span className="text-red-500">*</span>
-                    </span>
-                    <input
-                      type="text"
-                      className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
-                      placeholder="e.g. Maria Santos"
-                      value={contactPerson}
-                      onChange={(e) => setContactPerson(e.target.value)}
-                      required
-                    />
-                  </label>
+                  {/* First name + Last name */}
+                  {/* Per the intercom-verify-guest permanent fix
+                      extension (2026-08-21): separate given-name /
+                      family-name inputs replace the old single
+                      "Contact Person" field so the inquiry wire
+                      carries structured first/last name. Mirrors
+                      the pattern on /corporate/book. */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="grid gap-2 text-sm font-medium text-gray-700">
+                      <span className="flex items-center gap-1.5">
+                        <User size={16} className="text-gray-400" />
+                        First Name <span className="text-red-500">*</span>
+                      </span>
+                      <input
+                        type="text"
+                        autoComplete="given-name"
+                        className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+                        placeholder="Maria"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        required
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-medium text-gray-700">
+                      <span className="flex items-center gap-1.5">
+                        <User size={16} className="text-gray-400" />
+                        Last Name <span className="text-red-500">*</span>
+                      </span>
+                      <input
+                        type="text"
+                        autoComplete="family-name"
+                        className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+                        placeholder="Santos"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        required
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 <div className="grid gap-6 sm:grid-cols-2">
