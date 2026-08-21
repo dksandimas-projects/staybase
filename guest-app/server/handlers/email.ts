@@ -6,7 +6,7 @@ import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
 import { getServerBaseUrl, getServerAdminBaseUrl } from "../lib/siteUrl";
-import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
+import { toDateOrNull, getManilaDateInfo, generateLookupToken, RESERVATION_REF_REGEX } from "@spark-inn/shared";
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5 server-side
 // files. The shared implementation lives in
@@ -965,20 +965,79 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
     if (!doc.exists) return null;
     snapshot = doc;
   } else if (bookingRef) {
-    let query: any = adminDb.collection("bookings").where("bookingRef", "==", String(bookingRef).trim()).limit(1);
-    if (options.requireGuestMatch && !user.uid) {
-      if (!guestEmail) {
-        throw new Error("Booking reference and guest email are required.");
-      }
-      query = adminDb
+    const trimmed = String(bookingRef).trim();
+    let query: any;
+    // Per EC-02b (operator-reported 2026-08-21): post-MRB-01
+    // bookings (decision #159) carry a `reservationRef`
+    // (`R-YYYYMMDD-NNNNN`) rather than a per-child
+    // `bookingRef`. The booking-create response on the
+    // success URL carries `result.data.reservationRef ||
+    // result.data.bookingRef` (see `BookingPage.tsx:1587`)
+    // and the BookingConfirmPage POSTs that string to
+    // /api/email. Without the reservationRef branch below
+    // the lookup returns 0 rows → 404 "Booking not found."
+    // for every post-MRB-01 booking. The fix: detect the
+    // `R-…` shape via RESERVATION_REF_REGEX, query the
+    // `reservations` collection, pick the LEAD child
+    // (reservationPosition === 1) — the canonical anchor
+    // for the rest of the system (per the per-reservation
+    // "anchor" pattern at email.ts:2200+ for the
+    // checkin-reminder cron, and the
+    // `resolveBookingForLink` helper at members.ts:816
+    // that the MED-3 G1 fix added for the same wire shape).
+    if (RESERVATION_REF_REGEX.test(trimmed)) {
+      const reservationSnap = await adminDb
+        .collection("reservations")
+        .where("reservationRef", "==", trimmed)
+        .limit(1)
+        .get();
+      if (reservationSnap.empty) return null;
+      const reservationDoc = reservationSnap.docs[0];
+      // Lead booking = first child by `reservationPosition`
+      // ascending. Some legacy reservations might be missing
+      // `reservationPosition`; `orderBy` is robust to missing
+      // fields (Firestore puts them last by default) but we
+      // also filter to position === 1 so a mid-position child
+      // can never be the anchor. Falls back to the first child
+      // by `createdAt` if no child has position === 1 (a
+      // defensive shape for any post-MRB-01 reservation that
+      // somehow shipped without the position field).
+      const childrenSnap = await adminDb
         .collection("bookings")
-        .where("bookingRef", "==", String(bookingRef).trim())
-        .where("guestEmail", "==", String(guestEmail).trim())
-        .limit(1);
+        .where("reservationId", "==", reservationDoc.id)
+        .orderBy("reservationPosition", "asc")
+        .limit(1)
+        .get();
+      if (childrenSnap.empty) {
+        // No reservationPosition — fall back to createdAt
+        // ascending (oldest = lead by convention).
+        const fallbackSnap = await adminDb
+          .collection("bookings")
+          .where("reservationId", "==", reservationDoc.id)
+          .orderBy("createdAt", "asc")
+          .limit(1)
+          .get();
+        if (fallbackSnap.empty) return null;
+        snapshot = fallbackSnap.docs[0];
+      } else {
+        snapshot = childrenSnap.docs[0];
+      }
+    } else {
+      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
+      if (options.requireGuestMatch && !user.uid) {
+        if (!guestEmail) {
+          throw new Error("Booking reference and guest email are required.");
+        }
+        query = adminDb
+          .collection("bookings")
+          .where("bookingRef", "==", trimmed)
+          .where("guestEmail", "==", String(guestEmail).trim())
+          .limit(1);
+      }
+      const results = await query.get();
+      if (results.empty) return null;
+      snapshot = results.docs[0];
     }
-    const results = await query.get();
-    if (results.empty) return null;
-    snapshot = results.docs[0];
   } else {
     throw new Error("Booking ID or booking reference is required.");
   }

@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.287.1";
+    VERSION2 = "0.288.0";
   }
 });
 
@@ -224682,16 +224682,32 @@ async function findBooking(req, options) {
     if (!doc.exists) return null;
     snapshot = doc;
   } else if (bookingRef) {
-    let query = adminDb.collection("bookings").where("bookingRef", "==", String(bookingRef).trim()).limit(1);
-    if (options.requireGuestMatch && !user.uid) {
-      if (!guestEmail) {
-        throw new Error("Booking reference and guest email are required.");
+    const trimmed = String(bookingRef).trim();
+    let query;
+    if (RESERVATION_REF_REGEX.test(trimmed)) {
+      const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).limit(1).get();
+      if (reservationSnap.empty) return null;
+      const reservationDoc = reservationSnap.docs[0];
+      const childrenSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("reservationPosition", "asc").limit(1).get();
+      if (childrenSnap.empty) {
+        const fallbackSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("createdAt", "asc").limit(1).get();
+        if (fallbackSnap.empty) return null;
+        snapshot = fallbackSnap.docs[0];
+      } else {
+        snapshot = childrenSnap.docs[0];
       }
-      query = adminDb.collection("bookings").where("bookingRef", "==", String(bookingRef).trim()).where("guestEmail", "==", String(guestEmail).trim()).limit(1);
+    } else {
+      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
+      if (options.requireGuestMatch && !user.uid) {
+        if (!guestEmail) {
+          throw new Error("Booking reference and guest email are required.");
+        }
+        query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).where("guestEmail", "==", String(guestEmail).trim()).limit(1);
+      }
+      const results = await query.get();
+      if (results.empty) return null;
+      snapshot = results.docs[0];
     }
-    const results = await query.get();
-    if (results.empty) return null;
-    snapshot = results.docs[0];
   } else {
     throw new Error("Booking ID or booking reference is required.");
   }
