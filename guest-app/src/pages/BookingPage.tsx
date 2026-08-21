@@ -279,10 +279,39 @@ export function BookingPage() {
   );
 
   const [guestDetails, setGuestDetails] = useState({
-    firstName: searchParams.get("firstName") ?? "",
-    lastName: searchParams.get("lastName") ?? "",
-    email: searchParams.get("email") ?? "",
-    phone: searchParams.get("phone") ?? "",
+    // Per feature/booking-autofill-member-name: when the guest is
+    // signed in as a Spark Rewards member, pre-fill the Step 2 name
+    // + phone from the member profile. We split `fullName` on the
+    // first space (first name = first token, last name = the rest)
+    // — the same split ProfilePage.tsx uses when it loads the
+    // edit form. The URL params keep precedence (the Step 4 →
+    // re-book flow pins first/last/phone via the URL) so the member
+    // cannot accidentally have a different value pinned by an old
+    // link. The name fields are then rendered as readOnly below —
+    // see the first/last <TextField>s for the matching render-time
+    // gate. Email is handled by the existing email-only block below;
+    // phone stays editable (members may travel on a secondary phone
+    // — per the autofill+lock UX decision 2026-08-20).
+    firstName:
+      searchParams.get("firstName") ??
+      (memberProfile?.isMember && memberProfile.fullName
+        ? memberProfile.fullName.split(" ")[0] ?? ""
+        : ""),
+    lastName:
+      searchParams.get("lastName") ??
+      (memberProfile?.isMember && memberProfile.fullName
+        ? memberProfile.fullName.split(" ").slice(1).join(" ") ?? ""
+        : ""),
+    email:
+      searchParams.get("email") ??
+      (memberProfile?.isMember && memberProfile.email
+        ? memberProfile.email
+        : ""),
+    phone:
+      searchParams.get("phone") ??
+      (memberProfile?.isMember && memberProfile.phone
+        ? memberProfile.phone
+        : ""),
     guestCount: String((Number(searchParams.get("adults")) || (Number(searchParams.get("guests")) || 2)) + Number(searchParams.get("children") ?? 0)),
     requests: searchParams.get("requests") ?? "",
     consent: false,
@@ -1203,6 +1232,25 @@ export function BookingPage() {
   }
 
   function updateGuestDetail(field: keyof typeof guestDetails, value: string | boolean) {
+    // Per feature/booking-autofill-member-email + member-name:
+    // when the guest is signed in as a Spark Rewards member the
+    // identity-anchored fields (email + first/last name) are locked
+    // to the member's account. The <TextField>s render `readOnly`
+    // below so the standard UI can't change them; this no-op guards
+    // the programmatic path (a paste, a dev-tools edit, or any
+    // future caller of `updateGuestDetail(...)`) so the server-side
+    // validation stays in sync with the UI. Phone is deliberately
+    // NOT in this list — members may travel on a secondary phone
+    // and need to edit it for a specific booking.
+    if (
+      memberProfile?.isMember &&
+      memberProfile.email &&
+      (field === "email" ||
+        field === "firstName" ||
+        field === "lastName")
+    ) {
+      return;
+    }
     setGuestDetails((current) => ({
       ...current,
       [field]: value
@@ -1712,6 +1760,13 @@ export function BookingPage() {
                 id="firstName"
                 name="firstName"
                 autoComplete="given-name"
+                // Per feature/booking-autofill-member-name: lock the
+                // first/last name fields to the member's account
+                // name. The identity anchor (email + name triple)
+                // stays consistent across bookings. `updateGuestDetail`
+                // short-circuits the same fields above, so the
+                // readOnly here is belt-and-braces.
+                readOnly={!!memberProfile?.isMember}
               />
               <TextField
                 error={touchedFields.lastName ? guestErrors.lastName : ""}
@@ -1725,24 +1780,38 @@ export function BookingPage() {
                 id="lastName"
                 name="lastName"
                 autoComplete="family-name"
+                readOnly={!!memberProfile?.isMember}
               />
             </motion.div>
 
             <motion.div className="mt-5 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
-              <TextField
-                error={touchedFields.email ? guestErrors.email : ""}
-                icon={<Mail size={17} />}
-                label="Email"
-                onBlur={() => markTouched("email")}
-                onChange={(value) => updateGuestDetail("email", value)}
-                placeholder="maria@example.com"
-                required
-                type="email"
-                value={guestDetails.email}
-                id="email"
-                name="email"
-                autoComplete="email"
-              />
+              <div className="grid gap-2">
+                <TextField
+                  error={touchedFields.email ? guestErrors.email : ""}
+                  icon={<Mail size={17} />}
+                  label="Email"
+                  onBlur={() => markTouched("email")}
+                  onChange={(value) => updateGuestDetail("email", value)}
+                  placeholder="maria@example.com"
+                  required
+                  type="email"
+                  value={guestDetails.email}
+                  id="email"
+                  name="email"
+                  autoComplete="email"
+                  // Per feature/booking-autofill-member-email: lock the
+                  // email field to the member's account email so the
+                  // booking is always filed under the correct identity.
+                  // `updateGuestDetail` short-circuits the same field
+                  // above, so the readOnly here is belt-and-braces.
+                  readOnly={!!memberProfile?.isMember}
+                />
+                {memberProfile?.isMember && memberProfile.email ? (
+                  <p className="text-xs text-gray-600">
+                    Linked to your {config.rewardsName} account.
+                  </p>
+                ) : null}
+              </div>
               <TextField
                 error={touchedFields.phone ? guestErrors.phone : ""}
                 icon={<Phone size={17} />}
@@ -1759,7 +1828,7 @@ export function BookingPage() {
               />
             </motion.div>
 
-            <motion.div className="mt-5 grid gap-5 sm:grid-cols-[220px_1fr]" variants={staggerChild}>
+            <motion.div className="mt-5 grid items-start gap-5 sm:grid-cols-[220px_1fr]" variants={staggerChild}>
               <TextField
                 error={touchedFields.guestCount ? guestErrors.guestCount : ""}
                 icon={<Users size={17} />}
@@ -3492,9 +3561,29 @@ interface TextFieldProps {
   id?: string;
   name?: string;
   autoComplete?: string;
+  // Per feature/booking-autofill-member-email: when true the input is
+  // non-editable but the value still flows through onChange + form
+  // submission. We use `readOnly` rather than `disabled` so the email
+  // remains part of the Step 2 payload submitted to /api/bookings/create
+  // (a disabled input is omitted from form submission).
+  readOnly?: boolean;
 }
 
-function TextField({ error, icon, label, onBlur, onChange, placeholder, required, type = "text", value, id, name, autoComplete }: TextFieldProps) {
+function TextField({
+  error,
+  icon,
+  label,
+  onBlur,
+  onChange,
+  placeholder,
+  required,
+  type = "text",
+  value,
+  id,
+  name,
+  autoComplete,
+  readOnly = false
+}: TextFieldProps) {
   return (
     <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
       {label}
@@ -3507,13 +3596,16 @@ function TextField({ error, icon, label, onBlur, onChange, placeholder, required
           autoComplete={autoComplete}
           className={cn(
             "min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
-            error ? "border-red-300" : "border-gray-200"
+            error ? "border-red-300" : "border-gray-200",
+            readOnly ? "cursor-default bg-gray-50 text-gray-700" : null
           )}
           onBlur={onBlur}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
+          readOnly={readOnly}
           type={type}
           value={value}
+          aria-readonly={readOnly ? "true" : undefined}
         />
       </span>
       {error ? <span className="text-xs font-medium text-red-600">{error}</span> : null}

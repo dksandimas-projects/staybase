@@ -79,9 +79,23 @@ type EmailAction =
   | "store-order-delivered"
   | "store-order-cancelled"
   | "staff-new-booking"
-  | "staff-new-payment";
+  | "staff-new-payment"
+  | "spark-rewards-email-verification";
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || config.supportEmail;
+// Resolve the underlying address (the part inside < >). We layer a
+// human-readable display name on top so Gmail's "From" line shows
+// "Spark Inn <address>" instead of falling back to the underlying
+// Gmail account's profile display name (which on
+// `sparkinn.dev@gmail.com` reads "bookings" — operator-reported in
+// 2026-08-20). The inbox-list sender column still keys off the
+// Gmail account's profile name on gmail.com addresses; the display
+// name here is what lands in the email-detail "From" line + every
+// non-Gmail client (Outlook, Apple Mail, the Resend activity log).
+const FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || config.supportEmail;
+const FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
+const FROM_EMAIL = FROM_ADDRESS.includes("<")
+  ? FROM_ADDRESS
+  : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;
 const ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || config.supportEmail;
 
 function escapeHtml(value: unknown) {
@@ -895,14 +909,50 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
     console.log(`Skipping email send to placeholder address: ${to}`);
     return;
   }
-  await resend.emails.send({
-    from: FROM_EMAIL,
-    to,
-    subject,
-    html,
-    replyTo: config.supportEmail,
-    attachments
-  });
+  // Per #11 (operator-reported 2026-08-20, tracked in
+  // `plan/project/ROADMAP.md §Open Operator-Reported Bugs → #11`):
+  // the pre-#11 `resend.emails.send` call was unguarded — any
+  // Resend API error (timeout, 5xx, network reset) threw
+  // uncaught, the outer try/catch at every trigger site just
+  // `console.error`'d + continued, and the desk had no way
+  // to know the email failed. #11 wraps the call in a
+  // try/catch that writes to a new `failed_emails` Firestore
+  // collection so the staff dashboard can surface a banner
+  // + the operator can audit + retry. The `bookingId` +
+  // `action` come from the caller-side `sendBookingTrigger`
+  // (which writes the canonical DLQ entry below); this
+  // `sendEmail`-level write captures the recipient + subject
+  // + raw error for any future caller that doesn't go
+  // through the trigger orchestrator.
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      html,
+      replyTo: config.supportEmail,
+      attachments
+    });
+  } catch (error: any) {
+    // Best-effort DLQ write — the failure is the
+    // thing we want to surface, so we don't want
+    // the DLQ write itself to crash the request.
+    try {
+      await adminDb.collection("failed_emails").add({
+        recipient: to,
+        subject,
+        error: typeof error?.message === "string" ? error.message : String(error),
+        lastAttemptAt: new Date(),
+        retryCount: 0
+      });
+    } catch (dlqErr) {
+      console.error("[#11] failed to write failed_emails DLQ row:", dlqErr);
+    }
+    // Re-throw so the caller can surface the
+    // failure in its own response shape (the
+    // post-#11 `{ emailQueued: false }` banner).
+    throw error;
+  }
 }
 
 async function findBooking(req: VercelRequest, options: { requireGuestMatch: boolean }) {
@@ -1703,6 +1753,40 @@ export async function sendVoucherIssuedTrigger(voucher: any) {
     voucher.guestEmail,
     `[${config.brandName}] Your voucher: ${voucher.code}`,
     voucherIssuedEmail(voucher)
+  );
+}
+
+function sparkRewardsEmailVerificationEmail(data: { guestName?: string; email: string; verificationLink: string }) {
+  const name = (data.guestName || "").trim();
+  const greetingName = name ? escapeHtml(name) : "Valued Member";
+  return emailLayout({
+    preheader: `Verify your email address for ${config.rewardsName}.`,
+    eyebrow: `${config.rewardsName} Account Verification`,
+    title: "Verify your email address",
+    intro: `Dear ${greetingName}, thank you for joining ${escapeHtml(config.rewardsName)}! Please verify your email address to complete your account registration.`,
+    body: `
+      ${callout("warm", "Unlock Member Privileges", "Verifying your email address links your past bookings to your account, enables early check-in requests, and activates member rates on future stays.")}
+      ${card("Verification link", `
+        <p style="margin: 0 0 16px; color: #374151; font-size: 14px; line-height: 1.6;">
+          Click the button below to verify your email address (<strong>${escapeHtml(data.email)}</strong>). If you didn't create an account with ${escapeHtml(config.brandName)}, you can safely ignore this message.
+        </p>
+        <p style="margin: 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+          If the button below doesn't work, copy and paste this link into your browser:<br>
+          <a href="${escapeHtml(data.verificationLink)}" style="color: ${config.colors.primary}; word-break: break-all;">${escapeHtml(data.verificationLink)}</a>
+        </p>
+      `)}
+    `,
+    ctaLabel: "Verify Email Address",
+    ctaUrl: data.verificationLink
+  });
+}
+
+export async function sendVerificationEmailTrigger(data: { guestName?: string; email: string; verificationLink: string }) {
+  if (!data.email) return;
+  await sendEmail(
+    data.email,
+    `[${config.brandName}] Verify your email address for ${config.rewardsName}`,
+    sparkRewardsEmailVerificationEmail(data)
   );
 }
 
@@ -2631,6 +2715,13 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         break;
       case "staff-new-payment":
         html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        break;
+      case "spark-rewards-email-verification":
+        html = sparkRewardsEmailVerificationEmail({
+          guestName: "Maria Santos",
+          email: "maria.santos@example.com",
+          verificationLink: siteUrl("/account/profile?emailVerified=true")
+        });
         break;
       default:
         return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });

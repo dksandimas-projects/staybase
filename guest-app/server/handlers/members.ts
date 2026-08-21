@@ -1,8 +1,15 @@
 import { z } from "zod";
-import { generateMemberNumber, validatePointsRedemption } from "@spark-inn/shared";
+import {
+  BOOKING_REF_REGEX,
+  RESERVATION_REF_REGEX,
+  generateMemberNumber,
+  validatePointsRedemption
+} from "@spark-inn/shared";
 import config from "../../../hotel.config";
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { rebuildRateBreakdown } from "../lib/rate-breakdown";
+import { sendVerificationEmailTrigger } from "./email";
+import { getServerBaseUrl } from "../lib/siteUrl";
 
 const registerMemberSchema = z.object({
   fullName: z.string().trim().max(120).optional().default(""),
@@ -769,6 +776,164 @@ const linkBookingToMemberSchema = z.object({
   reason: z.string().trim().min(1).max(500)
 }).strict();
 
+/**
+ * Per MED-3 G1 (build-variant follow-up 2026-08-20):
+ * resolve the staff's `bookingId` paste to a concrete
+ * Firestore doc id, accepting all three input shapes:
+ *
+ *   - `SPK-YYYYMMDD-NNNNN` (the human `bookingRef`,
+ *     matches `BOOKING_REF_REGEX` from
+ *     `shared/utils/references.ts`)
+ *   - `R-YYYYMMDD-NNNNN` (the human `reservationRef`,
+ *     matches `RESERVATION_REF_REGEX` from
+ *     `shared/utils/references.ts`) — resolves via the
+ *     `reservations/{ref}` header to the lead child +
+ *     the `reservations/{id}` uuid
+ *   - raw Firestore doc id (legacy pre-MRB-01 paths +
+ *     post-MRB-01 child doc ids that staff paste from
+ *     the bookings table)
+ *
+ * Returns a discriminated union. The `ok: true` branch
+ * carries the resolved `bookingId` (always the lead
+ * child for the `R-…` path, the matching doc id for the
+ * `SPK-…` + raw-id paths) + the `reservationId` (null
+ * for the raw-id + `SPK-…` paths unless the matching
+ * booking carries one, non-null for the `R-…` path).
+ * The `ok: false` branch carries the structured `code`
+ * for the toast + a human-readable `message`.
+ *
+ * Why non-transactional: the resolver is a single
+ * `get()` / `where().limit(1)` — FOL-03's
+ * reads-before-writes invariant only applies inside the
+ * transaction. The `runTransaction` block then re-reads
+ * the booking via `transaction.get(bookingRef)` so the
+ * FOL-03 invariant is preserved for the actual write
+ * phase. A race where the booking is deleted between
+ * the resolver read and the transaction read is handled
+ * by the transaction's `exists: false` check
+ * (surfaces 404 + `code: BOOKING_NOT_FOUND`).
+ */
+async function resolveBookingForLink(input: string): Promise<
+  | { ok: true; bookingId: string; reservationId: string | null }
+  | { ok: false; code: "BOOKING_NOT_FOUND" | "RESERVATION_NOT_FOUND"; message: string }
+> {
+  const trimmed = String(input || "").trim();
+  if (!trimmed) {
+    return { ok: false, code: "BOOKING_NOT_FOUND", message: "Booking was not found." };
+  }
+
+  // Path 1: `R-…` reservationRef. The shape `R-YYYYMMDD-NNNNN`
+  // is the post-MRB-01 public-facing reservation ref. Resolve
+  // it via the `reservations` collection's doc id (the public
+  // ref is also the Firestore doc id, per the
+  // `generateReservationRef` helper in
+  // `shared/utils/reservationRef.ts`). Fall through to the
+  // `reservations.where("reservationRef", "==", input)` query
+  // for the case where a ref + a uuid diverge (e.g. legacy
+  // pre-MRB-04 reservations).
+  if (RESERVATION_REF_REGEX.test(trimmed)) {
+    const reservationDoc = await adminDb.collection("reservations").doc(trimmed).get();
+    if (reservationDoc.exists) {
+      const reservationData = reservationDoc.data() || {};
+      const leadBookingId = String(reservationData.leadBookingId || "").trim();
+      if (leadBookingId) {
+        return {
+          ok: true,
+          bookingId: leadBookingId,
+          reservationId: reservationDoc.id
+        };
+      }
+      // Reservation header exists but no `leadBookingId`
+      // — try the `where("reservationRef", "==", ...)` fallback
+      // (the public ref might be on the doc under a different
+      // name, OR the lead field name might be older).
+      const whereFallback = await adminDb
+        .collection("reservations")
+        .where("reservationRef", "==", trimmed)
+        .get();
+      if (!whereFallback.empty) {
+        const fallbackDoc = whereFallback.docs[0];
+        const fallbackData = fallbackDoc.data() || {};
+        const fallbackLead = String(fallbackData.leadBookingId || "").trim();
+        if (fallbackLead) {
+          return {
+            ok: true,
+            bookingId: fallbackLead,
+            reservationId: fallbackDoc.id
+          };
+        }
+      }
+      return {
+        ok: false,
+        code: "RESERVATION_NOT_FOUND",
+        message: "Reservation was not found or has no lead booking."
+      };
+    }
+    // Reservation header miss — try the
+    // `where("reservationId", "==", input)` query on the
+    // `bookings` collection. For the case where a staff typed
+    // a reservation ref into the bookings collection's
+    // `reservationId` field (defense in depth; the
+    // `reservationRef` is a separate field, but a misconfigured
+    // write path could have used `reservationId`).
+    const bookingByReservationId = await adminDb
+      .collection("bookings")
+      .where("reservationId", "==", trimmed)
+      .limit(1)
+      .get();
+    if (!bookingByReservationId.empty) {
+      const matchDoc = bookingByReservationId.docs[0];
+      return {
+        ok: true,
+        bookingId: matchDoc.id,
+        reservationId: trimmed
+      };
+    }
+    return {
+      ok: false,
+      code: "RESERVATION_NOT_FOUND",
+      message: "Reservation was not found."
+    };
+  }
+
+  // Path 2: `SPK-…` bookingRef. The shape `SPK-YYYYMMDD-NNNNN`
+  // is the public-facing booking ref. Resolve via
+  // `bookings.where("bookingRef", "==", input).limit(1)`
+  // (the canonical "look up by bookingRef" pattern at
+  // `email.ts:932` and `bookings.ts:6053`).
+  if (BOOKING_REF_REGEX.test(trimmed)) {
+    const byBookingRef = await adminDb
+      .collection("bookings")
+      .where("bookingRef", "==", trimmed)
+      .limit(1)
+      .get();
+    if (!byBookingRef.empty) {
+      const matchDoc = byBookingRef.docs[0];
+      return {
+        ok: true,
+        bookingId: matchDoc.id,
+        reservationId: null
+      };
+    }
+    return {
+      ok: false,
+      code: "BOOKING_NOT_FOUND",
+      message: "Booking was not found."
+    };
+  }
+
+  // Path 3: raw doc id (legacy pre-MRB-01 + post-MRB-01 child
+  // doc ids that staff paste from the bookings table). The
+  // transaction will re-read this id and surface 404 +
+  // BOOKING_NOT_FOUND if the doc has been deleted between the
+  // paste and the link confirmation.
+  return {
+    ok: true,
+    bookingId: trimmed,
+    reservationId: null
+  };
+}
+
 export async function handleLinkBookingToMember(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -796,6 +961,46 @@ export async function handleLinkBookingToMember(req: any, res: any) {
   try {
     let responseData: any = {};
 
+    // Per MED-3 G1 (build-variant follow-up 2026-08-20):
+    // extend the resolver to accept all three input shapes
+    // the staff actually paste. The pre-G1 surface only did
+    // `adminDb.collection("bookings").doc(bookingId).get()` —
+    // a doc-id lookup, so pasting the human `bookingRef`
+    // (`SPK-…`) or `reservationRef` (`R-…`) returned
+    // `{ exists: false }` and the catch mapped it to 400
+    // with the verbatim "Booking was not found." message
+    // (misleading copy — reads as a client typo, not as
+    // "the server expected a doc id, you gave it a ref").
+    // G1 also tightens the catch to surface 404 + a
+    // structured `code: "BOOKING_NOT_FOUND"` /
+    // `code: "RESERVATION_NOT_FOUND"` on the JSON response
+    // so the toast can branch on code, not prose (per
+    // `silent-rate-limit-fallback` skill's AFTER pattern).
+    //
+    // The resolver is non-transactional (a single-shot
+    // `get()` / `where().limit(1)`); the resulting
+    // `resolvedBookingId` is then read INSIDE the
+    // transaction via `transaction.get(bookingRef)` (per the
+    // FOL-03 reads-before-writes invariant). The two reads
+    // are consistent for the staff's interactive
+    // link-and-confirm flow (the time between the resolver
+    // read and the transaction read is sub-second, and the
+    // `linkedReason` audit row is written for every call
+    // regardless of success — the existing idempotency
+    // guard handles a race where the booking is deleted
+    // mid-transaction: the transaction's `exists: false`
+    // throws "Booking was not found." → 404).
+    const resolution = await resolveBookingForLink(bookingId);
+    if (!resolution.ok) {
+      return res.status(404).json({
+        success: false,
+        code: resolution.code,
+        error: resolution.message
+      });
+    }
+    const resolvedBookingId = resolution.bookingId;
+    const resolvedReservationId = resolution.reservationId;
+
     await adminDb.runTransaction(async (transaction: any) => {
       const memberRef = adminDb.collection("members").doc(memberUid);
       const memberDoc = await transaction.get(memberRef);
@@ -803,16 +1008,19 @@ export async function handleLinkBookingToMember(req: any, res: any) {
         throw new Error("Member account was not found.");
       }
 
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingRef = adminDb.collection("bookings").doc(resolvedBookingId);
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
-        throw new Error("Booking was not found.");
+        // Race: the booking was deleted between the resolver
+        // read + the transaction read. Surface 404 + the same
+        // structured code so the toast branches on code
+        // regardless of which read missed.
+        throw new Error("BOOKING_NOT_FOUND:Booking was not found.");
       }
 
       const bookingData = bookingDoc.data() || {};
       const bookingStatus = String(bookingData.status || "");
       const bookingTestRunId = bookingData.testRunId || null;
-      const existingMemberId = bookingData.memberId || null;
 
       if (bookingStatus === "cancelled") {
         // Cancelled bookings are historical; linking them would put
@@ -832,35 +1040,124 @@ export async function handleLinkBookingToMember(req: any, res: any) {
         throw new Error("Test-run bookings cannot be linked to a member.");
       }
 
+      // Per MED-3 G2 (build-variant follow-up 2026-08-20):
+      // for an N>1 reservation (post-MRB-01
+      // bookings with `reservationId` set), query
+      // the siblings in the same `runTransaction`
+      // and fan the `memberId` write out to every
+      // one. Pre-G2 the transaction only wrote to
+      // the resolved booking — so the member's My
+      // Stays list (which queries
+      // `bookings.where("memberId", "==", uid)` at
+      // `members.ts:192`) only showed the lead
+      // child. G2 closes that gap.
+      //
+      // The fan-out is conditional on
+      // `bookingData.reservationId` being set —
+      // legacy pre-MRB-01 + N=1 reservations have
+      // no `reservationId` and skip the sibling
+      // query entirely (preserves the pre-G2
+      // single-doc write shape).
+      //
+      // The siblings are read in the SAME
+      // `runTransaction` so the sibling query is
+      // consistent with the rest of the write set
+      // (per the FOL-03 reads-before-writes
+      // invariant). The conflict guard at line 837
+      // is extended: if ANY sibling is linked to a
+      // different member, the whole link fails 409
+      // (no silent overwrite on the lead, no
+      // partial fan-out).
+      const existingMemberId = bookingData.memberId || null;
+
       if (existingMemberId && existingMemberId !== memberUid) {
-        // Surface the conflict cleanly. The staff can either unlink
-        // the booking via the booking-drawer `memberId` edit (out of
-        // scope for this fix) or pick a different booking. The
-        // thrown error becomes a 409 in the catch.
+        // Surface the conflict cleanly on the lead
+        // child. The sibling-extension below adds
+        // the same check for every other child in
+        // the same reservation. The thrown error
+        // becomes a 409 in the catch.
         throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
       }
 
-      const alreadyLinked = existingMemberId === memberUid;
+      let siblingDocs: Array<{ id: string; data: any }> = [];
+      const isReservationBooking = !!(bookingData.reservationId && String(bookingData.reservationId).trim());
+      if (isReservationBooking) {
+        const siblingsQuery = await adminDb
+          .collection("bookings")
+          .where("reservationId", "==", String(bookingData.reservationId).trim())
+          .get();
+        siblingDocs = siblingsQuery.docs
+          .map((d: any) => ({ id: d.id, data: d.data() || {} }))
+          .filter((b: any) => String(b.id) !== String(resolvedBookingId));
+        // G2.D: every sibling must be either
+        // unlinked OR linked to the same member.
+        // A different member on any sibling is a
+        // 409 conflict (no silent overwrite).
+        for (const sibling of siblingDocs) {
+          const siblingMemberId = sibling.data.memberId || null;
+          if (siblingMemberId && siblingMemberId !== memberUid) {
+            throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
+          }
+        }
+      }
+      // The lead + the siblings form the fan-out
+      // set. The lead's existingMemberId is the
+      // primary gate (single-doc conflict guard
+      // from pre-G2); each sibling's memberId is
+      // the per-sibling gate (G2).
+      const allTargets = [
+        { id: resolvedBookingId, data: bookingData, existingMemberId },
+        ...siblingDocs.map((s) => ({
+          id: s.id,
+          data: s.data,
+          existingMemberId: s.data.memberId || null
+        }))
+      ];
+      const allAlreadyLinked = allTargets.every((t) => t.existingMemberId === memberUid);
       const now = new Date();
 
-      if (!alreadyLinked) {
-        transaction.update(bookingRef, {
-          memberId: memberUid,
-          linkedByStaff: staff.uid,
-          linkedAt: now,
-          linkedReason: trimmedReason,
-          updatedAt: now
-        });
+      if (!allAlreadyLinked) {
+        for (const target of allTargets) {
+          if (target.existingMemberId === memberUid) continue; // idempotent skip
+          const siblingRef = adminDb.collection("bookings").doc(target.id);
+          transaction.update(siblingRef, {
+            memberId: memberUid,
+            linkedByStaff: staff.uid,
+            linkedAt: now,
+            linkedReason: trimmedReason,
+            updatedAt: now
+          });
+        }
       }
 
       // Audit row — same shape as the erasure audit, written
       // before the booking update so a partial transaction can be
-      // retried without losing the audit trail.
+      // retried without losing the audit trail. Per MED-3 G1
+      // (build-variant 2026-08-20): when the link resolves via the
+      // `R-…` reservationRef path, the audit row carries the
+      // `reservationId` + `reservationRef` so future auditors can
+      // tell whether the staff linked a single child or a whole
+      // reservation. Per MED-3 G2: the audit row also carries
+      // `linkedBookingIds` (the fan-out set) so a future audit
+      // can disambiguate "linked the lead" from "linked the
+      // whole reservation".
+      const linkedBookingIds = allTargets.map((t) => t.id);
       const auditRef = adminDb
-        .collection("bookings").doc("audit").collection("records").doc(`${bookingId}-link-${now.getTime()}`);
+        .collection("bookings").doc("audit").collection("records").doc(`${resolvedBookingId}-link-${now.getTime()}`);
       transaction.set(auditRef, {
-        bookingId,
+        bookingId: resolvedBookingId,
         bookingRef: bookingData.bookingRef || "",
+        // G1: include the reservation cluster on the
+        // audit row so a future reconciliation can
+        // disambiguate "linked the lead" from "linked
+        // the whole reservation".
+        reservationId: bookingData.reservationId || resolvedReservationId || null,
+        reservationRef: bookingData.reservationRef || null,
+        // G2: include the fan-out set so an auditor
+        // can see exactly which bookings were
+        // linked (and which were skipped via the
+        // idempotency guard).
+        linkedBookingIds,
         action: "manual-link-member",
         fromMemberId: existingMemberId,
         toMemberId: memberUid,
@@ -874,9 +1171,19 @@ export async function handleLinkBookingToMember(req: any, res: any) {
 
       responseData = {
         memberUid,
-        bookingId,
+        bookingId: resolvedBookingId,
         bookingRef: bookingData.bookingRef || "",
-        alreadyLinked,
+        // G1: surface the resolved reservation cluster
+        // (null on legacy pre-MRB-01 single-room
+        // links) so the admin UI can confirm what
+        // was linked.
+        reservationId: bookingData.reservationId || resolvedReservationId || null,
+        // G2: surface the fan-out set so the
+        // admin UI can confirm which bookings were
+        // linked. Always array-shaped (length 1
+        // for the single-doc back-compat path).
+        linkedBookingIds,
+        alreadyLinked: allAlreadyLinked,
         auditId: auditRef.id
       };
     });
@@ -886,18 +1193,38 @@ export async function handleLinkBookingToMember(req: any, res: any) {
     const message = error?.message || "We could not link this booking to the member.";
     // The conflict guard ("already linked to a different member")
     // is a 409 — the request is well-formed but conflicts with
-    // existing data, not a server failure. Everything else that
-    // mentions a missing member/booking or a cancelled/test-run
-    // booking is a 400 (client error). Default to 500.
-    const status = message.includes("already linked to a different member")
-      ? 409
-      : message.includes("was not found")
-        || message.includes("cannot be linked")
-        || message.includes("Cancelled bookings")
-        || message.includes("Test-run bookings")
-        ? 400
-        : 500;
-    return res.status(status).json({ success: false, error: message });
+    // existing data, not a server failure. Per MED-3 G1
+    // (build-variant 2026-08-20): the "was not found" branch is
+    // tightened to 404 with a structured `code: BOOKING_NOT_FOUND`
+    // / `code: RESERVATION_NOT_FOUND` so the toast can branch on
+    // code, not prose (per `silent-rate-limit-fallback` skill's
+    // AFTER pattern). Validation errors (cancelled, test-run,
+    // member-not-found, conflict) stay at 400 / 409. Default to
+    // 500.
+    if (message.includes("already linked to a different member")) {
+      return res.status(409).json({ success: false, error: message });
+    }
+    if (message.startsWith("BOOKING_NOT_FOUND:")) {
+      return res.status(404).json({
+        success: false,
+        code: "BOOKING_NOT_FOUND",
+        error: message.replace(/^BOOKING_NOT_FOUND:/, "")
+      });
+    }
+    if (message.startsWith("RESERVATION_NOT_FOUND:")) {
+      return res.status(404).json({
+        success: false,
+        code: "RESERVATION_NOT_FOUND",
+        error: message.replace(/^RESERVATION_NOT_FOUND:/, "")
+      });
+    }
+    if (message.includes("was not found")
+      || message.includes("cannot be linked")
+      || message.includes("Cancelled bookings")
+      || message.includes("Test-run bookings")) {
+      return res.status(400).json({ success: false, error: message });
+    }
+    return res.status(500).json({ success: false, error: message });
   }
 }
 
@@ -1055,6 +1382,74 @@ export async function handleEraseMemberAccount(req: any, res: any) {
     return res.status(500).json({
       success: false,
       error: "We could not erase your account right now. Please try again."
+    });
+  }
+}
+
+export async function handleSendVerificationEmail(req: any, res: any) {
+  try {
+    const authUser = getAuthUser(req);
+    if (!authUser?.uid || !authUser?.email) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Missing or invalid authentication token."
+      });
+    }
+
+    if (authUser.email_verified === true) {
+      return res.status(200).json({
+        success: true,
+        message: "Email is already verified.",
+        data: { alreadyVerified: true }
+      });
+    }
+
+    const email = authUser.email;
+    const guestName = authUser.name || authUser.displayName || "";
+
+    const actionCodeSettings = {
+      url: `${getServerBaseUrl()}/account/profile?emailVerified=true`,
+      handleCodeInApp: true
+    };
+
+    const verificationLink = await adminAuth.generateEmailVerificationLink(email, actionCodeSettings);
+
+    await sendVerificationEmailTrigger({
+      guestName,
+      email,
+      verificationLink
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification email sent successfully."
+    });
+  } catch (error: any) {
+    console.error("handleSendVerificationEmail failed:", error);
+    // Per operator report 2026-08-20: a generic 500 here
+    // surfaces to the banner as a useless "try again" message
+    // even when the real cause is a Firebase console config
+    // issue (e.g. `auth/unauthorized-continue-uri` because the
+    // continue-URL domain is not in the project's authorized
+    // domains list). The firebase-admin SDK puts the error code
+    // on both `error.code` and `error.errorInfo.code` — we read
+    // both so the mapping survives any SDK shape changes.
+    const firebaseErrorCode =
+      (typeof error?.errorInfo?.code === "string" && error.errorInfo.code) ||
+      (typeof error?.code === "string" && error.code) ||
+      "";
+    if (firebaseErrorCode === "auth/unauthorized-continue-uri") {
+      return res.status(500).json({
+        success: false,
+        code: "auth/unauthorized-continue-uri",
+        error:
+          "This site's domain is not allowlisted in the Firebase project's authorized domains list. " +
+          "Add the current hostname (e.g. stg.sparkinnbohol.com) under Firebase Console → Authentication → Settings → Authorized domains, then try again."
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      error: "Failed to send verification email. Please try again."
     });
   }
 }

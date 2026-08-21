@@ -72,7 +72,8 @@ const EMAIL_TRIGGER_GROUPS: Array<{ label: string; triggers: EmailTriggerCatalog
       { label: "Contact Inquiry — Guest", description: "Submitter receives confirmation that their contact message was received", action: "contact-confirmation" },
       { label: "Early Check-in Request", description: "Staff notified when a member requests early check-in", action: "early-checkin-request" },
       { label: "Early Check-in Resolution", description: "Guest notified when an early check-in request is approved or declined", action: "early-checkin-resolve" },
-      { label: "Voucher Issued", description: "Guest receives a newly issued promotional voucher and redemption details", action: "voucher-issued" }
+      { label: "Voucher Issued", description: "Guest receives a newly issued promotional voucher and redemption details", action: "voucher-issued" },
+      { label: "Rewards Email Verification", description: "Member receives a verification link to confirm their email address", action: "spark-rewards-email-verification" }
     ]
   },
   {

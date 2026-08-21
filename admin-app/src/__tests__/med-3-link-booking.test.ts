@@ -240,4 +240,219 @@ describe("fix/spark-rewards-med-3-link-booking — front-desk manual link (decis
       expect(handlerBlock?.[0]).toMatch(/toast\.info/);
     });
   });
+
+  // ─── 5. MED-3 G1 build-variant follow-up (operator-reported 2026-08-20) ──
+  // Per `plan/features/SPARK-REWARDS.md §Front-desk manual
+  // link` follow-up note: the pre-G1 surface only did
+  // `bookings.doc(bookingId).get()` so pasting a `SPK-…`
+  // or `R-…` ref returned `{ exists: false }` and the
+  // catch mapped it to 400 with the verbatim "Booking was
+  // not found." message. G1 extends the resolver to accept
+  // all three input shapes + tightens the not-found
+  // branches to 404 + structured `code: BOOKING_NOT_FOUND`
+  // / `code: RESERVATION_NOT_FOUND`.
+
+  describe("MED-3 G1 — resolver accepts bookingRef + reservationRef + doc id", () => {
+    it("imports BOOKING_REF_REGEX + RESERVATION_REF_REGEX from @spark-inn/shared", () => {
+      expect(membersHandlerSrc).toMatch(
+        /import \{[\s\S]*?BOOKING_REF_REGEX[\s\S]*?\} from "@spark-inn\/shared"/
+      );
+      expect(membersHandlerSrc).toMatch(
+        /import \{[\s\S]*?RESERVATION_REF_REGEX[\s\S]*?\} from "@spark-inn\/shared"/
+      );
+    });
+
+    it("declares the resolveBookingForLink helper with a discriminated-union return type", () => {
+      // The helper is the gate the production
+      // handler enters BEFORE the transaction. Its
+      // return type is the source-of-truth for
+      // the toasts + the audit row shape.
+      expect(membersHandlerSrc).toMatch(
+        /async function resolveBookingForLink\(input: string\)/
+      );
+      expect(membersHandlerSrc).toMatch(
+        /\{ ok: true; bookingId: string; reservationId: string \| null \}/
+      );
+      expect(membersHandlerSrc).toMatch(
+        /\{ ok: false; code: "BOOKING_NOT_FOUND" \| "RESERVATION_NOT_FOUND"; message: string \}/
+      );
+    });
+
+    // Slice the resolver body from the function
+    // declaration to its matching closing `}`. The
+    // body has nested braces (the `if`/`else if`
+    // branches + the return-object literals), so we
+    // use a brace-counting helper (the FOL-02
+    // mapper pattern from
+    // `fol-02-call-history-mapper-drops.test.ts`).
+    function sliceResolverBody(src: string): string {
+      const start = src.indexOf("async function resolveBookingForLink(");
+      if (start < 0) return "";
+      // Must skip past the preceding JSDoc `/** ... */`
+      // block — its `{` / `}` (in the type-def lines) would
+      // prematurely close the counter. The function's
+      // return type also has nested `{` / `}` (the
+      // discriminated union), so we find the
+      // `> {` pattern (return-type end + body start)
+      // rather than the first `{`.
+      const jsdocEnd = src.lastIndexOf("*/", start);
+      const searchFrom = jsdocEnd > 0 ? jsdocEnd + 2 : start;
+      // Look for `> {` — the body opening brace
+      // (the return type's `>` is always followed
+      // by a space and the body `{`).
+      const bodyOpenMatch = src.slice(searchFrom).match(/>\s*\{/);
+      if (!bodyOpenMatch || bodyOpenMatch.index === undefined) return "";
+      const openIdx = searchFrom + bodyOpenMatch.index + bodyOpenMatch[0].length - 1;
+      let depth = 1;
+      let i = openIdx + 1;
+      while (i < src.length && depth > 0) {
+        const ch = src[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        i++;
+      }
+      return src.slice(start, i);
+    }
+
+    it("routes R-… input via reservations.doc(input).get() + reads leadBookingId", () => {
+      // The R-… path is the new MRB-aware surface.
+      // The pre-G1 doc-id lookup never resolved an
+      // R-… ref at all (the doc id was the
+      // reservationRef shape, not a Firestore auto-id).
+      const resolverBlock = sliceResolverBody(membersHandlerSrc);
+      expect(resolverBlock).toMatch(/RESERVATION_REF_REGEX\.test\(trimmed\)/);
+      expect(resolverBlock).toMatch(/adminDb\.collection\("reservations"\)\.doc\(trimmed\)\.get\(\)/);
+      expect(resolverBlock).toMatch(/leadBookingId/);
+    });
+
+    it("routes SPK-… input via bookings.where(bookingRef).limit(1).get()", () => {
+      const resolverBlock = sliceResolverBody(membersHandlerSrc);
+      expect(resolverBlock).toMatch(/BOOKING_REF_REGEX\.test\(trimmed\)/);
+      expect(resolverBlock).toMatch(/where\("bookingRef", "==", trimmed\)/);
+      expect(resolverBlock).toMatch(/\.limit\(1\)/);
+    });
+
+    it("falls through to the raw doc id path for legacy pre-MRB-01 bookings", () => {
+      // Backwards compat: the pre-G1 surface only
+      // did `bookings.doc(bookingId).get()`; the
+      // raw-id path keeps that contract for
+      // pre-MRB-01 + post-MRB-01 child doc ids
+      // that staff paste from the bookings table.
+      const resolverBlock = sliceResolverBody(membersHandlerSrc);
+      expect(resolverBlock).toMatch(/bookingId: trimmed/);
+    });
+
+    it("tightens the not-found catch to 404 + structured code: BOOKING_NOT_FOUND / RESERVATION_NOT_FOUND", () => {
+      // The pre-G1 mapping was 400 + prose. G1
+      // branches on the throw's `BOOKING_NOT_FOUND:`
+      // / `RESERVATION_NOT_FOUND:` prefix and
+      // surfaces the structured code on the JSON
+      // response (per the silent-rate-limit-fallback
+      // skill's AFTER pattern). The anchor is the
+      // unique `MED-3 G1` docstring + the
+      // `RESERVATION_NOT_FOUND:` literal (only the
+      // G1 catch block has both).
+      const catchBlock = membersHandlerSrc.match(
+        /MED-3 G1[\s\S]*?RESERVATION_NOT_FOUND:[\s\S]*?return res\.status\(500\)\.json/
+      );
+      expect(catchBlock?.[0]).toMatch(/404/);
+      expect(catchBlock?.[0]).toMatch(/BOOKING_NOT_FOUND/);
+      expect(catchBlock?.[0]).toMatch(/RESERVATION_NOT_FOUND/);
+    });
+
+    it("the form placeholder surfaces all three input shapes (SPK-…, R-…, doc id)", () => {
+      // The pre-G1 placeholder read "e.g.
+      // SPK-2026-0142 or booking doc id" — the
+      // staff saw a date that no longer matches
+      // any current booking ref AND the
+      // reservation ref was missing entirely.
+      const placeholder = membersPageSrc.match(
+        /placeholder="e\.g\. SPK-20260820-\d+, R-20260820-\d+, or booking doc id"/
+      );
+      expect(placeholder, "expected the G1 placeholder").not.toBeNull();
+    });
+  });
+
+  // ─── 6. MED-3 G2 build-variant follow-up (operator-reported 2026-08-20) ──
+  // Per `plan/features/SPARK-REWARDS.md §Front-desk manual
+  // link` follow-up note: when the staff links a member to
+  // a multi-room reservation, the transaction now fans the
+  // `memberId` write out to every sibling (not just the
+  // lead). Pre-G2, the member's My Stays list
+  // (`handleListMemberStays` at `members.ts:192` queries
+  // `bookings.where("memberId", "==", uid)`) only showed
+  // the lead child — the siblings stayed orphaned.
+  describe("MED-3 G2 — MRB-aware sibling fan-out", () => {
+    // Slice the `runTransaction` body in
+    // `handleLinkBookingToMember` to read the
+    // production code. The body's nested
+    // `transaction.update` calls + the
+    // `siblingsQuery` + the `allTargets` loop
+    // pattern is the G2 contract. The slice uses
+    // the same brace-counting pattern as the G1
+    // helper (skip JSDoc, find body opening).
+    function sliceHandleLinkBody(src: string): string {
+      // Find the function declaration. The body
+      // is the entire `runTransaction(async
+      // (transaction) => { ... })` block. Slice
+      // from the function declaration to the end
+      // of the file (the function is the last
+      // export in the file — the matching `}` is
+      // the file's closing brace).
+      const start = src.indexOf("export async function handleLinkBookingToMember(");
+      if (start < 0) return "";
+      // Skip past the preceding JSDoc.
+      const jsdocEnd = src.lastIndexOf("*/", start);
+      const searchFrom = jsdocEnd > 0 ? jsdocEnd + 2 : start;
+      return src.slice(searchFrom);
+    }
+
+    it("declares the G2 sibling-query block on the post-MRB-01 path (bookingData.reservationId)", () => {
+      // The pre-G2 code only wrote to a single
+      // `bookings/{id}` doc. G2 adds a
+      // `bookings.where("reservationId", "==", ...)`
+      // query + a per-sibling memberId write.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/where\("reservationId", "==", String\(bookingData\.reservationId\)\.trim\(\)\)/);
+    });
+
+    it("iterates allTargets via the per-target existingMemberId check (idempotent skip)", () => {
+      // The G2 fan-out loop must skip siblings
+      // already linked to the same member
+      // (idempotency). The check is
+      // `if (target.existingMemberId === memberUid) continue;`.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/allTargets/);
+      expect(body).toMatch(/target\.existingMemberId === memberUid/);
+    });
+
+    it("extends the conflict guard to siblings (409 if ANY sibling is linked to a different member)", () => {
+      // Pre-G2: the conflict guard was scoped to
+      // the resolved booking only. G2 extends it
+      // to every sibling in the same reservation.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/siblingMemberId\s*&&\s*siblingMemberId\s*!==\s*memberUid/);
+    });
+
+    it("includes linkedBookingIds on the response payload + the audit row", () => {
+      // The G2 audit row + response both carry
+      // `linkedBookingIds` so a future auditor
+      // can see "linked the lead" vs "linked the
+      // whole reservation".
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/linkedBookingIds/);
+    });
+
+    it("computes allAlreadyLinked from every target (the response's alreadyLinked field reflects the FAN-OUT, not just the lead)", () => {
+      // The pre-G2 response's `alreadyLinked` was
+      // scoped to the resolved booking. G2 makes
+      // it reflect the entire fan-out: if ANY
+      // sibling still needs the write, the
+      // response says `alreadyLinked: false` so
+      // the UI surfaces the partial-link state.
+      const body = sliceHandleLinkBody(membersHandlerSrc);
+      expect(body).toMatch(/allAlreadyLinked/);
+      expect(body).toMatch(/alreadyLinked:\s*allAlreadyLinked/);
+    });
+  });
 });

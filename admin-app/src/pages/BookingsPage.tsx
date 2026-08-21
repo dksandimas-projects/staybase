@@ -650,6 +650,15 @@ export function BookingsPage() {
   ];
   const brandRgb = hexToRgb(config.colors.primary);
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
+  // Per DSC-05 (2026-08-20, decision #228): the folio "Discount or
+  // voucher" card surfaces a `Re-verify ID` button when the ID has
+  // been rejected + the booking is in a reschedulable status. The
+  // button opens a `ConfirmForm` that cites the prior rejection
+  // audit cluster + runs the SAME updateDoc payload as the
+  // existing check-in `Approve Discount` flow (no new server
+  // route). See plan/features/BOOKINGS-MANAGEMENT.md §Discount
+  // Verification (Senior/PWD) + plan/docs/DECISIONS-FEATURES.md #228.
+  const [showReverifyDiscountConfirm, setShowReverifyDiscountConfirm] = useState(false);
   const [showDiscountForm, setShowDiscountForm] = useState(false);
   const [discountError, setDiscountError] = useState<string | null>(null);
   const [refundError, setRefundError] = useState<string | null>(null);
@@ -2444,9 +2453,34 @@ export function BookingsPage() {
     if (!selectedBooking) return;
     setConfirmBookingPending(true);
     try {
-      await updateBookingStatus(selectedBooking.id, "confirmed");
+      // Per #11 (operator-reported 2026-08-20, tracked in
+      // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+      // #11 row`): the `updateBookingStatus` return value
+      // now carries the `emailQueued: boolean` flag from
+      // the server's `handleConfirmBooking` response.
+      // The toast branches on the flag — true → "Booking
+      // confirmed, email queued" (the pre-#11 happy path);
+      // false → "Booking confirmed, email FAILED — see
+      // banner" (the post-#11 desk-facing surface for the
+      // silent-swallow fix). The `failed_emails` Firestore
+      // collection has the durable audit trail; the
+      // AdminContext `failed_emails/` listener (deferred
+      // follow-up) is what will render the banner.
+      const result = await updateBookingStatus(selectedBooking.id, "confirmed");
       setSelectedBooking(prev => prev ? { ...prev, status: "confirmed" } : null);
       setShowConfirmBooking(false);
+      // The toast is gated on `result` being non-null AND
+      // `emailQueued === false` — other branches (older
+      // server builds, or the future pre-flight refresh
+      // path) return `null` and the toast stays silent.
+      if (result && result.emailQueued === false) {
+        toast.warning(
+          "Email delivery failed",
+          "Booking confirmed, but confirmation email failed to send. The desk banner lists the failure."
+        );
+      } else {
+        toast.success("Booking confirmed", "Email queued");
+      }
     } catch (err: any) {
       toast.error("Failed to confirm booking", err?.message || "Please try again.");
     } finally {
@@ -2720,8 +2754,28 @@ export function BookingsPage() {
     if (!verifySuccess) return;
     setConfirmingBookingFromSuccess(true);
     try {
-      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
-      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      // Per #11 (operator-reported 2026-08-20, tracked in
+      // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+      // #11 row`): this is the same `booking-confirmed`
+      // path as the drawer confirm (both call
+      // `updateBookingStatus(..., "confirmed")` →
+      // server `handleConfirmBooking` → fires the
+      // `booking-confirmed` email). The post-#11 toast
+      // branches on the server's `emailQueued` flag
+      // so the desk sees the email state in BOTH
+      // entry points (drawer confirm + post-verify
+      // success modal). The pre-#11 happy-path toast
+      // text is preserved when `emailQueued` is
+      // `true` (or `null` from an older server build).
+      const result = await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      if (result && result.emailQueued === false) {
+        toast.warning(
+          "Email delivery failed",
+          `${verifySuccess.booking.bookingRef} is confirmed, but the confirmation email failed. See the desk banner.`
+        );
+      } else {
+        toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      }
     } catch (err: any) {
       toast.error("Failed to confirm booking", err?.message || "Please try again.");
     } finally {
@@ -5766,6 +5820,34 @@ export function BookingsPage() {
             <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:w-[calc(66.667%-0.5rem)]">
             {(() => {
               const hasVoucherOrDiscount = selectedBooking.discountType || selectedBooking.voucherCode;
+              // Per DSC-05 (2026-08-20, decision #228): the folio
+              // chip mirrors the check-in chip's 3-state shape
+              // (verified / rejected / pending) so the desk sees the
+              // same status pill on both surfaces. The pre-DSC-05
+              // 2-state ternary always rendered "Pending review"
+              // on rejection — that's the operator-reported bug.
+              const renderDiscountChip = () => {
+                if (selectedBooking.discountVerified) {
+                  return (
+                    <span className="ml-1 inline-flex items-center gap-1 rounded bg-green-50 px-1.5 py-0.5 text-[10px] font-bold text-green-700">
+                      ✓ Verified
+                    </span>
+                  );
+                }
+                if (selectedBooking.discountRejected) {
+                  return (
+                    <span className="ml-1 inline-flex items-center gap-1 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                      ✗ Rejected
+                    </span>
+                  );
+                }
+                return (
+                  <span className="ml-1 inline-flex items-center gap-1 rounded bg-yellow-50 px-1.5 py-0.5 text-[10px] font-bold text-yellow-700">
+                    ⌛ Pending Review
+                  </span>
+                );
+              };
+              const canReverify = !!selectedBooking.discountRejected && RESCHEDULABLE_STATUSES.includes(selectedBooking.status);
               return (
                 <div className="flex flex-col gap-3 rounded-card border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -5779,7 +5861,7 @@ export function BookingsPage() {
                           {selectedBooking.discountType && (
                             <p>
                               {selectedBooking.discountType === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
-                              {selectedBooking.discountVerified ? <span className="ml-1 font-semibold text-emerald-700">Verified</span> : <span className="ml-1 font-semibold text-amber-700">Pending review</span>}
+                              {renderDiscountChip()}
                             </p>
                           )}
                           {selectedBooking.voucherCode && <p>Voucher {selectedBooking.voucherCode}</p>}
@@ -5789,6 +5871,18 @@ export function BookingsPage() {
                       )}
                     </div>
                   </div>
+                  {/* Per DSC-05 (2026-08-20, decision #228): the
+                      `Apply discount` button is unchanged on its
+                      rendering condition (`!hasVoucherOrDiscount &&
+                      RESCHEDULABLE_STATUSES.includes(status)`).
+                      On rejection, `hasVoucherOrDiscount` stays
+                      truthy because `discountType` is still set, so
+                      the existing gate keeps `Apply discount`
+                      hidden — the desk should re-verify the original
+                      ID (Re-verify ID below), not re-apply the
+                      rejected discount. Per IDG #227, the rejected
+                      branch still satisfies the dashboard gate's
+                      "verified or rejected" check. */}
                   {!hasVoucherOrDiscount && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
                     <button
                       type="button"
@@ -5809,9 +5903,84 @@ export function BookingsPage() {
                       {renderActionScope("room")}
                     </button>
                   )}
+                  {/* Per DSC-05 (2026-08-20, decision #228): on
+                      rejection the desk needs a UI path back to
+                      verifying the (physically re-checked or
+                      OSCA-resubmitted) ID. Opens a `ConfirmForm`
+                      that cites the prior rejection audit cluster +
+                      runs the existing approve-discount writer. */}
+                  {canReverify && (
+                    <button
+                      type="button"
+                      data-testid="dsc-05-reverify-discount"
+                      onClick={() => setShowReverifyDiscountConfirm(true)}
+                      className="inline-flex min-h-[44px] w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-emerald-600/30 bg-emerald-50 px-4 text-xs font-bold text-emerald-700 hover:bg-emerald-100 sm:w-auto"
+                    >
+                      <ShieldCheck size={14} />
+                      Re-verify ID
+                    </button>
+                  )}
                 </div>
               );
             })()}
+            {/* Per DSC-05 (2026-08-20, decision #228): the folio
+                re-verify confirm — fires the SAME updateDoc payload
+                as the check-in `Approve Discount` handler above
+                (line 5914-5924). The audit-cluster fields are
+                already hydrated by FOL-02 (#198). The reason field
+                on the ConfirmForm captures the staff's free-text note
+                (stored only in the toast / not on the doc — mirrors
+                the existing approve-discount writer which doesn't
+                stamp a free-text note either). The lifecycle is
+                closed-and-reopened: `discountVerified` flips true,
+                `discountVerifiedBy` stamps, `discountRejected`
+                clears. No new email action; no re-send of the
+                original rejection (per the DSC-05 spec). */}
+            {showReverifyDiscountConfirm && selectedBooking.discountRejected && (
+              <ConfirmForm
+                title="Re-verify this rejected discount?"
+                message={
+                  <div className="space-y-2 text-xs text-gray-700">
+                    <p>
+                      This booking's <strong>{selectedBooking.discountType?.toUpperCase()}</strong> discount was rejected.
+                    </p>
+                    <p className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 leading-relaxed">
+                      <strong>{selectedBooking.discountRejectedBy || "Staff"}</strong> · {selectedBooking.discountRejectionReason || "No reason recorded"}
+                    </p>
+                    <p>
+                      Confirming flips <code className="rounded bg-gray-100 px-1">discountVerified: true</code> and clears <code className="rounded bg-gray-100 px-1">discountRejected: false</code> on this booking. The discount is restored on the folio.
+                    </p>
+                  </div>
+                }
+                confirmLabel="Re-verify and restore discount"
+                cancelLabel="Back"
+                variant="primary"
+                onConfirm={async () => {
+                  try {
+                    const updatedFields = {
+                      discountVerified: true,
+                      discountVerifiedBy: currentUser?.email || "staff",
+                      discountRejected: false
+                    };
+                    const bookingDocRef = doc(db, "bookings", selectedBooking.id);
+                    await updateDoc(bookingDocRef, {
+                      ...updatedFields,
+                      updatedAt: serverTimestamp()
+                    });
+                    syncSelectedBooking(updatedFields);
+                    toast.success(
+                      "Discount re-verified",
+                      `Verified by ${currentUser?.email || "staff"}`
+                    );
+                    setShowReverifyDiscountConfirm(false);
+                  } catch (err: any) {
+                    console.error("Failed to re-verify discount:", err);
+                    toast.error("Failed to re-verify discount", err.message);
+                  }
+                }}
+                onCancel={() => setShowReverifyDiscountConfirm(false)}
+              />
+            )}
             </BookingDrawerSectionPanel>
 
             {/* Government discount verification */}

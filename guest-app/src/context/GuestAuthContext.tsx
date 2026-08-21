@@ -61,22 +61,74 @@ export function useGuestAuth(): GuestAuthContextValue {
   return ctx;
 }
 
-async function registerMember(
-  idToken: string,
-  profile: { fullName?: string; phone?: string; photoUrl?: string; authProvider?: "google" | "email" } = {}
-): Promise<void> {
+async function registerMember(idToken: string, payload: any) {
   const res = await fetch("/api/members/register", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`
     },
-    body: JSON.stringify(profile)
+    body: JSON.stringify(payload)
   });
-  const result = await res.json().catch(() => null);
-  if (!res.ok || !result?.success) {
-    throw new Error(result?.error || `We could not join ${config.rewardsName} right now. Please try again.`);
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
   }
+}
+
+/**
+ * Sends the branded verification email via the custom API
+ * (`/api/members/send-verification-email`), which generates
+ * a Firebase `generateEmailVerificationLink` server-side and
+ * dispatches a styled Resend email. Returns `false` only if a
+ * network failure prevented the request from reaching the
+ * server AND the SDK fallback succeeded.
+ *
+ * Important (2026-08-20 bug fix): we do NOT swallow the
+ * API's HTTP error responses (4xx/5xx) just to attempt a
+ * Firebase SDK fallback. The SDK fallback produces an
+ * unbranded email through a different code path and — more
+ * importantly — its own per-user throttle throws
+ * `auth/too-many-requests`, which previously propagated out
+ * of this helper as a misleading "wait a minute" message
+ * triggered by the API's 429, not the SDK's.
+ *
+ * The SDK fallback is reserved for the case where the
+ * network call itself failed (offline / DNS / CORS) — in
+ * that case we let the SDK surface its own error and the
+ * banner's `auth/too-many-requests` mapping still applies.
+ */
+async function sendCustomVerificationEmail(user: User): Promise<boolean> {
+  let res: Response;
+  try {
+    const idToken = await user.getIdToken();
+    res = await fetch("/api/members/send-verification-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Be" + "arer " + idToken,
+      }
+    });
+  } catch (networkErr) {
+    // The request never reached the server. Fall back to the
+    // SDK so the user still gets an email. Any SDK error
+    // (e.g. `auth/too-many-requests`) propagates to the
+    // caller so the banner can surface it accurately.
+    console.warn("Custom verification email API unreachable, falling back to Firebase SDK:", networkErr);
+    await firebaseSendEmailVerification(user);
+    return false;
+  }
+
+  if (!res.ok) {
+    // The API responded with an error (e.g. 429 rate limit,
+    // 500 server error). Surface that exact error to the
+    // banner — do NOT swallow it with a SDK fallback that
+    // would throw a different, misleading error.
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return true;
 }
 
 export function GuestAuthProvider({ children }: { children: ReactNode }) {
@@ -175,13 +227,10 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
       // verification email right after signup so the
       // email/password user can be promoted to
       // `email_verified === true` (the server gate that protects
-      // email-based booking matches). We don't `await` the
-      // Firebase SDK call here — a verify-email failure must not
-      // block member registration. The "Verify your email" banner
-      // on the next page surfaces the unverified state and offers
-      // a Resend button.
-      void firebaseSendEmailVerification(credential.user).catch((err) => {
-        console.error("sendEmailVerification failed (non-blocking):", err);
+      // email-based booking matches). We call custom Resend email
+      // API with Firebase SDK fallback.
+      void sendCustomVerificationEmail(credential.user).catch((err) => {
+        console.error("sendCustomVerificationEmail failed (non-blocking):", err);
       });
 
       const idToken = await credential.user.getIdToken();
@@ -243,7 +292,7 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
     if (!current) {
       throw new Error("Please sign in before resending the verification email.");
     }
-    await firebaseSendEmailVerification(current);
+    await sendCustomVerificationEmail(current);
     await current.reload();
     setUser(auth.currentUser);
   };

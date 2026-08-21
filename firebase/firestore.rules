@@ -485,6 +485,30 @@ service cloud.firestore {
         && request.resource.data.readBy[request.auth.uid] is timestamp;
       allow delete: if false;
     }
+    // Per #11 (operator-reported 2026-08-20, tracked in
+    // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+    // #11`): the `failed_emails` collection is the DLQ for
+    // every Resend send failure. The `sendEmail` wrapper at
+    // `guest-app/server/handlers/email.ts` writes a row on
+    // every Resend error. The admin dashboard renders a
+    // `FailedEmailsBanner` from this collection so the
+    // desk can see + retry the failures.
+    //
+    // Auth posture: admin-only read (mirrors the canonical
+    // admin write posture; front-desk staff should not
+    // see failed emails since they cannot resolve them
+    // without Resend credentials). Server-side write
+    // (the `sendEmail` wrapper is server-side — the client
+    // never writes to this collection directly).
+    match /failed_emails/{failureId} {
+      allow read: if isAdmin();
+      // Server-only writes — the `sendEmail` wrapper is
+      // server-side (admin SDK), the client never
+      // writes to this collection. Explicitly false on
+      // the client to defend against any future caller
+      // that bypasses the server.
+      allow create, update, delete: if false;
+    }
     // ── collectionGroup rules ──────────────────────────────────────────────
     // Firestore requires explicit collectionGroup rules for cross-document
     // queries (collectionGroup(db, "charges") / "payments"). The nested
@@ -511,6 +535,53 @@ service cloud.firestore {
     match /{path=**}/refunds/{refundId} {
       allow read: if isStaff();
       allow update, delete: if false;
+    }
+
+    // Per ETR-R07 (staging isolation metadata) +
+    // ETR-D02 (Restricted Diagnostic Mode locks
+    // everyday staging): the refresh-snapshot
+    // docs in `janitor/refresh-snapshots/{snapshotId}`
+    // are read by Admin only (front-desk staff
+    // should never see production data leaked
+    // into staging). The `outbound-suppression`
+    // collection is also Admin-only. Both
+    // collections are written by the server
+    // (no client writes).
+    match /janitor/refresh-snapshots/{snapshotId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+    match /janitor/refresh-snapshots/{snapshotId}/items/{itemId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+    // Per ETR-D05 (force-disable outbound
+    // side effects): the outbound-suppression
+    // docs are written by the server (admin
+    // SDK) + read by the client SDK (so
+    // email.ts / notifications.ts can check
+    // the flag before firing). The client
+    // can read ONLY docs that are still
+    // active (the expiresAt is in the future)
+    // + only if the requester is an Admin
+    // (the isStaff() check covers all staff
+    // roles; the read here is narrowed to
+    // admin-only because the outbound
+    // suppression gate is part of the
+    // Restricted Diagnostic Mode admin
+    // flow — front-desk staff never trigger
+    // an outbound call that this flag would
+    // gate).
+    match /janitor/outbound-suppression/{snapshotId} {
+      allow read: if isAdmin() && resource.data.expiresAt.toMillis() > request.time.toMillis();
+      allow create, update, delete: if false;
+    }
+    match /janitor/refresh-access-audit/{auditId} {
+      // The access audit is written by the
+      // server + read by Admin (for the
+      // audit-log view in Settings).
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
   }
 }

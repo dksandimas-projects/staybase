@@ -9033,6 +9033,20 @@ export async function handleConfirmBooking(req: any, res: any) {
     // is PII-sensitive; storing emails leaks the staff member's
     // contact info. Use the UID from the auth result (the
     // dispatcher's `authenticateStaff` guarantees presence).
+    // Per #11 (operator-reported 2026-08-20, tracked in
+    // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+    // #11`): the pre-#11 try/catch was a silent swallow —
+    // `console.error` only, no DLQ, no retry, no
+    // operator notification. The post-#11 shape is
+    // (a) `sendEmail` writes to the new `failed_emails`
+    // collection on every Resend failure (so the admin
+    // dashboard's `FailedEmailsBanner` surfaces it), and
+    // (b) the HTTP response carries `emailQueued: boolean`
+    // so the desk's confirm-booking UI can branch on
+    // the email state — the toast reads "Booking
+    // confirmed, email queued" (success) or "Booking
+    // confirmed, email failed — see banner" (failure).
+    let emailQueued = true;
     try {
       // Per MRB-09 (2026-08-02, per decision #168): the
       // reservation-scope email view. The pre-MRB-09
@@ -9049,6 +9063,12 @@ export async function handleConfirmBooking(req: any, res: any) {
         reservationView ?? { ...bookingData, status: "confirmed" }
       );
     } catch (emailErr) {
+      // The DLQ write already happened inside
+      // `sendEmail` (per #11). The desk-facing
+      // surface is the `emailQueued: false` flag
+      // on the HTTP response. The console.error
+      // is preserved as an operator breadcrumb.
+      emailQueued = false;
       console.error("Failed to send booking confirmation email:", emailErr);
     }
 
@@ -9072,7 +9092,7 @@ export async function handleConfirmBooking(req: any, res: any) {
       bookingRef: bookingData.bookingRef || null
     });
 
-    return res.status(200).json({ success: true, data: { status: "confirmed" } });
+    return res.status(200).json({ success: true, data: { status: "confirmed", emailQueued } });
   } catch (error: any) {
     if (error?.message === "BOOKING_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Booking not found." });

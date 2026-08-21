@@ -10,7 +10,7 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
@@ -21,7 +21,7 @@ import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
-import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
+import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -1080,6 +1080,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleRegisterMember(req, res);
   }
 
+  if (domain === "members" && action === "send-verification-email" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-send-verification:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many verification email requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    (req as any).user = authResult;
+
+    return await handleSendVerificationEmail(req, res);
+  }
+
   if (domain === "members" && action === "stays" && req.method === "GET") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-stays:${ip}`, 30, 60000)) {
       return res.status(429).json({ success: false, error: "Too many stay lookup requests. Please try again in a minute." });
@@ -1597,6 +1611,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleStagingRefreshPreview(req, res);
+  }
+
+  // Per ETR-R09 (controlled replacement):
+  // the import endpoint takes the
+  // sanitizedExport from the preview +
+  // writes the docs to staging. Server
+  // contract + audit row + finance
+  // invariant are in
+  // handleStagingRefreshImport.
+  if (domain === "test-runs" && action === "staging-refresh-import" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-import:${ip}`, 3, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many import requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can import staging refreshes." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingRefreshImport(req, res);
+  }
+
+  // Per ETR-D06 (TTL + destruction) +
+  // ETR-D07 (restore ordinary staging): the
+  // destroy endpoint. The operator clicks
+  // "Destroy diagnostic snapshot" or the
+  // TTL expires + the scheduled job fires
+  // the destroy.
+  if (domain === "test-runs" && action === "staging-refresh-destroy" && req.method === "POST") {
+    // Per ETR-RATE-LIMIT-1: the destroy
+    // endpoint was missing a rate limit
+    // (the preview + import endpoints both
+    // have 3/min limits). A malicious admin
+    // (or a leaked admin token) could spam
+    // the destroy endpoint + overload
+    // Firestore. Mirror the same rate limit.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-destroy:${ip}`, 3, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many destroy requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can destroy staging refreshes." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingRefreshDestroy(req, res);
   }
 
   // Fallback 404

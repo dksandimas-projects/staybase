@@ -265,9 +265,16 @@ describe("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () => {
 
   it("rejects when the mode is not in the allowlist (400)", async () => {
     const res = mockResponse();
+    // Per ETR-R02 full impl: the
+    // "unsanitized" alias normalizes
+    // to "unsanitized-diagnostic" so
+    // it's now valid. The test uses
+    // a value that doesn't normalize
+    // (no alias match) to verify the
+    // 400 path.
     await handleStagingRefreshPreview({
       ...adminReq(),
-      body: { export: { bookings: [], storeOrders: [], members: [] }, options: { mode: "unsanitized" } }
+      body: { export: { bookings: [], storeOrders: [], members: [] }, options: { mode: "production-clone" } }
     }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);

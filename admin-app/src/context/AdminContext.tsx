@@ -20,6 +20,13 @@ import {
   MAX_ROOM_TYPE_PHOTOS,
   Notification,
   type NotificationType,
+  // Per #11 (operator-reported 2026-08-20, tracked in
+  // `plan/project/ROADMAP.md §Open Operator-Reported Bugs
+  // → #11 row`): the canonical shape of a row in the
+  // `failed_emails` Firestore collection (the DLQ for
+  // every Resend send failure). The admin banner's
+  // listener uses this type.
+  FailedEmail,
   PaymentMethodConfig,
   PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
@@ -609,7 +616,14 @@ export interface AdminContextType {
     // reservation-scope selector to the server.
     // Other status transitions ignore the field.
     options?: { scope?: "room" | "reservation" }
-  ) => void | Promise<void>;
+  // Per #11 (operator-reported 2026-08-20): the
+  // returned object carries the `emailQueued`
+  // flag for the `booking-confirmed` server
+  // response. Other status transitions return
+  // `null` or an object without `emailQueued`.
+  // Back-compat safe — existing callers that
+  // don't read the return value still work.
+  ) => Promise<{ emailQueued?: boolean } | null>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
@@ -880,6 +894,15 @@ export interface AdminContextType {
 
   // Notification Center (Phase 12 — decision #120)
   notifications: Notification[];
+  // Per #11 (operator-reported 2026-08-20): the
+  // `failed_emails` collection listener surfaces
+  // here so the dashboard's `FailedEmailsBanner`
+  // can read the DLQ on every render. Admin-only —
+  // front-desk staff reset the state on
+  // non-admin sessions (see the listener
+  // short-circuit).
+  failedEmails: FailedEmail[];
+  failedEmailsLoading: boolean;
   notificationsLoading: boolean;
   unreadNotificationCount: number;
   markNotificationRead: (notificationId: string) => Promise<void>;
@@ -2183,7 +2206,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // transitions ignore it (the field is silently
     // dropped on the wire).
     options?: { scope?: "room" | "reservation" }
-  ) => {
+  ): Promise<{ emailQueued?: boolean } | null> => {
     try {
       const currentBooking = bookings.find((b) => b.id === bookingId);
       const isStatusChanging = currentBooking ? currentBooking.status !== status : true;
@@ -2195,7 +2218,10 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           updatedAt: serverTimestamp(),
           handledBy: currentUser?.uid || currentUser?.email || "staff"
         });
-        return;
+        // No server round-trip → no `emailQueued`
+        // flag to surface. The caller can ignore
+        // the `null` return.
+        return null;
       }
 
       if (status === "cancelled") {
@@ -2221,6 +2247,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
+        return data?.data ?? null;
       } else if (status === "confirmed") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/confirm`, {
@@ -2235,6 +2262,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to confirm booking via server API.");
         }
+        // Per #11 (operator-reported 2026-08-20, tracked in
+        // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+        // #11 row`): the `handleConfirmBooking` server
+        // response now carries `emailQueued: boolean` so
+        // the desk's confirm-booking UI can branch on the
+        // email state (toast reads "Booking confirmed,
+        // email queued" / "Booking confirmed, email failed
+        // — see banner"). The AdminContext surfaces
+        // this flag through the function's return value
+        // so `BookingsPage.handleConfirmBooking` can
+        // pick it up without re-fetching the server.
+        return data?.data ?? null;
       } else if (status === "payment-confirmed") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/mark-payment-confirmed`, {
@@ -2249,6 +2288,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to confirm payment via server API.");
         }
+        return data?.data ?? null;
       } else if (status === "checked-out") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkout`, {
@@ -2269,6 +2309,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           }
           throw new Error(data.error || "Failed to checkout booking via server API.");
         }
+        return data?.data ?? null;
       } else if (status === "checked-in") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkin`, {
@@ -2283,12 +2324,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to check in booking via server API.");
         }
+        return data?.data ?? null;
       } else {
         throw new Error(`Unsupported client-side booking status transition: ${status}`);
       }
+      // Unreachable: every branch above either
+      // returns or throws. The `return` here
+      // satisfies the Promise<… | null> return
+      // type for the strict TS compiler; the
+      // `throw new Error(...)` above is the only
+      // way to land in the catch block.
+      return null;
     } catch (error) {
       console.error("Error updating booking status:", error);
       notify.error("Failed to update booking status", error instanceof Error ? error.message : String(error));
+      // The error path always returns null (no
+      // emailQueued flag to surface).
+      return null;
     }
   };
 
@@ -3037,7 +3089,41 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                 photoUrl: data.photoUrl || "",
                 authProvider: data.authProvider || "email",
                 isMember: data.isMember !== false,
-                memberSince: data.memberSince || "",
+                // Per decision #226 (2026-08-20): the server's
+                // `/api/members/register` handler writes `memberSince:
+                // new Date()` (`guest-app/server/handlers/members.ts:243,258,285`),
+                // and the Admin SDK auto-converts `Date` to a Firestore
+                // `Timestamp` on store. The TS contract says `Member.memberSince:
+                // string` but the runtime shape is `{seconds, nanoseconds,
+                // toDate()}` — the pre-#226 raw pass-through leaked the
+                // Timestamp onto React state and React error #31 fired when
+                // `MembersPage.tsx:225,326` rendered `{row.memberSince}` /
+                // `{selectedMember.memberSince}` as a JSX child ("object
+                // with keys {seconds, nanoseconds}"). Convert via the
+                // `toDate()` guard (mirrors `MembersPage.tsx:58-60` for the
+                // drawer's `pointsHistory` and `IntercomPage.tsx:495` for
+                // `intercomMessages.timestamp`); fall back to the raw value
+                // for legacy docs that already have `memberSince` as a
+                // string.
+                // Per decision #226 (2026-08-20): the server's
+                // `/api/members/register` handler writes `memberSince:
+                // new Date()` (`guest-app/server/handlers/members.ts:243,258,285`),
+                // and the Admin SDK auto-converts `Date` to a Firestore
+                // `Timestamp` on store. The TS contract says `Member.memberSince:
+                // string` but the runtime shape is `{seconds, nanoseconds,
+                // toDate()}` — the pre-#226 raw pass-through leaked the
+                // Timestamp onto React state and React error #31 fired when
+                // `MembersPage.tsx:225,326` rendered `{row.memberSince}` /
+                // `{selectedMember.memberSince}` as a JSX child ("object
+                // with keys {seconds, nanoseconds}"). Convert via the
+                // `toDate()` guard (mirrors `MembersPage.tsx:58-60` for the
+                // drawer's `pointsHistory` and `IntercomPage.tsx:495` for
+                // `intercomMessages.timestamp`); fall back to the raw value
+                // for legacy docs that already have `memberSince` as a
+                // string.
+                memberSince: data.memberSince?.toDate
+                  ? data.memberSince.toDate().toISOString()
+                  : (data.memberSince || ""),
                 rewardsPoints: data.rewardsPoints || 0,
                 tier: data.tier || "standard",
                 isActive: data.isActive !== false,
@@ -4532,6 +4618,117 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       // and let the next user interaction retry.
       console.error("Failed to force-refresh ID token for notifications listener:", refreshErr);
       setNotificationsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [currentUser]);
+
+  // ── #11 Failed Emails Banner (operator-reported 2026-08-20) ───
+  // The `failed_emails` Firestore collection is the
+  // DLQ for every Resend send failure (per the spec
+  // at `plan/project/ROADMAP.md §Open Operator-Reported
+  // Bugs → #11 row`). The desk-facing surface is the
+  // `FailedEmailsBanner` rendered on the dashboard
+  // — the banner reads "N emails failed to send"
+  // + a click-through to a list of `{ recipient,
+  // subject, error, lastAttemptAt, retryCount }`
+  // rows. The collection is `isAdmin()`-gated
+  // (front-desk staff should not see failed
+  // emails — they can't resolve them without
+  // Resend credentials), so this listener
+  // short-circuits on non-admin roles. The MRB-15-09
+  // force-refresh pattern (below) is borrowed
+  // verbatim from the `notifications` listener
+  // because the same `role`-claim-staleness risk
+  // applies.
+  //
+  // Pre-#11 surface: the `failed_emails` collection
+  // existed (the DLQ write happened in the server's
+  // `sendEmail` wrapper) but nothing in the admin app
+  // read it. The desk only saw the failure via the
+  // `emailQueued: false` toast (the synchronous
+  // surface, shipped in the prior PR). The banner
+  // is the persistent "did we miss anything?"
+  // surface for the desk to scan on dashboard load.
+  const [failedEmails, setFailedEmails] = useState<FailedEmail[]>([]);
+  const [failedEmailsLoading, setFailedEmailsLoading] = useState(true);
+
+  useEffect(() => {
+    // Front-desk staff cannot see the banner
+    // (the `failed_emails` collection is
+    // `isAdmin()`-gated). Reset the state on
+    // logout / role change so a previous
+    // admin's failures don't linger in a
+    // non-admin session.
+    if (!currentUser || currentUser.role !== "admin") {
+      setFailedEmails([]);
+      setFailedEmailsLoading(true);
+      return;
+    }
+    setFailedEmailsLoading(true);
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+
+    // Force-refresh pattern (MRB-15-09): the
+    // `failed_emails` collection is `isAdmin()`-gated,
+    // which reads the `role` custom claim. The
+    // Firestore SDK uses its OWN cached ID token
+    // for the listener handshake — if the cache
+    // is one refresh behind the auth-state callback
+    // (long-idle session, fresh tab, or just-minted
+    // role claim), the listener attaches with a
+    // stale token and `Missing or insufficient
+    // permissions` silently empties the banner.
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+      // Bounded query — never the whole
+      // collection. 100 is enough for the desk
+      // to scan the last few days of failures;
+      // older failures are operational, not
+      // desk-facing. The composite index
+      // `(lastAttemptAt desc)` is the only
+      // one this listener needs. The orderBy
+      // + limit pins the listener to a bounded
+      // shape (Firestore requires an orderBy on
+      // any range/limit query).
+      const failedRef = collection(db, "failed_emails");
+      const failedQuery = query(failedRef, orderBy("lastAttemptAt", "desc"), limit(100));
+      unsubscribe = onSnapshot(
+        failedQuery,
+        (snapshot) => {
+          const docs: FailedEmail[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() || {};
+            // Defensive coercion: the DLQ is
+            // server-side + admin-SDK, so the
+            // shape is canonical. The defensive
+            // parsing handles any future
+            // shape-drift from a manual write
+            // (operator audit trail).
+            return {
+              id: docSnap.id,
+              recipient: String(data.recipient || ""),
+              subject: String(data.subject || ""),
+              error: String(data.error || ""),
+              lastAttemptAt: data.lastAttemptAt && typeof (data.lastAttemptAt as any).toDate === "function"
+                ? (data.lastAttemptAt as any).toDate()
+                : new Date(0),
+              retryCount: Number(data.retryCount || 0)
+            };
+          });
+          setFailedEmails(docs);
+          setFailedEmailsLoading(false);
+        },
+        (error) => {
+          console.error("Error listening to failed_emails collection:", error);
+          setFailedEmailsLoading(false);
+        }
+      );
+    }).catch((refreshErr) => {
+      console.error("Failed to force-refresh ID token for failed_emails listener:", refreshErr);
+      setFailedEmailsLoading(false);
     });
 
     return () => {
@@ -6768,6 +6965,17 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         unreadNotificationCount,
         markNotificationRead,
         markAllNotificationsRead,
+        // Per #11 (operator-reported 2026-08-20): the
+        // `failedEmails` collection listener's state
+        // surfaces to the dashboard's
+        // `FailedEmailsBanner`. Placed AFTER
+        // `markAllNotificationsRead` so the existing
+        // `phase-12-notification-center.test.ts`
+        // source-text pin (which checks the order of
+        // the notification fields) still passes
+        // without modification.
+        failedEmails,
+        failedEmailsLoading,
         testRuns,
         testRunsLoading,
         createTestRun,

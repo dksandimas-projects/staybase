@@ -1,13 +1,24 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, doc } from "firebase/firestore";
-import { getManilaDateInfo } from "@spark-inn/shared";
+import { getManilaDateInfo, type DiscountType } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
+import {
+  hasUnverifiedDiscount,
+  getDueAmountPreDiscount,
+} from "../utils/pendingPaymentDiscountGate";
 import { StatsCard } from "../components/StatsCard";
+// Per #11 (operator-reported 2026-08-20, tracked in
+// `plan/project/ROADMAP.md §Open Operator-Reported Bugs
+// → #11 row`): the `FailedEmailsBanner` is the
+// desk-facing surface for the `failed_emails`
+// Firestore DLQ. Rendered at the top of the
+// dashboard content (above the stats cards).
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
+import { FailedEmailsBanner } from "../components/FailedEmailsBanner";
 import { useToast } from "../components/Toast";
 import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -85,6 +96,32 @@ type PendingPaymentRoom = {
   roomType: string;
   totalPrice: number;
   status: string;
+  // Per IDG (decision #227, 2026-08-20): the four
+  // discount-eligibility fields the dashboard alert card
+  // uses to gate the verify / reject buttons. Mirrored
+  // off the `Booking` contract (FOL-02 admin mapper
+  // hydrates the same four fields on every snapshot
+  // echo). The dashboard reads them off the
+  // `PendingPaymentItem.rooms[]` derivation so the gate
+  // can flip per-room without re-running the heavy
+  // bookings listener. Defensive coercions (Number +
+  // boolean) match the FOL-02 mapper's normalisation.
+  /** `"" | "senior" | "pwd"` per `DiscountType`. `null`
+   *  when the room carries no discount. */
+  discountType: DiscountType | null;
+  /** ID verification status. `null` for non-discounted
+   *  rooms + legacy pre-FOL-02 docs. */
+  discountVerified: boolean | null;
+  /** ID rejection status. `null` for non-discounted
+   *  rooms + legacy pre-FOL-02 docs. */
+  discountRejected: boolean | null;
+  /** Pre-discount total. `null` for non-discounted rooms
+   *  + the data-drift fallback when the server forgot
+   *  to stamp it. The dashboard reads this for the
+   *  verify amount while the IDG gate is active so the
+   *  staff sees the HONEST amount even if a later ID
+   *  rejection re-prices the booking. */
+  originalTotalPrice: number | null;
 };
 type PendingPaymentItem = {
   /** `reservationId` for grouped items, `bookingId` for legacy single-row items. */
@@ -356,7 +393,20 @@ export function DashboardPage() {
               roomNumber: booking.roomNumber || "TBD",
               roomType: booking.roomType,
               totalPrice: Number(booking.totalPrice || 0),
-              status: booking.status
+              status: booking.status,
+              // Per IDG (decision #227, 2026-08-20): the
+              // 4 discount-eligibility fields the alert
+              // card's gate reads. Defensive coercions
+              // match the FOL-02 admin mapper (decision
+              // #198): `Number(...)` for the price,
+              // boolean coercion for the verify/reject
+              // flags, `null` for unknown.
+              discountType: (booking.discountType || null) as DiscountType | null,
+              discountVerified: typeof booking.discountVerified === "boolean" ? booking.discountVerified : null,
+              discountRejected: typeof booking.discountRejected === "boolean" ? booking.discountRejected : null,
+              originalTotalPrice: booking.originalTotalPrice !== undefined && booking.originalTotalPrice !== null
+                ? Number(booking.originalTotalPrice)
+                : null,
             }
           ]
         });
@@ -421,7 +471,18 @@ export function DashboardPage() {
           roomNumber: c.roomNumber || "TBD",
           roomType: c.roomType,
           totalPrice: Number(c.totalPrice || 0),
-          status: c.status
+          status: c.status,
+          // Per IDG (decision #227, 2026-08-20): the
+          // 4 discount-eligibility fields the alert
+          // card's gate reads. Same defensive coercions
+          // as the legacy single-row site above
+          // (FOL-02 mapper normalisation pattern).
+          discountType: (c.discountType || null) as DiscountType | null,
+          discountVerified: typeof c.discountVerified === "boolean" ? c.discountVerified : null,
+          discountRejected: typeof c.discountRejected === "boolean" ? c.discountRejected : null,
+          originalTotalPrice: c.originalTotalPrice !== undefined && c.originalTotalPrice !== null
+            ? Number(c.originalTotalPrice)
+            : null,
         }))
       });
     }
@@ -653,8 +714,28 @@ export function DashboardPage() {
     if (!verifySuccess) return;
     setConfirmingBookingFromSuccess(true);
     try {
-      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
-      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      // Per #11 (operator-reported 2026-08-20, tracked in
+      // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
+      // #11 row`): this is the same `booking-confirmed`
+      // path as the drawer confirm + the BookingsPage
+      // post-verify modal. All three call
+      // `updateBookingStatus(..., "confirmed")` → server
+      // `handleConfirmBooking` → fires the
+      // `booking-confirmed` email. The post-#11 toast
+      // branches on the server's `emailQueued` flag so
+      // the desk sees the email state on EVERY entry
+      // point. The pre-#11 happy-path toast text is
+      // preserved when `emailQueued` is `true` (or `null`
+      // from an older server build).
+      const result = await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      if (result && result.emailQueued === false) {
+        toast.warning(
+          "Email delivery failed",
+          `${verifySuccess.booking.bookingRef} is confirmed, but the confirmation email failed. See the desk banner.`
+        );
+      } else {
+        toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+      }
     } catch (err: any) {
       toast.error("Failed to confirm booking", err?.message || "Please try again.");
     } finally {
@@ -767,6 +848,23 @@ export function DashboardPage() {
         <p className="text-xs text-gray-500 mt-1">Real-time room occupancy and housekeeping operations overview.</p>
       </header>
 
+      {/* Per #11 (operator-reported 2026-08-20, tracked in
+          `plan/project/ROADMAP.md §Open Operator-Reported Bugs
+          → #11 row`): the failed-emails banner sits at
+          the top of the dashboard content (above the
+          stats cards) so the desk sees any Resend
+          send-failures on every dashboard load. The
+          banner reads "N emails failed to send" + a
+          click-through to a list of `{ recipient,
+          subject, error, lastAttemptAt, retryCount }`
+          rows. Admin-only — the listener resets the
+          state on non-admin sessions, so a front-desk
+          user sees nothing here. When there are no
+          failures, the banner renders nothing (a
+          persistent "all good" banner would be
+          noise). */}
+      <FailedEmailsBanner />
+
       {/* Stats Cards Row */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatsCard
@@ -865,7 +963,21 @@ export function DashboardPage() {
                   ? `${item.rooms.length} rooms`
                   : `Room ${item.rooms[0]?.roomNumber || "TBD"}`;
                 const totalLabel = item.isReservation ? "Reservation total" : "Booking total";
-                const dueLabel = item.isReservation ? "Reservation due" : "Outstanding";
+                // Per IDG (decision #227, 2026-08-20):
+                // when the gate is active, the
+                // `dueAmount` line reads
+                // pre-discount totals (the HONEST
+                // verify amount if a later ID
+                // rejection re-prices the booking)
+                // and the label swaps to flag the
+                // math as provisional.
+                const idgBlocked = hasUnverifiedDiscount(item);
+                const idgDueAmount = idgBlocked
+                  ? getDueAmountPreDiscount(item)
+                  : item.dueAmount;
+                const dueLabel = idgBlocked
+                  ? "Due (pre-discount, ID pending)"
+                  : item.isReservation ? "Reservation due" : "Outstanding";
                 const verifyTooltip = item.isReservation
                   ? "Verify and record payment (covers all rooms covered by the amount)"
                   : "Verify and record payment";
@@ -900,7 +1012,7 @@ export function DashboardPage() {
                         </span>
                       </div>
                       <p className="truncate text-xs text-gray-600">{item.guestName} · {roomChip}</p>
-                      <p className="text-[10px] font-semibold text-gray-400">{item.checkIn} to {item.checkOut} · {formatPrice(item.totalPrice)} total · {formatPrice(item.dueAmount)} due</p>
+                      <p className="text-[10px] font-semibold text-gray-400">{item.checkIn} to {item.checkOut} · {formatPrice(item.totalPrice)} total · {formatPrice(idgDueAmount)} {dueLabel.toLowerCase()}</p>
                       {item.latestReference && (
                         <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-800">
                           Ref: {item.latestReference}
@@ -919,14 +1031,56 @@ export function DashboardPage() {
                           Proof
                         </button>
                       )}
+                      {idgBlocked && (
+                        // Per IDG (decision #227, 2026-08-20):
+                        // amber callout listing the
+                        // unverified room(s) + an
+                        // `Open booking` deep-link to
+                        // the drawer so the desk can
+                        // verify or reject the ID
+                        // before returning to verify
+                        // the payment. The gate is
+                        // active for any room with
+                        // `discountType ∈ {"senior",
+                        // "pwd"}` AND `!discountVerified
+                        // && !discountRejected`.
+                        <div
+                          role="alert"
+                          data-testid="idg-discount-gate-banner"
+                          className="col-span-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 sm:col-auto"
+                        >
+                          <p className="font-bold uppercase tracking-wider text-amber-800">
+                            Senior/PWD ID pending verification
+                          </p>
+                          <p className="mt-1 text-amber-900">
+                            {item.rooms
+                              .filter((r) => r.discountType === "senior" || r.discountType === "pwd")
+                              .filter((r) => r.discountVerified !== true && r.discountRejected !== true)
+                              .map((r) => `Room ${r.roomNumber}`)
+                              .join(", ") || "Affected room"}{" "}
+                            — verify the discount ID in the booking before recording payment.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/bookings?bookingId=${encodeURIComponent(item.leadBooking.id)}`)}
+                            className="mt-1.5 inline-flex min-h-[32px] items-center justify-center rounded border border-amber-400 bg-white px-2 text-[11px] font-bold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                            title="Open booking drawer to verify or reject the discount ID"
+                            data-testid="idg-open-booking-cta"
+                          >
+                            Open booking
+                          </button>
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
                           cancelRejectForm();
                           openRejectForm(item.leadBooking);
                         }}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
-                        title={rejectTooltip}
+                        disabled={idgBlocked}
+                        aria-disabled={idgBlocked}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+                        title={idgBlocked ? "Verify the senior/PWD ID before rejecting payment — open the booking to verify or reject the ID" : rejectTooltip}
                       >
                         <XCircle size={14} />
                         Reject
@@ -937,8 +1091,10 @@ export function DashboardPage() {
                           cancelRejectForm();
                           openVerifyForm(item);
                         }}
-                        className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 sm:col-auto"
-                        title={verifyTooltip}
+                        disabled={idgBlocked}
+                        aria-disabled={idgBlocked}
+                        className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary sm:col-auto"
+                        title={idgBlocked ? "Verify the senior/PWD ID before verifying payment — open the booking to verify or reject the ID" : verifyTooltip}
                       >
                         <Check size={14} />
                         Verify & Record

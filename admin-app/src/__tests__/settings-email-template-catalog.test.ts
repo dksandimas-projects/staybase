@@ -27,7 +27,8 @@ const expectedTemplates = [
   "store-order-delivered",
   "store-order-cancelled",
   "staff-new-booking",
-  "staff-new-payment"
+  "staff-new-payment",
+  "spark-rewards-email-verification"
 ];
 
 describe("Settings email-template catalog", () => {
