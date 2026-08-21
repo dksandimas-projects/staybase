@@ -2995,6 +2995,22 @@ export async function handleCreateBooking(req: any, res: any) {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName,
+        // Per the intercom-verify-guest permanent fix
+        // extension (2026-08-21, add-room-to-reservation):
+        // the reservation header carries a structured
+        // `leadGuestDetails` sub-object alongside the
+        // concatenated `leadGuestName` so subsequent
+        // `handleAddRoomToReservation` writes can copy the
+        // structured first/last name into new booking child
+        // docs. Without this, every additional room added
+        // to a multi-room reservation would still hit the
+        // verify-side fallback path.
+        leadGuestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
@@ -4665,6 +4681,18 @@ export async function handleCreateWalkin(req: any, res: any) {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName,
+        // Per the intercom-verify-guest permanent fix
+        // extension (2026-08-21, add-room-to-reservation):
+        // mirrors the online reservation header — see the
+        // matching block above. The walk-in flow carries
+        // the structured name through to subsequent
+        // add-room writes the same way.
+        leadGuestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
@@ -11913,6 +11941,33 @@ export async function handleAddRoomToReservation(req: any, res: any) {
 
       // 10. Compose the new booking doc. Mirrors the
       // per-child write in the create + walkin paths.
+      // Per the intercom-verify-guest permanent fix
+      // extension (2026-08-21, add-room-to-reservation):
+      // derive the structured first/last name from
+      // `reservation.leadGuestDetails` when present (the
+      // online + walk-in paths now write it), with a
+      // documented legacy split-on-whitespace fallback for
+      // reservations created before the fix landed. The
+      // structured `guestDetails` is persisted on every
+      // new child doc so the intercom verifier has a real
+      // `lastName` to match — never a silent fallback.
+      const leadDetails = (reservation as any).leadGuestDetails
+        && typeof (reservation as any).leadGuestDetails === "object"
+          ? (reservation as any).leadGuestDetails
+          : {};
+      let firstName = String(leadDetails.firstName || "").trim();
+      let lastName = String(leadDetails.lastName || "").trim();
+      const leadGuestName = String(reservation.leadGuestName || "").trim();
+      if (!firstName || !lastName) {
+        // Legacy fallback: split the concatenated
+        // `reservation.leadGuestName`. Approximate for
+        // compound given names — documented as best
+        // effort until the reservation is re-created
+        // through a fixed flow.
+        const parts = leadGuestName.split(/\s+/).filter(Boolean);
+        if (!firstName) firstName = parts[0] || "";
+        if (!lastName) lastName = parts.length > 1 ? parts.slice(1).join(" ") : "";
+      }
       const newBookingDoc = {
         id: bookingId,
         bookingRef: newBookingRefValue,
@@ -11923,7 +11978,13 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         roomId: String(roomId),
         roomNumber: String(targetRoom.roomNumber || ""),
         roomType: targetRoomType,
-        guestName: String(reservation.leadGuestName || "").trim(),
+        guestName: leadGuestName,
+        guestDetails: {
+          firstName,
+          lastName,
+          email: String(reservation.leadGuestEmail || "").trim().toLowerCase(),
+          phone: String(reservation.leadGuestPhone || "").trim()
+        },
         guestEmail: String(reservation.leadGuestEmail || "").trim().toLowerCase(),
         guestPhone: String(reservation.leadGuestPhone || "").trim(),
         numGuests: numAdults + numChildren,

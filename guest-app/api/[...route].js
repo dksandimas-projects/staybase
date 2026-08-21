@@ -229487,6 +229487,22 @@ async function handleCreateBooking(req, res) {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName2,
+        // Per the intercom-verify-guest permanent fix
+        // extension (2026-08-21, add-room-to-reservation):
+        // the reservation header carries a structured
+        // `leadGuestDetails` sub-object alongside the
+        // concatenated `leadGuestName` so subsequent
+        // `handleAddRoomToReservation` writes can copy the
+        // structured first/last name into new booking child
+        // docs. Without this, every additional room added
+        // to a multi-room reservation would still hit the
+        // verify-side fallback path.
+        leadGuestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
@@ -230615,6 +230631,18 @@ async function handleCreateWalkin(req, res) {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
         leadGuestName: guestName2,
+        // Per the intercom-verify-guest permanent fix
+        // extension (2026-08-21, add-room-to-reservation):
+        // mirrors the online reservation header — see the
+        // matching block above. The walk-in flow carries
+        // the structured name through to subsequent
+        // add-room writes the same way.
+        leadGuestDetails: {
+          firstName: guestDetails.firstName.trim(),
+          lastName: guestDetails.lastName.trim(),
+          email: guestDetails.email.trim().toLowerCase(),
+          phone: guestDetails.phone.trim()
+        },
         cancellationPolicySnapshot,
         leadGuestEmail: guestDetails.email.trim().toLowerCase(),
         leadGuestPhone: guestDetails.phone.trim(),
@@ -234601,6 +234629,15 @@ async function handleAddRoomToReservation(req, res) {
       transaction.set(counterRef, { count: nextSequence2, updatedAt: /* @__PURE__ */ new Date() }, { merge: true });
       const bookingId = parsedAddRoom.data.requestFingerprint ? `add-room-${reservationId}-${roomId}-${String(parsedAddRoom.data.requestFingerprint).slice(0, 16)}` : `add-room-${reservationId}-${roomId}-${nextSequence2}-${Date.now()}`;
       const newBookingRefValue = generateBookingRef("SI", headerCheckIn, nextSequence2);
+      const leadDetails = reservation.leadGuestDetails && typeof reservation.leadGuestDetails === "object" ? reservation.leadGuestDetails : {};
+      let firstName = String(leadDetails.firstName || "").trim();
+      let lastName = String(leadDetails.lastName || "").trim();
+      const leadGuestName = String(reservation.leadGuestName || "").trim();
+      if (!firstName || !lastName) {
+        const parts = leadGuestName.split(/\s+/).filter(Boolean);
+        if (!firstName) firstName = parts[0] || "";
+        if (!lastName) lastName = parts.length > 1 ? parts.slice(1).join(" ") : "";
+      }
       const newBookingDoc = {
         id: bookingId,
         bookingRef: newBookingRefValue,
@@ -234611,7 +234648,13 @@ async function handleAddRoomToReservation(req, res) {
         roomId: String(roomId),
         roomNumber: String(targetRoom.roomNumber || ""),
         roomType: targetRoomType,
-        guestName: String(reservation.leadGuestName || "").trim(),
+        guestName: leadGuestName,
+        guestDetails: {
+          firstName,
+          lastName,
+          email: String(reservation.leadGuestEmail || "").trim().toLowerCase(),
+          phone: String(reservation.leadGuestPhone || "").trim()
+        },
         guestEmail: String(reservation.leadGuestEmail || "").trim().toLowerCase(),
         guestPhone: String(reservation.leadGuestPhone || "").trim(),
         numGuests: numAdults + numChildren,

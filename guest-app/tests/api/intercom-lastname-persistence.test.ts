@@ -183,6 +183,110 @@ describe("intercom verify-guest — permanent last-name fix", () => {
     });
   });
 
+  describe("reservation header — online + walk-in write sites", () => {
+    // Per the intercom-verify-guest permanent fix extension
+    // (2026-08-21, add-room-to-reservation): the reservation
+    // header must persist a structured `leadGuestDetails`
+    // sub-object alongside the concatenated `leadGuestName`,
+    // so `handleAddRoomToReservation` can copy the structured
+    // name into new booking child docs. Without this, multi-
+    // room reservations would persist their first room's
+    // child with `guestDetails` but every subsequent room
+    // (added later by staff via the desk) would still fall
+    // through the verify-side fallback path.
+    const bookingsSrc = readFileSync(
+      resolve(__dirname, "../../server/handlers/bookings.ts"),
+      "utf8"
+    );
+
+    function sliceReservationLiteral(src: string, anchorText: string): string {
+      const anchorIdx = src.indexOf(anchorText);
+      if (anchorIdx === -1) return "";
+      const tailStart = src.indexOf("\n      }", anchorIdx);
+      if (tailStart === -1) return src.slice(anchorIdx);
+      return src.slice(anchorIdx, tailStart);
+    }
+
+    it("online reservation header writes leadGuestDetails: { firstName, lastName, email, phone }", () => {
+      const literal = sliceReservationLiteral(bookingsSrc, "      const newReservation = {");
+      expect(literal, "online reservation literal must exist in bookings.ts").not.toBe("");
+      expect(literal).toMatch(
+        /leadGuestDetails:\s*\{\s*firstName:\s*guestDetails\.firstName[\s\S]*?lastName:\s*guestDetails\.lastName[\s\S]*?email:\s*guestDetails\.email[\s\S]*?phone:\s*guestDetails\.phone/
+      );
+    });
+
+    it("walk-in reservation header writes leadGuestDetails: { firstName, lastName, email, phone }", () => {
+      // The walk-in reservation literal is the SECOND
+      // `const newReservation = {` in bookings.ts.
+      const firstIdx = bookingsSrc.indexOf("      const newReservation = {");
+      const secondIdx = bookingsSrc.indexOf("      const newReservation = {", firstIdx + 1);
+      expect(secondIdx, "walk-in reservation literal must exist in bookings.ts").toBeGreaterThan(-1);
+      const tailStart = bookingsSrc.indexOf("\n      }", secondIdx);
+      const literal = bookingsSrc.slice(secondIdx, tailStart);
+      expect(literal).toMatch(
+        /leadGuestDetails:\s*\{\s*firstName:\s*guestDetails\.firstName[\s\S]*?lastName:\s*guestDetails\.lastName[\s\S]*?email:\s*guestDetails\.email[\s\S]*?phone:\s*guestDetails\.phone/
+      );
+    });
+  });
+
+  describe("add-room-to-reservation child write — handleAddRoomToReservation", () => {
+    // The child doc written at line ~11916 (the third
+    // newBooking-style literal in bookings.ts) must persist
+    // `guestDetails` so the verifier can match the entered
+    // last name. The source of truth is
+    // `reservation.leadGuestDetails` (the structured sub-
+    // object that the parent online/walk-in paths now write).
+    // For legacy reservations without `leadGuestDetails`,
+    // the child falls back to splitting `reservation.leadGuestName`
+    // (documented legacy fallback, never silent).
+    const bookingsSrc = readFileSync(
+      resolve(__dirname, "../../server/handlers/bookings.ts"),
+      "utf8"
+    );
+
+    it("child booking doc writes a structured guestDetails derived from reservation.leadGuestDetails", () => {
+      // The third booking-write literal is the
+      // `const newBookingDoc = {` assignment in
+      // handleAddRoomToReservation.
+      const anchorIdx = bookingsSrc.indexOf("      const newBookingDoc = {");
+      expect(anchorIdx, "newBookingDoc = { literal must exist in bookings.ts (handleAddRoomToReservation)").toBeGreaterThan(-1);
+      const tailStart = bookingsSrc.indexOf("\n      };", anchorIdx);
+      expect(tailStart, "newBookingDoc literal must terminate").toBeGreaterThan(-1);
+      const literal = bookingsSrc.slice(anchorIdx, tailStart);
+      expect(literal).toMatch(/guestDetails:\s*\{/);
+      // The literal uses shorthand property syntax for
+      // firstName/lastName (the values are derived from
+      // locals computed just above the literal in the
+      // function body). Assert on the property names and on
+      // the explicit email/phone assignments.
+      expect(literal).toMatch(/firstName,/);
+      expect(literal).toMatch(/lastName,/);
+      expect(literal).toMatch(/email:\s*String\(reservation\.leadGuestEmail/);
+      expect(literal).toMatch(/phone:\s*String\(reservation\.leadGuestPhone/);
+    });
+
+    it("handleAddRoomToReservation has a legacy split-on-whitespace fallback for reservations without leadGuestDetails", () => {
+      // Anchor on the actual function declaration (not a
+      // comment that mentions it), then slice until the next
+      // top-level `export ` (or EOF).
+      const fnStart = bookingsSrc.indexOf(
+        "export async function handleAddRoomToReservation"
+      );
+      expect(fnStart, "handleAddRoomToReservation function must exist").toBeGreaterThan(-1);
+      const fnEnd = bookingsSrc.indexOf("\nexport ", fnStart + 200);
+      const fnBody = fnEnd > 0 ? bookingsSrc.slice(fnStart, fnEnd) : bookingsSrc.slice(fnStart);
+      // Belt-and-suspenders: the function MUST contain a
+      // documented legacy split-on-whitespace branch for
+      // reservations created before the fix landed. Without
+      // it, legacy reservations would silently lose the
+      // structured guestDetails on every add-room write.
+      expect(fnBody).toMatch(/leadGuestName\s*\.\s*split/);
+      // And the function MUST read leadGuestDetails when
+      // present (the structured path).
+      expect(fnBody).toMatch(/reservation\.leadGuestDetails|\(reservation as any\)\.leadGuestDetails/);
+    });
+  });
+
   describe("corporate-inquiry conversion write site — handleConvertInquiryToBooking", () => {
     const corporateSrc = readFileSync(
       resolve(__dirname, "../../server/handlers/corporate-inquiries.ts"),
