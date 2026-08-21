@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.284.0";
+    VERSION2 = "0.285.0";
   }
 });
 
@@ -227379,7 +227379,8 @@ async function handleStagingRefreshImport(req, res) {
     }
     if (snapshotData.mode === "unsanitized-diagnostic") {
       const ttlHours = Number(snapshotData.ttlHours || 24);
-      const expiresAt2 = new Date(Date.now() + ttlHours * 60 * 60 * 1e3);
+      const ttlMs = ttlHours * 60 * 60 * 1e3;
+      const expiresAt2 = new Date(Date.now() + ttlMs);
       await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).set({
         snapshotId,
         suppressedAt: /* @__PURE__ */ new Date(),
@@ -227387,6 +227388,74 @@ async function handleStagingRefreshImport(req, res) {
         suppressedBy: staff.email || staff.uid || "",
         reason: "Restricted Diagnostic Mode"
       });
+    }
+    if (snapshotData.mode === "unsanitized-diagnostic") {
+      const reauthAt = Date.parse(String(snapshotData.reauthenticatedAt || ""));
+      const now = Date.now();
+      const thirtyMin = 30 * 60 * 1e3;
+      if (Number.isNaN(reauthAt) || now - reauthAt > thirtyMin) {
+        await snapshotRef.update({
+          status: "incomplete",
+          failureReason: `Reauth timestamp is not recent (must be within 30 min; got ${snapshotData.reauthenticatedAt || "missing"})`,
+          completedAt: /* @__PURE__ */ new Date(),
+          completedBy: staff.email || staff.uid || ""
+        });
+        return res.status(401).json({
+          success: false,
+          error: "Reauthentication is stale (must be within 30 min). Reauthenticate and regenerate the preview."
+        });
+      }
+    }
+    const sensitiveFileOptIn = Boolean(snapshotData.sensitiveFileOptIn);
+    const scopeBookingIds = new Set(
+      Array.isArray(snapshotData.scopeManifest?.bookingIds) ? snapshotData.scopeManifest.bookingIds : []
+    );
+    const scopeMemberIds = new Set(
+      Array.isArray(snapshotData.scopeManifest?.memberIds) ? snapshotData.scopeManifest.memberIds : []
+    );
+    const hasScopeRestriction = scopeBookingIds.size > 0 || scopeMemberIds.size > 0;
+    let bookingsWritten = 0;
+    let storeOrdersWritten = 0;
+    let membersWritten = 0;
+    let bookingsDropped = 0;
+    let membersDropped = 0;
+    for (const booking of sanitizedExport?.bookings || []) {
+      if (hasScopeRestriction && !scopeBookingIds.has(booking?.id)) {
+        bookingsDropped++;
+        continue;
+      }
+      const toWrite = { ...booking };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.guestIdUrl = "";
+        toWrite.guestIdPhotoUrl = "";
+        toWrite.paymentProofUrl = "";
+        toWrite.signatureUrl = "";
+      }
+      await adminDb.collection("bookings").doc(String(booking.id)).set(toWrite, { merge: false });
+      bookingsWritten++;
+    }
+    for (const order of sanitizedExport?.storeOrders || []) {
+      const toWrite = { ...order };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.guestIdUrl = "";
+        toWrite.paymentProofUrl = "";
+        toWrite.signatureUrl = "";
+      }
+      await adminDb.collection("storeOrders").doc(String(order.id)).set(toWrite, { merge: false });
+      storeOrdersWritten++;
+    }
+    for (const member of sanitizedExport?.members || []) {
+      if (hasScopeRestriction && !scopeMemberIds.has(member?.id)) {
+        membersDropped++;
+        continue;
+      }
+      const toWrite = { ...member };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.profilePhotoUrl = "";
+        toWrite.idImageUrl = "";
+      }
+      await adminDb.collection("members").doc(String(member.id)).set(toWrite, { merge: false });
+      membersWritten++;
     }
     const completedAt = /* @__PURE__ */ new Date();
     const expiresAt = snapshotData.mode === "unsanitized-diagnostic" ? new Date(Date.now() + Number(snapshotData.ttlHours || 24) * 60 * 60 * 1e3) : null;
@@ -227401,7 +227470,16 @@ async function handleStagingRefreshImport(req, res) {
         sumBalanceDue: financeCheck.sumBalanceDue,
         drift: financeCheck.drift
       },
-      sanitizedHash
+      sanitizedHash,
+      writeSummary: {
+        bookingsWritten,
+        storeOrdersWritten,
+        membersWritten,
+        bookingsDropped,
+        membersDropped,
+        sensitiveFileOptIn,
+        scopeRestricted: hasScopeRestriction
+      }
     });
     await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
       action: "import",
@@ -227469,14 +227547,75 @@ async function handleStagingRefreshDestroy(req, res) {
     if (!snapshotDoc.exists) {
       return res.status(404).json({ success: false, error: "Snapshot not found." });
     }
+    const snapshotData = snapshotDoc.data() || {};
+    if (snapshotData.status === "destroyed") {
+      return res.status(409).json({
+        success: false,
+        error: "Snapshot is already destroyed."
+      });
+    }
+    if (!snapshotData.writeSummary) {
+      return res.status(422).json({
+        success: false,
+        error: "Snapshot has no writeSummary (legacy snapshot). Cannot reverse the import without a full staging walk. Use the staging reset workflow instead."
+      });
+    }
+    let deletedBookings = 0;
+    let deletedStoreOrders = 0;
+    let deletedMembers = 0;
+    let deleteFailures = [];
+    for (const booking of (await adminDb.collection("bookings").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
+      try {
+        await booking.ref.delete();
+        deletedBookings++;
+      } catch (err) {
+        deleteFailures.push(`bookings/${booking.id}`);
+      }
+    }
+    for (const order of (await adminDb.collection("storeOrders").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
+      try {
+        await order.ref.delete();
+        deletedStoreOrders++;
+      } catch (err) {
+        deleteFailures.push(`storeOrders/${order.id}`);
+      }
+    }
+    for (const member of (await adminDb.collection("members").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
+      try {
+        await member.ref.delete();
+        deletedMembers++;
+      } catch (err) {
+        deleteFailures.push(`members/${member.id}`);
+      }
+    }
     await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).delete().catch(() => void 0);
     await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
       action: "destroy",
       snapshotId,
       adminUid: staff.uid,
       adminEmail: staff.email || "",
-      timestamp: /* @__PURE__ */ new Date()
+      timestamp: /* @__PURE__ */ new Date(),
+      deletedBookings,
+      deletedStoreOrders,
+      deletedMembers,
+      deleteFailures
     });
+    if (deleteFailures.length > 0) {
+      await snapshotRef.update({
+        status: "incomplete",
+        failureReason: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete`,
+        destroyedAt: /* @__PURE__ */ new Date(),
+        destroyedBy: staff.email || staff.uid || ""
+      });
+      return res.status(500).json({
+        success: false,
+        error: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete. Retry the destroy.`,
+        deletedBookings,
+        deletedStoreOrders,
+        deletedMembers,
+        deleteFailures
+      });
+    }
     await snapshotRef.update({
       status: "destroyed",
       destroyedAt: /* @__PURE__ */ new Date(),
@@ -227487,11 +227626,24 @@ async function handleStagingRefreshDestroy(req, res) {
       data: {
         snapshotId,
         status: "destroyed",
-        destroyedAt: (/* @__PURE__ */ new Date()).toISOString()
+        destroyedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        deletedBookings,
+        deletedStoreOrders,
+        deletedMembers
       }
     });
   } catch (error) {
     console.error("Staging refresh destroy failed:", error);
+    try {
+      await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).update({
+        status: "incomplete",
+        failureReason: error?.message || "Unknown error",
+        completedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || staff.uid || ""
+      });
+    } catch (nestedErr) {
+      console.error("Failed to mark snapshot incomplete:", nestedErr);
+    }
     return res.status(500).json({
       success: false,
       error: "Unable to destroy staging refresh."
@@ -239149,6 +239301,9 @@ async function handler(req, res) {
     return await handleStagingRefreshImport(req, res);
   }
   if (domain === "test-runs" && action === "staging-refresh-destroy" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-destroy:${ip}`, 3, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many destroy requests. Please try again in a minute." });
+    }
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });

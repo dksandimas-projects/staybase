@@ -1643,6 +1643,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // TTL expires + the scheduled job fires
   // the destroy.
   if (domain === "test-runs" && action === "staging-refresh-destroy" && req.method === "POST") {
+    // Per ETR-RATE-LIMIT-1: the destroy
+    // endpoint was missing a rate limit
+    // (the preview + import endpoints both
+    // have 3/min limits). A malicious admin
+    // (or a leaked admin token) could spam
+    // the destroy endpoint + overload
+    // Firestore. Mirror the same rate limit.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-destroy:${ip}`, 3, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many destroy requests. Please try again in a minute." });
+    }
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
