@@ -271,7 +271,23 @@ Booking {
   isCorporate: boolean
   corporateCode: string
   companyName: string
+  // Per feat/special-requests-redirect (commit 78a79f7) +
+  // feat/staff-special-requests-capture (2026-08-21): the
+  // public `/book` form does NOT collect `specialRequests`
+  // (replaced with a redirect card pointing to the hotel's
+  // support email + front desk phone). The field is captured
+  // by the front desk from email or phone through three staff
+  // surfaces: the booking drawer's "Special requests" editor
+  // (in `BookingDrawerWorkspace.tsx`), the admin walk-in modal,
+  // and the calendar-create modal. The two metadata fields
+  // below track when the staff last touched the value and
+  // which staff uid did. The firestore.rules staff-allowed
+  // update list includes all three fields; the server endpoint
+  // `/api/bookings/set-special-requests` stamps the metadata
+  // in the same transaction.
   specialRequests: string
+  specialRequestsUpdatedAt: string | null
+  specialRequestsUpdatedBy: string | null
   status: BookingStatus
   paymentMethod: PaymentMethod
   // Per BF-45 (booking-flow audit 2026-06-26): the

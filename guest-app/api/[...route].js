@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.287.0";
+    VERSION2 = "0.290.0";
   }
 });
 
@@ -224682,16 +224682,32 @@ async function findBooking(req, options) {
     if (!doc.exists) return null;
     snapshot = doc;
   } else if (bookingRef) {
-    let query = adminDb.collection("bookings").where("bookingRef", "==", String(bookingRef).trim()).limit(1);
-    if (options.requireGuestMatch && !user.uid) {
-      if (!guestEmail) {
-        throw new Error("Booking reference and guest email are required.");
+    const trimmed = String(bookingRef).trim();
+    let query;
+    if (RESERVATION_REF_REGEX.test(trimmed)) {
+      const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).limit(1).get();
+      if (reservationSnap.empty) return null;
+      const reservationDoc = reservationSnap.docs[0];
+      const childrenSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("reservationPosition", "asc").limit(1).get();
+      if (childrenSnap.empty) {
+        const fallbackSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("createdAt", "asc").limit(1).get();
+        if (fallbackSnap.empty) return null;
+        snapshot = fallbackSnap.docs[0];
+      } else {
+        snapshot = childrenSnap.docs[0];
       }
-      query = adminDb.collection("bookings").where("bookingRef", "==", String(bookingRef).trim()).where("guestEmail", "==", String(guestEmail).trim()).limit(1);
+    } else {
+      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
+      if (options.requireGuestMatch && !user.uid) {
+        if (!guestEmail) {
+          throw new Error("Booking reference and guest email are required.");
+        }
+        query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).where("guestEmail", "==", String(guestEmail).trim()).limit(1);
+      }
+      const results = await query.get();
+      if (results.empty) return null;
+      snapshot = results.docs[0];
     }
-    const results = await query.get();
-    if (results.empty) return null;
-    snapshot = results.docs[0];
   } else {
     throw new Error("Booking ID or booking reference is required.");
   }
@@ -225109,7 +225125,14 @@ function earlyCheckinRequestEmail(booking, request) {
     preheader: `Early check-in request for ${booking.bookingRef} from ${booking.guestName}.`,
     eyebrow: "Early check-in request",
     title: "A member has requested early check-in",
-    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk \u2014 subject to availability.`,
+    // Per EC-02 (2026-08-21): the intro now names the
+    // approval loop explicitly so the receiving operator knows
+    // they need to either approve or decline from the booking
+    // drawer / dashboard widget — and that the guest will
+    // receive a confirmation email regardless of the outcome.
+    // The strong disclaimer copy is the same wording used on
+    // the guest-facing button on Step 4 of the booking flow.
+    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk \u2014 subject to availability, not guaranteed, and requires your approval. The guest will receive an email once you approve or decline.`,
     body: `
       ${card("Booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
         ${row("Booking ref", booking.bookingRef)}
@@ -225639,6 +225662,19 @@ async function handleEmailTrigger(req, res, action) {
       return res.status(200).json({ success: true });
     }
     if (action === "early-checkin-request") {
+      try {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsSnap = await rewardsRef.get();
+        const rewardsCfg = rewardsSnap.exists ? rewardsSnap.data() : null;
+        if (rewardsCfg && rewardsCfg.earlyCheckInEnabled === false) {
+          return res.status(403).json({
+            success: false,
+            error: "Early check-in requests are currently disabled by the hotel."
+          });
+        }
+      } catch (gateErr) {
+        console.error("[early-checkin] Failed to read rewardsConfig gate:", gateErr);
+      }
       const hasStaff2 = Boolean(req.staff?.success);
       const booking2 = await findBooking(req, { requireGuestMatch: !hasStaff2 });
       if (!booking2) {
@@ -229333,7 +229369,19 @@ async function handleCreateBooking(req, res) {
         isCorporate: corporateDetails2.isCorporate,
         corporateCode: corporateDetails2.corporateCode,
         companyName: corporateDetails2.companyName,
-        specialRequests: guestDetails.requests || "",
+        // Per feat/special-requests-redirect (2026-08-21):
+        // the online /book create no longer writes
+        // `specialRequests` on the booking doc. The public
+        // form's textarea is gone; the redirect copy is the
+        // new surface. In-flight bookings that already carry
+        // a value still surface it via the admin intercom
+        // amber banner (the gate is
+        // `&& bookingSummary.specialRequests`). The walk-in
+        // API path keeps its `requests` mapping (see below
+        // in the WalkinBookingSchema branch) so the admin
+        // walk-in modal's `requests` input still writes
+        // through unchanged.
+        //
         // Per the intercom-verify-guest permanent fix
         // (2026-08-21): persist the structured `guestDetails`
         // sub-object so the intercom verifier can match against
@@ -231355,6 +231403,49 @@ async function handleSetLouReceived(req, res) {
     const message = error.message || "An unexpected error occurred while updating the LOU flag.";
     const status = message === "Booking not found." ? 404 : 400;
     console.error("Set LOU handler error:", error);
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+var MAX_SPECIAL_REQUESTS_LENGTH = 1e3;
+async function handleSetSpecialRequests(req, res) {
+  const { bookingId, value } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (typeof value !== "string") {
+    return res.status(400).json({ success: false, error: "Special requests must be a string." });
+  }
+  const trimmedValue = value.trim();
+  if (trimmedValue.length > MAX_SPECIAL_REQUESTS_LENGTH) {
+    return res.status(400).json({
+      success: false,
+      error: `Special requests must be ${MAX_SPECIAL_REQUESTS_LENGTH} characters or fewer.`
+    });
+  }
+  try {
+    let result = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId.trim());
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("Booking not found.");
+      }
+      const staffUid = req.staff?.uid || "staff";
+      const now = /* @__PURE__ */ new Date();
+      const updates = {
+        specialRequests: trimmedValue,
+        specialRequestsUpdatedAt: now,
+        specialRequestsUpdatedBy: staffUid,
+        updatedAt: now
+      };
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "An unexpected error occurred while updating special requests.";
+    const status = message === "Booking not found." ? 404 : 400;
+    console.error("Set special requests handler error:", error);
     return res.status(status).json({ success: false, error: message });
   }
 }
@@ -238780,6 +238871,17 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleSetLouReceived(req, res);
+  }
+  if (domain === "bookings" && action === "set-special-requests" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-special-requests:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many special-request updates. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleSetSpecialRequests(req, res);
   }
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 6e4)) {

@@ -2804,7 +2804,19 @@ export async function handleCreateBooking(req: any, res: any) {
         isCorporate: corporateDetails.isCorporate,
         corporateCode: corporateDetails.corporateCode,
         companyName: corporateDetails.companyName,
-        specialRequests: guestDetails.requests || "",
+        // Per feat/special-requests-redirect (2026-08-21):
+        // the online /book create no longer writes
+        // `specialRequests` on the booking doc. The public
+        // form's textarea is gone; the redirect copy is the
+        // new surface. In-flight bookings that already carry
+        // a value still surface it via the admin intercom
+        // amber banner (the gate is
+        // `&& bookingSummary.specialRequests`). The walk-in
+        // API path keeps its `requests` mapping (see below
+        // in the WalkinBookingSchema branch) so the admin
+        // walk-in modal's `requests` input still writes
+        // through unchanged.
+        //
         // Per the intercom-verify-guest permanent fix
         // (2026-08-21): persist the structured `guestDetails`
         // sub-object so the intercom verifier can match against
@@ -5810,6 +5822,74 @@ export async function handleSetLouReceived(req: any, res: any) {
 // reference staff recorded before rejection still lives on
 // the corresponding payment ledger entry's
 // `transactionReference`.
+// Per feat/staff-special-requests-capture (2026-08-21):
+// the staff-only closed-loop field on the booking doc.
+// The public /book form no longer collects a free-text
+// `requests` value (see feat/special-requests-redirect,
+// commit 78a79f7); requests arrive via email or phone and
+// the front desk types them into the booking from the
+// drawer editor, the walk-in modal, or the calendar-create
+// modal. This handler stamps the value + last-edit metadata
+// in a single transaction; the cap matches the historical
+// `WalkinGuestDetailsSchema.requests` cap (1000 chars).
+const MAX_SPECIAL_REQUESTS_LENGTH = 1000;
+
+export async function handleSetSpecialRequests(req: any, res: any) {
+  const { bookingId, value } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (typeof value !== "string") {
+    return res.status(400).json({ success: false, error: "Special requests must be a string." });
+  }
+  // Server-side cap is the authoritative gate; the client
+  // UI also caps at 1000 (see `maxLength={1000}` on the
+  // drawer + walk-in + calendar modals) so a runaway
+  // paste is rejected on the first keystroke. The trim
+  // normalizes whitespace; an empty result is allowed and
+  // clears the field + the metadata stamps.
+  const trimmedValue = value.trim();
+  if (trimmedValue.length > MAX_SPECIAL_REQUESTS_LENGTH) {
+    return res.status(400).json({
+      success: false,
+      error: `Special requests must be ${MAX_SPECIAL_REQUESTS_LENGTH} characters or fewer.`
+    });
+  }
+
+  try {
+    let result: Record<string, any> = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId.trim());
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("Booking not found.");
+      }
+      const staffUid = req.staff?.uid || "staff";
+      const now = new Date();
+      // The two metadata fields are stamped on every write
+      // — even when clearing the field — so the drawer's
+      // "last edited by" line stays in sync with the latest
+      // intent. The empty-string clear case still records
+      // who/when (the staff actively cleared it, which is
+      // itself an audit-relevant event).
+      const updates: Record<string, any> = {
+        specialRequests: trimmedValue,
+        specialRequestsUpdatedAt: now,
+        specialRequestsUpdatedBy: staffUid,
+        updatedAt: now
+      };
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    const message = error.message || "An unexpected error occurred while updating special requests.";
+    const status = message === "Booking not found." ? 404 : 400;
+    console.error("Set special requests handler error:", error);
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+
 const MAX_PAYMENT_REJECTION_REASON_LENGTH = 500;
 
 export async function handleRejectPayment(req: any, res: any) {

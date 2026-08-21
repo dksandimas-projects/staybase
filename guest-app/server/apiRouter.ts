@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -715,6 +715,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleSetLouReceived(req, res);
+  }
+
+  // Per feat/staff-special-requests-capture (2026-08-21):
+  // the staff-only closed-loop write for the booking's
+  // `specialRequests` field. Staff captures requests
+  // received via email or phone; the field is never
+  // user-input on the public form (see feat/special-
+  // requests-redirect, commit 78a79f7). Same auth
+  // posture + rate-limit bucket as set-lou-received:
+  // 30/min/IP, staff role gate, server-side char cap.
+  if (domain === "bookings" && action === "set-special-requests" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-special-requests:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many special-request updates. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleSetSpecialRequests(req, res);
   }
 
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {

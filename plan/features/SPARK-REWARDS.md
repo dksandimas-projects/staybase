@@ -223,6 +223,20 @@ These are documented here for awareness. Define before starting Phase 2:
 - [x] Tests: `admin-app/src/__tests__/dashboard-early-checkin.test.ts` adds 10 source-text pins (shared type extension, awaited server write, bell entry + deep-link routing, dashboard derivation + `resolveEarlyCheckin` wiring + Approve/Decline buttons + `ConfirmForm` usage, regression sanity). `tsc -p admin-app` + `tsc -p api` both clean. `admin-app` 1581/1581 + `shared` 569/569 green; pre-existing `test-runs-staging-refresh` + `audit-guest-sev2-2026-07-07` failures present on `dev` HEAD before this PR.
 - [x] MD sync: `plan/docs/DECISIONS-FEATURES.md` entry `EC-01`.
 
+### Phase 12 addendum §2 — booking-flow entry point + admin disable toggle (decision EC-02, 2026-08-21, `feature/early-checkin-booking-flow-toggle`)
+
+> Operator-requested 2026-08-21: the perk is now exposed on Step 4 of the booking flow with a strong disclaimer, AND globally togglable from the admin Settings → Rewards tab.
+
+- [x] Server (defense-in-depth, Hard Rule #1): `/api/email?action=early-checkin-request` reads `settings/rewardsConfig.earlyCheckInEnabled` on every request and returns 403 if false. Gate runs BEFORE the booking write so a disabled toggle never lands a doc. Failure to read the config defaults to true (logged + perk proceeds) — same pattern as `bookings.ts:2582-2586`.
+- [x] Staff email copy: `earlyCheckinRequestEmail` intro names the approval loop — "requires your approval. The guest will receive an email once you approve or decline." Same recipient, same template shape.
+- [x] Guest booking confirmation (Step 4): new "Request early check-in" section on `BookingConfirmPage.tsx`, rendered only when `isRewardsMember && earlyCheckInEnabled`. Disclaimer copy next to the button ("**not guaranteed** — subject to approval by our team, and you'll receive an email once we approve or decline") + repeats inside the modal. Single-booking flow (URL params carry the bookingRef) — submission uses the existing `/api/email` path, no new server route.
+- [x] RewardsPage: existing button (line 306) gated on `rewardsConfig.earlyCheckInEnabled !== false` so the disable is consistent across both surfaces.
+- [x] Admin Settings → Rewards tab: new "Allow Spark Rewards Early Check-In Requests" toggle alongside the existing points + member-discount toggles. Same 6×11 round switch UI, sub-text explains the side-effect ("When off, the button disappears from the booking confirmation page and the server rejects new requests with 403. Pending + historical requests on existing bookings stay visible until resolved."). Flag rides on the same `updateSettings("rewardsConfig", {...})` save — one save persists the whole tab.
+- [x] Shared: `RewardsConfigLike` extended with `earlyCheckInEnabled?: boolean` (defaults to true when absent — non-breaking for pre-EC-02 deployments).
+- [x] Tests: `admin-app/src/__tests__/early-checkin-booking-flow-toggle.test.ts` (NEW, 11 source-text pins). Existing `dashboard-early-checkin.test.ts` (EC-01) extended its slice anchor to cover the new gate block.
+- [x] `tsc -p admin-app` + `tsc -p api` + `guest-app` typecheck all clean. admin-app 1598/1598 + shared 569/569. No new Vercel function (reuses `/api/bookings/early-checkin-resolve`). Husky `check:api-bundle` verified + version bump to 0.288.0.
+- [x] MD sync: `plan/docs/DECISIONS-FEATURES.md` entry `EC-02`.
+
 ### Out of scope
 
 - The dormant `isEarlyCheckInRequest` intercom-message flag stays dormant — intercom delivery remains deferred per `plan/features/INTERCOM-INBOX.md §Preserve early check-in request metadata`. This workflow is email + booking-document only.

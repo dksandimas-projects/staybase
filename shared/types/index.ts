@@ -653,7 +653,19 @@ export interface Booking {
   isCorporate: boolean;
   corporateCode: string;
   companyName: string;
+  // Per feat/staff-special-requests-capture (2026-08-21):
+  // `specialRequests` is a STAFF-ONLY closed-loop field. The
+  // public /book form no longer collects the input (see
+  // feat/special-requests-redirect, commit 78a79f7); the
+  // front desk captures requests received via email or phone
+  // into the booking doc from the booking drawer, the walk-in
+  // modal, or the calendar-create modal. The two metadata
+  // fields below track when the staff last touched the value
+  // and which staff uid did — useful when the next shift opens
+  // the drawer and wants context on the request's freshness.
   specialRequests: string;
+  specialRequestsUpdatedAt: string | null;
+  specialRequestsUpdatedBy: string | null;
   status: BookingStatus;
   paymentMethod: PaymentMethod;
   // Per BF-45 (booking-flow audit 2026-06-26): the

@@ -50,15 +50,33 @@ describe("Phase 12 — Early check-in admin alert (dashboard widget + bell)", ()
 
   describe("server write path — early-checkin-request handler", () => {
     it("awaits writeNotification after the earlyCheckIn booking write (NC-01 contract)", () => {
-      // Slice from the action handler anchor so we don't get a
-      // generic regex-no-match on the 2700-line file.
+      // Slice from the action handler anchor through the end
+      // of the handler body. Per EC-02 the gate is BEFORE the
+      // booking write (defense-in-depth: the toggle rejects
+      // before we touch the booking doc), so the ordering is
+      // now: gate → booking update → email send → writeNotification.
+      // Use the schema block as the end anchor (it's at the
+      // tail of the handler body, ~50 lines after the action
+      // anchor — well within the 4000-char window).
       const actionIdx = emailHandlerSrc.indexOf(
         'if (action === "early-checkin-request")'
       );
       expect(actionIdx).toBeGreaterThan(-1);
+      const schemaIdx = emailHandlerSrc.indexOf("earlyCheckinRequestSchema", actionIdx);
+      expect(schemaIdx, "schema anchor not found — handler shape changed").toBeGreaterThan(-1);
+      // The booking update + writeNotification live AFTER the
+      // schema block (~25 lines after the schema close), so
+      // extend the window to the next `if (action ===` token
+      // — that marks the end of THIS handler.
+      const nextHandlerIdx = emailHandlerSrc.indexOf(
+        "if (action ===",
+        schemaIdx + 10
+      );
       const slice = emailHandlerSrc.slice(
         actionIdx,
-        Math.min(actionIdx + 4000, emailHandlerSrc.length)
+        nextHandlerIdx >= 0
+          ? Math.min(nextHandlerIdx, emailHandlerSrc.length)
+          : Math.min(schemaIdx + 1500, emailHandlerSrc.length)
       );
       // The booking doc update happens first (existing behavior),
       // then the existing email send, then the new awaited
@@ -78,30 +96,46 @@ describe("Phase 12 — Early check-in admin alert (dashboard widget + bell)", ()
     });
 
     it("uses NotificationType \"early-checkin-request\" in the new server write", () => {
-      const actionIdx = emailHandlerSrc.indexOf(
-        'if (action === "early-checkin-request")'
-      );
-      const slice = emailHandlerSrc.slice(
-        actionIdx,
-        Math.min(actionIdx + 4000, emailHandlerSrc.length)
-      );
-      expect(slice).toMatch(/type:\s*[\"']early-checkin-request[\"']/);
-      // PII-safe title: the new writeNotification block must
-      // not log or persist guest email. Slice just the
-      // writeNotification call + its object literal so the
-      // assertion doesn't bleed into the next handler.
-      const writeNotificationIdx = slice.indexOf("writeNotification");
-      // 600 chars covers the object literal of the call
-      // (~250 chars: writeNotification({ type: "...", title:
-      // `...`, entityType: ..., entityId: ..., roomNumber: ...,
-      // bookingRef: ... }) — well within range).
-      const notifBlock = slice.slice(writeNotificationIdx, writeNotificationIdx + 600);
-      expect(notifBlock).not.toMatch(/guestEmail/);
-      // The roomNumber field is read with a nullish fallback
-      // (`?? null`) so the existing writeNotification helper
-      // receives a clean string-or-null value.
-      expect(notifBlock).toMatch(/roomNumber\s*:/);
-    });
+          const actionIdx = emailHandlerSrc.indexOf(
+            'if (action === "early-checkin-request")'
+          );
+          // Per EC-02 the gate is now before the booking write,
+          // so the writeNotification call is ~70 lines into the
+          // handler (not the original ~50). Use the schema block
+          // as the end anchor so the slice reliably covers the
+          // writeNotification call site.
+          const schemaIdx = emailHandlerSrc.indexOf("earlyCheckinRequestSchema", actionIdx);
+                // The writeNotification call sits AFTER the schema block
+                // (~25 lines after the schema close), so extend the
+                // window to the next `if (action ===` token — that marks
+                // the end of this handler.
+                const nextHandlerIdx = emailHandlerSrc.indexOf(
+                  "if (action ===",
+                  schemaIdx + 10
+                );
+                const slice = emailHandlerSrc.slice(
+                  actionIdx,
+                  nextHandlerIdx >= 0
+                    ? Math.min(nextHandlerIdx, emailHandlerSrc.length)
+                    : Math.min(schemaIdx + 1500, emailHandlerSrc.length)
+                );
+          expect(slice).toMatch(/type:\s*["']early-checkin-request["']/);
+          // PII-safe title: the new writeNotification block must
+          // not log or persist guest email. Slice just the
+          // writeNotification call + its object literal so the
+          // assertion doesn't bleed into the next handler.
+          const writeNotificationIdx = slice.indexOf("writeNotification");
+          // 600 chars covers the object literal of the call
+          // (~250 chars: writeNotification({ type: "...", title:
+          // `...`, entityType: ..., entityId: ..., roomNumber: ...,
+          // bookingRef: ... }) — well within range).
+          const notifBlock = slice.slice(writeNotificationIdx, writeNotificationIdx + 600);
+          expect(notifBlock).not.toMatch(/guestEmail/);
+          // The roomNumber field is read with a nullish fallback
+          // (`?? null`) so the existing writeNotification helper
+          // receives a clean string-or-null value.
+          expect(notifBlock).toMatch(/roomNumber\s*:/);
+        });
   });
 
   describe("admin — notification bell", () => {

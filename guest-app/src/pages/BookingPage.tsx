@@ -88,6 +88,13 @@ import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
 import { useGuestAuth } from "../context/GuestAuthContext";
+// Per feat/special-requests-redirect (2026-08-21): the guest
+// booking form no longer collects a free-text special-requests
+// field. The redirect copy on the form reads the per-hotel
+// contact override from `usePublicSiteContent` (same hook as
+// ContactPage + Footer) so the email + phone render through the
+// same source-of-truth chain — admin override > `hotel.config.ts`.
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 import {
@@ -164,6 +171,14 @@ export function BookingPage() {
   const { rooms, loading: roomsLoading } = useRooms();
   const { roomTypes, seasonalRateOverrides } = useRoomTypes();
   const { memberProfile } = useGuestAuth();
+  // Per feat/special-requests-redirect (2026-08-21): the
+  // redirect card on the booking form reads the per-hotel
+  // contact override (Settings → Hotel Info) with the
+  // deploy-time `hotel.config.ts` values as the fallback. Same
+  // pattern as ContactPage + Footer.
+  const { contact } = usePublicSiteContent();
+  const redirectPhone = contact?.frontDeskPhone || config.frontDeskPhone;
+  const redirectEmail = contact?.supportEmail || config.supportEmail;
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
   const isReviewStep = currentStepKey === "review";
@@ -313,7 +328,9 @@ export function BookingPage() {
         ? memberProfile.phone
         : ""),
     guestCount: String((Number(searchParams.get("adults")) || (Number(searchParams.get("guests")) || 2)) + Number(searchParams.get("children") ?? 0)),
-    requests: searchParams.get("requests") ?? "",
+    // Per feat/special-requests-redirect (2026-08-21): the
+    // `requests` field is gone. The guest now sees the redirect
+    // card on the form (and again on the confirmation page).
     consent: false,
     _hp: ""
   });
@@ -810,7 +827,10 @@ export function BookingPage() {
   reviewParams.set("lastName", guestDetails.lastName);
   reviewParams.set("email", guestDetails.email);
   reviewParams.set("phone", guestDetails.phone);
-  reviewParams.set("requests", guestDetails.requests);
+  // Per feat/special-requests-redirect (2026-08-21): the
+  // `requests` URL param is gone with the form field; the
+  // redirect is the single source of truth for the guest's
+  // special-request path.
 
   // Per BF-29: Zod-based email validation. Compile once at
   // module scope so the regex doesn't re-compile on every
@@ -1549,7 +1569,13 @@ export function BookingPage() {
             lastName: guestDetails.lastName,
             email: guestDetails.email,
             phone: guestDetails.phone,
-            requests: guestDetails.requests,
+            // Per feat/special-requests-redirect (2026-08-21):
+            // the `requests` field is no longer sent on the
+            // public /book create wire. The server-side
+            // `GuestDetailsSchema.specialRequests` is left
+            // untouched (back-compat for any third-party
+            // caller that still posts it) but the client
+            // doesn't carry the input anymore.
             consent: termsConsent
           },
           discountType: discountType === "none" ? "" : discountType,
@@ -1842,20 +1868,52 @@ export function BookingPage() {
                 id="guestCount"
                 name="guestCount"
               />
-              <label htmlFor="requests" className="grid gap-2 text-sm font-medium text-gray-700">
-                Special requests
-                <span className="relative block">
-                  <MessageSquareText size={17} className="absolute left-3 top-3 text-primary" />
-                  <textarea
-                    id="requests"
-                    name="requests"
-                    className="min-h-28 w-full rounded-lg border border-gray-200 bg-white py-3 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
-                    onChange={(event) => updateGuestDetail("requests", event.target.value)}
-                    placeholder="Late check-in, dietary notes, room preferences..."
-                    value={guestDetails.requests}
+              {/* Per feat/special-requests-redirect (2026-08-21):
+                  the textarea is gone. The card below renders the
+                  redirect copy so the guest still has a clear path
+                  for late check-in / dietary / room preferences. The
+                  email + phone read from the per-hotel contact
+                  override (Settings → Hotel Info) with the
+                  deploy-time `hotel.config.ts` as the fallback. */}
+              <div
+                data-testid="special-requests-redirect"
+                className="rounded-card border border-primary/20 bg-primary-light p-4 text-sm text-gray-700"
+              >
+                <div className="flex items-start gap-3">
+                  <MessageSquareText
+                    size={18}
+                    className="mt-0.5 shrink-0 text-primary"
+                    aria-hidden="true"
                   />
-                </span>
-              </label>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900">Need something special?</p>
+                    <p className="mt-1 leading-relaxed">
+                      We do our best to accommodate requests like late check-in, dietary needs,
+                      and room preferences. Please reach out before your stay:
+                    </p>
+                    <ul className="mt-2 space-y-1 text-xs">
+                      <li className="flex items-center gap-2">
+                        <Mail size={14} className="text-primary" aria-hidden="true" />
+                        <a
+                          href={`mailto:${redirectEmail}`}
+                          className="font-semibold text-primary hover:underline"
+                        >
+                          {redirectEmail}
+                        </a>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Phone size={14} className="text-primary" aria-hidden="true" />
+                        <a
+                          href={`tel:${redirectPhone}`}
+                          className="font-semibold text-primary hover:underline"
+                        >
+                          {redirectPhone}
+                        </a>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </motion.div>
 
             <motion.div className="mt-6 rounded-card bg-primary-light p-4" variants={staggerChild}>

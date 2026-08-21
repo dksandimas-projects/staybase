@@ -1,4 +1,4 @@
-import { CalendarPlus, CheckCircle2, ExternalLink, Home, Mail, Sparkles, Star } from "lucide-react";
+import { CalendarPlus, CheckCircle2, Clock, ExternalLink, Home, Mail, MessageSquareText, Phone, Sparkles, Star, X } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
@@ -14,6 +14,12 @@ import { PriceBreakdown } from "../components/PriceBreakdown";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { useRoomTypes } from "../hooks/useRoomTypes";
+// Per feat/special-requests-redirect (2026-08-21): the redirect
+// card on the confirmation page reads the per-hotel contact
+// override (Settings → Hotel Info) with the deploy-time
+// `hotel.config.ts` as the fallback. Same source-of-truth chain
+// as ContactPage + Footer.
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { formatPrice } from "../utils/format";
 
 function formatStayDate(value: string) {
@@ -60,6 +66,14 @@ export function BookingConfirmPage() {
   const shouldReduceMotion = useReducedMotion();
   const { roomTypes } = useRoomTypes();
   const { user, memberProfile } = useGuestAuth();
+  // Per feat/special-requests-redirect (2026-08-21): the
+  // redirect card on the confirmation page reads the per-hotel
+  // contact override (Settings → Hotel Info) with the
+  // deploy-time `hotel.config.ts` as the fallback. Same pattern
+  // as ContactPage + Footer.
+  const { contact } = usePublicSiteContent();
+  const redirectPhone = contact?.frontDeskPhone || config.frontDeskPhone;
+  const redirectEmail = contact?.supportEmail || config.supportEmail;
 
   // The payment-method label shown to the guest is now sourced
   // from `settings/hotelConfig.paymentMethods[].label` (admin-
@@ -192,6 +206,86 @@ export function BookingConfirmPage() {
   const isOnlinePayment = rawPaymentMethod === "gcash" || rawPaymentMethod === "bank";
   const isRewardsMember = !!user && !!memberProfile?.isMember;
   const showRewardsJoinPrompt = !isRewardsMember;
+
+  // Per EC-02 (2026-08-21): the "Request Early Check-In"
+  // section on Step 4. The button is gated on (a) the
+  // member being signed in (Spark Rewards perk) AND (b) the
+  // admin toggle in Settings → Rewards tab. The strong
+  // disclaimer copy sits next to the button so the member
+  // sees the exact wording before they open the modal —
+  // "not guaranteed, subject to approval, email will be
+  // received for the approval or rejection".
+  const [earlyCheckInEnabled, setEarlyCheckInEnabled] = useState<boolean>(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "rewardsConfig"));
+        if (!cancelled && snap.exists()) {
+          const data = snap.data();
+          // Default to true when absent so pre-EC-02 deployments
+          // keep the perk on until the admin explicitly turns it off.
+          setEarlyCheckInEnabled(data?.earlyCheckInEnabled !== false);
+        }
+      } catch (err) {
+        console.error("[BookingConfirmPage] Failed to load rewardsConfig:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const showEarlyCheckInButton = isRewardsMember && earlyCheckInEnabled;
+  const [showEarlyCheckInModal, setShowEarlyCheckInModal] = useState(false);
+  const [earlyCheckInRequestedTime, setEarlyCheckInRequestedTime] = useState<string>("11:00 AM");
+  const [earlyCheckInNotes, setEarlyCheckInNotes] = useState<string>("");
+  const [earlyCheckInSubmitting, setEarlyCheckInSubmitting] = useState(false);
+  const [earlyCheckInSent, setEarlyCheckInSent] = useState(false);
+  const [earlyCheckInError, setEarlyCheckInError] = useState<string | null>(null);
+  // Reset all modal state when closing — the per-booking
+  // guest can re-open after a decline / after re-thinking.
+  const closeEarlyCheckInModal = () => {
+    setShowEarlyCheckInModal(false);
+    setEarlyCheckInNotes("");
+    setEarlyCheckInError(null);
+  };
+  const handleSubmitEarlyCheckIn = async () => {
+    if (!user) {
+      setEarlyCheckInError("Please sign in to your member account to submit a request.");
+      return;
+    }
+    setEarlyCheckInSubmitting(true);
+    setEarlyCheckInError(null);
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch("/api/email/early-checkin-request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          bookingRef,
+          request: {
+            requestedCheckInTime: earlyCheckInRequestedTime,
+            notes: earlyCheckInNotes
+          }
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to submit the request.");
+      }
+      setEarlyCheckInSent(true);
+    } catch (submitErr) {
+      console.error("Early check-in submit failed:", submitErr);
+      setEarlyCheckInError(
+        submitErr instanceof Error
+          ? submitErr.message
+          : "Unable to submit the request. Please try again."
+      );
+    } finally {
+      setEarlyCheckInSubmitting(false);
+    }
+  };
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -351,6 +445,120 @@ export function BookingConfirmPage() {
           </span>
         </motion.div>
 
+        {/* Per feat/special-requests-redirect (2026-08-21): the
+            "Forgot something?" prompt lives right after the email
+            alert and before the early check-in section. The
+            confirmation moment is when guests most often remember
+            a special need (late check-in, dietary notes, room
+            preferences) — surfacing the prompt here, with the
+            booking ref already on the page, gives the guest a
+            clear path to reach the front desk without leaving the
+            flow. Same per-hotel contact override as the booking
+            form redirect (Settings → Hotel Info →
+            `hotel.config.ts` fallback). */}
+        <motion.div
+          data-testid="special-requests-redirect"
+          className="mt-6 rounded-xl border border-primary/20 bg-primary-light p-5 shadow-sm"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4, duration: 0.4 }}
+        >
+          <div className="flex items-start gap-3">
+            <MessageSquareText
+              size={20}
+              className="mt-0.5 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <div className="flex-1">
+              <h3 className="font-heading text-base text-gray-950">
+                Forgot something? Need something special?
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-gray-700">
+                If you have requests like late check-in, dietary needs, or room preferences,
+                please reach out before your stay — we&apos;ll do our best to accommodate:
+              </p>
+              <ul className="mt-3 flex flex-col gap-1.5 text-xs sm:flex-row sm:gap-4">
+                <li className="flex items-center gap-1.5">
+                  <Mail size={14} className="text-primary" aria-hidden="true" />
+                  <a
+                    href={`mailto:${redirectEmail}`}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {redirectEmail}
+                  </a>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <Phone size={14} className="text-primary" aria-hidden="true" />
+                  <a
+                    href={`tel:${redirectPhone}`}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {redirectPhone}
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Per EC-02 (2026-08-21): Spark Rewards early
+            check-in request section. The button is visible
+            ONLY to logged-in members when the admin toggle is
+            on. The strong disclaimer is right under the
+            button so the member sees the exact wording before
+            they open the modal — "not guaranteed and is for
+            approval, email will be received for the approval
+            or rejection". A separate `sent` state shows a
+            confirmation panel after the request goes through
+            (so the member doesn't accidentally double-submit
+            if they re-open the modal). */}
+        {showEarlyCheckInButton && (
+          <motion.div
+            data-testid="early-checkin-request-section"
+            className="mt-6 rounded-xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.38, duration: 0.4 }}
+          >
+            <div className="flex items-start gap-3">
+              <Clock size={20} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+              <div className="flex-1">
+                <h3 className="font-heading text-base text-amber-950">
+                  Request early check-in
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-amber-900">
+                  As a {config.rewardsName} member, you can request an earlier arrival for
+                  booking <span className="font-mono font-bold">{bookingRef}</span>. This
+                  request is <strong>not guaranteed</strong> — it's subject to approval by our
+                  team, and you'll receive an email once we approve or decline the request.
+                </p>
+                {earlyCheckInSent ? (
+                  <div
+                    data-testid="early-checkin-sent"
+                    className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800"
+                  >
+                    <CheckCircle2 size={16} className="shrink-0" aria-hidden="true" />
+                    Request sent — we'll email you when our team has reviewed it.
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEarlyCheckInModal(true);
+                      setEarlyCheckInError(null);
+                    }}
+                    data-testid="early-checkin-open-modal"
+                    className="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-amber-700 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+                  >
+                    <Clock size={14} />
+                    Request early check-in
+                  </button>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Action Buttons */}
         <motion.div
           className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center"
@@ -409,6 +617,120 @@ export function BookingConfirmPage() {
                 Learn more
               </GhostButton>
             </div>
+          </motion.div>
+        )}
+
+        {/* Per EC-02 (2026-08-21): the early check-in request
+            modal. Single-booking flow (no picker) — the URL
+            params carry the bookingRef so the server can
+            resolve via the same `findBooking` helper the
+            RewardsPage path uses. The disclaimer copy is
+            repeated inside the modal so the member sees it
+            before they hit submit (not just next to the
+            button). After a successful send the modal flips
+            to a confirmation panel — the section above also
+            flips to the "Request sent" callout, so closing
+            the modal doesn't lose the success state. */}
+        {showEarlyCheckInModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="early-checkin-modal-title"
+          >
+            <motion.div
+              data-testid="early-checkin-modal"
+              initial={{ scale: 0.96, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-md rounded-card-lg bg-white p-6 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <h3
+                  id="early-checkin-modal-title"
+                  className="font-heading text-xl text-gray-950"
+                >
+                  Request early check-in
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeEarlyCheckInModal}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
+                  aria-label="Close early check-in modal"
+                >
+                  <X size={18} aria-hidden="true" />
+                </button>
+              </div>
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                <strong>Heads up:</strong> early check-in is a member perk and is{" "}
+                <strong>not guaranteed</strong>. Your request is subject to approval by our
+                team. You'll receive an email once we approve or decline the request.
+              </div>
+              <div className="mt-5 space-y-4">
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    Requested arrival time
+                  </span>
+                  <select
+                    value={earlyCheckInRequestedTime}
+                    onChange={(e) => setEarlyCheckInRequestedTime(e.target.value)}
+                    disabled={earlyCheckInSubmitting}
+                    className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="08:00 AM">08:00 AM</option>
+                    <option value="09:00 AM">09:00 AM</option>
+                    <option value="10:00 AM">10:00 AM</option>
+                    <option value="11:00 AM">11:00 AM</option>
+                    <option value="12:00 PM">12:00 PM (noon)</option>
+                    <option value="01:00 PM">01:00 PM</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    Notes for our team (optional)
+                  </span>
+                  <textarea
+                    value={earlyCheckInNotes}
+                    onChange={(e) => setEarlyCheckInNotes(e.target.value)}
+                    rows={3}
+                    maxLength={500}
+                    disabled={earlyCheckInSubmitting}
+                    placeholder="e.g. arriving from a long flight, would help to be settled earlier"
+                    className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </label>
+                {earlyCheckInError && (
+                      <div
+                        role="alert"
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
+                      >
+                        {earlyCheckInError}
+                      </div>
+                    )}
+              </div>
+              <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeEarlyCheckInModal}
+                  disabled={earlyCheckInSubmitting}
+                  className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSubmitEarlyCheckIn()}
+                  disabled={earlyCheckInSubmitting}
+                  data-testid="early-checkin-submit"
+                  className="min-h-[44px] rounded-lg bg-amber-700 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {earlyCheckInSubmitting ? "Sending…" : "Submit request"}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </section>

@@ -1,8 +1,19 @@
+// Per EC-02 (operator-requested 2026-08-21): the
+// `earlyCheckInEnabled` flag joins the existing
+// `pointsEnabled` / `memberDiscountEnabled` toggles in
+// `settings/rewardsConfig`. When `false`, the booking flow
+// hides the "Request Early Check-In" button, the
+// `/api/email?action=early-checkin-request` handler rejects
+// the write with 403 (defense-in-depth per Hard Rule #1),
+// and the staff email is not sent. The flag is treated as
+// `true` (the pre-EC-02 default) when absent — non-breaking
+// for any deployment that hasn't explicitly turned it off.
 export interface RewardsConfigLike {
   earningMode: "per-booking" | "per-spend";
   pointsPerBooking: number;
   pointsPerHundred: number;
   pointsRedemptionRate: number;
+  earlyCheckInEnabled?: boolean;
 }
 
 // Per Spark Rewards audit 2026-07-18 LOW-4: the previous

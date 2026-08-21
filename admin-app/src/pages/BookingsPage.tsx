@@ -48,6 +48,7 @@ import {
   BookingDrawerActionFooter,
   BookingDrawerSectionPanel,
   BookingDrawerWorkspaceHeader,
+  BookingSpecialRequestsEditor,
   type BookingDrawerSection
 } from "../components/BookingDrawerWorkspace";
 import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
@@ -1162,6 +1163,14 @@ export function BookingsPage() {
   const [priceOverride, setPriceOverride] = useState("");
   const [walkinDiscountType, setWalkinDiscountType] = useState<"" | "senior" | "pwd">("");
   const [walkinVoucherCode, setWalkinVoucherCode] = useState("");
+  // Per feat/staff-special-requests-capture (2026-08-21):
+  // the walk-in modal captures requests received at the
+  // counter (front desk types on the guest's behalf). The
+  // state flows into the addWalkinBooking call which posts
+  // to /api/bookings/create-walkin with `requests` inside
+  // guestDetails; the server writes it to
+  // `Booking.specialRequests` on the doc.
+  const [walkinSpecialRequests, setWalkinSpecialRequests] = useState("");
   const [walkinTestRunId, setWalkinTestRunId] = useState("");
   const [staffDiscountType, setStaffDiscountType] = useState<"" | "senior" | "pwd">("");
   const [staffVoucherCode, setStaffVoucherCode] = useState("");
@@ -3615,36 +3624,14 @@ export function BookingsPage() {
         y += 2;
       }
 
-      // ── Special Requests / Notes ──
-      const requestBookings = receiptBookings.filter(
-        (receiptBooking) => receiptBooking.specialRequests?.trim().length > 0
-      );
-      if (requestBookings.length > 0) {
-        checkNewPage(15);
-        drawPdfSectionTitle(pdf, "Special Requests", marginL, y, brandRgb);
-        y += 5;
-
-        pdf.setFontSize(10);
-        pdf.setTextColor(60, 60, 60);
-        requestBookings.forEach((receiptBooking, requestIndex) => {
-          const bookingIndex = receiptBookings.findIndex((booking) => booking.id === receiptBooking.id);
-          if (isReservationReceipt) {
-            checkNewPage(5);
-            pdf.setFont("helvetica", "bold");
-            pdf.text(getReceiptRoomLabel(receiptBooking, bookingIndex), labelColX, y, { charSpace: 0 });
-            setPdfFont(pdf, "Inter");
-            y += 4;
-          }
-          const reqLines = pdf.splitTextToSize(receiptBooking.specialRequests, pageW - 40);
-          for (const line of reqLines) {
-            checkNewPage(5);
-            pdf.text(line, labelColX, y, { charSpace: 0 });
-            y += 4.0;
-          }
-          if (requestIndex < requestBookings.length - 1) y += 1;
-        });
-        y += 3;
-      }
+      // Per feat/special-requests-redirect (2026-08-21): the
+      // "Special Requests" PDF section is gone. The public /book
+      // form no longer collects a free-text `specialRequests`
+      // value, and the admin walk-in / calendar create paths now
+      // write an empty string for the field. In-flight bookings
+      // that already carry a non-empty value surface via the
+      // intercom amber banner in the admin app, not on the
+      // printable receipt.
 
       // ── Payment Breakdown ──
       checkNewPage(30);
@@ -4276,6 +4263,12 @@ export function BookingsPage() {
         // with a synthetic placeholder.
         guestEmail: trimmedEmail,
         guestPhone: trimmedPhone,
+        // Per feat/staff-special-requests-capture (2026-08-21):
+        // the staff-captured request from the walk-in modal
+        // (front desk types on the guest's behalf at the
+        // counter). Truncated at 1000 chars on the client;
+        // the WalkinGuestDetailsSchema caps at 1000 too.
+        specialRequests: walkinSpecialRequests.trim().slice(0, 1000),
         numGuests,
         // Per EXB-07 (2026-08-01, per decision #155): the
         // walk-in modal now carries the adult/child split
@@ -4308,7 +4301,19 @@ export function BookingsPage() {
         isCorporate: false,
         corporateCode: "",
         companyName: "",
-        specialRequests: "Walk-in registration.",
+        // Per feat/special-requests-redirect (2026-08-21):
+        // the previous literal "Walk-in registration."
+        // placeholder is replaced with an empty string. The
+        // Per feat/staff-special-requests-capture (2026-08-21):
+        // the staff-captured request (now sourced from the
+        // walk-in modal's `walkinSpecialRequests` state —
+        // see the `specialRequests:` entry further up in
+        // this same payload). The earlier literal-empty
+        // hard-code was removed; the same field is now
+        // populated from the desk's textarea input on the
+        // modal. Back-compat with pre-existing in-flight
+        // bookings that already carry a value is preserved
+        // (the intercom amber banner still surfaces them).
         status: immediateCheckIn ? "checked-in" : "confirmed",
         paymentMethod: walkinPayment,
         // Per BF-45 (booking-flow audit 2026-06-26):
@@ -4349,6 +4354,7 @@ export function BookingsPage() {
         setHasBreakfast(false);
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
+        setWalkinSpecialRequests("");
         setWalkinTestRunId("");
         // Per NBS-2026-08-08 (F9, booking-flow audit
         // 2026-08-08): the previous reset read
@@ -5264,6 +5270,19 @@ export function BookingsPage() {
                 {getOnsitePaymentMethodLabel(selectedBooking.paymentMethod!)} — no proof uploaded
               </div>
             ) : null}
+
+            {/* Per feat/staff-special-requests-capture (2026-08-21):
+                the staff-only closed-loop editor for the booking's
+                `specialRequests` field. The textarea is captured from
+                email or phone by the front desk; guests never see the
+                field (the public /book form was redirected to email/
+                phone in feat/special-requests-redirect, commit 78a79f7).
+                The editor mounts in the Overview section so the staff
+                sees the request alongside guest identity + payment
+                context. */}
+            <div className="mt-6">
+              <BookingSpecialRequestsEditor booking={selectedBooking} />
+            </div>
             </BookingDrawerSectionPanel>
 
             {/* Check-in registration workstation */}
@@ -7436,6 +7455,21 @@ export function BookingsPage() {
             <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Voucher Code
               <input value={walkinVoucherCode} onChange={(e) => setWalkinVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional" className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs uppercase" />
+
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+              Special requests (optional)
+              <textarea
+                value={walkinSpecialRequests}
+                onChange={(e) => setWalkinSpecialRequests(e.target.value)}
+                maxLength={1000}
+                rows={3}
+                placeholder="e.g. Late check-in ~11pm, extra pillows, vegetarian breakfast"
+                className="min-h-[80px] w-full rounded-lg border border-gray-250 bg-white px-3 py-2 text-xs font-normal placeholder:text-gray-400"
+              />
+              <span className="text-[10px] font-normal text-gray-500">
+                Captured from email or phone by the front desk. Guests never see this field.
+              </span>
+            </label>
             </label>
             {testRuns.filter(r => r.status === "active").length > 0 && (
               <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
