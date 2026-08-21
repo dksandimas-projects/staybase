@@ -1,4 +1,4 @@
-import { CalendarPlus, CheckCircle2, Clock, ExternalLink, Home, Mail, Sparkles, Star, X } from "lucide-react";
+import { CalendarPlus, CheckCircle2, Clock, ExternalLink, Home, Mail, MessageSquareText, Phone, Sparkles, Star, X } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
@@ -14,6 +14,12 @@ import { PriceBreakdown } from "../components/PriceBreakdown";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { useRoomTypes } from "../hooks/useRoomTypes";
+// Per feat/special-requests-redirect (2026-08-21): the redirect
+// card on the confirmation page reads the per-hotel contact
+// override (Settings → Hotel Info) with the deploy-time
+// `hotel.config.ts` as the fallback. Same source-of-truth chain
+// as ContactPage + Footer.
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { formatPrice } from "../utils/format";
 
 function formatStayDate(value: string) {
@@ -60,6 +66,14 @@ export function BookingConfirmPage() {
   const shouldReduceMotion = useReducedMotion();
   const { roomTypes } = useRoomTypes();
   const { user, memberProfile } = useGuestAuth();
+  // Per feat/special-requests-redirect (2026-08-21): the
+  // redirect card on the confirmation page reads the per-hotel
+  // contact override (Settings → Hotel Info) with the
+  // deploy-time `hotel.config.ts` as the fallback. Same pattern
+  // as ContactPage + Footer.
+  const { contact } = usePublicSiteContent();
+  const redirectPhone = contact?.frontDeskPhone || config.frontDeskPhone;
+  const redirectEmail = contact?.supportEmail || config.supportEmail;
 
   // The payment-method label shown to the guest is now sourced
   // from `settings/hotelConfig.paymentMethods[].label` (admin-
@@ -429,6 +443,62 @@ export function BookingConfirmPage() {
               ? "An acknowledgment email has been sent. Official confirmation will follow after payment verification."
               : "A confirmation has been sent to your email. See you soon!"}
           </span>
+        </motion.div>
+
+        {/* Per feat/special-requests-redirect (2026-08-21): the
+            "Forgot something?" prompt lives right after the email
+            alert and before the early check-in section. The
+            confirmation moment is when guests most often remember
+            a special need (late check-in, dietary notes, room
+            preferences) — surfacing the prompt here, with the
+            booking ref already on the page, gives the guest a
+            clear path to reach the front desk without leaving the
+            flow. Same per-hotel contact override as the booking
+            form redirect (Settings → Hotel Info →
+            `hotel.config.ts` fallback). */}
+        <motion.div
+          data-testid="special-requests-redirect"
+          className="mt-6 rounded-xl border border-primary/20 bg-primary-light p-5 shadow-sm"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4, duration: 0.4 }}
+        >
+          <div className="flex items-start gap-3">
+            <MessageSquareText
+              size={20}
+              className="mt-0.5 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <div className="flex-1">
+              <h3 className="font-heading text-base text-gray-950">
+                Forgot something? Need something special?
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-gray-700">
+                If you have requests like late check-in, dietary needs, or room preferences,
+                please reach out before your stay — we&apos;ll do our best to accommodate:
+              </p>
+              <ul className="mt-3 flex flex-col gap-1.5 text-xs sm:flex-row sm:gap-4">
+                <li className="flex items-center gap-1.5">
+                  <Mail size={14} className="text-primary" aria-hidden="true" />
+                  <a
+                    href={`mailto:${redirectEmail}`}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {redirectEmail}
+                  </a>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <Phone size={14} className="text-primary" aria-hidden="true" />
+                  <a
+                    href={`tel:${redirectPhone}`}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {redirectPhone}
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
         </motion.div>
 
         {/* Per EC-02 (2026-08-21): Spark Rewards early

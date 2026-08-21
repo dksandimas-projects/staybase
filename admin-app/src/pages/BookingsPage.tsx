@@ -3615,36 +3615,14 @@ export function BookingsPage() {
         y += 2;
       }
 
-      // ── Special Requests / Notes ──
-      const requestBookings = receiptBookings.filter(
-        (receiptBooking) => receiptBooking.specialRequests?.trim().length > 0
-      );
-      if (requestBookings.length > 0) {
-        checkNewPage(15);
-        drawPdfSectionTitle(pdf, "Special Requests", marginL, y, brandRgb);
-        y += 5;
-
-        pdf.setFontSize(10);
-        pdf.setTextColor(60, 60, 60);
-        requestBookings.forEach((receiptBooking, requestIndex) => {
-          const bookingIndex = receiptBookings.findIndex((booking) => booking.id === receiptBooking.id);
-          if (isReservationReceipt) {
-            checkNewPage(5);
-            pdf.setFont("helvetica", "bold");
-            pdf.text(getReceiptRoomLabel(receiptBooking, bookingIndex), labelColX, y, { charSpace: 0 });
-            setPdfFont(pdf, "Inter");
-            y += 4;
-          }
-          const reqLines = pdf.splitTextToSize(receiptBooking.specialRequests, pageW - 40);
-          for (const line of reqLines) {
-            checkNewPage(5);
-            pdf.text(line, labelColX, y, { charSpace: 0 });
-            y += 4.0;
-          }
-          if (requestIndex < requestBookings.length - 1) y += 1;
-        });
-        y += 3;
-      }
+      // Per feat/special-requests-redirect (2026-08-21): the
+      // "Special Requests" PDF section is gone. The public /book
+      // form no longer collects a free-text `specialRequests`
+      // value, and the admin walk-in / calendar create paths now
+      // write an empty string for the field. In-flight bookings
+      // that already carry a non-empty value surface via the
+      // intercom amber banner in the admin app, not on the
+      // printable receipt.
 
       // ── Payment Breakdown ──
       checkNewPage(30);
@@ -4308,7 +4286,19 @@ export function BookingsPage() {
         isCorporate: false,
         corporateCode: "",
         companyName: "",
-        specialRequests: "Walk-in registration.",
+        // Per feat/special-requests-redirect (2026-08-21):
+        // the previous literal "Walk-in registration."
+        // placeholder is replaced with an empty string. The
+        // admin walk-in modal has no `specialRequests` UI
+        // input (the front desk is the guest's proxy at the
+        // counter — the redirect is on the public /book
+        // form, not here), and the source is tracked
+        // separately in `walkinSource` per NBS-02. The
+        // `specialRequests` schema field stays on the doc
+        // for back-compat with any in-flight bookings that
+        // already carry a value (the intercom amber banner
+        // is the only admin surface that reads it).
+        specialRequests: "",
         status: immediateCheckIn ? "checked-in" : "confirmed",
         paymentMethod: walkinPayment,
         // Per BF-45 (booking-flow audit 2026-06-26):

@@ -51,9 +51,20 @@ describe("MRB-04 Phase 5B — reservation-aware receipt", () => {
     expect(context).toMatch(/bookingId\?: string \| null/);
   });
 
-  it("renders special requests per room and reservation-wide payments once", () => {
-    expect(receipt).toMatch(/requestBookings = receiptBookings\.filter/);
-    expect(receipt).toMatch(/getReceiptRoomLabel\(receiptBooking, bookingIndex\)/);
+  // Per feat/special-requests-redirect (2026-08-21): the
+  // PDF receipt no longer renders a "Special Requests" section.
+  // The public /book form no longer collects the field, the
+  // admin walk-in / calendar create paths now write an empty
+  // string, and the intercom amber banner is the only admin
+  // surface that surfaces the value (for in-flight bookings
+  // that already carry one). The previous test asserted the
+  // filter block + the per-room label render; both are gone.
+  it("does not render a Special Requests section in the receipt", () => {
+    expect(receipt).not.toMatch(/requestBookings = receiptBookings\.filter/);
+    expect(receipt).not.toMatch(/drawPdfSectionTitle\(pdf, "Special Requests"/);
+  });
+
+  it("still renders reservation-wide payments once", () => {
     expect(receipt).toMatch(/const payments = selectedBookingPayments/);
   });
 });

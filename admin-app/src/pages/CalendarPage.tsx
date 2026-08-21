@@ -379,7 +379,17 @@ export function CalendarPage() {
       isCorporate: false,
       corporateCode: "",
       companyName: "",
-      specialRequests: "Created from booking calendar.",
+      // Per feat/special-requests-redirect (2026-08-21):
+      // the previous literal "Created from booking calendar."
+      // placeholder is replaced with an empty string. The
+      // calendar-create modal has no `specialRequests` UI
+      // input — the source is tracked in `source: "walk-in"`
+      // below, and the public /book form's redirect is the
+      // single guest-facing surface for special requests.
+      // The `specialRequests` schema field stays on the doc
+      // for back-compat (the intercom amber banner is the
+      // only admin surface that reads it).
+      specialRequests: "",
       status: "confirmed",
       paymentMethod,
       paymentProofUrl: null,

@@ -271,6 +271,17 @@ Booking {
   isCorporate: boolean
   corporateCode: string
   companyName: string
+  // Per feat/special-requests-redirect (2026-08-21): the public
+  // `/book` form no longer collects a free-text `specialRequests`
+  // value (the input was replaced with a redirect card pointing
+  // to the hotel's support email + front desk phone). The field
+  // is preserved on the schema for back-compat — in-flight
+  // bookings written before this change may still carry a
+  // non-empty value, and the admin walk-in / calendar create
+  // paths still post `requests` via the `WalkinGuestDetailsSchema`.
+  // The intercom amber banner is the only staff-facing surface
+  // that reads the value; the admin receipt PDF no longer
+  // renders a "Special Requests" section.
   specialRequests: string
   status: BookingStatus
   paymentMethod: PaymentMethod

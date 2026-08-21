@@ -2804,7 +2804,19 @@ export async function handleCreateBooking(req: any, res: any) {
         isCorporate: corporateDetails.isCorporate,
         corporateCode: corporateDetails.corporateCode,
         companyName: corporateDetails.companyName,
-        specialRequests: guestDetails.requests || "",
+        // Per feat/special-requests-redirect (2026-08-21):
+        // the online /book create no longer writes
+        // `specialRequests` on the booking doc. The public
+        // form's textarea is gone; the redirect copy is the
+        // new surface. In-flight bookings that already carry
+        // a value still surface it via the admin intercom
+        // amber banner (the gate is
+        // `&& bookingSummary.specialRequests`). The walk-in
+        // API path keeps its `requests` mapping (see below
+        // in the WalkinBookingSchema branch) so the admin
+        // walk-in modal's `requests` input still writes
+        // through unchanged.
+        //
         // Per the intercom-verify-guest permanent fix
         // (2026-08-21): persist the structured `guestDetails`
         // sub-object so the intercom verifier can match against
