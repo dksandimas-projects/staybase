@@ -1724,6 +1724,31 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // but read back as `undefined`, so the dashboard re-rendered the
             // row as unserved after every snapshot update.
             breakfastServed: data.breakfastServed || {},
+            // Per EC-01 (2026-08-21, fix shipped 2026-08-21):
+            // hydrate `earlyCheckIn` from the snapshot. Same shape
+            // of bug as FOL-02 (decision #198) — the admin
+            // `Booking` type declared the field but the mapper
+            // silently dropped it on every snapshot echo, so the
+            // dashboard widget's `earlyCheckIn?.status ===
+            // "requested"` filter was always false. The bell +
+            // the `notifications` doc worked (they live on a
+            // separate write path), so the bug presented as "I
+            // see the bell alert but no widget" — exactly what
+            // the operator reported on 2026-08-21. Default to
+            // `null` (the type declares it nullable) so a
+            // legacy booking without the field reads as "no
+            // early check-in request". The `?.status` filter
+            // on the dashboard widget short-circuits on `null`,
+            // so non-member bookings never match.
+            //
+            // The defensive-coercion pattern (`?? null`) matches
+            // FOL-02's `reservationId: data.reservationId ? ...
+            // || null : null` shape — the same hydration
+            // discipline across the mapper. The shared
+            // `Booking` type on the guest-app side already
+            // declares this field; only the admin extension
+            // was missing the read.
+            earlyCheckIn: data.earlyCheckIn ?? null,
           });
         });
 
