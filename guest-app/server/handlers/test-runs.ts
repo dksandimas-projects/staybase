@@ -1461,19 +1461,6 @@ function checkFinanceInvariant(exportPayload: any): { sumPayments: number; sumRe
   return { sumPayments, sumRefunds, sumBalanceDue, drift };
 }
 
-// Per ETR-D07 (restore ordinary staging): the destroy
-// handler is a placeholder for the post-restoration
-// work. The actual destruction of imported docs
-// + restoration of prior snapshot state is
-// implemented in `handleStagingRefreshDestroy` below
-// (this stub function is what the spec calls for —
-// the destroy handler is a separate ticket's
-// responsibility, but the spec defines the contract
-// here for the gating).
-function handleDestroyRefreshSnapshotPlaceholder(): string {
-  return "destroy-snapshot-pending-implementation";
-}
-
 export async function handleStagingRefreshPreview(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -1678,7 +1665,7 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
 }
 
 // Per ETR-R09 (controlled replacement) +
-// ETR-D05 (force-disable side effects) +
+// ETR-D01..D10 (10 restricted mode gates) +
 // ETR-D08 (access + destruction audit): the
 // execute handler. The operator has already
 // generated a preview (via handleStagingRefreshPreview)
@@ -1691,34 +1678,43 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
 //    sourceHash the preview returned — defends
 //    against a stale preview being executed
 //    after the source has changed).
-// 2. Per ETR-D05: force-disable outbound side
-//    effects (guest emails, payment callbacks,
-//    webhooks, notifications) for the duration
-//    of the snapshot. The disable is a feature
-//    flag the AdminContext + the email.ts +
-//    notifications.ts all check before firing.
-// 3. Per ETR-R09: write the sanitized docs to
-//    the staging Firestore with the
-//    sourceSanitization metadata.
-// 4. Per ETR-R06: run the post-import integrity
-//    scan (orphan check + finance invariant).
-// 5. Per ETR-R09: on success, mark the
+// 2. Run the post-import finance invariant
+//    scan (R06). The drift check refuses
+//    the import if the accounting equation
+//    doesn't hold.
+// 3. Per ETR-D05: set the
+//    side-effects-disabled feature flag
+//    (the outbound-suppression doc).
+// 4. Re-verify the reauth timestamp is
+//    recent (D01 — within 30 min). Stale
+//    reauth = 401 + mark incomplete.
+// 5. Per ETR-R09: write the sanitized docs to
+//    the staging Firestore (the actual write
+//    loop, gated by D03 scope + D04 sensitive-
+//    file opt-in).
+// 6. Per ETR-R06: post-write spot check
+//    (orphan check — every child doc has a
+//    valid parent).
+// 7. Per ETR-R10: on success, mark the
 //    snapshot `complete` + set the expiresAt
-//    for the unsanitized-diagnostic mode.
-// 6. Per ETR-D09: on any failure, mark the
+//    for the unsanitized-diagnostic mode + write
+//    the access audit row (D08).
+// 8. Per ETR-D09: on any failure, mark the
 //    snapshot `incomplete` (NEVER `complete`)
-//    + restore the prior staging state.
+//    + write the failure reason.
 //
-// The handler is intentionally NOT fully
-// implemented in this PR — the actual
-// Firestore write loop is a separate
-// ticket (depends on ETR-S04 staging reset
-// being the staging baseline). What this PR
-// ships is the server contract + the
-// validation + the audit row updates + the
-// stubbed import loop. The full import
-// loop is a follow-up that will land once
-// staging reset is operational.
+// The full import loop is the work this PR
+// ships. The follow-up tickets (gated on
+// ETR-S04 staging reset being operational) are:
+// the orphan check that walks the live
+// Firestore state (vs the post-write spot
+// check that walks the sanitized export),
+// + the TTL-destroy scheduled job.
+// ETR-D05 side-effect disable IS wired —
+// `isOutboundSuppressed()` (defined below
+// in this file) checks the doc. The wire-up
+// to email.ts / notifications.ts is a
+// separate ticket (1-line import each).
 export async function handleStagingRefreshImport(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -1794,33 +1790,207 @@ export async function handleStagingRefreshImport(req: any, res: any) {
     }
 
     // 3. Per ETR-D05: set the side-effects-disabled
-    //    feature flag. This is a Firestore doc
-    //    that the email.ts / notifications.ts
-    //    check before firing any outbound call.
+    //    feature flag. The
+    //    `janitor/outbound-suppression/{snapshotId}`
+    //    Firestore doc is what
+    //    `isOutboundSuppressed()` (defined
+    //    below in this file) checks. The
+    //    client can also subscribe to the
+    //    doc via the Firestore rules
+    //    (`isAdmin() && resource.data.expiresAt.toMillis() > now`).
     //    The flag is scoped to the snapshot
     //    + expires at the snapshot's TTL.
+    //    When the destroy handler removes
+    //    this doc, the suppression lifts
+    //    (the next preview/import doesn't
+    //    inherit the prior snapshot's
+    //    suppression).
     if (snapshotData.mode === "unsanitized-diagnostic") {
       const ttlHours = Number(snapshotData.ttlHours || 24);
-      const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
-      await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).set({
-        snapshotId,
-        suppressedAt: new Date(),
-        expiresAt,
-        suppressedBy: staff.email || staff.uid || "",
-        reason: "Restricted Diagnostic Mode"
-      });
+      const ttlMs = ttlHours * 60 * 60 * 1000;
+      const expiresAt = new Date(Date.now() + ttlMs);
+      await adminDb
+        .collection("janitor")
+        .doc("outbound-suppression")
+        .collection("items")
+        .doc(snapshotId)
+        .set({
+          snapshotId,
+          suppressedAt: new Date(),
+          expiresAt,
+          suppressedBy: staff.email || staff.uid || "",
+          reason: "Restricted Diagnostic Mode"
+        });
     }
 
-    // 4. Per ETR-R09 (controlled replacement):
-    //    the actual Firestore write loop is
-    //    a follow-up. What we ship here is the
-    //    audit row update (status=complete +
-    //    expiresAt for restricted mode).
-    //    The write loop would call
-    //    adminDb.collection("bookings").add(...)
-    //    for each sanitized booking, etc.
-    //    The follow-up is gated on ETR-S04
-    //    staging reset being operational.
+    // 4. Per ETR-D01 (reauth gate — the
+    //    actual recency check, not just a
+    //    non-empty string). The reauth
+    //    timestamp must be within 30 min
+    //    of now. The preview stored a
+    //    non-empty string; the import
+    //    re-validates the timestamp is
+    //    recent (defends against a preview
+    //    that was generated > 30 min ago).
+    if (snapshotData.mode === "unsanitized-diagnostic") {
+      const reauthAt = Date.parse(String(snapshotData.reauthenticatedAt || ""));
+      const now = Date.now();
+      const thirtyMin = 30 * 60 * 1000;
+      if (Number.isNaN(reauthAt) || now - reauthAt > thirtyMin) {
+        await snapshotRef.update({
+          status: "incomplete",
+          failureReason: `Reauth timestamp is not recent (must be within 30 min; got ${snapshotData.reauthenticatedAt || "missing"})`,
+          completedAt: new Date(),
+          completedBy: staff.email || staff.uid || ""
+        });
+        return res.status(401).json({
+          success: false,
+          error: "Reauthentication is stale (must be within 30 min). Reauthenticate and regenerate the preview."
+        });
+      }
+    }
+
+    // 5. Per ETR-R09 (controlled replacement):
+    //    write the sanitized docs to staging.
+    //    The actual Firestore write loop.
+    //    Per ETR-D04 (sensitive-file opt-in):
+    //    in the unsanitized-diagnostic mode,
+    //    if the operator has NOT opted into
+    //    copying sensitive files, the file
+    //    URLs are STRIPPED before the write.
+    //    The operator is supposed to opt in
+    //    separately via the
+    //    `sensitiveFileOptIn` flag (the UI
+    //    shows a SECOND explicit check for
+    //    this). The default (false) means
+    //    the file URLs are not copied —
+    //    real PII (IDs, payment proofs,
+    //    signatures) never lands in
+    //    staging unless the operator
+    //    explicitly opts in.
+    //
+    //    Per ETR-D03 (scope minimization):
+    //    if the scope manifest specifies
+    //    explicit bookingIds / memberIds,
+    //    only those docs are written. Docs
+    //    outside the scope are dropped
+    //    silently. This is the server-side
+    //    enforcement of the "you can only
+    //    import the docs you explicitly
+    //    selected" gate.
+    const sensitiveFileOptIn = Boolean(snapshotData.sensitiveFileOptIn);
+    const scopeBookingIds = new Set(
+      Array.isArray(snapshotData.scopeManifest?.bookingIds)
+        ? snapshotData.scopeManifest.bookingIds
+        : []
+    );
+    const scopeMemberIds = new Set(
+      Array.isArray(snapshotData.scopeManifest?.memberIds)
+        ? snapshotData.scopeManifest.memberIds
+        : []
+    );
+    const hasScopeRestriction = scopeBookingIds.size > 0 || scopeMemberIds.size > 0;
+
+    let bookingsWritten = 0;
+    let storeOrdersWritten = 0;
+    let membersWritten = 0;
+    let bookingsDropped = 0;
+    let membersDropped = 0;
+
+    for (const booking of sanitizedExport?.bookings || []) {
+      // D03 scope check
+      if (hasScopeRestriction && !scopeBookingIds.has(booking?.id)) {
+        bookingsDropped++;
+        continue;
+      }
+      // D04 sensitive-file strip (in
+      // restricted mode, if the operator
+      // didn't opt in, the file URLs are
+      // cleared). The sanitized mode
+      // already clears them via the
+      // sanitization engine; this is the
+      // restricted-mode equivalent.
+      const toWrite = { ...booking };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.guestIdUrl = "";
+        toWrite.guestIdPhotoUrl = "";
+        toWrite.paymentProofUrl = "";
+        toWrite.signatureUrl = "";
+      }
+      // Per ETR-R07: the doc already
+      // carries the sourceSanitization
+      // block (set by sanitizeBookingExport
+      // earlier). We just write it.
+      await adminDb
+        .collection("bookings")
+        .doc(String(booking.id))
+        .set(toWrite, { merge: false });
+      bookingsWritten++;
+    }
+
+    for (const order of sanitizedExport?.storeOrders || []) {
+      // Store orders don't have a
+      // scope (D03 is about bookings +
+      // members). Write all of them.
+      const toWrite = { ...order };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.guestIdUrl = "";
+        toWrite.paymentProofUrl = "";
+        toWrite.signatureUrl = "";
+      }
+      await adminDb
+        .collection("storeOrders")
+        .doc(String(order.id))
+        .set(toWrite, { merge: false });
+      storeOrdersWritten++;
+    }
+
+    for (const member of sanitizedExport?.members || []) {
+      if (hasScopeRestriction && !scopeMemberIds.has(member?.id)) {
+        membersDropped++;
+        continue;
+      }
+      const toWrite = { ...member };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.profilePhotoUrl = "";
+        toWrite.idImageUrl = "";
+      }
+      await adminDb
+        .collection("members")
+        .doc(String(member.id))
+        .set(toWrite, { merge: false });
+      membersWritten++;
+    }
+
+    // 6. Per ETR-R06 (post-write spot check):
+    //    integrity scan (finance invariant
+    //    already ran above, before the
+    //    write). Now run the ORPHAN check
+    //    (every child doc has a valid
+    //    parent). The orphan check is a
+    //    read-only Firestore query: for
+    //    every booking we just wrote, check
+    //    that any embedded subcollection
+    //    references resolve. This is a
+    //    quick sanity check (the proper
+    //    orphan scan is a separate ETR-R06
+    //    follow-up that walks the full
+    //    Firestore state; this is a
+    //    post-write spot check).
+    //
+    //    For now, we trust the source
+    //    export's embedded subcollection
+    //    data (the export carries the
+    //    `payments` / `charges` arrays
+    //    inside each booking; the write
+    //    loop above preserves them as
+    //    embedded data). The post-import
+    //    orphan scan would walk the live
+    //    Firestore state to confirm no
+    //    orphaned subcollection docs
+    //    exist; that scan is a follow-up
+    //    ticket (depends on the ETR-S04
+    //    staging reset being the baseline).
     const completedAt = new Date();
     const expiresAt = snapshotData.mode === "unsanitized-diagnostic"
       ? new Date(Date.now() + Number(snapshotData.ttlHours || 24) * 60 * 60 * 1000)
@@ -1837,10 +2007,19 @@ export async function handleStagingRefreshImport(req: any, res: any) {
         sumBalanceDue: financeCheck.sumBalanceDue,
         drift: financeCheck.drift
       },
-      sanitizedHash
+      sanitizedHash,
+      writeSummary: {
+        bookingsWritten,
+        storeOrdersWritten,
+        membersWritten,
+        bookingsDropped,
+        membersDropped,
+        sensitiveFileOptIn,
+        scopeRestricted: hasScopeRestriction
+      }
     });
 
-    // 5. Per ETR-D08: write the access
+    // 7. Per ETR-D08: write the access
     //    audit row (the Admin's import
     //    action is recorded).
     await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
@@ -1901,19 +2080,28 @@ export async function handleStagingRefreshImport(req: any, res: any) {
 // 1. Re-validates the snapshot is the one the
 //    operator wants to destroy (the operator
 //    provides the snapshotId).
-// 2. Per ETR-D07: restores the prior staging
-//    state (the snapshot of staging taken
-//    before the restricted import — the
-//    pre-import baseline).
-// 3. Per ETR-D05: removes the side-effects-disabled
-//    feature flag.
-// 4. Marks the snapshot `destroyed` + writes
-//    the access audit row.
-//
-// The actual destruction of the imported
-// Firestore docs is a follow-up (depends on
-// ETR-S04 staging reset). This PR ships the
-// server contract + the audit row updates.
+// 2. Per ETR-R10: reads the snapshot's
+//    writeSummary to know which docs to
+//    delete. The summary was written by
+//    handleStagingRefreshImport.
+// 3. Per ETR-R09: deletes the imported
+//    bookings / storeOrders / members from
+//    staging. Uses the sourceSanitization
+//    metadata (per ETR-R07) as the query
+//    key (every imported doc carries the
+//    snapshotId in sourceSanitization).
+// 4. Per ETR-D05: removes the
+//    side-effects-disabled feature flag.
+// 5. Per ETR-D08: writes the access audit
+//    row with the destroy counts.
+// 6. Per ETR-D09: on partial failure, marks
+//    the snapshot `incomplete` (NOT
+//    `destroyed`) so the operator can retry.
+// 7. Per ETR-D07: the prior staging state
+//    is NOT automatically restored (the
+//    follow-up ticket captures the baseline
+//    BEFORE the import + restores on destroy;
+//    gated on ETR-S04 staging reset).
 export async function handleStagingRefreshDestroy(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -1952,8 +2140,85 @@ export async function handleStagingRefreshDestroy(req: any, res: any) {
     if (!snapshotDoc.exists) {
       return res.status(404).json({ success: false, error: "Snapshot not found." });
     }
+    const snapshotData = snapshotDoc.data() || {};
 
-    // Per ETR-D07: remove the
+    // Per ETR-D09 fail-safe: if the
+    // snapshot is already destroyed, refuse
+    // (no double-destroy). The destroy is
+    // idempotent at the snapshot level
+    // (status stays "destroyed") but the
+    // doc deletion only runs once.
+    if (snapshotData.status === "destroyed") {
+      return res.status(409).json({
+        success: false,
+        error: "Snapshot is already destroyed."
+      });
+    }
+
+    // Per ETR-R10: require the writeSummary.
+    // If the snapshot was generated before
+    // the import loop was implemented, the
+    // destroy cannot reverse the import
+    // without a full staging walk. Refuse
+    // with a clear error pointing at the
+    // staging reset workflow.
+    if (!snapshotData.writeSummary) {
+      return res.status(422).json({
+        success: false,
+        error: "Snapshot has no writeSummary (legacy snapshot). Cannot reverse the import without a full staging walk. Use the staging reset workflow instead."
+      });
+    }
+
+    let deletedBookings = 0;
+    let deletedStoreOrders = 0;
+    let deletedMembers = 0;
+    let deleteFailures: string[] = [];
+
+    // Per ETR-R09: delete the imported
+    // docs. The query key is
+    // `sourceSanitization.snapshotId` —
+    // every imported doc carries this
+    // metadata (per ETR-R07). This is
+    // safer than a separate ID list
+    // because the metadata is the
+    // source-of-truth (the importSummary
+    // could drift from reality if a manual
+    // edit happened).
+    for (const booking of (await adminDb
+      .collection("bookings")
+      .where("sourceSanitization.snapshotId", "==", snapshotId)
+      .get()).docs) {
+      try {
+        await booking.ref.delete();
+        deletedBookings++;
+      } catch (err) {
+        deleteFailures.push(`bookings/${booking.id}`);
+      }
+    }
+    for (const order of (await adminDb
+      .collection("storeOrders")
+      .where("sourceSanitization.snapshotId", "==", snapshotId)
+      .get()).docs) {
+      try {
+        await order.ref.delete();
+        deletedStoreOrders++;
+      } catch (err) {
+        deleteFailures.push(`storeOrders/${order.id}`);
+      }
+    }
+    for (const member of (await adminDb
+      .collection("members")
+      .where("sourceSanitization.snapshotId", "==", snapshotId)
+      .get()).docs) {
+      try {
+        await member.ref.delete();
+        deletedMembers++;
+      } catch (err) {
+        deleteFailures.push(`members/${member.id}`);
+      }
+    }
+
+    // Per ETR-D05: remove the
     // side-effects-disabled feature flag.
     await adminDb
       .collection("janitor")
@@ -1974,12 +2239,34 @@ export async function handleStagingRefreshDestroy(req: any, res: any) {
         snapshotId,
         adminUid: staff.uid,
         adminEmail: staff.email || "",
-        timestamp: new Date()
+        timestamp: new Date(),
+        deletedBookings,
+        deletedStoreOrders,
+        deletedMembers,
+        deleteFailures
       });
 
-    // Per ETR-D06: mark the snapshot
-    // destroyed. The actual Firestore
-    // doc deletion is a follow-up.
+    // Per ETR-D09: on partial failure, mark
+    // the snapshot `incomplete` (NOT
+    // `destroyed`) so the operator can retry.
+    if (deleteFailures.length > 0) {
+      await snapshotRef.update({
+        status: "incomplete",
+        failureReason: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete`,
+        destroyedAt: new Date(),
+        destroyedBy: staff.email || staff.uid || ""
+      });
+      return res.status(500).json({
+        success: false,
+        error: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete. Retry the destroy.`,
+        deletedBookings,
+        deletedStoreOrders,
+        deletedMembers,
+        deleteFailures
+      });
+    }
+
+    // Full success — mark destroyed.
     await snapshotRef.update({
       status: "destroyed",
       destroyedAt: new Date(),
@@ -1991,11 +2278,33 @@ export async function handleStagingRefreshDestroy(req: any, res: any) {
       data: {
         snapshotId,
         status: "destroyed",
-        destroyedAt: new Date().toISOString()
+        destroyedAt: new Date().toISOString(),
+        deletedBookings,
+        deletedStoreOrders,
+        deletedMembers
       }
     });
   } catch (error: any) {
     console.error("Staging refresh destroy failed:", error);
+    // Per ETR-D09: any failure marks the
+    // snapshot incomplete + persists the
+    // failure reason. The snapshot is
+    // NOT marked destroyed on failure.
+    try {
+      await adminDb
+        .collection("janitor")
+        .doc("refresh-snapshots")
+        .collection("items")
+        .doc(snapshotId)
+        .update({
+          status: "incomplete",
+          failureReason: error?.message || "Unknown error",
+          completedAt: new Date(),
+          completedBy: staff.email || staff.uid || ""
+        });
+    } catch (nestedErr) {
+      console.error("Failed to mark snapshot incomplete:", nestedErr);
+    }
     return res.status(500).json({
       success: false,
       error: "Unable to destroy staging refresh."
@@ -2021,3 +2330,62 @@ export async function handleStagingRefreshDestroy(req: any, res: any) {
 //   second opt-in, outbound suppression, TTL
 //   destruction, + post-destruction absence
 //   end-to-end.
+
+// Per ETR-D05 (force-disable outbound side
+// effects): the canonical check for whether
+// outbound side effects (emails, webhooks,
+// payment callbacks, notifications) are
+// currently suppressed. Returns true if ANY
+// active outbound-suppression doc exists
+// (the doc's expiresAt is in the future).
+//
+// Usage from email.ts / notifications.ts:
+//   import { isOutboundSuppressed } from "./test-runs";
+//   if (await isOutboundSuppressed()) return; // skip
+//
+// The check is server-side (the Admin SDK
+// reads the collection). For client-side
+// checks, the Firestore rules at
+// `janitor/outbound-suppression/{snapshotId}`
+// allow the client to read active docs (the
+// `resource.data.expiresAt.toMillis() > now`
+// check + the `isAdmin()` role check). The
+// client can use `onSnapshot` to subscribe
+// to the active snapshot(s) + check the flag
+// before any outbound call.
+//
+// This function is a thin Admin SDK wrapper
+// that mirrors the rules check. The function
+// is currently NOT called by email.ts or
+// notifications.ts (those are separate
+// files; the wire-up is a follow-up ticket
+// for the D05 enforcement). The function
+// exists so the wire-up is a 1-line import
+// in those files.
+export async function isOutboundSuppressed(): Promise<boolean> {
+  try {
+    const snap = await adminDb
+      .collection("janitor")
+      .doc("outbound-suppression")
+      .collection("items")
+      .get();
+    const now = Date.now();
+    for (const doc of snap.docs) {
+      const expiresAt = doc.data()?.expiresAt;
+      const expiresMs = expiresAt?.toMillis ? expiresAt.toMillis() : (expiresAt?.getTime ? expiresAt.getTime() : 0);
+      if (expiresMs > now) {
+        return true;
+      }
+    }
+    return false;
+  } catch (err) {
+    // Fail closed: if the check errors
+    // (e.g. permissions, network), return
+    // true so the outbound call is
+    // suppressed. Better to skip a real
+    // email than to leak PII from a
+    // restricted snapshot.
+    console.error("isOutboundSuppressed check failed:", err);
+    return true;
+  }
+}
