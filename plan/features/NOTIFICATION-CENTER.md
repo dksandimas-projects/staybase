@@ -80,7 +80,7 @@ The panel loads a bounded query — `orderBy("createdAt","desc").limit(50)` — 
 
 - [ ] **Bell icon in the admin header** with an unread-count badge — persistent across all routes via `AdminLayout`
 - [ ] **Notification panel** (dropdown on desktop, drawer/bottom-sheet on mobile) — live `onSnapshot` on `notifications` (bounded `limit(50)`, `orderBy createdAt desc`), merged with live-derived unread guest messages from the existing `intercoms` listener (B1)
-- [ ] Per-entry: event-type icon + label (Booking / Payment / Message / Arrival / Departure / Store order), `title`, room #/booking ref, relative timestamp
+- **Per-event-type icon + label** (Booking / Payment / Message / Arrival / Departure / Store order / **Cancellation refund** / **Early check-in**), `title`, room #/booking ref, relative timestamp
 - [ ] Clicking an entry deep-links via `entityType`/`entityId`: booking → `/bookings` (open drawer), message → `/intercom` (open thread), store order → Store Management, arrival/departure → `/bookings` or Dashboard arrivals list — and writes my UID into `readBy`
 - [ ] "Mark all as read" action — writes my UID into `readBy` for the loaded set
 - [ ] Read/unread state is **per staff** and survives reload + follows me across devices (that is the whole point of Option B)
