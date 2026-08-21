@@ -235,6 +235,14 @@ export interface Booking {
   corporateCode: string;
   companyName: string;
   specialRequests: string;
+  // Per feat/staff-special-requests-capture (2026-08-21):
+  // the staff-captured request's last-edit metadata. Mirrors
+  // the shared `Booking` type. The fields are optional so
+  // pre-existing bookings without these fields still read;
+  // the server stamps them on every staff write through
+  // /api/bookings/set-special-requests.
+  specialRequestsUpdatedAt?: string | null;
+  specialRequestsUpdatedBy?: string | null;
   status: "pending" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "checked-in" | "checked-out" | "cancelled";
   paymentMethod: string;
   // Per BF-45 (booking-flow audit 2026-06-26): canonical
@@ -667,6 +675,17 @@ export interface AdminContextType {
   // staff-toggled LOU (Letter of Undertaking) flag for
   // corporate chargeback bookings.
   setLouReceived: (bookingId: string, louReceived: boolean) => Promise<{ success: boolean; error?: string }>;
+  // Per feat/staff-special-requests-capture (2026-08-21):
+  // the staff-only closed-loop write for the booking's
+  // `specialRequests` field. The public /book form no longer
+  // collects a free-text value (see feat/special-requests-
+  // redirect, commit 78a79f7); requests arrive via email or
+  // phone and the front desk types them into the booking from
+  // the drawer editor, the walk-in modal, or the calendar-
+  // create modal. The server stamps the value + the last-edit
+  // metadata (`specialRequestsUpdatedAt` + `...UpdatedBy`) in
+  // a single transaction.
+  updateBookingSpecialRequests: (bookingId: string, value: string) => Promise<{ success: boolean; error?: string }>;
   // Per CWB (decision #122, 2026-07-23): staff-triggered
   // transition from `payment-uploaded` to `confirmed` when
   // a positive balance will be collected at check-in. Server
@@ -2656,6 +2675,38 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true };
     } catch (err: any) {
       console.error("Error setting LOU flag:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  // Per feat/staff-special-requests-capture (2026-08-21):
+  // the staff-only closed-loop write for `specialRequests`.
+  // Mirrors the setLouReceived shape exactly (single-token
+  // POST to /api/bookings/set-special-requests, JSON body,
+  // success/error return). The server stamps the last-edit
+  // metadata so the drawer's "Last edited by" line can
+  // render without a second read.
+  const updateBookingSpecialRequests = async (
+    bookingId: string,
+    value: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/set-special-requests`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId: bookingId.trim(), value })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to update special requests." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error updating special requests:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -6922,6 +6973,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         verifyAndRecordPayment,
         rejectPayment,
         setLouReceived,
+        updateBookingSpecialRequests,
         confirmBookingWithBalance,
         roomBlocks,
         createRoomBlock,

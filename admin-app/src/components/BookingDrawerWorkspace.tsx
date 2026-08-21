@@ -1,20 +1,25 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   BedDouble,
   Check,
   ClipboardCheck,
   CreditCard,
   LayoutDashboard,
+  Loader2,
   Mail,
+  MessageSquareText,
   MoreHorizontal,
   Phone,
+  Save,
   User,
   XCircle
 } from "lucide-react";
 import type { Booking } from "../context/AdminContext";
+import { useAdmin } from "../context/AdminContext";
 import { getLatestPaymentReference } from "@spark-inn/shared";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
+import { useToast } from "./Toast";
 import { StatusBadge } from "./StatusBadge";
 
 export type BookingDrawerSection = "overview" | "check-in" | "folio" | "more";
@@ -278,6 +283,152 @@ export function BookingDrawerWorkspaceHeader({
         </div>
       </nav>
     </div>
+  );
+}
+
+// Per feat/staff-special-requests-capture (2026-08-21):
+// the staff-only closed-loop editor for the booking's
+// `specialRequests` field. The field is captured by the
+// front desk after the guest contacts them by email or
+// phone (see feat/special-requests-redirect, commit
+// 78a79f7 — the public /book form no longer collects
+// this). The editor lives in the Overview section of the
+// drawer so the staff sees the request alongside guest
+// identity. Save posts to the server endpoint which
+// stamps the value + the last-edit metadata in a single
+// transaction; the local state optimistically reflects the
+// saved value on success.
+const SPECIAL_REQUESTS_MAX_LENGTH = 1000;
+
+function formatUpdatedAt(value: string | null | undefined): string {
+  if (!value) return "Not yet captured";
+  // The server writes a Firestore Timestamp which the
+  // Firestore SDK normalizes to a `toDate()`-able object
+  // on read; a pre-existing ISO string from before this
+  // PR ships just passes through Date() parsing.
+  const date = typeof (value as any)?.toDate === "function"
+    ? (value as any).toDate()
+    : new Date(value);
+  if (isNaN(date.getTime())) return "Not yet captured";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+interface BookingSpecialRequestsEditorProps {
+  booking: Booking;
+}
+
+export function BookingSpecialRequestsEditor({ booking }: BookingSpecialRequestsEditorProps) {
+  const { updateBookingSpecialRequests } = useAdmin();
+  const toast = useToast();
+  // Local state mirrors the booking's stored value; the
+  // input is uncontrolled while the user is editing but
+  // the source of truth is always the booking doc. We
+  // re-sync on booking change so two drawers opening in
+  // succession (e.g. drawer A closes, drawer B opens with
+  // a different booking) reset cleanly.
+  const [draft, setDraft] = useState<string>(booking.specialRequests ?? "");
+  const [isSaving, setIsSaving] = useState(false);
+  useEffect(() => {
+    setDraft(booking.specialRequests ?? "");
+  }, [booking.id, booking.specialRequests]);
+
+  const trimmed = draft.trim();
+  const isDirty = trimmed !== (booking.specialRequests ?? "").trim();
+  const isOverLimit = trimmed.length > SPECIAL_REQUESTS_MAX_LENGTH;
+  const canSave = isDirty && !isOverLimit && !isSaving;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setIsSaving(true);
+    const result = await updateBookingSpecialRequests(booking.id, trimmed);
+    setIsSaving(false);
+    if (result.success) {
+      toast.success("Special requests saved", "The booking now reflects the latest staff-captured request.");
+      return;
+    }
+    toast.error("Could not save special requests", result.error || "Please try again in a moment.");
+  };
+
+  return (
+    <section
+      data-testid="special-requests-editor"
+      className="rounded-lg border border-amber-200 bg-amber-50/40 p-4"
+    >
+      <div className="flex items-center gap-2">
+        <MessageSquareText size={14} className="text-amber-700" aria-hidden="true" />
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+          Special requests (staff-captured)
+        </h4>
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-amber-900/80">
+        Captured from email or phone by the front desk. Guests never see this field.
+      </p>
+      <textarea
+        data-testid="special-requests-editor-input"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        maxLength={SPECIAL_REQUESTS_MAX_LENGTH}
+        rows={3}
+        placeholder="e.g. Late check-in ~11pm, extra pillows, vegetarian breakfast"
+        className="mt-3 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-gray-900 placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-light"
+      />
+      <div className="mt-2 flex items-center justify-between gap-2 text-[10px]">
+        <span className={cn(
+          "font-semibold",
+          isOverLimit ? "text-red-700" : "text-gray-500"
+        )}>
+          {trimmed.length} / {SPECIAL_REQUESTS_MAX_LENGTH}
+        </span>
+        <span className="text-gray-500">
+          {booking.specialRequestsUpdatedAt || booking.specialRequestsUpdatedBy ? (
+            <>
+              Last edited by{" "}
+              <span className="font-bold text-gray-700">
+                {booking.specialRequestsUpdatedBy ?? "staff"}
+              </span>
+              {" · "}
+              {formatUpdatedAt(booking.specialRequestsUpdatedAt)}
+            </>
+          ) : (
+            "Not yet captured"
+          )}
+        </span>
+      </div>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setDraft(booking.specialRequests ?? "")}
+          disabled={!isDirty || isSaving}
+          className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Reset
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!canSave}
+          data-testid="special-requests-editor-save"
+          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSaving ? (
+            <>
+              <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <Save size={12} aria-hidden="true" />
+              Save
+            </>
+          )}
+        </button>
+      </div>
+    </section>
   );
 }
 

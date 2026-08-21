@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.288.1";
+    VERSION2 = "0.289.0";
   }
 });
 
@@ -231406,6 +231406,49 @@ async function handleSetLouReceived(req, res) {
     return res.status(status).json({ success: false, error: message });
   }
 }
+var MAX_SPECIAL_REQUESTS_LENGTH = 1e3;
+async function handleSetSpecialRequests(req, res) {
+  const { bookingId, value } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (typeof value !== "string") {
+    return res.status(400).json({ success: false, error: "Special requests must be a string." });
+  }
+  const trimmedValue = value.trim();
+  if (trimmedValue.length > MAX_SPECIAL_REQUESTS_LENGTH) {
+    return res.status(400).json({
+      success: false,
+      error: `Special requests must be ${MAX_SPECIAL_REQUESTS_LENGTH} characters or fewer.`
+    });
+  }
+  try {
+    let result = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId.trim());
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("Booking not found.");
+      }
+      const staffUid = req.staff?.uid || "staff";
+      const now = /* @__PURE__ */ new Date();
+      const updates = {
+        specialRequests: trimmedValue,
+        specialRequestsUpdatedAt: now,
+        specialRequestsUpdatedBy: staffUid,
+        updatedAt: now
+      };
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "An unexpected error occurred while updating special requests.";
+    const status = message === "Booking not found." ? 404 : 400;
+    console.error("Set special requests handler error:", error);
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 var MAX_PAYMENT_REJECTION_REASON_LENGTH = 500;
 async function handleRejectPayment(req, res) {
   const { bookingId, reason } = req.body || {};
@@ -238828,6 +238871,17 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleSetLouReceived(req, res);
+  }
+  if (domain === "bookings" && action === "set-special-requests" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-special-requests:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many special-request updates. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleSetSpecialRequests(req, res);
   }
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 6e4)) {

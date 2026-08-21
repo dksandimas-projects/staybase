@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Edit3, Plus, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Edit3, MessageSquareText, Plus, XCircle } from "lucide-react";
 // Per NBS-2026-08-08 (F1 + F8, booking-flow audit
 // 2026-08-08): the calendar create-booking path preallocates
 // a `bookingId` + `reservationId` pair (F1) and now threads
@@ -147,6 +147,14 @@ export function CalendarPage() {
   const [extraBedCount, setExtraBedCount] = useState(0);
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("pay-at-hotel");
+  // Per feat/staff-special-requests-capture (2026-08-21):
+  // the calendar-create modal captures requests at booking
+  // time when the desk is taking the booking in person. The
+  // state flows into the addWalkinBooking call which posts
+  // to /api/bookings/create-walkin with `requests` inside
+  // guestDetails; the server writes it to
+  // `Booking.specialRequests` on the doc.
+  const [calendarSpecialRequests, setCalendarSpecialRequests] = useState("");
   // Per NBS-2026-08-08 (F1): the modal-session preallocation
   // of the `bookingId` + `reservationId` for the calendar
   // create path. Same shape as the BookingsPage modal —
@@ -382,14 +390,16 @@ export function CalendarPage() {
       // Per feat/special-requests-redirect (2026-08-21):
       // the previous literal "Created from booking calendar."
       // placeholder is replaced with an empty string. The
-      // calendar-create modal has no `specialRequests` UI
-      // input — the source is tracked in `source: "walk-in"`
-      // below, and the public /book form's redirect is the
-      // single guest-facing surface for special requests.
-      // The `specialRequests` schema field stays on the doc
-      // for back-compat (the intercom amber banner is the
-      // only admin surface that reads it).
-      specialRequests: "",
+      // Per feat/staff-special-requests-capture (2026-08-21):
+      // the staff-captured request from the calendar-create
+      // modal (front desk types on the guest's behalf when
+      // the booking is taken in person). The previous
+      // PR (feat/special-requests-redirect) left this
+      // empty as part of the no-guest-input rule; this
+      // PR restores a captured value via the textarea on
+      // the modal below. Truncated at 1000 chars; the
+      // WalkinGuestDetailsSchema caps at 1000 too.
+      specialRequests: calendarSpecialRequests.trim().slice(0, 1000),
       status: "confirmed",
       paymentMethod,
       paymentProofUrl: null,
@@ -426,6 +436,10 @@ export function CalendarPage() {
     setNumChildren(0);
     setExtraBedCount(0);
     setHasBreakfast(false);
+    // Per feat/staff-special-requests-capture (2026-08-21):
+    // reset the staff-captured special request alongside the
+    // other fields so the next modal open starts clean.
+    setCalendarSpecialRequests("");
     // Per NBS-2026-08-08 (F1): rotate the preallocation
     // key so the next modal open generates a fresh
     // `bookingId` + `reservationId` pair. The current
@@ -576,11 +590,33 @@ export function CalendarPage() {
                   if (booking) {
                     const left = isRangeStart(booking.checkIn, day);
                     const right = isRangeEnd(booking.checkOut, day);
+                    // Per feat/staff-special-requests-capture (2026-08-21):
+                    // render a small icon + hover tooltip when the
+                    // booking has a non-empty `specialRequests`
+                    // value (staff-captured from email or phone).
+                    // The icon is a MessageSquareText glyph in
+                    // amber so it reads as an action hint, not a
+                    // status pill; the tooltip carries the raw
+                    // text (truncated at 80 chars to keep the cell
+                    // tidy).
+                    const hasSpecialRequest = (booking.specialRequests ?? "").trim().length > 0;
                     return (
                       <button key={`${room.id}-${dateKey}`} type="button" onClick={() => openBookingDrawer(booking)} className="relative min-h-[78px] border-l border-gray-100 bg-white px-0 py-3 text-left">
                         <div className={`flex min-h-[46px] flex-col justify-center bg-gray-950 px-3 text-white shadow-sm ${left ? "ml-2 rounded-l-full" : ""} ${right ? "mr-2 rounded-r-full" : ""}`}>
                           <span className="truncate text-[11px] font-bold">{booking.guestName}</span>
                           <span className="truncate text-[10px] text-white/70">{booking.isCorporate && booking.companyName ? booking.companyName : booking.bookingRef}</span>
+                          {hasSpecialRequest && (
+                            <span
+                              data-testid="calendar-special-request-icon"
+                              title={(booking.specialRequests ?? "").length > 80
+                                ? `${booking.specialRequests!.trim().slice(0, 80)}…`
+                                : booking.specialRequests}
+                              aria-label="Has special request — click booking to view"
+                              className="absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm"
+                            >
+                              <MessageSquareText size={9} aria-hidden="true" />
+                            </span>
+                          )}
                         </div>
                       </button>
                     );
@@ -621,6 +657,21 @@ export function CalendarPage() {
           </div>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Email<input type="email" required value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Phone<input required value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+
+          <label className="flex flex-col gap-2 font-semibold text-gray-700">
+            Special requests (optional)
+            <textarea
+              value={calendarSpecialRequests}
+              onChange={(e) => setCalendarSpecialRequests(e.target.value)}
+              maxLength={1000}
+              rows={3}
+              placeholder="e.g. Late check-in ~11pm, extra pillows, vegetarian breakfast"
+              className="min-h-[80px] rounded border border-gray-250 px-3 py-2 text-sm font-normal placeholder:text-gray-400"
+            />
+            <span className="text-[10px] font-normal text-gray-500">
+              Captured from email or phone by the front desk. Guests never see this field.
+            </span>
+          </label>
           {/* Per NBS-2026-08-08 (F8): the calendar-create
               modal now collects the adult/child split +
               extra bed count the same way the New Booking

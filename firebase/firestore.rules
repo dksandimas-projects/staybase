@@ -64,6 +64,16 @@ service cloud.firestore {
           "discountRejected",
           "notes",
           "specialRequests",
+          // Per feat/staff-special-requests-capture (2026-08-21):
+          // the staff write paths (drawer editor, walk-in
+          // modal, calendar-create modal) stamp the
+          // last-edit metadata in the same `updateDoc`
+          // call. The fields are optional on the type so
+          // pre-existing docs read without coercion; the
+          // server endpoint stamps both as part of every
+          // successful write.
+          "specialRequestsUpdatedAt",
+          "specialRequestsUpdatedBy",
           "handledBy",
           "updatedAt"
         ]);

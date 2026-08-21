@@ -22,6 +22,32 @@ The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 
 ---
 
+## Special Requests Capture (Staff Closed-Loop)
+
+Per `feat/staff-special-requests-capture` (2026-08-21): three staff surfaces capture inbound special requests (from email or phone) into the booking doc. The public `/book` form does NOT collect the input — see `feat/special-requests-redirect` (commit 78a79f7) for the redirect-only public path.
+
+**Three capture surfaces:**
+1. **Booking drawer editor** (`BookingDrawerWorkspace.tsx` → `BookingSpecialRequestsEditor`). Mounted in the drawer's Overview section so the staff sees the request alongside guest identity. Inline edit with "Last edited by &lt;uid&gt; · &lt;timestamp&gt;" metadata line. Save posts to `/api/bookings/set-special-requests`.
+2. **Walk-in modal** (`BookingsPage.tsx`). The desk types the request directly when creating a walk-in booking. The value flows into the `addWalkinBooking` payload and is written by the server walk-in endpoint to `Booking.specialRequests` (per the existing `WalkinGuestDetailsSchema.requests` field).
+3. **Calendar-create modal** (`CalendarPage.tsx`). Same shape as the walk-in modal; flows through `addWalkinBooking` with the calendar's `source: "walk-in"` booking source.
+
+**Constraints:**
+- 1000-char cap (matches `WalkinGuestDetailsSchema.requests.max(1000)`; enforced client + server)
+- Staff-only (firestore.rules: `isStaff()` + `affectedKeys().hasOnly([...specialRequests, specialRequestsUpdatedAt, specialRequestsUpdatedBy, ...])`)
+- 30/min/IP rate limit on the server endpoint
+
+**Discovery surfaces (read-only):**
+- **Calendar grid icon + hover tooltip** (`CalendarPage.tsx` line ~580). Each booking cell that has a non-empty `specialRequests` renders a small amber icon with `title=` showing the text (truncated at 80 chars). Front desk sees requests at a glance when scanning the day's rooms.
+- **Intercom amber banner** (`IntercomChatPanel.tsx`). When a guest mentions a request mid-chat, the banner surfaces the stored value. Coexists with the staff-capture surfaces — the drawer is the source of truth, the banner is the discovery aid.
+
+### Calendar Cell Indicator
+
+Per `feat/staff-special-requests-capture` (2026-08-21): the calendar grid (`CalendarPage.tsx`, the Bookings calendar — not the Rate Calendar) renders a small **amber icon** (a `MessageSquareText` glyph from lucide) at the top-right corner of every booking cell whose `Booking.specialRequests` is non-empty (after trim). The icon carries a native `title=` tooltip with the request text (truncated at 80 chars) so the next shift sees it at a glance.
+
+**Accessibility:** the icon has `data-testid="calendar-special-request-icon"` for the e2e harness and `aria-label="Has special request — click booking to view"` for screen readers (the cell's click handler still opens the drawer with the full text + last-edit metadata).
+
+**Conditional:** `(booking.specialRequests ?? "").trim().length > 0`. Empty values render nothing — no noise from the historical default `""` value.
+
 ## New Booking Modal (Walk-in Create) — NBS-2026-08-08 fixes
 
 The New Booking modal + the Calendar's "Book dates" modal are the staff walk-in create paths. Both post to `POST /api/bookings/create-walkin` via the shared `addWalkinBooking` helper in `admin-app/src/context/AdminContext.tsx`. The 2026-08-08 booking-flow audit closed 6 findings in one batch on `fix/new-booking-audit-2026-08-08` (decision #206):

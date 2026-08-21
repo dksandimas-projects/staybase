@@ -186,27 +186,45 @@ describe("Special requests redirect — server handler", () => {
 
 describe("Special requests redirect — admin walk-in / calendar cleanup", () => {
   it("does not auto-seed `specialRequests: \"Walk-in registration.\"`", () => {
-    // The admin walk-in modal previously hardcoded a
-    // placeholder string into the booking doc. The redirect
-    // replaces it with an empty string (the field lives on the
-    // schema for back-compat but is no longer user-input nor
-    // auto-seeded).
+    // Per feat/staff-special-requests-capture (2026-08-21,
+    // commit follows 78a79f7): the previous empty-string
+    // literal `specialRequests: ""` was replaced with the
+    // staff-captured value `walkinSpecialRequests.trim().
+    // slice(0, 1000)`. The auto-seed check below anchors
+    // on the absence of the historical literal — the
+    // redirect's promise was to stop the walk-in modal
+    // from claiming the booking was "Walk-in registration."
+    // in the specialRequests slot. The staff-capture
+    // feature preserves that promise (the walk-in modal
+    // no longer pre-fills a fake request).
     expect(adminBookingsPage).not.toMatch(
       /specialRequests:\s*"Walk-in registration\."/
     );
-    // The admin walk-in now writes an empty string for the
-    // field so the intercom banner auto-hides and the receipt
-    // PDF section (which filters on `?.trim().length > 0`)
-    // skips rendering.
-    expect(adminBookingsPage).toMatch(/specialRequests:\s*""/);
+    // And the walk-in modal no longer hard-codes an empty
+    // string for the field — the staff-capture feature
+    // reads from the modal state instead.
+    expect(adminBookingsPage).toMatch(/specialRequests:\s*walkinSpecialRequests/);
   });
 
   it("does not auto-seed `specialRequests: \"Created from booking calendar.\"`", () => {
-    // Same reasoning as the walk-in auto-string above.
+    // Per feat/staff-special-requests-capture (2026-08-21,
+    // commit follows 78a79f7): the previous empty-string
+    // literal `specialRequests: ""` was replaced with the
+    // staff-captured value `calendarSpecialRequests.
+    // trim().slice(0, 1000)`. The auto-seed check below
+    // anchors on the absence of the historical literal — the
+    // redirect's promise was to stop the calendar from
+    // claiming the booking was "Created from booking
+    // calendar." in the specialRequests slot. The staff-
+    // capture feature preserves that promise (the calendar
+    // no longer pre-fills a fake request).
     expect(adminCalendarPage).not.toMatch(
       /specialRequests:\s*"Created from booking calendar\."/
     );
-    expect(adminCalendarPage).toMatch(/specialRequests:\s*""/);
+    // And the calendar no longer hard-codes an empty string
+    // for the field — the staff-capture feature reads from
+    // the modal state instead.
+    expect(adminCalendarPage).toMatch(/specialRequests:\s*calendarSpecialRequests/);
   });
 
   it("removes the 'Special Requests' section from the admin receipt PDF", () => {
