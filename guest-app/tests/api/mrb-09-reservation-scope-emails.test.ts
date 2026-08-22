@@ -37,6 +37,20 @@ describe("MRB-09 — Reservation-scope email view builder", () => {
     );
   });
 
+  it("exports the liability projection loader consumed by the confirmation view", () => {
+    // `loadReservationEmailView` dynamically imports this
+    // helper. If it is not exported, every reservation-style
+    // booking confirmation fails before `sendBookingTrigger`
+    // runs, while the earlier payment-confirmed email still
+    // succeeds because it does not use this view loader.
+    expect(emailHandlerSrc).toMatch(
+      /export async function loadLiabilityProjectionForEmail\(/
+    );
+    expect(bookingsHandlerSrc).toMatch(
+      /const \{ loadLiabilityProjectionForEmail \} = await import\("\.\/email"\)/
+    );
+  });
+
   it("the view carries the reservation ref + a rooms[] array of per-stay projections", () => {
     // The view is the single source of truth for the
     // guest-facing email — it carries the reservation

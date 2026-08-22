@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.292.2";
+    VERSION2 = "0.292.3";
   }
 });
 
@@ -224132,6 +224132,7 @@ __export(email_exports, {
   buildReservationEmailView: () => buildReservationEmailView,
   handleEmailPreview: () => handleEmailPreview,
   handleEmailTrigger: () => handleEmailTrigger,
+  loadLiabilityProjectionForEmail: () => loadLiabilityProjectionForEmail,
   sendBookingConfirmedWithBalanceTrigger: () => sendBookingConfirmedWithBalanceTrigger,
   sendBookingTrigger: () => sendBookingTrigger,
   sendContactConfirmationTrigger: () => sendContactConfirmationTrigger,
@@ -224291,6 +224292,44 @@ function siteUrl(path = "") {
 }
 function adminUrl(path = "") {
   return `${getServerAdminBaseUrl()}${path}`;
+}
+async function loadLiabilityProjectionForEmail(params) {
+  const reservationId = String(params.reservationId || "").trim();
+  const bookingId = String(params.bookingId || "").trim();
+  if (!bookingId) return null;
+  let liability = null;
+  let refundsRef = null;
+  if (reservationId) {
+    const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
+    if (reservationDoc.exists) {
+      liability = reservationDoc.data()?.cancellationLiability || null;
+      if (liability) {
+        refundsRef = adminDb.collection("reservations").doc(reservationId).collection("refunds");
+      }
+    }
+  }
+  if (!liability) {
+    const bookingDoc = await adminDb.collection("bookings").doc(bookingId).get();
+    if (bookingDoc.exists) {
+      liability = bookingDoc.data()?.cancellationLiability || null;
+    }
+    refundsRef = adminDb.collection("bookings").doc(bookingId).collection("payments");
+  }
+  if (!liability) return null;
+  let processedAmount = 0;
+  if (refundsRef) {
+    try {
+      const snap = await refundsRef.get();
+      processedAmount = snap.docs.reduce((sum, d) => {
+        const amount = Number(d.data()?.amount || 0);
+        return sum + Math.abs(amount);
+      }, 0);
+    } catch (err) {
+      console.warn("[email] Failed to read refunds subcollection for liability projection:", err);
+    }
+  }
+  const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
+  return computeCancellationLiabilityState2({ liability, processedAmount });
 }
 function buildReservationEmailView(reservation, children) {
   if (!reservation || !Array.isArray(children) || children.length === 0) return null;
@@ -228050,8 +228089,8 @@ async function loadReservationEmailView(bookingId) {
   const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   const view = buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
   if (!view) return null;
-  const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
-  view.liabilityProjection = await loadLiabilityProjectionForEmail({
+  const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
+  view.liabilityProjection = await loadLiabilityProjectionForEmail2({
     reservationId,
     bookingId
   });
@@ -232013,9 +232052,9 @@ async function handleCancelBooking(req, res) {
       });
     }
     try {
-      const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
+      const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
       const reservationView = await loadReservationEmailView(bookingId);
-      const liabilityProjection = reservationView ? reservationView.liabilityProjection : await loadLiabilityProjectionForEmail({ bookingId });
+      const liabilityProjection = reservationView ? reservationView.liabilityProjection : await loadLiabilityProjectionForEmail2({ bookingId });
       const cancellationSourceForEmail = cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff";
       await sendBookingTrigger(
         postTransactionAction,
@@ -232479,8 +232518,8 @@ async function fireRefundStateEmailAndNotification(params) {
   const guestEmail = String(bookingData2.guestEmail || "").trim();
   let liabilityProjection = null;
   try {
-    const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
-    liabilityProjection = await loadLiabilityProjectionForEmail({
+    const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
+    liabilityProjection = await loadLiabilityProjectionForEmail2({
       reservationId: params.targetReservationId,
       bookingId: params.targetBookingId
     });

@@ -350,7 +350,7 @@ function adminUrl(path = "") {
 // negative amounts on either subcollection per
 // CRL-01; the `|abs()|` makes the projection
 // consistent with the helper's sign convention).
-async function loadLiabilityProjectionForEmail(params: {
+export async function loadLiabilityProjectionForEmail(params: {
   reservationId?: string | null;
   bookingId: string;
 }): Promise<any | null> {

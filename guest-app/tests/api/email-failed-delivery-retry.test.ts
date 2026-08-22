@@ -51,7 +51,10 @@ vi.mock("../../server/lib/firebase-admin", () => ({
 
 // `sendBookingTrigger` is exercised as the public
 // surface that calls `sendEmail` internally.
-import { sendBookingTrigger } from "../../server/handlers/email";
+import {
+  loadLiabilityProjectionForEmail,
+  sendBookingTrigger
+} from "../../server/handlers/email";
 
 describe("#11 — failed_emails DLQ on Resend send failure (sendEmail contract)", () => {
   beforeEach(() => {
@@ -165,5 +168,11 @@ describe("#11 — failed_emails DLQ on Resend send failure (sendEmail contract)"
     // operator's breadcrumb) but doesn't replace
     // the original error.
     expect(mockConsoleError).toHaveBeenCalled();
+  });
+});
+
+describe("booking confirmation email module contract", () => {
+  test("exports the liability loader used by the reservation confirmation path", () => {
+    expect(typeof loadLiabilityProjectionForEmail).toBe("function");
   });
 });
