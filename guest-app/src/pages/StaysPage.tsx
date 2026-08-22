@@ -30,6 +30,7 @@ interface StayRecord {
   // Rewards rendered it). The shape mirrors the
   // `Booking.earlyCheckIn` map from `shared/types/index.ts`.
   earlyCheckIn?: {
+    source?: "guest-request" | "staff-granted";
     status: "requested" | "approved" | "declined";
     requestedTime?: string;
     notes?: string;

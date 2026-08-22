@@ -409,11 +409,11 @@ export function RewardsPage() {
                               : "bg-blue-50 border-blue-200 text-blue-800"
                         }`}>
                           <p className="font-bold mb-1">
-                            Request Status: {earlyCheckIn.status.toUpperCase()}
+                            {earlyCheckIn.source === "staff-granted" ? "Early Check-In" : "Request Status"}: {earlyCheckIn.source === "staff-granted" && isApproved ? "GRANTED" : earlyCheckIn.status.toUpperCase()}
                           </p>
                           {isApproved && (
                             <p className="leading-relaxed">
-                              Your request is approved! Room will be ready at <strong>{earlyCheckIn.confirmedTime || earlyCheckIn.requestedTime}</strong>.
+                              {earlyCheckIn.source === "staff-granted" ? "Early check-in has been added to your stay!" : "Your request is approved!"} Room will be ready at <strong>{earlyCheckIn.confirmedTime || earlyCheckIn.requestedTime}</strong>.
                               {earlyCheckIn.staffNote && <span className="block mt-1 italic">Note: "{earlyCheckIn.staffNote}"</span>}
                             </p>
                           )}

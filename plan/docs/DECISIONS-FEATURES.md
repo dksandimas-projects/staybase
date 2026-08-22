@@ -5,6 +5,12 @@ Resolved product, feature scope, business rules, compliance, and UX decisions. L
 
 For architecture and stack decisions see `plan/docs/DECISIONS-ARCH.md`.
 
+## Current Early Check-In Addendum
+
+| ID | Decision |
+|---|---|
+| EC-03 | **Admin-granted early check-in from the booking drawer (owner-requested 2026-08-22; implemented on `feature/admin-grant-early-checkin`):** administrators can add early check-in directly to an upcoming booking without requiring a guest request first. Creation is limited to bookings with no existing early-check-in record, status `payment-confirmed` or `confirmed`, and a check-in date that has not passed. The server re-checks the Admin role; Front Desk can still resolve guest-originated requests but sees staff grants read-only. The optional `earlyCheckIn.source` discriminator is `guest-request` or `staff-granted`, with an absent legacy value treated as a guest request. The existing resolve endpoint accepts grant mode, uses a Firestore transaction, refuses to overwrite existing data, and makes exact retries idempotent without duplicate guest email. Staff-granted email and Rewards copy say the perk was added to the stay. The drawer collects a required time and optional guest-facing note, then reuses the existing approved calendar icon and drawer-header badge. No new Vercel function. |
+
 ---
 
 ## Historical Decisions (#1 – #107)

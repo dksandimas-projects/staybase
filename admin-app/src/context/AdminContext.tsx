@@ -384,6 +384,7 @@ export interface Booking {
   // null in that case. See `handleResolveEarlyCheckin` in
   // `guest-app/server/handlers/bookings.ts`.
   earlyCheckIn?: {
+    source?: "guest-request" | "staff-granted";
     status: "requested" | "approved" | "declined";
     requestedTime: string;
     notes: string;
@@ -640,6 +641,7 @@ export interface AdminContextType {
   // don't read the return value still work.
   ) => Promise<{ emailQueued?: boolean } | null>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
+  grantEarlyCheckin: (bookingId: string, confirmedTime: string, staffNote?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
   // Per fix/walkin-split-name (2026-07-25): the walk-in modal
@@ -2146,6 +2148,28 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true };
     } catch (err: any) {
       console.error("resolveEarlyCheckin failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const grantEarlyCheckin = async (bookingId: string, confirmedTime: string, staffNote?: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/early-checkin-resolve`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, status: "approved", staffNote, confirmedTime, grantIfMissing: true })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to grant early check-in." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("grantEarlyCheckin failed:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -6973,6 +6997,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         reservationPaidAmount,
         updateBookingStatus,
         resolveEarlyCheckin,
+        grantEarlyCheckin,
         rescheduleBooking,
         addOnsitePayment,
         addWalkinBooking,

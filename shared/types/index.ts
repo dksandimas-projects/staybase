@@ -114,6 +114,7 @@ export interface Room {
 // + the `getRoomTypeImages` / `getRoomTypeRates` helpers.
 
 export interface EarlyCheckInDetails {
+  source?: "guest-request" | "staff-granted";
   status: "requested" | "approved" | "declined";
   requestedTime: string;
   notes: string;

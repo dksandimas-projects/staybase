@@ -175,6 +175,7 @@ These are documented here for awareness. Define before starting Phase 2:
 ### Data model
 
 - [x] New optional `earlyCheckIn` map on the `Booking` document (add to `plan/docs/TYPES.md` and `shared/types/index.ts` when building):
+  - `source` — optional `guest-request` or `staff-granted` discriminator; absent legacy values are treated as guest requests
   - `status` — `"requested" | "approved" | "declined"`
   - `requestedTime` — guest's requested arrival time (string, e.g. "11:00 AM")
   - `notes` — guest note from the request form
@@ -200,6 +201,7 @@ These are documented here for awareness. Define before starting Phase 2:
 - [x] Approve / Decline actions (front desk + admin roles) — Approve captures optional confirmed time + staff note; Decline captures optional reason (stored in `staffNote`)
 - [x] Resolution goes through an authenticated staff action in the existing API catch-all (no new Vercel function — see `plan/docs/VERCEL-FUNCTION-LIMIT.md`), which updates the booking and fires the guest email server-side with a server-controlled recipient (`booking.guestEmail`)
 - [x] Early check-in badge on the booking row / arrivals list for `approved` bookings so front desk sees it on the check-in day
+- [x] Admins can grant early check-in directly when no request exists on an upcoming `payment-confirmed` or `confirmed` booking. The drawer captures the confirmed time and optional guest-facing staff note, calls the existing resolve route in grant mode, updates the drawer optimistically, and emails the guest. The server re-checks the admin role, booking status/date, and absence of an existing request inside the transaction. Front Desk sees an admin grant read-only; admins can later change its time or remove it through the existing resolution controls.
 
 ### Guest visibility
 
