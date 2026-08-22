@@ -292,6 +292,8 @@ Firebase Console → Project settings → API keys → your web API key → Appl
 - [ ] Verify cron at midnight UTC sends check-in reminders
 
 ### Step 8.7 — Client handoff
+For every piece of content the client (or DK on their behalf) has to load into the admin before opening bookings to the public — addresses, logos, room photos, rates, payment methods, vouchers, staff accounts, legal copy, etc. — see `plan/project/CLIENT-LAUNCH-CONTENT-CHECKLIST.md`. The checklist is the operator-facing companion to this runbook and should be ticked through before §8.7.
+
 Schedule a 1-2 hour training session covering:
 - Daily booking management (search, filter, confirm, cancel)
 - Walk-in booking creation
