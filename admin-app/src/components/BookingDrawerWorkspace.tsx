@@ -116,6 +116,7 @@ export function BookingDrawerWorkspaceHeader({
                 Room {booking.roomNumber} · {booking.roomType.replace(/-/g, " ")}
               </span>
               <span>{booking.checkIn} → {booking.checkOut}</span>
+              <span>{booking.numNights} night{booking.numNights === 1 ? "" : "s"}</span>
               {/* Per EXB-08 (2026-08-01, per decision #156):
                   the drawer header's occupancy line now
                   shows the adult/child split when both
@@ -145,6 +146,7 @@ export function BookingDrawerWorkspaceHeader({
                 }
                 return <span>{booking.numGuests} guest{booking.numGuests === 1 ? "" : "s"}</span>;
               })()}
+              <span>{booking.hasBreakfast ? "Breakfast included" : "No breakfast"}</span>
             </div>
           </div>
 
