@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Check, Edit3, MessageSquareText, Plus, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarClock, CalendarDays, Edit3, MessageSquareText, Plus, XCircle } from "lucide-react";
 // Per NBS-2026-08-08 (F1 + F8, booking-flow audit
 // 2026-08-08): the calendar create-booking path preallocates
 // a `bookingId` + `reservationId` pair (F1) and now threads
@@ -62,6 +62,20 @@ function formatDay(value: Date) {
     month: "short",
     day: "numeric"
   }).format(value);
+}
+
+function formatCalendarDetailDate(value: unknown) {
+  if (!value) return "";
+  const date = typeof (value as { toDate?: () => Date })?.toDate === "function"
+    ? (value as { toDate: () => Date }).toDate()
+    : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(config.locale, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
 }
 
 function overlapsDate(startDate: string, endDate: string, date: Date) {
@@ -607,27 +621,33 @@ export function CalendarPage() {
                         <div className={`flex min-h-[46px] flex-col justify-center bg-gray-950 px-3 text-white shadow-sm ${left ? "ml-2 rounded-l-full" : ""} ${right ? "mr-2 rounded-r-full" : ""}`}>
                           <span className="truncate text-[11px] font-bold">{booking.guestName}</span>
                           <span className="truncate text-[10px] text-white/70">{booking.isCorporate && booking.companyName ? booking.companyName : booking.bookingRef}</span>
-                          {left && hasApprovedEarlyCheckIn && (
+                          {(hasSpecialRequest || (left && hasApprovedEarlyCheckIn)) && (
                             <span
-                              data-testid="calendar-approved-early-checkin-badge"
-                              title={`Early check-in approved for ${earlyCheckInTime}`}
-                              aria-label={`Early check-in approved for ${earlyCheckInTime}`}
-                              className="mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                              data-testid="calendar-booking-indicators"
+                              className="absolute right-1 top-1 flex flex-col items-center gap-1"
                             >
-                              <Check size={9} aria-hidden="true" />
-                              early {earlyCheckInTime}
-                            </span>
-                          )}
-                          {hasSpecialRequest && (
-                            <span
-                              data-testid="calendar-special-request-icon"
-                              title={(booking.specialRequests ?? "").length > 80
-                                ? `${booking.specialRequests!.trim().slice(0, 80)}…`
-                                : booking.specialRequests}
-                              aria-label="Has special request — click booking to view"
-                              className="absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm"
-                            >
-                              <MessageSquareText size={9} aria-hidden="true" />
+                              {hasSpecialRequest && (
+                                <span
+                                  data-testid="calendar-special-request-icon"
+                                  title={(booking.specialRequests ?? "").length > 80
+                                    ? `${booking.specialRequests!.trim().slice(0, 80)}…`
+                                    : booking.specialRequests}
+                                  aria-label="Has special request — click booking to view details"
+                                  className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm ring-1 ring-inset ring-amber-500/40"
+                                >
+                                  <MessageSquareText size={9} aria-hidden="true" />
+                                </span>
+                              )}
+                              {left && hasApprovedEarlyCheckIn && (
+                                <span
+                                  data-testid="calendar-approved-early-checkin-icon"
+                                  title="Early check-in approved — click booking to view details"
+                                  aria-label="Early check-in approved — click booking to view details"
+                                  className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 shadow-sm ring-1 ring-inset ring-emerald-300"
+                                >
+                                  <CalendarClock size={9} aria-hidden="true" />
+                                </span>
+                              )}
                             </span>
                           )}
                         </div>
@@ -733,18 +753,83 @@ export function CalendarPage() {
               {selectedBooking.isCorporate && selectedBooking.companyName && <p className="mt-1 font-semibold text-primary-dark">{selectedBooking.companyName}</p>}
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <StatusBadge label={selectedBooking.status.replace("-", " ")} status={selectedBooking.status} />
-                {selectedBooking.earlyCheckIn?.status === "approved" && (selectedBooking.earlyCheckIn.confirmedTime || selectedBooking.earlyCheckIn.requestedTime) && (
-                  <span
-                    data-testid="calendar-drawer-approved-early-checkin-badge"
-                    title={`Early check-in approved for ${selectedBooking.earlyCheckIn.confirmedTime || selectedBooking.earlyCheckIn.requestedTime}`}
-                    className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200"
-                  >
-                    <Check size={10} aria-hidden="true" />
-                    early {selectedBooking.earlyCheckIn.confirmedTime || selectedBooking.earlyCheckIn.requestedTime}
-                  </span>
-                )}
               </div>
             </div>
+            {selectedBooking.earlyCheckIn?.status === "approved" && (() => {
+              const earlyCheckIn = selectedBooking.earlyCheckIn;
+              const approvedTime = earlyCheckIn.confirmedTime || earlyCheckIn.requestedTime;
+              const approvedAt = formatCalendarDetailDate(earlyCheckIn.resolvedAt);
+              const timeWasChanged = Boolean(
+                earlyCheckIn.confirmedTime &&
+                earlyCheckIn.confirmedTime !== earlyCheckIn.requestedTime
+              );
+              return (
+                <section
+                  data-testid="calendar-drawer-early-checkin-details"
+                  className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4"
+                >
+                  <div className="flex items-center gap-2">
+                    <CalendarClock size={15} className="text-emerald-700" aria-hidden="true" />
+                    <h3 className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                      Approved early check-in
+                    </h3>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+                    <div>
+                      <dt className="text-[9px] font-bold uppercase tracking-wide text-emerald-700/70">Approved arrival</dt>
+                      <dd className="mt-0.5 text-sm font-bold text-emerald-950">{approvedTime}</dd>
+                    </div>
+                    {timeWasChanged && (
+                      <div>
+                        <dt className="text-[9px] font-bold uppercase tracking-wide text-emerald-700/70">Originally requested</dt>
+                        <dd className="mt-0.5 text-xs font-semibold text-emerald-900">{earlyCheckIn.requestedTime}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  {earlyCheckIn.notes?.trim() && (
+                    <div className="mt-3 border-t border-emerald-200 pt-3">
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-emerald-700/70">Guest note</p>
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-emerald-950">{earlyCheckIn.notes.trim()}</p>
+                    </div>
+                  )}
+                  {earlyCheckIn.staffNote?.trim() && (
+                    <div className="mt-3 border-t border-emerald-200 pt-3">
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-emerald-700/70">Staff note</p>
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-emerald-950">{earlyCheckIn.staffNote.trim()}</p>
+                    </div>
+                  )}
+                  {(earlyCheckIn.resolvedBy || approvedAt) && (
+                    <p className="mt-3 text-[10px] text-emerald-800/70">
+                      Approved by {earlyCheckIn.resolvedBy || "staff"}{approvedAt ? ` · ${approvedAt}` : ""}
+                    </p>
+                  )}
+                </section>
+              );
+            })()}
+            {(selectedBooking.specialRequests ?? "").trim() && (
+              <section
+                data-testid="calendar-drawer-special-request-details"
+                className="rounded-lg border border-amber-200 bg-amber-50/70 p-4"
+              >
+                <div className="flex items-center gap-2">
+                  <MessageSquareText size={15} className="text-amber-700" aria-hidden="true" />
+                  <h3 className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                    Special request
+                  </h3>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-amber-950">
+                  {selectedBooking.specialRequests.trim()}
+                </p>
+                {(selectedBooking.specialRequestsUpdatedAt || selectedBooking.specialRequestsUpdatedBy) && (
+                  <p className="mt-3 text-[10px] text-amber-800/70">
+                    Last edited by {selectedBooking.specialRequestsUpdatedBy || "staff"}
+                    {formatCalendarDetailDate(selectedBooking.specialRequestsUpdatedAt)
+                      ? ` · ${formatCalendarDetailDate(selectedBooking.specialRequestsUpdatedAt)}`
+                      : ""}
+                  </p>
+                )}
+              </section>
+            )}
             <Link to={`/bookings?bookingId=${selectedBooking.id}`} className="inline-flex min-h-[40px] items-center rounded-lg bg-primary px-4 text-xs font-semibold text-white">Open full booking</Link>
             <form onSubmit={handleMoveBooking} className="space-y-3 border-t border-gray-100 pt-4">
               <p className="font-bold text-gray-900">Move booking</p>
