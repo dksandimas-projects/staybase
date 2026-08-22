@@ -117,7 +117,7 @@ export function StaysPage() {
           <span className="text-sm">Loading your stays...</span>
         </div>
       ) : loadError ? (
-        <div className="rounded-card bg-white p-8 shadow-sm ring-1 ring-red-100">
+        <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-red-100 sm:p-8">
           <div className="flex items-start gap-3 text-red-700">
             <AlertCircle size={18} className="mt-0.5 shrink-0" />
             <div>
@@ -127,7 +127,7 @@ export function StaysPage() {
           </div>
         </div>
       ) : stays.length === 0 ? (
-        <div className="rounded-card bg-white p-12 shadow-sm ring-1 ring-gray-200 text-center">
+        <div className="rounded-card bg-white p-6 text-center shadow-sm ring-1 ring-gray-200 sm:p-12">
           <Calendar size={40} className="mx-auto text-gray-300 mb-4" />
           <p className="text-sm font-semibold text-gray-600">No stays yet.</p>
           <p className="text-xs text-gray-400 mt-1">Your bookings will appear here after your first stay.</p>
@@ -193,10 +193,10 @@ function StayCard({ stay }: { stay: StayRecord }) {
   // an early check-in request — the line is conditional.
   const earlyCheckIn = stay.earlyCheckIn;
   return (
-    <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col sm:flex-row sm:items-center gap-4">
+    <div className="flex min-w-0 flex-col gap-4 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:flex-row sm:items-center sm:p-5">
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs font-mono font-bold text-primary">{stay.bookingRef}</span>
+        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
+          <span className="break-all text-xs font-mono font-bold text-primary">{stay.bookingRef}</span>
           <StatusBadge label={stay.status.replace(/-/g, " ")} status={stay.status} />
         </div>
         <p className="text-sm font-semibold text-gray-900">
@@ -210,9 +210,9 @@ function StayCard({ stay }: { stay: StayRecord }) {
             ? `Room ${stay.roomNumber} — ${stay.roomType}`
             : stay.roomType}
         </p>
-        <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
-          <span className="flex items-center gap-1">
-            <Calendar size={12} />
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+          <span className="flex min-w-0 items-start gap-1">
+            <Calendar size={12} className="mt-0.5 shrink-0" />
             {stay.checkIn} → {stay.checkOut}
           </span>
           <span>{stay.numNights} night{stay.numNights !== 1 ? "s" : ""}</span>
@@ -220,7 +220,7 @@ function StayCard({ stay }: { stay: StayRecord }) {
         </div>
         {earlyCheckIn && <EarlyCheckInStatusLine earlyCheckIn={earlyCheckIn} />}
       </div>
-      <div className="text-right">
+      <div className="text-left sm:shrink-0 sm:text-right">
         <p className="text-lg font-bold text-primary-dark">{formatPrice(stay.totalPrice)}</p>
         <Link
           // Per H2 (hardening batch 2026-06-26): the
@@ -251,27 +251,25 @@ function EarlyCheckInStatusLine({ earlyCheckIn }: { earlyCheckIn: NonNullable<St
   if (earlyCheckIn.status === "approved") {
     const readyAt = earlyCheckIn.confirmedTime || earlyCheckIn.requestedTime;
     return (
-      <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-green-50 px-2 py-1 text-[11px] font-semibold text-green-800">
-        <CheckCircle2 size={12} aria-hidden="true" />
-        Early check-in approved — ready from {readyAt || "TBA"}
-        {earlyCheckIn.staffNote && <span className="font-normal italic text-green-700"> · "{earlyCheckIn.staffNote}"</span>}
+      <p className="mt-2 flex max-w-full items-start gap-1.5 rounded-md bg-green-50 px-2 py-1 text-[11px] font-semibold text-green-800">
+        <CheckCircle2 size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 break-words">Early check-in approved — ready from {readyAt || "TBA"}{earlyCheckIn.staffNote && <span className="font-normal italic text-green-700"> · "{earlyCheckIn.staffNote}"</span>}</span>
       </p>
     );
   }
   if (earlyCheckIn.status === "declined") {
     return (
-      <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-800">
-        <AlertCircle size={12} aria-hidden="true" />
-        Early check-in unavailable
-        {earlyCheckIn.staffNote && <span className="font-normal italic text-red-700"> · "{earlyCheckIn.staffNote}"</span>}
+      <p className="mt-2 flex max-w-full items-start gap-1.5 rounded-md bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-800">
+        <AlertCircle size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 break-words">Early check-in unavailable{earlyCheckIn.staffNote && <span className="font-normal italic text-red-700"> · "{earlyCheckIn.staffNote}"</span>}</span>
       </p>
     );
   }
   // status === "requested"
   return (
-    <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
-      <Clock size={12} aria-hidden="true" />
-      Early check-in requested — awaiting front desk
+    <p className="mt-2 flex max-w-full items-start gap-1.5 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
+      <Clock size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 break-words">Early check-in requested — awaiting front desk</span>
     </p>
   );
 }
