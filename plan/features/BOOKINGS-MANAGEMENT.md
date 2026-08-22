@@ -44,18 +44,20 @@ Per `feat/staff-special-requests-capture` (2026-08-21): three staff surfaces cap
 
 Per `feat/staff-special-requests-capture` (2026-08-21): the calendar grid (`CalendarPage.tsx`, the Bookings calendar — not the Rate Calendar) renders a small **amber icon** (a `MessageSquareText` glyph from lucide) at the top-right corner of every booking cell whose `Booking.specialRequests` is non-empty (after trim). The icon carries a native `title=` tooltip with the request text (truncated at 80 chars) so the next shift sees it at a glance.
 
-**Accessibility:** the icon has `data-testid="calendar-special-request-icon"` for the e2e harness and `aria-label="Has special request — click booking to view"` for screen readers (the cell's click handler still opens the drawer with the full text + last-edit metadata).
+**Accessibility:** the icon has `data-testid="calendar-special-request-icon"` for the e2e harness and an accessible label directing staff to click the booking for details (the cell's click handler opens the drawer with the full text + last-edit metadata).
 
 **Conditional:** `(booking.specialRequests ?? "").trim().length > 0`. Empty values render nothing — no noise from the historical default `""` value.
 
-### Approved Early Check-In Badges
+### Approved Early Check-In Calendar Indicator
 
 Per `fix/confirmed-early-checkin-badges` (2026-08-22), an approved Spark Rewards early check-in is visible at the two front-desk scanning points where arrival timing matters most:
 
-- **Booking calendar:** the booking's arrival-day cell shows a compact green “early &lt;time&gt;” badge. It appears on the check-in date only so multi-night stays do not repeat the signal across every occupied cell. The calendar's quick booking drawer repeats the same badge beside the booking status.
+- **Booking calendar:** the booking's arrival-day cell shows a small emerald `CalendarClock` icon with no time text. It appears on the check-in date only so multi-night stays do not repeat the signal across every occupied cell. When the booking also has a special request, the green early-check-in icon and orange message icon form a compact vertical indicator stack at the cell's top-right.
 - **Booking drawer header:** the full booking workspace shows the badge beside the lifecycle and source chips, keeping the approved arrival time visible regardless of the active drawer section.
 
-Both surfaces render only for approved requests. The staff-confirmed override time takes priority, with the guest's requested time as the fallback when the request was approved as submitted. Pending and declined requests do not render the green badge.
+The calendar icons are non-interactive children of the existing booking-cell button; clicking either icon or anywhere else in the cell opens the same quick drawer without invalid nested controls. The drawer conditionally renders an approved early-check-in panel followed by a special-request panel, so when both indicators are present both full records appear together. Early check-in details include the approved time, originally requested time when changed, guest note, staff note, and approval metadata. Special-request details include the full request and last-edit metadata when available.
+
+The green calendar icon renders only for approved requests. The staff-confirmed override time takes priority in the drawer, with the guest's requested time as the fallback when the request was approved as submitted. Pending and declined requests do not render the green icon.
 
 ## New Booking Modal (Walk-in Create) — NBS-2026-08-08 fixes
 
