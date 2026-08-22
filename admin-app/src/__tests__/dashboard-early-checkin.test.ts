@@ -194,6 +194,61 @@ describe("Phase 12 — Early check-in admin alert (dashboard widget + bell)", ()
     });
   });
 
+  // Per feat/early-checkin-empty-state (2026-08-22): mirror the
+  // pending-payments summary-tile pattern. The widget container
+  // always renders so staff see "0 pending" rather than wondering
+  // whether the section is missing or broken. Body row list is
+  // still gated on `length > 0`; header copy + tone toggle on
+  // the same flag.
+  describe("feat/early-checkin-empty-state — always-render widget (mirrors pending-payments tile)", () => {
+    it("renders the widget container even when no requests are pending", () => {
+      // The `data-testid="early-checkin-widget"` container must
+      // not be wrapped in an outer `length > 0 && (...)` guard —
+      // the new shape moves the guard inside so only the body
+      // list is conditional.
+      expect(dashboardSrc).toMatch(/data-testid="early-checkin-widget"/);
+      expect(dashboardSrc).not.toMatch(
+        /\{pendingEarlyCheckIns\.length > 0 && \([\s\S]{0,200}?data-testid="early-checkin-widget"/
+      );
+    });
+
+    it("renders the empty-state copy and neutral tone when no requests are pending", () => {
+      // Mirrors the pending-payments tile's `length > 0 ? "warning" : "neutral"`
+      // tone switch (DashboardPage.tsx:965). Empty-state copy:
+      // "No pending requests" (parallel to "No payment proofs
+      // queued"). The chip badge copy must mirror the
+      // `length > 0 ? "X pending" : "No pending requests"` ternary.
+      expect(dashboardSrc).toMatch(
+        /pendingEarlyCheckIns\.length > 0[\s\S]{0,400}?No pending requests/
+      );
+      // Tone switch: amber when pending, gray/neutral when empty.
+      // The pre-fix outer div unconditionally used
+      // `border-amber-200 bg-amber-50`; the post-fix outer div
+      // toggles between amber (populated) and gray (empty). Both
+      // class pairs must exist in the source.
+      expect(dashboardSrc).toMatch(/border-amber-200/);
+      expect(dashboardSrc).toMatch(/border-gray-200 bg-gray-50/);
+    });
+
+    it("hides the row list when empty but keeps the header + empty-state copy", () => {
+      // The body map is gated so an empty array renders 0
+      // rows, not "undefined" or a stray "No requests" inside
+      // the list container. The cleanest pattern is moving the
+      // `pendingEarlyCheckIns.map(...)` inside its own
+      // `{pendingEarlyCheckIns.length > 0 ? (...) : null}`
+      // ternary (mirrors the pending-payments summary tile
+      // pattern at line 1004). Pin: anchored on the unique
+      // `pendingEarlyCheckIns` body guard (the `<div
+      // className="space-y-3">` is not unique — appears in both
+      // pendingPayments and earlyCheckIn, so we anchor on the
+      // `pendingEarlyCheckIns.length > 0 ?` immediately
+      // followed by the map call instead).
+      expect(dashboardSrc).toMatch(
+        /pendingEarlyCheckIns\.length > 0\s*\?\s+pendingEarlyCheckIns\.map/
+      );
+    });
+  });
+
   describe("regression — existing notification contract still pins", () => {
     // Per the spec-compliance-audit skill: a new write site must
     // not regress the post-ship NC-01 fix. The existing

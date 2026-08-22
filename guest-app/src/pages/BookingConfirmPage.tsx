@@ -216,6 +216,16 @@ export function BookingConfirmPage() {
   // "not guaranteed, subject to approval, email will be
   // received for the approval or rejection".
   const [earlyCheckInEnabled, setEarlyCheckInEnabled] = useState<boolean>(true);
+  // Per fix/early-checkin-payment-uploaded-allowlist (2026-08-21):
+  // the booking status is fetched so the "Request early
+  // check-in" button only appears when the booking is in one
+  // of the three statuses the server allowlists. Mirrors the
+  // rewardsConfig fetch above (best-effort, doesn't block the
+  // page on a transient read failure). Defaults to a
+  // conservative "" so the gate stays closed until the read
+  // resolves — a guest on payment-uploaded sees the button
+  // appear as soon as the status arrives (typically < 200ms).
+  const [bookingStatus, setBookingStatus] = useState<string>("");
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -233,7 +243,48 @@ export function BookingConfirmPage() {
     })();
     return () => { cancelled = true; };
   }, []);
-  const showEarlyCheckInButton = isRewardsMember && earlyCheckInEnabled;
+  useEffect(() => {
+    // Fetch the booking status so the client gate mirrors the
+    // server allowlist in `guest-app/server/handlers/email.ts`
+    // (`ALLOWED_EARLY_CHECKIN_STATUSES`). Until the read
+    // resolves, `bookingStatus` is "" which is not in the
+    // allowlist, so the button stays hidden — the conservative
+    // default avoids a click → 400 surprise.
+    if (!bookingRef) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "bookings", bookingRef));
+        if (!cancelled && snap.exists()) {
+          const data = snap.data();
+          setBookingStatus(typeof data?.status === "string" ? data.status : "");
+        }
+      } catch (err) {
+        console.error("[BookingConfirmPage] Failed to load booking status:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [bookingRef]);
+  // Per fix/early-checkin-payment-uploaded-allowlist (2026-08-21):
+  // the gate mirrors the server allowlist in
+  // `guest-app/server/handlers/email.ts`. The button only
+  // appears when the booking is in one of the three allowed
+  // statuses — `payment-uploaded` (the common case after a
+  // guest paid online but before staff verified), `payment-
+  // confirmed` (staff verified but not yet transitioned), or
+  // `confirmed` (the existing allowlist). All other statuses
+  // hide the button so the guest never sees a click that
+  // secretly 400s. The two sides stay in sync via the shared
+  // allowlist shape — server enforces for defense in depth,
+  // client enforces for UX (no confusing error toast).
+  const ALLOWED_EARLY_CHECKIN_STATUSES = [
+    "payment-uploaded",
+    "payment-confirmed",
+    "confirmed"
+  ] as const;
+  const bookingStatusAllowsEarlyCheckIn = (ALLOWED_EARLY_CHECKIN_STATUSES as readonly string[])
+    .includes(bookingStatus);
+  const showEarlyCheckInButton = isRewardsMember && earlyCheckInEnabled && bookingStatusAllowsEarlyCheckIn;
   const [showEarlyCheckInModal, setShowEarlyCheckInModal] = useState(false);
   const [earlyCheckInRequestedTime, setEarlyCheckInRequestedTime] = useState<string>("11:00 AM");
   const [earlyCheckInNotes, setEarlyCheckInNotes] = useState<string>("");
@@ -242,10 +293,18 @@ export function BookingConfirmPage() {
   const [earlyCheckInError, setEarlyCheckInError] = useState<string | null>(null);
   // Reset all modal state when closing — the per-booking
   // guest can re-open after a decline / after re-thinking.
+  // Per fix/early-checkin-modal-success-state (2026-08-21):
+  // the success state (`earlyCheckInSent`) is reset alongside
+  // notes + error so re-opening the modal starts on the form,
+  // not on a stale "Request sent" panel. Pre-fix the success
+  // flag persisted across closes — opening the modal after a
+  // previous successful submit would show the success panel
+  // instead of the form.
   const closeEarlyCheckInModal = () => {
     setShowEarlyCheckInModal(false);
     setEarlyCheckInNotes("");
     setEarlyCheckInError(null);
+    setEarlyCheckInSent(false);
   };
   const handleSubmitEarlyCheckIn = async () => {
     if (!user) {
@@ -669,40 +728,78 @@ export function BookingConfirmPage() {
                 <strong>not guaranteed</strong>. Your request is subject to approval by our
                 team. You'll receive an email once we approve or decline the request.
               </div>
-              <div className="mt-5 space-y-4">
-                <label className="block">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    Requested arrival time
-                  </span>
-                  <select
-                    value={earlyCheckInRequestedTime}
-                    onChange={(e) => setEarlyCheckInRequestedTime(e.target.value)}
-                    disabled={earlyCheckInSubmitting}
-                    className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="08:00 AM">08:00 AM</option>
-                    <option value="09:00 AM">09:00 AM</option>
-                    <option value="10:00 AM">10:00 AM</option>
-                    <option value="11:00 AM">11:00 AM</option>
-                    <option value="12:00 PM">12:00 PM (noon)</option>
-                    <option value="01:00 PM">01:00 PM</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    Notes for our team (optional)
-                  </span>
-                  <textarea
-                    value={earlyCheckInNotes}
-                    onChange={(e) => setEarlyCheckInNotes(e.target.value)}
-                    rows={3}
-                    maxLength={500}
-                    disabled={earlyCheckInSubmitting}
-                    placeholder="e.g. arriving from a long flight, would help to be settled earlier"
-                    className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+              {earlyCheckInSent ? (
+                // Per fix/early-checkin-modal-success-state (2026-08-21):
+                // the success state swaps the form out for a
+                // confirmation panel. The CheckCircle2 icon + the
+                // "Request sent" copy give the guest instant
+                // confirmation; the single Done button closes the
+                // modal. The X close button at the top of the modal
+                // header continues to work in this state (it calls
+                // the same closeEarlyCheckInModal), so the guest
+                // has two equivalent dismiss paths.
+                <div
+                  data-testid="early-checkin-sent"
+                  className="mt-5 flex flex-col items-center gap-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-6 text-center"
+                >
+                  <CheckCircle2
+                    size={36}
+                    className="text-emerald-600"
+                    aria-hidden="true"
                   />
-                </label>
-                {earlyCheckInError && (
+                  <div>
+                    <p className="text-sm font-bold text-emerald-900">
+                      Request sent
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-emerald-800">
+                      We&apos;ll email you at your booking contact when our team
+                      has reviewed the request.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeEarlyCheckInModal}
+                    className="min-h-[44px] rounded-lg bg-emerald-700 px-6 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-5 space-y-4">
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                        Requested arrival time
+                      </span>
+                      <select
+                        value={earlyCheckInRequestedTime}
+                        onChange={(e) => setEarlyCheckInRequestedTime(e.target.value)}
+                        disabled={earlyCheckInSubmitting}
+                        className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="08:00 AM">08:00 AM</option>
+                        <option value="09:00 AM">09:00 AM</option>
+                        <option value="10:00 AM">10:00 AM</option>
+                        <option value="11:00 AM">11:00 AM</option>
+                        <option value="12:00 PM">12:00 PM (noon)</option>
+                        <option value="01:00 PM">01:00 PM</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                        Notes for our team (optional)
+                      </span>
+                      <textarea
+                        value={earlyCheckInNotes}
+                        onChange={(e) => setEarlyCheckInNotes(e.target.value)}
+                        rows={3}
+                        maxLength={500}
+                        disabled={earlyCheckInSubmitting}
+                        placeholder="e.g. arriving from a long flight, would help to be settled earlier"
+                        className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                    </label>
+                    {earlyCheckInError && (
                       <div
                         role="alert"
                         className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
@@ -710,26 +807,28 @@ export function BookingConfirmPage() {
                         {earlyCheckInError}
                       </div>
                     )}
-              </div>
-              <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeEarlyCheckInModal}
-                  disabled={earlyCheckInSubmitting}
-                  className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSubmitEarlyCheckIn()}
-                  disabled={earlyCheckInSubmitting}
-                  data-testid="early-checkin-submit"
-                  className="min-h-[44px] rounded-lg bg-amber-700 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {earlyCheckInSubmitting ? "Sending…" : "Submit request"}
-                </button>
-              </div>
+                  </div>
+                  <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={closeEarlyCheckInModal}
+                      disabled={earlyCheckInSubmitting}
+                      className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSubmitEarlyCheckIn()}
+                      disabled={earlyCheckInSubmitting}
+                      data-testid="early-checkin-submit"
+                      className="min-h-[44px] rounded-lg bg-amber-700 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {earlyCheckInSubmitting ? "Sending…" : "Submit request"}
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}

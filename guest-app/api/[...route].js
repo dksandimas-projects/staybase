@@ -225680,7 +225680,12 @@ async function handleEmailTrigger(req, res, action) {
       if (!booking2) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-      if (booking2.status !== "confirmed") {
+      const ALLOWED_EARLY_CHECKIN_STATUSES = [
+        "payment-uploaded",
+        "payment-confirmed",
+        "confirmed"
+      ];
+      if (!ALLOWED_EARLY_CHECKIN_STATUSES.includes(booking2.status)) {
         return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking2.status}'.` });
       }
       const checkInDateObj = toDate3(booking2.checkIn);

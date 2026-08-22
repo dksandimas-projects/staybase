@@ -2396,8 +2396,33 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
 
-      // Enforce status is confirmed
-      if (booking.status !== "confirmed") {
+      // Per fix/early-checkin-payment-uploaded-allowlist (2026-08-21):
+      // loosen the status gate from a single-string `"confirmed"`
+      // check to a 3-status allowlist. The pre-fix gate rejected
+      // every `payment-uploaded` and `payment-confirmed` booking
+      // with a 400 even though the booking was definitely happening
+      // — a guest who paid (GCash/bank) was forced to wait for
+      // staff verification before they could request early
+      // check-in. The expanded allowlist covers the three states
+      // where the booking is real and upcoming:
+      //   - `payment-uploaded` — guest paid, awaiting staff
+      //     verification (the common case for online payments)
+      //   - `payment-confirmed` — staff verified, not yet
+      //     transitioned to `confirmed` (rare but valid)
+      //   - `confirmed` — fully confirmed (the existing case)
+      // All other statuses (`pending`, `checked-in`, `checked-out`,
+      // `cancelled`) still reject with a clear 400. The matching
+      // client gate lives in `BookingConfirmPage.tsx`
+      // (`showEarlyCheckInButton`) so the button only appears
+      // when the booking is in one of the three allowed states
+      // — the two sides stay in sync so a guest never sees a
+      // button that secretly won't work.
+      const ALLOWED_EARLY_CHECKIN_STATUSES = [
+        "payment-uploaded",
+        "payment-confirmed",
+        "confirmed"
+      ] as const;
+      if (!ALLOWED_EARLY_CHECKIN_STATUSES.includes(booking.status as typeof ALLOWED_EARLY_CHECKIN_STATUSES[number])) {
         return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking.status}'.` });
       }
 
