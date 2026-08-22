@@ -5227,70 +5227,6 @@ export function BookingsPage() {
             />
             </div>
 
-            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
-            {selectedBooking.paymentProofUrl ? (
-              <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-2.5">
-                <div className="flex items-center gap-2 text-xs">
-                  <CreditCard size={14} className="text-gray-400" />
-                  <span className="text-gray-700">{selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : "Online payment"}</span>
-                  {/* Per FOL-01 (2026-08-06, decision #197): the
-                      "Pending" / "Verified" badge is derived
-                      through the shared `isPaymentVerified()`
-                      helper, not the transient
-                      `status === "payment-confirmed"` check.
-                      Pre-FOL-01, a `confirmed` booking whose
-                      payment was verified earlier (the common
-                      case after Verify & Record Payment →
-                      Confirm Booking) rendered NO badge at
-                      all in the Overview — the staff had to
-                      click into the Folio section to see the
-                      proof. The helper ORs the durable
-                      `paymentConfirmedAt` timestamp with the
-                      transient status, so a `confirmed` booking
-                      with a stamped timestamp now shows
-                      "Verified" in the Overview too. The
-                      `payment-uploaded` branch (no
-                      verification yet, proof on file) and the
-                      `paymentRejectionReason` branch (staff
-                      rejected the proof) are unchanged —
-                      different axes. */}
-                  {selectedBooking.status === "payment-uploaded" && !isPaymentVerified(selectedBooking) && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
-                  )}
-                  {isPaymentVerified(selectedBooking) && (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">Verified</span>
-                  )}
-                  {selectedBooking.paymentRejectionReason && (
-                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-700">Rejected</span>
-                  )}
-                </div>
-                {selectedBooking.paymentProofUrl && (
-                  <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="min-h-[32px] rounded-lg border border-gray-250 bg-white px-2.5 text-[10px] font-semibold text-gray-600 hover:bg-gray-100">
-                    View proof
-                  </button>
-                )}
-              </div>
-            ) : selectedBooking.paymentMethod !== "pay-at-hotel" && selectedBooking.paymentMethod ? (
-              <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-2.5 text-xs text-gray-500">
-                <CreditCard size={14} className="text-gray-400" />
-                {getOnsitePaymentMethodLabel(selectedBooking.paymentMethod!)} — no proof uploaded
-              </div>
-            ) : null}
-
-            {/* Per feat/staff-special-requests-capture (2026-08-21):
-                the staff-only closed-loop editor for the booking's
-                `specialRequests` field. The textarea is captured from
-                email or phone by the front desk; guests never see the
-                field (the public /book form was redirected to email/
-                phone in feat/special-requests-redirect, commit 78a79f7).
-                The editor mounts in the Overview section so the staff
-                sees the request alongside guest identity + payment
-                context. */}
-            <div className="mt-6">
-              <BookingSpecialRequestsEditor booking={selectedBooking} />
-            </div>
-            </BookingDrawerSectionPanel>
-
             {/* Check-in registration workstation */}
             <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection} primary>
             {/*
@@ -5362,70 +5298,6 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
-            </BookingDrawerSectionPanel>
-
-            {/* Room stay details */}
-            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection} primary>
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Stay & Accommodation</h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">
-                <div className="flex justify-between">
-                  <span className="font-bold text-gray-900">Room {selectedBooking.roomNumber}</span>
-                  <span className="text-xs text-gray-500 capitalize">{selectedBooking.roomType.replace("-", " ")}</span>
-                </div>
-                <div className="grid gap-2 border-t border-gray-100 pt-3 text-xs text-gray-600">
-                  <p className="flex items-center gap-2">
-                    <Calendar size={14} className="text-primary shrink-0" />
-                    <span>Check-In: <strong>{selectedBooking.checkIn}</strong></span>
-                  </p>
-                  <p className="flex items-center gap-2">
-                    <Calendar size={14} className="text-primary shrink-0" />
-                    <span>Check-Out: <strong>{selectedBooking.checkOut}</strong></span>
-                  </p>
-                  <p>Duration: {selectedBooking.numNights} nights</p>
-                  {/* Per EXB-08 (2026-08-01, per decision #156):
-                      the drawer "Guests:" line now shows
-                      the adult/child split when both
-                      fields are present, with the extra
-                      bed count appended when > 0. Legacy
-                      pre-CHD bookings read as a single
-                      `numGuests` total. Matches the
-                      receipt PDF + the email helper +
-                      the table row so the staff
-                      surfaces stay in lockstep. */}
-                  <p>Guests: {(() => {
-                    const numAdults = Number((selectedBooking as any).numAdults);
-                    const numChildren = Number((selectedBooking as any).numChildren);
-                    const extraBedCount = Number((selectedBooking as any).extraBedCount);
-                    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
-                      const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${selectedBooking.numGuests} total)`;
-                      const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
-                        ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
-                        : "";
-                      return <span>{splitLabel}{extraLabel}</span>;
-                    }
-                    return <span>{selectedBooking.numGuests}</span>;
-                  })()}</p>
-                  <p>Breakfast: {selectedBooking.hasBreakfast ? "Included" : "Excluded"}</p>
-                </div>
-                {/* Move Booking trigger */}
-                {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
-                  <div className="border-t border-gray-100 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowMoveForm(!showMoveForm);
-                        setActiveBookingSection("more");
-                      }}
-                      className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition hover:bg-gray-50 active:scale-95"
-                    >
-                      <Move size={14} className="text-primary" />
-                      {showMoveForm ? "Cancel Move" : "Move / Upgrade Room"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
             </BookingDrawerSectionPanel>
 
             {/* Move booking form */}
@@ -5748,16 +5620,14 @@ export function BookingsPage() {
                               Verify & Record Payment
                             </button>
                           )}
-                          <div className="flex gap-2">
-                            <a href={selectedBooking.paymentProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[36px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50">
-                              <Eye size={13} />
-                              Open Full Size
-                            </a>
-                            <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="inline-flex min-h-[36px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark">
-                              <Eye size={13} />
-                              Preview
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
+                            className="inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                          >
+                            <Eye size={13} />
+                            View proof
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -6283,7 +6153,7 @@ export function BookingsPage() {
             </BookingDrawerSectionPanel>
 
             {/* Early Check-In Request Panel */}
-            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection} primary>
             {!selectedBooking.earlyCheckIn
               && currentUser?.role === "admin"
               && ["payment-confirmed", "confirmed"].includes(selectedBooking.status) && (
@@ -6573,13 +6443,9 @@ export function BookingsPage() {
             })()}
             </BookingDrawerSectionPanel>
 
-            {/* Email Actions Panel */}
-            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} primary>
-            <BookingEmailActions
-              booking={selectedBooking}
-              resendingAction={resendingEmailAction}
-              onResend={handleResendEmail}
-            />
+            {/* Requests and notes follow the time-sensitive early check-in panel. */}
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
+              <BookingSpecialRequestsEditor booking={selectedBooking} />
             </BookingDrawerSectionPanel>
 
             <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:w-[calc(66.667%-0.5rem)]">
@@ -6679,7 +6545,7 @@ export function BookingsPage() {
             </BookingDrawerSectionPanel>
 
             {/* Secondary and destructive booking actions */}
-            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} className="border-t border-gray-150 pt-4">
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} primary className="border-t border-gray-150 pt-4">
               {/* Per CWB-04 / decision #122 (2026-07-23):
                   secondary entry point for the confirm-with-
                   balance flow. Visible whenever the booking is
@@ -6898,6 +6764,15 @@ export function BookingsPage() {
                   </button>
                 )
               )}
+            </BookingDrawerSectionPanel>
+
+            {/* Communication history and resend controls come after booking actions. */}
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection}>
+              <BookingEmailActions
+                booking={selectedBooking}
+                resendingAction={resendingEmailAction}
+                onResend={handleResendEmail}
+              />
             </BookingDrawerSectionPanel>
           </div>
         )}

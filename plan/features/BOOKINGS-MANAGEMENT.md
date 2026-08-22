@@ -13,12 +13,18 @@ The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 
 - **Sticky Header:** Booking context (guest, room, stay, status, source), lifecycle indicator, Total/Paid/Balance summary, and actionable alerts.
 - **Four Task-Based Sections:**
-  - **Overview:** Guest info, room/dates, breakfast inclusion, compact payment status, financial summary.
+  - **Overview:** Time-sensitive early check-in decision/grant first, followed by staff-captured special requests. Guest, room, dates, duration, occupancy, breakfast inclusion, payment method, reference, and the compact financial summary live once in the global header above the tabs.
   - **Check-in:** Readiness checklist, registration, signature, guest ID photo, discount verification, breakfast selections.
-  - **Folio:** Money ledgers, discounts, payment proofs, receipts, incidental & store charges.
-  - **Activity & More:** Email actions/history, move/upgrade/reschedule, audit detail, cancellation.
+  - **Folio:** The sole detailed home for money ledgers, discounts, payment proof review, receipts, incidental & store charges. A pending proof has one labelled View action plus the verification action.
+  - **Activity & More:** Booking actions first (confirm-with-balance, move/upgrade, add room, cancellation), followed by transactional email history/resend controls.
 - **Sticky Footer:** Context-aware primary action button for the current status plus a **More actions** dropdown menu.
 - **Focused Task Modals:** Bounded responsive modals for discount verification, payment recording, refund recording, charge adding/voiding, and cancellation.
+
+### Drawer De-duplication Contract
+
+Per `feature/rearrange-booking-drawer` (2026-08-22), every operational detail has one authoritative home. The always-visible header owns booking identity, guest contacts, room/stay duration/occupancy, breakfast inclusion, payment method/reference, lifecycle, alerts, and the compact Total/Paid/Balance scan. Overview does not repeat the stay card or payment-proof status. Folio owns the detailed proof and financial work. More owns the only room-move trigger; its workstation appears there after the trigger is opened. The pending proof no longer offers separate Open Full Size and Preview buttons for the same image.
+
+This rule is intentionally about duplicate content and actions, not useful summaries at different scopes. The reservation strip remains group-level while the header remains room-level. The compact header money metrics remain visible while Folio provides the detailed charge breakdown and ledger.
 
 ---
 
