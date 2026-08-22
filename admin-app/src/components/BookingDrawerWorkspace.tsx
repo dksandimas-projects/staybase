@@ -78,6 +78,8 @@ export function BookingDrawerWorkspaceHeader({
 }: BookingDrawerWorkspaceHeaderProps) {
   const needsPaymentReview = booking.status === "payment-uploaded";
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
+  const approvedEarlyCheckInTime = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime;
+  const hasApprovedEarlyCheckIn = booking.earlyCheckIn?.status === "approved" && Boolean(approvedEarlyCheckInTime);
   const needsCheckInWork = ["confirmed", "payment-confirmed"].includes(booking.status) && missingCheckInItems.length > 0;
   const lifecycleIndex = getLifecycleIndex(booking.status);
 
@@ -91,6 +93,16 @@ export function BookingDrawerWorkspaceHeader({
               <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-600">
                 {booking.source}
               </span>
+              {hasApprovedEarlyCheckIn && (
+                <span
+                  data-testid="booking-drawer-approved-early-checkin-badge"
+                  title={`Early check-in approved for ${approvedEarlyCheckInTime}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                >
+                  <Check size={10} aria-hidden="true" />
+                  early {approvedEarlyCheckInTime}
+                </span>
+              )}
             </div>
             <p className="mt-3 truncate text-base font-bold text-gray-950">
               {booking.guestName}

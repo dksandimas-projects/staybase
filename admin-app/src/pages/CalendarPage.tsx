@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Edit3, MessageSquareText, Plus, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Check, Edit3, MessageSquareText, Plus, XCircle } from "lucide-react";
 // Per NBS-2026-08-08 (F1 + F8, booking-flow audit
 // 2026-08-08): the calendar create-booking path preallocates
 // a `bookingId` + `reservationId` pair (F1) and now threads
@@ -590,6 +590,8 @@ export function CalendarPage() {
                   if (booking) {
                     const left = isRangeStart(booking.checkIn, day);
                     const right = isRangeEnd(booking.checkOut, day);
+                    const earlyCheckInTime = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime;
+                    const hasApprovedEarlyCheckIn = booking.earlyCheckIn?.status === "approved" && Boolean(earlyCheckInTime);
                     // Per feat/staff-special-requests-capture (2026-08-21):
                     // render a small icon + hover tooltip when the
                     // booking has a non-empty `specialRequests`
@@ -605,6 +607,17 @@ export function CalendarPage() {
                         <div className={`flex min-h-[46px] flex-col justify-center bg-gray-950 px-3 text-white shadow-sm ${left ? "ml-2 rounded-l-full" : ""} ${right ? "mr-2 rounded-r-full" : ""}`}>
                           <span className="truncate text-[11px] font-bold">{booking.guestName}</span>
                           <span className="truncate text-[10px] text-white/70">{booking.isCorporate && booking.companyName ? booking.companyName : booking.bookingRef}</span>
+                          {left && hasApprovedEarlyCheckIn && (
+                            <span
+                              data-testid="calendar-approved-early-checkin-badge"
+                              title={`Early check-in approved for ${earlyCheckInTime}`}
+                              aria-label={`Early check-in approved for ${earlyCheckInTime}`}
+                              className="mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                            >
+                              <Check size={9} aria-hidden="true" />
+                              early {earlyCheckInTime}
+                            </span>
+                          )}
                           {hasSpecialRequest && (
                             <span
                               data-testid="calendar-special-request-icon"
@@ -718,7 +731,19 @@ export function CalendarPage() {
               <p className="text-base font-bold text-gray-950">{selectedBooking.guestName}</p>
               <p className="mt-1 text-gray-500">Room {selectedBooking.roomNumber} · {selectedBooking.checkIn} to {selectedBooking.checkOut}</p>
               {selectedBooking.isCorporate && selectedBooking.companyName && <p className="mt-1 font-semibold text-primary-dark">{selectedBooking.companyName}</p>}
-              <StatusBadge label={selectedBooking.status.replace("-", " ")} status={selectedBooking.status} />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <StatusBadge label={selectedBooking.status.replace("-", " ")} status={selectedBooking.status} />
+                {selectedBooking.earlyCheckIn?.status === "approved" && (selectedBooking.earlyCheckIn.confirmedTime || selectedBooking.earlyCheckIn.requestedTime) && (
+                  <span
+                    data-testid="calendar-drawer-approved-early-checkin-badge"
+                    title={`Early check-in approved for ${selectedBooking.earlyCheckIn.confirmedTime || selectedBooking.earlyCheckIn.requestedTime}`}
+                    className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                  >
+                    <Check size={10} aria-hidden="true" />
+                    early {selectedBooking.earlyCheckIn.confirmedTime || selectedBooking.earlyCheckIn.requestedTime}
+                  </span>
+                )}
+              </div>
             </div>
             <Link to={`/bookings?bookingId=${selectedBooking.id}`} className="inline-flex min-h-[40px] items-center rounded-lg bg-primary px-4 text-xs font-semibold text-white">Open full booking</Link>
             <form onSubmit={handleMoveBooking} className="space-y-3 border-t border-gray-100 pt-4">

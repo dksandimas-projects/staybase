@@ -48,6 +48,15 @@ Per `feat/staff-special-requests-capture` (2026-08-21): the calendar grid (`Cale
 
 **Conditional:** `(booking.specialRequests ?? "").trim().length > 0`. Empty values render nothing — no noise from the historical default `""` value.
 
+### Approved Early Check-In Badges
+
+Per `fix/confirmed-early-checkin-badges` (2026-08-22), an approved Spark Rewards early check-in is visible at the two front-desk scanning points where arrival timing matters most:
+
+- **Booking calendar:** the booking's arrival-day cell shows a compact green “early &lt;time&gt;” badge. It appears on the check-in date only so multi-night stays do not repeat the signal across every occupied cell. The calendar's quick booking drawer repeats the same badge beside the booking status.
+- **Booking drawer header:** the full booking workspace shows the badge beside the lifecycle and source chips, keeping the approved arrival time visible regardless of the active drawer section.
+
+Both surfaces render only for approved requests. The staff-confirmed override time takes priority, with the guest's requested time as the fallback when the request was approved as submitted. Pending and declined requests do not render the green badge.
+
 ## New Booking Modal (Walk-in Create) — NBS-2026-08-08 fixes
 
 The New Booking modal + the Calendar's "Book dates" modal are the staff walk-in create paths. Both post to `POST /api/bookings/create-walkin` via the shared `addWalkinBooking` helper in `admin-app/src/context/AdminContext.tsx`. The 2026-08-08 booking-flow audit closed 6 findings in one batch on `fix/new-booking-audit-2026-08-08` (decision #206):
