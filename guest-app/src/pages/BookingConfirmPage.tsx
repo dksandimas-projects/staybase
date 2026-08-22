@@ -216,16 +216,11 @@ export function BookingConfirmPage() {
   // "not guaranteed, subject to approval, email will be
   // received for the approval or rejection".
   const [earlyCheckInEnabled, setEarlyCheckInEnabled] = useState<boolean>(true);
-  // Per fix/early-checkin-payment-uploaded-allowlist (2026-08-21):
-  // the booking status is fetched so the "Request early
-  // check-in" button only appears when the booking is in one
-  // of the three statuses the server allowlists. Mirrors the
-  // rewardsConfig fetch above (best-effort, doesn't block the
-  // page on a transient read failure). Defaults to a
-  // conservative "" so the gate stays closed until the read
-  // resolves — a guest on payment-uploaded sees the button
-  // appear as soon as the status arrives (typically < 200ms).
-  const [bookingStatus, setBookingStatus] = useState<string>("");
+  // Guest clients are intentionally denied direct reads from
+  // `bookings/*`. BookingPage therefore carries the status returned by the
+  // create endpoint into this URL. It is only a UI hint; the request endpoint
+  // validates the booking's current status before accepting early check-in.
+  const [bookingStatus] = useState<string>(() => searchParams.get("status") ?? "");
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -243,28 +238,6 @@ export function BookingConfirmPage() {
     })();
     return () => { cancelled = true; };
   }, []);
-  useEffect(() => {
-    // Fetch the booking status so the client gate mirrors the
-    // server allowlist in `guest-app/server/handlers/email.ts`
-    // (`ALLOWED_EARLY_CHECKIN_STATUSES`). Until the read
-    // resolves, `bookingStatus` is "" which is not in the
-    // allowlist, so the button stays hidden — the conservative
-    // default avoids a click → 400 surprise.
-    if (!bookingRef) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, "bookings", bookingRef));
-        if (!cancelled && snap.exists()) {
-          const data = snap.data();
-          setBookingStatus(typeof data?.status === "string" ? data.status : "");
-        }
-      } catch (err) {
-        console.error("[BookingConfirmPage] Failed to load booking status:", err);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [bookingRef]);
   // Per fix/early-checkin-payment-uploaded-allowlist (2026-08-21):
   // the gate mirrors the server allowlist in
   // `guest-app/server/handlers/email.ts`. The button only

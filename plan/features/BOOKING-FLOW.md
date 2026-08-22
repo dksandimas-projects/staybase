@@ -161,6 +161,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Email triggered via `/api/email/booking-submitted` after successful creation — acts as an acknowledgment/receipt submission warning the guest that their booking/payment is under review and that an official confirmation will follow once verified
 - [x] `isCorporate`, `corporateCode`, `companyName` set server-side — never trusted from client
 - [x] Initial status: `"pending"` (or `"payment-uploaded"` if screenshot provided)
+- [x] The create response carries that initial status into the Step 4 URL for the early-check-in visibility gate. Step 4 never reads `bookings/*` directly because guest clients are intentionally denied that collection; the early-check-in API rechecks the live status server-side before accepting a request.
 
 ---
 
