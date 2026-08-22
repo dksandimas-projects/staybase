@@ -210,14 +210,14 @@ export function ProfilePage() {
 
         {memberProfile?.isMember && (
           <div className="rounded-xl overflow-hidden shadow-sm" style={{ background: `linear-gradient(135deg, ${config.colors.sidebar}, ${config.colors.sidebar}ee)` }}>
-            <div className="p-6 text-white">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+            <div className="p-4 text-white sm:p-6">
+              <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
                   <img src={brandAsset(config.logos.white)} alt={config.brandName} className="h-8 w-auto mb-4 opacity-90" />
-                  <p className="text-xl font-heading tracking-wide">{memberProfile.fullName || "Member"}</p>
-                  <p className="text-sm opacity-80 mt-1 font-mono">{memberProfile.memberNumber}</p>
+                  <p className="break-words text-xl font-heading tracking-wide">{memberProfile.fullName || "Member"}</p>
+                  <p className="mt-1 break-all text-sm font-mono opacity-80">{memberProfile.memberNumber}</p>
                 </div>
-                <div className="text-right">
+                <div className="shrink-0 text-left sm:text-right">
                   <p className="text-[10px] uppercase tracking-widest opacity-60 font-bold">Points Balance</p>
                   <p className="text-3xl font-heading mt-1" style={{ color: config.colors.primary }}>
                     {memberProfile.rewardsPoints?.toLocaleString() || "0"}
@@ -225,9 +225,9 @@ export function ProfilePage() {
                   <p className="text-xs opacity-60 mt-1">Standard Member</p>
                 </div>
               </div>
-              <div className="mt-5 pt-4 border-t border-white/20 flex items-center gap-4 text-xs opacity-70">
-                <span className="flex items-center gap-1.5">
-                  <Calendar size={12} />
+              <div className="mt-5 flex min-w-0 items-center gap-4 border-t border-white/20 pt-4 text-xs opacity-70">
+                <span className="flex min-w-0 items-start gap-1.5">
+                  <Calendar size={12} className="mt-0.5 shrink-0" />
                   Member since {memberProfile.memberSince ? new Date(memberProfile.memberSince).toLocaleDateString(config.locale, { month: "short", year: "numeric" }) : "—"}
                 </span>
               </div>
@@ -236,13 +236,13 @@ export function ProfilePage() {
         )}
 
         {/* Profile Form */}
-        <form onSubmit={handleSaveChanges} className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-6">
+        <form onSubmit={handleSaveChanges} className="min-w-0 space-y-6 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:p-6">
           <div>
             <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Account Details</h2>
             <p className="text-[10px] text-gray-500 mt-0.5">Update your name and contact information.</p>
           </div>
 
-          <div className="flex items-center gap-3 rounded-lg bg-gray-50 p-3">
+          <div className="flex min-w-0 items-center gap-3 rounded-lg bg-gray-50 p-3">
             {memberProfile?.photoUrl || user?.photoURL ? (
               <img
                 src={memberProfile?.photoUrl || user?.photoURL || ""}
@@ -254,9 +254,9 @@ export function ProfilePage() {
                 {(memberProfile?.fullName || user?.displayName || user?.email || "M").charAt(0).toUpperCase()}
               </span>
             )}
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-bold text-gray-900">Profile photo</p>
-              <p className="text-[10px] text-gray-500">Shown from your sign-in provider when available.</p>
+              <p className="break-words text-[10px] text-gray-500">Shown from your sign-in provider when available.</p>
             </div>
           </div>
 
@@ -339,7 +339,7 @@ export function ProfilePage() {
 
         {/* Change Password */}
         {isEmailProvider && (
-          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+          <div className="space-y-4 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:p-6">
             <div>
               <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Change Password</h2>
               <p className="text-[10px] text-gray-500 mt-0.5">Update your account password.</p>
@@ -392,7 +392,7 @@ export function ProfilePage() {
         )}
 
         {/* Delete Account */}
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-red-100 space-y-4">
+        <div className="space-y-4 rounded-card bg-white p-4 shadow-sm ring-1 ring-red-100 sm:p-6">
           <div>
             <h2 className="text-base font-heading text-red-700 lowercase tracking-tight flex items-center gap-2">
               <Trash2 size={18} />

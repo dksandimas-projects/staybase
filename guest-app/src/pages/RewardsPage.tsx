@@ -275,7 +275,7 @@ export function RewardsPage() {
     <AccountLayout activeTab="rewards" title="My Rewards" subtitle={`Track your ${config.rewardsName} points and member perks.`}>
       <div className="space-y-8">
         {pointsEnabled && (
-          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 text-center">
+          <div className="rounded-card bg-white p-5 text-center shadow-sm ring-1 ring-gray-200 sm:p-6">
             <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-primary/10 mb-4">
               <Award size={28} className="text-primary" />
             </div>
@@ -462,7 +462,7 @@ export function RewardsPage() {
                             />
                           </label>
 
-                          <div className="flex gap-2 pt-1">
+                          <div className="flex flex-wrap gap-2 pt-1">
                             <button
                               type="button"
                               onClick={() => handleSubmitEarlyCheckIn(activeBooking.id)}
@@ -501,7 +501,7 @@ export function RewardsPage() {
         )}
 
         {pointsEnabled && (
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+        <div className="space-y-4 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:p-6">
           <div>
             <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Points History</h2>
             <p className="text-[10px] text-gray-500 mt-0.5">Your points earning and redemption activity.</p>
@@ -523,20 +523,20 @@ export function RewardsPage() {
               {transactions.map((tx) => (
                 <div
                   key={tx.id}
-                  className="flex items-center justify-between py-3 px-4 rounded-lg border border-gray-100 bg-gray-50/50 hover:bg-gray-50 transition"
+                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50/50 px-3 py-3 transition hover:bg-gray-50 sm:px-4"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className={`h-8 w-8 rounded-full flex items-center justify-center ${
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={`h-8 w-8 shrink-0 rounded-full flex items-center justify-center ${
                       tx.points >= 0 ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
                     }`}>
                       {tx.points >= 0 ? <CheckCircle2 size={14} /> : <ChevronRight size={14} className="rotate-180" />}
                     </div>
-                    <div>
-                      <p className="text-xs font-semibold text-gray-900">{tx.description}</p>
+                    <div className="min-w-0">
+                      <p className="break-words text-xs font-semibold text-gray-900">{tx.description}</p>
                       <p className="text-[10px] text-gray-400">{tx.date}</p>
                     </div>
                   </div>
-                  <span className={`text-sm font-bold ${tx.points >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  <span className={`shrink-0 text-sm font-bold ${tx.points >= 0 ? "text-green-600" : "text-red-600"}`}>
                     {tx.points >= 0 ? "+" : ""}{tx.points.toLocaleString()} pts
                   </span>
                 </div>

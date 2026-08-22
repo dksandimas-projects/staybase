@@ -83,8 +83,8 @@ export function EmailVerifyBanner({ reason = "past-stays" }: EmailVerifyBannerPr
           <p className="mt-1 text-xs text-amber-800 leading-relaxed">
             {REASON_COPY[reason]}
           </p>
-          <p className="mt-2 text-xs text-amber-700">
-            Sent to <span className="font-semibold">{user.email}</span>.
+          <p className="mt-2 break-words text-xs text-amber-700">
+            Sent to <span className="break-all font-semibold">{user.email}</span>.
           </p>
 
           {resendState === "sent" && (
