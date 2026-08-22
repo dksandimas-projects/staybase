@@ -264,20 +264,16 @@ export function BookingConfirmPage() {
   const [earlyCheckInSubmitting, setEarlyCheckInSubmitting] = useState(false);
   const [earlyCheckInSent, setEarlyCheckInSent] = useState(false);
   const [earlyCheckInError, setEarlyCheckInError] = useState<string | null>(null);
-  // Reset all modal state when closing — the per-booking
-  // guest can re-open after a decline / after re-thinking.
-  // Per fix/early-checkin-modal-success-state (2026-08-21):
-  // the success state (`earlyCheckInSent`) is reset alongside
-  // notes + error so re-opening the modal starts on the form,
-  // not on a stale "Request sent" panel. Pre-fix the success
-  // flag persisted across closes — opening the modal after a
-  // previous successful submit would show the success panel
-  // instead of the form.
+  // Clear transient form feedback when closing, but preserve
+  // `earlyCheckInSent` for the lifetime of this confirmation
+  // page. That flag also controls the inline status card below;
+  // resetting it here would make a successful request look
+  // unsent as soon as the guest dismisses the modal and would
+  // allow an accidental duplicate submission.
   const closeEarlyCheckInModal = () => {
     setShowEarlyCheckInModal(false);
     setEarlyCheckInNotes("");
     setEarlyCheckInError(null);
-    setEarlyCheckInSent(false);
   };
   const handleSubmitEarlyCheckIn = async () => {
     if (!user) {
