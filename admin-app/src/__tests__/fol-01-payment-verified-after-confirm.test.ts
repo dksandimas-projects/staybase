@@ -203,46 +203,15 @@ describe("FOL-01 — booking drawer payment badge reads through isPaymentVerifie
     });
   });
 
-  describe("Overview render site (the related bug — no badge on a confirmed booking)", () => {
-    it("the Verified badge condition reads through the helper", () => {
-      // The pre-FOL-01 Overview badge block had:
-      //   selectedBooking.status === "payment-confirmed" && (
-      //     <span ...>Verified</span>
-      //   )
-      // — so a `confirmed` booking with a stamped
-      // `paymentConfirmedAt` rendered NO badge at all
-      // (the staff had to click into the Folio section
-      // to see the proof). The post-FOL-01 form widens
-      // the read through the helper:
-      //   isPaymentVerified(selectedBooking) && (
-      //     <span ...>Verified</span>
-      //   )
-      expect(bookingsPageSrc).toMatch(
-        /isPaymentVerified\(selectedBooking\)\s*&&\s*\(\s*<span[^>]*>\s*Verified\s*<\/span>/
-      );
-    });
+  describe("single payment-proof home", () => {
+    it("keeps proof status and actions in Folio instead of duplicating them in Overview", () => {
+      const overviewStart = bookingsPageSrc.indexOf("Early Check-In Request Panel");
+      const overviewEnd = bookingsPageSrc.indexOf("Secondary and destructive booking actions", overviewStart);
+      const overviewSlice = bookingsPageSrc.slice(overviewStart, overviewEnd);
 
-    it("the Pending badge condition still gates on `payment-uploaded` AND NOT verified", () => {
-      // The pre-FOL-01 "Pending" badge was:
-      //   selectedBooking.status === "payment-uploaded" && (
-      //     <span ...>Pending</span>
-      //   )
-      // — which would also have fired on a
-      // `payment-uploaded` booking that ALREADY has a
-      // stamped `paymentConfirmedAt` (e.g. a re-upload
-      // after a verified-then-bounced-back flow). The
-      // post-FOL-01 form is:
-      //   selectedBooking.status === "payment-uploaded"
-      //   && !isPaymentVerified(selectedBooking) && (
-      //     <span ...>Pending</span>
-      //   )
-      // — so the "Pending" badge and the "Verified"
-      // badge are mutually exclusive (a booking is one
-      // or the other, not both). The `!isPaymentVerified`
-      // guard is the new piece.
-      expect(bookingsPageSrc).toMatch(
-        /selectedBooking\.status\s*===\s*["']payment-uploaded["']\s*&&\s*!isPaymentVerified\(selectedBooking\)\s*&&\s*\(\s*<span[^>]*>\s*Pending\s*<\/span>/
-      );
+      expect(overviewSlice).not.toContain("Payment Proof");
+      expect(overviewSlice).not.toContain("Open Full Size");
+      expect(bookingsPageSrc).toMatch(/Payment Proof[\s\S]*?isPaymentVerified\(selectedBooking\)/);
     });
   });
 

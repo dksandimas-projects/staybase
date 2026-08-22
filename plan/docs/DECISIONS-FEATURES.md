@@ -5,11 +5,12 @@ Resolved product, feature scope, business rules, compliance, and UX decisions. L
 
 For architecture and stack decisions see `plan/docs/DECISIONS-ARCH.md`.
 
-## Current Early Check-In Addendum
+## Current Feature Addenda
 
 | ID | Decision |
 |---|---|
 | EC-03 | **Admin-granted early check-in from the booking drawer (owner-requested 2026-08-22; implemented on `feature/admin-grant-early-checkin`):** administrators can add early check-in directly to an upcoming booking without requiring a guest request first. Creation is limited to bookings with no existing early-check-in record, status `payment-confirmed` or `confirmed`, and a check-in date that has not passed. The server re-checks the Admin role; Front Desk can still resolve guest-originated requests but sees staff grants read-only. The optional `earlyCheckIn.source` discriminator is `guest-request` or `staff-granted`, with an absent legacy value treated as a guest request. The existing resolve endpoint accepts grant mode, uses a Firestore transaction, refuses to overwrite existing data, and makes exact retries idempotent without duplicate guest email. Staff-granted email and Rewards copy say the perk was added to the stay. The drawer collects a required time and optional guest-facing note, then reuses the existing approved calendar icon and drawer-header badge. No new Vercel function. |
+| BDUX-06 | **Booking drawer content hierarchy and de-duplication (owner-requested 2026-08-22; implemented on `feature/rearrange-booking-drawer`):** preserve the four-tab workspace but give each detail one authoritative home. The global header remains the scan surface for guest/stay/payment context and compact money state. Overview is reduced to arrival-related early check-in work followed by special requests. Check-in retains readiness, registration, guest ID, government-discount verification, and breakfast selections. Folio is the only detailed payment-proof/ledger/discount/receipt surface. Activity & More presents booking mutations before email resend/history. Removed duplicates: the second Stay & Accommodation card, the Overview payment-proof row, the Overview room-move trigger, and the pending proof's separate Open Full Size/Preview pair. Group-level reservation money and room-level header money remain intentionally distinct. No data model, API, permission, or lifecycle behavior changes. |
 
 ---
 

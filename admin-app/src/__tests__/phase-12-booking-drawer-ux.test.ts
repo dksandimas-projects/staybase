@@ -33,6 +33,9 @@ describe("Phase 12 — booking drawer information architecture", () => {
 
   it("shows a compact operational header and booking lifecycle", () => {
     expect(workspaceSrc).toMatch(/Room \{booking\.roomNumber\}/);
+    expect(workspaceSrc).toMatch(/booking\.numNights/);
+    expect(workspaceSrc).toContain("Breakfast included");
+    expect(workspaceSrc).toContain("No breakfast");
     expect(workspaceSrc).toMatch(/SummaryMetric label="Total"/);
     expect(workspaceSrc).toMatch(/SummaryMetric label="Paid"/);
     expect(workspaceSrc).toMatch(/aria-label="Booking lifecycle"/);
@@ -75,7 +78,6 @@ describe("Phase 12 — booking drawer information architecture", () => {
       "Reference\n",
       "Check-in Registration",
       "Guest ID Attachment",
-      "Stay & Accommodation",
       "Move / Upgrade Room Workstation",
       "Charge breakdown",
       "Breakfast Selections",
@@ -92,6 +94,24 @@ describe("Phase 12 — booking drawer information architecture", () => {
       expect(drawerSrc, `expected booking drawer feature: ${feature}`).toContain(feature);
     }
     expect(pageSrc.match(/<BookingDrawerSectionPanel/g)?.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it("keeps one authoritative home for repeated drawer content", () => {
+    const bookingDrawerStart = pageSrc.indexOf("Booking Detail Drawer");
+    const bookingDrawerEnd = pageSrc.indexOf("Store Order Detail Drawer", bookingDrawerStart);
+    const bookingDrawer = pageSrc.slice(bookingDrawerStart, bookingDrawerEnd);
+    expect(bookingDrawer).not.toContain("Stay & Accommodation");
+    expect(bookingDrawer).not.toContain("Open Full Size");
+    expect(bookingDrawer.match(/onClick=\{\(\) => setShowMoveForm\(true\)\}/g)).toHaveLength(1);
+    expect(bookingDrawer.match(/Payment Proof/g)).toHaveLength(1);
+
+    const earlyIndex = pageSrc.indexOf("Early Check-In Request Panel");
+    const requestsIndex = pageSrc.indexOf("Requests and notes follow", earlyIndex);
+    const actionsIndex = pageSrc.indexOf("Secondary and destructive booking actions");
+    const communicationIndex = pageSrc.indexOf("Communication history and resend controls", actionsIndex);
+    expect(earlyIndex).toBeGreaterThan(0);
+    expect(requestsIndex).toBeGreaterThan(earlyIndex);
+    expect(communicationIndex).toBeGreaterThan(actionsIndex);
   });
 
   it("keeps check-in readiness visible and uses the shared gate for the primary action", () => {
