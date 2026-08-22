@@ -213,6 +213,7 @@ Used in: Bookings Management (print/download), email attachment option.
 
 **PDF checklist:**
 - [x] PDF font handling is stable in browsers: use jsPDF built-in fonts unless known-good base64 TTF assets are added and verified. Do not reference missing font files or embed OTF files that jsPDF cannot encode reliably.
+- [x] Receipt text is sanitized to WinAnsi before it is drawn (fix 2026-08-22): `generateReceiptPdf()` in `guest-app/server/handlers/email.ts` routes every string through a `pdfSafe()` helper and formats money with `currencyDisplay: "code"` (`PHP 2,000`). Drawing `₱` with a built-in font corrupted the whole line into UTF-16 — see `plan/docs/GOTCHAS.md §jsPDF`. The same pass fixed the receipt's right margin (170mm content column instead of a right edge at the 210mm paper edge), wrapped long values inside the space the label leaves free, and added page breaks so a large multi-room reservation no longer draws off the bottom of page 1.
 - [x] spark inn logo embedded as base64 image
 - [x] PDF generated client-side in `admin-app` — no server round-trip needed
 - [x] PDF actions open a tab synchronously when previewing generated PDFs and fall back to `jsPDF.save()` if popups are blocked.

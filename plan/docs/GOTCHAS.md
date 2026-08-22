@@ -68,6 +68,8 @@ Things agents must never do. Check this file before implementing any feature.
 
 - **Use stable jsPDF fonts unless custom TTFs are verified** — jsPDF cannot access system fonts, and unverified OTF/missing TTF assets can break generation. Use built-in fonts for reliability unless known-good base64 TTF assets are added and visually tested.
 - **Test PDF output on multiple browsers** — rendering differences between Chrome, Firefox, and Safari can cause layout shifts in generated PDFs.
+- **Never draw a character above U+00FF with a built-in jsPDF font** — built-in fonts are WinAnsi-encoded, so one out-of-range character (`₱`, `—`, a smart quote) makes jsPDF emit the *whole* string as UTF-16 the font can't map: every character renders blank-separated and `₱` reads as `±`. Sanitize before `doc.text()` (₱ → `PHP `, typographic punctuation → ASCII, the rest decomposed to its nearest Latin-1 form; keep é/ñ/·/×) — money via `Intl.NumberFormat` `currencyDisplay: "code"`. Reference: `generateReceiptPdf()`'s `pdfSafe()` in `guest-app/server/handlers/email.ts`.
+- **Right-align to the content edge, not the paper edge** — A4 is 210mm; a value right-aligned at x=210 is clipped. Use equal gutters (20mm → 170mm column), wrap long values into the width the label leaves free, and page-break before the bottom margin.
 
 ---
 
