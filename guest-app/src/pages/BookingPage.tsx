@@ -335,6 +335,58 @@ export function BookingPage() {
     _hp: ""
   });
 
+  // Per fix/booking-autofill-member-profile-race (2026-08-22):
+  // the `guestDetails` initializer above runs ONCE on mount.
+  // `memberProfile` arrives asynchronously via
+  // `onAuthStateChanged` + Firestore `onSnapshot` (typically
+  // 200–500ms after mount), so the initializer always sees
+  // `memberProfile = null` and every autofill branch falls
+  // through to `""`. The form fields stayed empty even for
+  // signed-in members.
+  //
+  // This effect re-applies the autofill when `memberProfile`
+  // lands (or changes). It runs only when:
+  //   1. `memberProfile?.isMember === true` (non-members never
+  //      get an autofill — they don't have a profile to read)
+  //   2. The dep array changes (memberProfile fullName / email /
+  //      phone / isMember). Each effect run is idempotent
+  //      because of the "only fill empty fields" guard below.
+  //
+  // The "only fill empty fields" guard preserves any value the
+  // guest typed in the gap between mount and snapshot landing.
+  // Without this guard, a guest who types their first name
+  // before the snapshot lands would have it overwritten by
+  // the autofill when the effect fires (rare but real).
+  //
+  // URL params keep precedence — same as the initializer above.
+  // If the URL pins firstName / lastName / phone (Step 4
+  // re-book flow), the param wins over the autofill.
+  useEffect(() => {
+    if (!memberProfile?.isMember) return;
+    if (!memberProfile.fullName && !memberProfile.email && !memberProfile.phone) return;
+    setGuestDetails((prev) => {
+      const urlFirst = searchParams.get("firstName");
+      const urlLast = searchParams.get("lastName");
+      const urlEmail = searchParams.get("email");
+      const urlPhone = searchParams.get("phone");
+      const derivedFirst = memberProfile.fullName.split(" ")[0] ?? "";
+      const derivedLast = memberProfile.fullName.split(" ").slice(1).join(" ") ?? "";
+      return {
+        ...prev,
+        firstName: prev.firstName || urlFirst || derivedFirst,
+        lastName: prev.lastName || urlLast || derivedLast,
+        email: prev.email || urlEmail || memberProfile.email,
+        phone: prev.phone || urlPhone || memberProfile.phone
+      };
+    });
+  }, [
+    memberProfile?.isMember,
+    memberProfile?.fullName,
+    memberProfile?.email,
+    memberProfile?.phone,
+    searchParams
+  ]);
+
   const [touchedFields, setTouchedFields] = useState<Record<GuestField, boolean>>({
     firstName: false,
     lastName: false,
