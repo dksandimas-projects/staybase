@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.292.2";
+    VERSION2 = "0.293.0";
   }
 });
 
@@ -224132,6 +224132,7 @@ __export(email_exports, {
   buildReservationEmailView: () => buildReservationEmailView,
   handleEmailPreview: () => handleEmailPreview,
   handleEmailTrigger: () => handleEmailTrigger,
+  loadLiabilityProjectionForEmail: () => loadLiabilityProjectionForEmail,
   sendBookingConfirmedWithBalanceTrigger: () => sendBookingConfirmedWithBalanceTrigger,
   sendBookingTrigger: () => sendBookingTrigger,
   sendContactConfirmationTrigger: () => sendContactConfirmationTrigger,
@@ -224153,30 +224154,54 @@ function escapeHtml(value) {
 function generateReceiptPdf(booking) {
   const doc = new import_jspdf.jsPDF({ unit: "mm", format: "a4" });
   const left2 = 20;
-  let top = 20;
-  const pageWidth = 190;
+  const pageWidth = 170;
   const right2 = left2 + pageWidth;
+  const pageBottom = 280;
+  const lineHeight = 4.5;
+  let top = 20;
+  function pdfSafe(value) {
+    return String(value ?? "").replace(/₱/g, "PHP ").replace(/[‐-―]/g, "-").replace(/[‘’‛]/g, "'").replace(/[“”]/g, '"').replace(/[•‣⁃]/g, "-").replace(/…/g, "...").replace(/[   ]/g, " ").replace(/[^\x00-\xFF]/g, (character) => character.normalize("NFKD").replace(/[^\x00-\xFF]/g, "")).trim();
+  }
   function line(y2) {
     doc.setDrawColor(200);
     doc.line(left2, y2, right2, y2);
   }
-  function text(label, value, y2) {
+  function ensureSpace(needed = 10) {
+    if (top + needed <= pageBottom) return;
+    doc.addPage();
+    top = 20;
+  }
+  function text(label, value, options = {}) {
+    const gap = options.gap ?? 6;
+    const safeLabel = pdfSafe(label);
+    const safeValue = pdfSafe(value);
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
-    doc.text(label, left2, y2);
-    doc.setFont("helvetica", "normal");
-    doc.text(value, right2, y2, { align: "right" });
+    const labelWidth = doc.getTextWidth(safeLabel);
+    doc.setFont("helvetica", options.bold ? "bold" : "normal");
+    const valueLines = safeValue ? doc.splitTextToSize(safeValue, Math.max(20, pageWidth - labelWidth - 4)) : [];
+    ensureSpace(Math.max(gap, valueLines.length * lineHeight));
+    doc.setFont("helvetica", "bold");
+    doc.text(safeLabel, left2, top);
+    doc.setFont("helvetica", options.bold ? "bold" : "normal");
+    valueLines.forEach((valueLine, index) => {
+      doc.text(valueLine, right2, top + index * lineHeight, { align: "right" });
+    });
+    top += Math.max(gap, (valueLines.length - 1) * lineHeight + gap);
+  }
+  function plain(value, gap) {
+    ensureSpace(gap);
+    doc.text(pdfSafe(value), left2, top);
+    top += gap;
   }
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(hotel_config_default.legalName || hotel_config_default.brandName, left2, top);
+  doc.text(pdfSafe(hotel_config_default.legalName || hotel_config_default.brandName), left2, top);
   top += 7;
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.text(`${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}`, left2, top);
-  top += 5;
-  doc.text(`Tel: ${hotel_config_default.frontDeskPhone} | Email: ${hotel_config_default.supportEmail}`, left2, top);
-  top += 8;
+  plain(`${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}`, 5);
+  plain(`Tel: ${hotel_config_default.frontDeskPhone} | Email: ${hotel_config_default.supportEmail}`, 8);
   line(top);
   top += 6;
   doc.setFontSize(14);
@@ -224184,106 +224209,88 @@ function generateReceiptPdf(booking) {
   doc.text("Booking Receipt", left2, top);
   top += 8;
   const fmtDate = (v6) => {
-    if (!v6) return "\u2014";
+    if (!v6) return "-";
     const d = toDate3(v6);
-    return d ? new Intl.DateTimeFormat(hotel_config_default.locale, { month: "short", day: "numeric", year: "numeric", timeZone: hotel_config_default.timezone }).format(d) : "\u2014";
+    return d ? new Intl.DateTimeFormat(hotel_config_default.locale, { month: "short", day: "numeric", year: "numeric", timeZone: hotel_config_default.timezone }).format(d) : "-";
   };
   const fmtMoney = (v6) => {
     const amt = Number(v6 || 0);
-    return new Intl.NumberFormat(hotel_config_default.locale, { style: "currency", currency: hotel_config_default.currency, maximumFractionDigits: 0 }).format(amt);
+    return new Intl.NumberFormat(hotel_config_default.locale, { style: "currency", currency: hotel_config_default.currency, currencyDisplay: "code", maximumFractionDigits: 0 }).format(amt);
   };
-  text("Booking Ref:", String(booking.bookingRef || "\u2014"), top);
-  top += 6;
-  text("Guest:", String(booking.guestName || "\u2014"), top);
-  top += 6;
+  text("Booking Ref:", String(booking.bookingRef || "-"));
+  text("Guest:", String(booking.guestName || "-"));
   const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
   if (rooms && rooms.length > 0) {
     if (booking.reservationRef) {
-      text("Reservation Ref:", String(booking.reservationRef), top);
-      top += 6;
+      text("Reservation Ref:", String(booking.reservationRef));
     }
-    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`, top);
-    top += 6;
+    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
     for (const room of rooms) {
       const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "\u2014")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
-      text(label, value, top);
-      top += 5;
+      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
+      text(label, value, { gap: 5 });
     }
   } else {
-    text("Room Type:", String(booking.roomName || booking.roomType || "\u2014"), top);
-    top += 6;
+    text("Room Type:", String(booking.roomName || booking.roomType || "-"));
   }
-  text("Check-in:", fmtDate(booking.checkIn), top);
-  top += 6;
-  text("Check-out:", fmtDate(booking.checkOut), top);
-  top += 6;
-  text("Nights:", String(booking.numNights || 0), top);
-  top += 6;
+  text("Check-in:", fmtDate(booking.checkIn));
+  text("Check-out:", fmtDate(booking.checkOut));
+  text("Nights:", String(booking.numNights || 0));
   {
     const numAdults = Number(booking.numAdults);
     const numChildren = Number(booking.numChildren);
     const extraBedCount = Number(booking.extraBedCount);
     if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
       const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
-      text(guestLine, "", top);
-      top += 6;
+      text(guestLine, "");
       if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
-        text(`Extra beds: ${extraBedCount} (${extraBedCount} \xD7 ${fmtMoney(booking.extraBedRate)} / bed / night)`, "", top);
-        top += 6;
+        text(`Extra beds: ${extraBedCount} (${extraBedCount} \xD7 ${fmtMoney(booking.extraBedRate)} / bed / night)`, "");
       }
     } else {
-      text("Guests:", String(booking.numGuests || 1), top);
-      top += 6;
+      text("Guests:", String(booking.numGuests || 1));
     }
   }
   if (booking.source) {
-    text("Source:", String(booking.source), top);
-    top += 6;
+    text("Source:", String(booking.source));
   }
   top += 2;
+  ensureSpace(12);
   line(top);
   top += 6;
   if (booking.rateBreakdown) {
     const bd = booking.rateBreakdown;
     if (Array.isArray(bd.roomLines)) {
-      bd.roomLines.forEach((line2) => {
-        text(line2.label || "Room rate", `${line2.nights || 0} night(s) x ${fmtMoney(line2.nightlyRate)} = ${fmtMoney(line2.subtotal)}`, top);
-        top += 5;
+      bd.roomLines.forEach((entry) => {
+        text(entry.label || "Room rate", `${entry.nights || 0} night(s) x ${fmtMoney(entry.nightlyRate)} = ${fmtMoney(entry.subtotal)}`, { gap: 5 });
       });
     }
     if (Array.isArray(bd.addOns)) {
-      bd.addOns.forEach((line2) => {
-        text(line2.label || "Add-on", fmtMoney(line2.amount), top);
-        top += 5;
+      bd.addOns.forEach((entry) => {
+        text(entry.label || "Add-on", fmtMoney(entry.amount), { gap: 5 });
       });
     }
     if (Array.isArray(bd.deductions)) {
-      bd.deductions.forEach((line2) => {
-        text(line2.label || "Discount", `-${fmtMoney(line2.amount)}`, top);
-        top += 5;
+      bd.deductions.forEach((entry) => {
+        text(entry.label || "Discount", `-${fmtMoney(entry.amount)}`, { gap: 5 });
       });
     }
   }
   top += 2;
+  ensureSpace(12);
   line(top);
   top += 6;
-  doc.setFont("helvetica", "bold");
-  text("Total Amount Due:", fmtMoney(booking.totalPrice), top);
-  top += 8;
+  text("Total Amount Due:", fmtMoney(booking.totalPrice), { gap: 8, bold: true });
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text(`Payment Method: ${booking.paymentMethod || "\u2014"}`, left2, top);
-  top += 5;
-  doc.text(`Status: ${booking.status || "\u2014"}`, left2, top);
-  top += 8;
+  plain(`Payment Method: ${booking.paymentMethod || "-"}`, 5);
+  plain(`Status: ${booking.status || "-"}`, 8);
+  ensureSpace(12);
   line(top);
   top += 5;
   doc.setFontSize(8);
   doc.setTextColor(128);
-  doc.text(`Generated on ${(/* @__PURE__ */ new Date()).toLocaleString(hotel_config_default.locale, { timeZone: hotel_config_default.timezone })}`, left2, top);
-  top += 4;
-  doc.text(`Thank you for choosing ${hotel_config_default.brandName}.`, left2, top);
+  plain(`Generated on ${(/* @__PURE__ */ new Date()).toLocaleString(hotel_config_default.locale, { timeZone: hotel_config_default.timezone })}`, 4);
+  plain(`Thank you for choosing ${hotel_config_default.brandName}.`, 4);
   return Buffer.from(doc.output("arraybuffer"));
 }
 function siteUrl(path = "") {
@@ -224291,6 +224298,44 @@ function siteUrl(path = "") {
 }
 function adminUrl(path = "") {
   return `${getServerAdminBaseUrl()}${path}`;
+}
+async function loadLiabilityProjectionForEmail(params) {
+  const reservationId = String(params.reservationId || "").trim();
+  const bookingId = String(params.bookingId || "").trim();
+  if (!bookingId) return null;
+  let liability = null;
+  let refundsRef = null;
+  if (reservationId) {
+    const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
+    if (reservationDoc.exists) {
+      liability = reservationDoc.data()?.cancellationLiability || null;
+      if (liability) {
+        refundsRef = adminDb.collection("reservations").doc(reservationId).collection("refunds");
+      }
+    }
+  }
+  if (!liability) {
+    const bookingDoc = await adminDb.collection("bookings").doc(bookingId).get();
+    if (bookingDoc.exists) {
+      liability = bookingDoc.data()?.cancellationLiability || null;
+    }
+    refundsRef = adminDb.collection("bookings").doc(bookingId).collection("payments");
+  }
+  if (!liability) return null;
+  let processedAmount = 0;
+  if (refundsRef) {
+    try {
+      const snap = await refundsRef.get();
+      processedAmount = snap.docs.reduce((sum, d) => {
+        const amount = Number(d.data()?.amount || 0);
+        return sum + Math.abs(amount);
+      }, 0);
+    } catch (err) {
+      console.warn("[email] Failed to read refunds subcollection for liability projection:", err);
+    }
+  }
+  const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
+  return computeCancellationLiabilityState2({ liability, processedAmount });
 }
 function buildReservationEmailView(reservation, children) {
   if (!reservation || !Array.isArray(children) || children.length === 0) return null;
@@ -228050,8 +228095,8 @@ async function loadReservationEmailView(bookingId) {
   const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   const view = buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children);
   if (!view) return null;
-  const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
-  view.liabilityProjection = await loadLiabilityProjectionForEmail({
+  const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
+  view.liabilityProjection = await loadLiabilityProjectionForEmail2({
     reservationId,
     bookingId
   });
@@ -232013,9 +232058,9 @@ async function handleCancelBooking(req, res) {
       });
     }
     try {
-      const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
+      const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
       const reservationView = await loadReservationEmailView(bookingId);
-      const liabilityProjection = reservationView ? reservationView.liabilityProjection : await loadLiabilityProjectionForEmail({ bookingId });
+      const liabilityProjection = reservationView ? reservationView.liabilityProjection : await loadLiabilityProjectionForEmail2({ bookingId });
       const cancellationSourceForEmail = cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff";
       await sendBookingTrigger(
         postTransactionAction,
@@ -232479,8 +232524,8 @@ async function fireRefundStateEmailAndNotification(params) {
   const guestEmail = String(bookingData2.guestEmail || "").trim();
   let liabilityProjection = null;
   try {
-    const { loadLiabilityProjectionForEmail } = await Promise.resolve().then(() => (init_email(), email_exports));
-    liabilityProjection = await loadLiabilityProjectionForEmail({
+    const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
+    liabilityProjection = await loadLiabilityProjectionForEmail2({
       reservationId: params.targetReservationId,
       bookingId: params.targetBookingId
     });

@@ -19,10 +19,9 @@ import { resolve } from "node:path";
 //   - The Done button calls `closeEarlyCheckInModal()`
 //   - The X close button at the top continues to work in both
 //     the form state + the success state
-//   - `earlyCheckInSent` resets when the modal closes so
-//     re-opening the modal shows the form, not the success
-//     panel (the existing `closeEarlyCheckInModal` doesn't
-//     reset it — that's the bug)
+//   - `earlyCheckInSent` persists when the modal closes so
+//     the confirmation-page card continues to show the sent
+//     status and cannot offer a duplicate submission
 //
 // This file pins the new contract at the source-text level so
 // a future refactor can't silently re-introduce the silent-
@@ -90,20 +89,43 @@ describe("BookingConfirmPage — early check-in modal success state", () => {
   });
 });
 
-describe("BookingConfirmPage — early check-in modal state reset", () => {
-  // Without resetting `earlyCheckInSent` when the modal
-  // closes, re-opening the modal would show the stale
-  // success panel. The existing `closeEarlyCheckInModal`
-  // resets notes + error but not sent — that's part of the
-  // bug. The fix adds the reset.
-
-  it("resets earlyCheckInSent inside closeEarlyCheckInModal", () => {
-    // The close handler is a single function with three
-    // reset calls. After the fix, the sent flag is reset
-    // alongside notes + error so re-opening starts clean.
-    expect(bookingConfirmPage).toMatch(
-      /closeEarlyCheckInModal\s*=\s*\(?\s*\)\s*=>\s*\{[\s\S]{0,200}?setEarlyCheckInSent\(false\)/
+describe("BookingConfirmPage — early check-in success persistence", () => {
+  it("does not clear earlyCheckInSent when the modal closes", () => {
+    const closeHandler = bookingConfirmPage.match(
+      /closeEarlyCheckInModal\s*=\s*\(?\s*\)\s*=>\s*\{([\s\S]{0,300}?)\n\s*\};/
     );
+
+    expect(closeHandler).not.toBeNull();
+    expect(closeHandler?.[1]).not.toMatch(/setEarlyCheckInSent\(false\)/);
+  });
+
+  it("uses the persistent sent state to replace the page-level request button", () => {
+    expect(bookingConfirmPage).toMatch(
+      /data-testid="early-checkin-request-section"[\s\S]{0,2000}?earlyCheckInSent\s*\?[\s\S]{0,800}?Request sent[\s\S]{0,800}?:\s*\([\s\S]{0,800}?data-testid="early-checkin-open-modal"/
+    );
+  });
+});
+
+describe("BookingConfirmPage — early check-in placement", () => {
+  it("places the early check-in card after the reservation reference and before reservation details", () => {
+    const referenceIndex = bookingConfirmPage.indexOf("Reservation Reference");
+    const earlyCheckInIndex = bookingConfirmPage.indexOf(
+      'data-testid="early-checkin-request-section"'
+    );
+    const detailsIndex = bookingConfirmPage.indexOf("Reservation Details");
+
+    expect(referenceIndex).toBeGreaterThan(-1);
+    expect(earlyCheckInIndex).toBeGreaterThan(referenceIndex);
+    expect(detailsIndex).toBeGreaterThan(earlyCheckInIndex);
+  });
+
+  it("keeps the special-requests card below the reservation details", () => {
+    const detailsIndex = bookingConfirmPage.indexOf("Reservation Details");
+    const specialRequestsIndex = bookingConfirmPage.indexOf(
+      'data-testid="special-requests-redirect"'
+    );
+
+    expect(specialRequestsIndex).toBeGreaterThan(detailsIndex);
   });
 });
 

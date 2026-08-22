@@ -264,20 +264,16 @@ export function BookingConfirmPage() {
   const [earlyCheckInSubmitting, setEarlyCheckInSubmitting] = useState(false);
   const [earlyCheckInSent, setEarlyCheckInSent] = useState(false);
   const [earlyCheckInError, setEarlyCheckInError] = useState<string | null>(null);
-  // Reset all modal state when closing — the per-booking
-  // guest can re-open after a decline / after re-thinking.
-  // Per fix/early-checkin-modal-success-state (2026-08-21):
-  // the success state (`earlyCheckInSent`) is reset alongside
-  // notes + error so re-opening the modal starts on the form,
-  // not on a stale "Request sent" panel. Pre-fix the success
-  // flag persisted across closes — opening the modal after a
-  // previous successful submit would show the success panel
-  // instead of the form.
+  // Clear transient form feedback when closing, but preserve
+  // `earlyCheckInSent` for the lifetime of this confirmation
+  // page. That flag also controls the inline status card below;
+  // resetting it here would make a successful request look
+  // unsent as soon as the guest dismisses the modal and would
+  // allow an accidental duplicate submission.
   const closeEarlyCheckInModal = () => {
     setShowEarlyCheckInModal(false);
     setEarlyCheckInNotes("");
     setEarlyCheckInError(null);
-    setEarlyCheckInSent(false);
   };
   const handleSubmitEarlyCheckIn = async () => {
     if (!user) {
@@ -388,6 +384,58 @@ export function BookingConfirmPage() {
           <span className="mt-1 font-mono text-2xl font-bold tracking-tight text-primary">{bookingRef}</span>
         </motion.div>
 
+        {/* The early check-in perk sits immediately after the
+            reservation reference so eligible members see the
+            time-sensitive action without scrolling past the full
+            stay summary. The booking success message + reference
+            remain the first and primary confirmation content. */}
+        {showEarlyCheckInButton && (
+          <motion.div
+            data-testid="early-checkin-request-section"
+            className="mt-6 rounded-xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.4 }}
+          >
+            <div className="flex items-start gap-3">
+              <Clock size={20} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+              <div className="flex-1">
+                <h3 className="font-heading text-base text-amber-950">
+                  Request early check-in
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-amber-900">
+                  As a {config.rewardsName} member, you can request an earlier arrival for
+                  booking <span className="font-mono font-bold">{bookingRef}</span>. This
+                  request is <strong>not guaranteed</strong> — it's subject to approval by our
+                  team, and you'll receive an email once we approve or decline the request.
+                </p>
+                {earlyCheckInSent ? (
+                  <div
+                    data-testid="early-checkin-sent"
+                    className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800"
+                  >
+                    <CheckCircle2 size={16} className="shrink-0" aria-hidden="true" />
+                    Request sent — we'll email you when our team has reviewed it.
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEarlyCheckInModal(true);
+                      setEarlyCheckInError(null);
+                    }}
+                    data-testid="early-checkin-open-modal"
+                    className="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-amber-700 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+                  >
+                    <Clock size={14} />
+                    Request early check-in
+                  </button>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Details Card */}
         <motion.div
           className="mt-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8"
@@ -479,7 +527,7 @@ export function BookingConfirmPage() {
 
         {/* Per feat/special-requests-redirect (2026-08-21): the
             "Forgot something?" prompt lives right after the email
-            alert and before the early check-in section. The
+            alert. The
             confirmation moment is when guests most often remember
             a special need (late check-in, dietary notes, room
             preferences) — surfacing the prompt here, with the
@@ -532,64 +580,6 @@ export function BookingConfirmPage() {
             </div>
           </div>
         </motion.div>
-
-        {/* Per EC-02 (2026-08-21): Spark Rewards early
-            check-in request section. The button is visible
-            ONLY to logged-in members when the admin toggle is
-            on. The strong disclaimer is right under the
-            button so the member sees the exact wording before
-            they open the modal — "not guaranteed and is for
-            approval, email will be received for the approval
-            or rejection". A separate `sent` state shows a
-            confirmation panel after the request goes through
-            (so the member doesn't accidentally double-submit
-            if they re-open the modal). */}
-        {showEarlyCheckInButton && (
-          <motion.div
-            data-testid="early-checkin-request-section"
-            className="mt-6 rounded-xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.38, duration: 0.4 }}
-          >
-            <div className="flex items-start gap-3">
-              <Clock size={20} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
-              <div className="flex-1">
-                <h3 className="font-heading text-base text-amber-950">
-                  Request early check-in
-                </h3>
-                <p className="mt-1 text-xs leading-relaxed text-amber-900">
-                  As a {config.rewardsName} member, you can request an earlier arrival for
-                  booking <span className="font-mono font-bold">{bookingRef}</span>. This
-                  request is <strong>not guaranteed</strong> — it's subject to approval by our
-                  team, and you'll receive an email once we approve or decline the request.
-                </p>
-                {earlyCheckInSent ? (
-                  <div
-                    data-testid="early-checkin-sent"
-                    className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800"
-                  >
-                    <CheckCircle2 size={16} className="shrink-0" aria-hidden="true" />
-                    Request sent — we'll email you when our team has reviewed it.
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowEarlyCheckInModal(true);
-                      setEarlyCheckInError(null);
-                    }}
-                    data-testid="early-checkin-open-modal"
-                    className="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-amber-700 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
-                  >
-                    <Clock size={14} />
-                    Request early check-in
-                  </button>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
 
         {/* Action Buttons */}
         <motion.div

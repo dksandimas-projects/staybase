@@ -116,34 +116,92 @@ function escapeHtml(value: unknown) {
 function generateReceiptPdf(booking: any): Buffer {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const left = 20;
-  let top = 20;
-  const pageWidth = 190;
+  // A4 is 210mm wide. The content column is 170mm so the 20mm gutter is
+  // symmetric — the previous 190mm width right-aligned every value at
+  // x=210, i.e. the physical paper edge, which clipped the longest values
+  // (booking refs, money) off the printable area.
+  const pageWidth = 170;
   const right = left + pageWidth;
+  const pageBottom = 280;
+  const lineHeight = 4.5;
+  let top = 20;
+
+  // jsPDF's built-in Helvetica is a WinAnsi-encoded standard font: a single
+  // character above U+00FF makes jsPDF emit the whole string as UTF-16,
+  // which the font has no CMap for. That is what turned "₱2,000" into
+  // "± 2 , 0 0 0" and letter-spaced every line containing a peso sign or an
+  // em dash. Every string drawn on this receipt goes through here first.
+  function pdfSafe(value: unknown) {
+    return String(value ?? "")
+      .replace(/₱/g, "PHP ")
+      .replace(/[‐-―]/g, "-")
+      .replace(/[‘’‛]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/[•‣⁃]/g, "-")
+      .replace(/…/g, "...")
+      .replace(/[   ]/g, " ")
+      // Latin-1 characters (é, ñ, ·, ×) have real glyphs and are kept as
+      // they are; anything else is decomposed to its closest Latin-1 form
+      // (and dropped only if it has none) so one stray character can no
+      // longer corrupt the whole line.
+      .replace(/[^\x00-\xFF]/g, (character) => character.normalize("NFKD").replace(/[^\x00-\xFF]/g, ""))
+      .trim();
+  }
 
   function line(y: number) {
     doc.setDrawColor(200);
     doc.line(left, y, right, y);
   }
 
-  function text(label: string, value: string, y: number) {
+  // Multi-room reservations and long rate breakdowns can run past the
+  // bottom of the page — without this the extra rows were drawn into the
+  // margin and lost.
+  function ensureSpace(needed = 10) {
+    if (top + needed <= pageBottom) return;
+    doc.addPage();
+    top = 20;
+  }
+
+  // Label on the left, value right-aligned against the content edge. The
+  // value is wrapped inside the space the label leaves free (and only
+  // there) so a long value can never collide with its own label or spill
+  // off the page.
+  function text(label: string, value: string, options: { gap?: number; bold?: boolean } = {}) {
+    const gap = options.gap ?? 6;
+    const safeLabel = pdfSafe(label);
+    const safeValue = pdfSafe(value);
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
-    doc.text(label, left, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(value, right, y, { align: "right" });
+    const labelWidth = doc.getTextWidth(safeLabel);
+    doc.setFont("helvetica", options.bold ? "bold" : "normal");
+    const valueLines: string[] = safeValue
+      ? doc.splitTextToSize(safeValue, Math.max(20, pageWidth - labelWidth - 4))
+      : [];
+    ensureSpace(Math.max(gap, valueLines.length * lineHeight));
+    doc.setFont("helvetica", "bold");
+    doc.text(safeLabel, left, top);
+    doc.setFont("helvetica", options.bold ? "bold" : "normal");
+    valueLines.forEach((valueLine, index) => {
+      doc.text(valueLine, right, top + index * lineHeight, { align: "right" });
+    });
+    top += Math.max(gap, (valueLines.length - 1) * lineHeight + gap);
+  }
+
+  function plain(value: string, gap: number) {
+    ensureSpace(gap);
+    doc.text(pdfSafe(value), left, top);
+    top += gap;
   }
 
   // Header
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(config.legalName || config.brandName, left, top);
+  doc.text(pdfSafe(config.legalName || config.brandName), left, top);
   top += 7;
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.text(`${config.address.street}, ${config.address.city}, ${config.address.region}`, left, top);
-  top += 5;
-  doc.text(`Tel: ${config.frontDeskPhone} | Email: ${config.supportEmail}`, left, top);
-  top += 8;
+  plain(`${config.address.street}, ${config.address.city}, ${config.address.region}`, 5);
+  plain(`Tel: ${config.frontDeskPhone} | Email: ${config.supportEmail}`, 8);
   line(top);
   top += 6;
 
@@ -155,17 +213,19 @@ function generateReceiptPdf(booking: any): Buffer {
 
   // Booking details
   const fmtDate = (v: any) => {
-    if (!v) return "—";
+    if (!v) return "-";
     const d = toDate(v);
-    return d ? new Intl.DateTimeFormat(config.locale, { month: "short", day: "numeric", year: "numeric", timeZone: config.timezone }).format(d) : "—";
+    return d ? new Intl.DateTimeFormat(config.locale, { month: "short", day: "numeric", year: "numeric", timeZone: config.timezone }).format(d) : "-";
   };
+  // `currencyDisplay: "code"` renders "PHP 2,000" instead of "₱2,000":
+  // the peso sign has no glyph in the PDF's standard font (see pdfSafe).
   const fmtMoney = (v: unknown) => {
     const amt = Number(v || 0);
-    return new Intl.NumberFormat(config.locale, { style: "currency", currency: config.currency, maximumFractionDigits: 0 }).format(amt);
+    return new Intl.NumberFormat(config.locale, { style: "currency", currency: config.currency, currencyDisplay: "code", maximumFractionDigits: 0 }).format(amt);
   };
 
-  text("Booking Ref:", String(booking.bookingRef || "—"), top); top += 6;
-  text("Guest:", String(booking.guestName || "—"), top); top += 6;
+  text("Booking Ref:", String(booking.bookingRef || "-"));
+  text("Guest:", String(booking.guestName || "-"));
   // Per MRB-09 (2026-08-02, per decision #168): the
   // multi-room receipt. The PDF lists every room in
   // the reservation with its own ref + type +
@@ -174,24 +234,24 @@ function generateReceiptPdf(booking: any): Buffer {
   const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
   if (rooms && rooms.length > 0) {
     if (booking.reservationRef) {
-      text("Reservation Ref:", String(booking.reservationRef), top); top += 6;
+      text("Reservation Ref:", String(booking.reservationRef));
     }
-    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`, top); top += 6;
+    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
     for (const room of rooms) {
       const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "—")} · ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${fmtMoney(Number(room.totalPrice || 0))}`;
-      text(label, value, top); top += 5;
+      const value = `${String(room.bookingRef || "-")} · ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${fmtMoney(Number(room.totalPrice || 0))}`;
+      text(label, value, { gap: 5 });
     }
   } else {
     // Per the refactor/room-number-visibility change: only the
     // room type is rendered on the PDF receipt. The room number
     // is intentionally omitted so the document doesn't create a
     // stale expectation if the room is reassigned before check-in.
-    text("Room Type:", String(booking.roomName || booking.roomType || "—"), top); top += 6;
+    text("Room Type:", String(booking.roomName || booking.roomType || "-"));
   }
-  text("Check-in:", fmtDate(booking.checkIn), top); top += 6;
-  text("Check-out:", fmtDate(booking.checkOut), top); top += 6;
-  text("Nights:", String(booking.numNights || 0), top); top += 6;
+  text("Check-in:", fmtDate(booking.checkIn));
+  text("Check-out:", fmtDate(booking.checkOut));
+  text("Nights:", String(booking.numNights || 0));
   // Per EXB-08 (2026-08-01, per decision #156): the
   // email's occupancy line now shows the adult/child
   // split when both fields are present, with the extra
@@ -208,17 +268,18 @@ function generateReceiptPdf(booking: any): Buffer {
     const extraBedCount = Number((booking as any).extraBedCount);
     if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
       const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
-      text(guestLine, "", top); top += 6;
+      text(guestLine, "");
       if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
-        text(`Extra beds: ${extraBedCount} (${extraBedCount} × ${fmtMoney((booking as any).extraBedRate)} / bed / night)`, "", top); top += 6;
+        text(`Extra beds: ${extraBedCount} (${extraBedCount} × ${fmtMoney((booking as any).extraBedRate)} / bed / night)`, "");
       }
     } else {
-      text("Guests:", String(booking.numGuests || 1), top); top += 6;
+      text("Guests:", String(booking.numGuests || 1));
     }
   }
-  if (booking.source) { text("Source:", String(booking.source), top); top += 6; }
+  if (booking.source) { text("Source:", String(booking.source)); }
 
   top += 2;
+  ensureSpace(12);
   line(top);
   top += 6;
 
@@ -226,48 +287,44 @@ function generateReceiptPdf(booking: any): Buffer {
   if (booking.rateBreakdown) {
     const bd = booking.rateBreakdown;
     if (Array.isArray(bd.roomLines)) {
-      bd.roomLines.forEach((line: any) => {
-        text(line.label || "Room rate", `${line.nights || 0} night(s) x ${fmtMoney(line.nightlyRate)} = ${fmtMoney(line.subtotal)}`, top);
-        top += 5;
+      bd.roomLines.forEach((entry: any) => {
+        text(entry.label || "Room rate", `${entry.nights || 0} night(s) x ${fmtMoney(entry.nightlyRate)} = ${fmtMoney(entry.subtotal)}`, { gap: 5 });
       });
     }
     if (Array.isArray(bd.addOns)) {
-      bd.addOns.forEach((line: any) => {
-        text(line.label || "Add-on", fmtMoney(line.amount), top);
-        top += 5;
+      bd.addOns.forEach((entry: any) => {
+        text(entry.label || "Add-on", fmtMoney(entry.amount), { gap: 5 });
       });
     }
     if (Array.isArray(bd.deductions)) {
-      bd.deductions.forEach((line: any) => {
-        text(line.label || "Discount", `-${fmtMoney(line.amount)}`, top);
-        top += 5;
+      bd.deductions.forEach((entry: any) => {
+        text(entry.label || "Discount", `-${fmtMoney(entry.amount)}`, { gap: 5 });
       });
     }
   }
 
   top += 2;
+  ensureSpace(12);
   line(top);
   top += 6;
 
   // Total
-  doc.setFont("helvetica", "bold");
-  text("Total Amount Due:", fmtMoney(booking.totalPrice), top);
-  top += 8;
+  text("Total Amount Due:", fmtMoney(booking.totalPrice), { gap: 8, bold: true });
 
   // Payment info
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text(`Payment Method: ${booking.paymentMethod || "—"}`, left, top); top += 5;
-  doc.text(`Status: ${booking.status || "—"}`, left, top); top += 8;
+  plain(`Payment Method: ${booking.paymentMethod || "-"}`, 5);
+  plain(`Status: ${booking.status || "-"}`, 8);
 
   // Footer
+  ensureSpace(12);
   line(top);
   top += 5;
   doc.setFontSize(8);
   doc.setTextColor(128);
-  doc.text(`Generated on ${new Date().toLocaleString(config.locale, { timeZone: config.timezone })}`, left, top);
-  top += 4;
-  doc.text(`Thank you for choosing ${config.brandName}.`, left, top);
+  plain(`Generated on ${new Date().toLocaleString(config.locale, { timeZone: config.timezone })}`, 4);
+  plain(`Thank you for choosing ${config.brandName}.`, 4);
 
   return Buffer.from(doc.output("arraybuffer"));
 }
@@ -350,7 +407,7 @@ function adminUrl(path = "") {
 // negative amounts on either subcollection per
 // CRL-01; the `|abs()|` makes the projection
 // consistent with the helper's sign convention).
-async function loadLiabilityProjectionForEmail(params: {
+export async function loadLiabilityProjectionForEmail(params: {
   reservationId?: string | null;
   bookingId: string;
 }): Promise<any | null> {
