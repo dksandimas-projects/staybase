@@ -189,7 +189,9 @@ These are documented here for awareness. Define before starting Phase 2:
 
 - [x] `/api/email/early-checkin-request` additionally persists the `earlyCheckIn` map onto the booking via Admin SDK in the same handler — guest client still never writes `bookings/` directly (per `plan/docs/GOTCHAS.md`)
 - [x] **Tighten auth**: once the request writes to the booking doc, require a verified Firebase ID token (drop the tokenless `bookingId` + `guestEmail` fallback for this action) — the perk is member-only anyway, and a write should not be reachable via the public lookup pattern
-- [x] Reject the request if booking status is not `confirmed` (e.g. `cancelled`, `checked-in`, `checked-out`) or if check-in date has passed
+- [x] Reject the request if booking status is not in the **3-status allowlist** `[payment-uploaded, payment-confirmed, confirmed]` (e.g. `pending`, `cancelled`, `checked-in`, `checked-out`) or if check-in date has passed
+  - Per `fix/early-checkin-payment-uploaded-allowlist` (2026-08-21): the original gate was `status === "confirmed"` only, which rejected every `payment-uploaded` booking with a 400 even though the guest had paid and was definitely coming. The expanded allowlist covers the three states where the booking is real and upcoming: `payment-uploaded` (the common case for online payments — guest paid, awaiting staff verification), `payment-confirmed` (staff verified, not yet transitioned), `confirmed` (the existing case). All other statuses still reject with a clear 400.
+  - The matching **client gate** in `BookingConfirmPage.tsx` (`showEarlyCheckInButton`) hides the button when the booking isn't in the allowlist, so a guest never sees a button that secretly 400s. The two sides are kept in sync via the shared array constant shape.
 - [x] Staff notification email unchanged (existing `earlyCheckinRequestEmail` template)
 
 ### Admin — booking drawer
