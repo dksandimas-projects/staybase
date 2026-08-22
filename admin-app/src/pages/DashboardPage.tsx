@@ -1165,101 +1165,131 @@ export function DashboardPage() {
             </div>
           </div>
 
-          {/* Per EC-01 (2026-08-21): the Spark Rewards early
-              check-in approval widget. Sits beside (and styled
-              like) the pending-payments card — same warm
-              attention treatment, same row pattern. Hidden when
-              no requests are pending so the dashboard does not
-              show an empty alert (per DASHBOARD-OVERVIEW.md §Edge
-              Cases). One row per booking with
+          {/* Per EC-01 (2026-08-21) + feat/early-checkin-empty-state
+              (2026-08-22): the Spark Rewards early check-in
+              approval widget. Sits beside (and styled like) the
+              pending-payments card. Container ALWAYS renders so
+              staff see "0 pending" rather than wondering whether
+              the section is missing or broken; tone + badge copy
+              toggle on `length > 0` (amber + "N pending" when
+              populated, neutral gray + "No pending requests"
+              when empty). Body row list is still gated on
+              `length > 0` so the empty state is visible-but-not-
+              noisy. Mirrors the pending-payments summary tile
+              at line 962. One row per booking with
               `earlyCheckIn.status === "requested"`; Approve and
               Decline actions call the existing
               `AdminContext.resolveEarlyCheckin` action (no new
-              API route, stays under the Vercel 12-function cap). */}
-          {pendingEarlyCheckIns.length > 0 && (
-            <div className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100" data-testid="early-checkin-widget">
+              API route, stays under the Vercel 12-function cap).
+              Reverses the prior "hide entirely when empty"
+              decision (DASHBOARD-OVERVIEW.md §Edge Cases,
+              2026-08-21). */}
+          <div
+            data-testid="early-checkin-widget"
+            className={`rounded-card border p-5 shadow-sm ring-1 ${
+              pendingEarlyCheckIns.length > 0
+                ? "border-amber-200 bg-amber-50 ring-amber-100"
+                : "border-gray-200 bg-gray-50 ring-gray-100"
+            }`}
+          >
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
-                  <CalendarClock size={18} className="text-amber-700" />
+                <h2
+                  className={`flex items-center gap-2 text-lg font-heading lowercase tracking-tight ${
+                    pendingEarlyCheckIns.length > 0 ? "text-amber-950" : "text-gray-700"
+                  }`}
+                >
+                  <CalendarClock
+                    size={18}
+                    className={pendingEarlyCheckIns.length > 0 ? "text-amber-700" : "text-gray-500"}
+                  />
                   early check-in requests
                 </h2>
-                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                  {pendingEarlyCheckIns.length} pending
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                    pendingEarlyCheckIns.length > 0
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {pendingEarlyCheckIns.length > 0
+                    ? `${pendingEarlyCheckIns.length} pending`
+                    : "No pending requests"}
                 </span>
               </div>
               <div className="space-y-3">
-                {pendingEarlyCheckIns.map((b) => {
-                  const isFocused = b.id === focusedEarlyCheckinBookingId;
-                  const requestedTime = b.earlyCheckIn?.requestedTime || "—";
-                  const notes = b.earlyCheckIn?.notes?.trim();
-                  const isBusy = resolveEarlyCheckinBusy === b.id;
-                  return (
-                    <div
-                      key={b.id}
-                      ref={isFocused ? focusedEarlyCheckinRowRef : undefined}
-                      className={`grid gap-3 rounded-lg border p-3 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center ${isFocused ? "border-primary bg-primary/5 ring-2 ring-primary/30" : "border-amber-200 bg-white/85"}`}
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-bold text-gray-900">{b.bookingRef || b.id}</p>
-                          <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800">
-                            early check-in requested
-                          </span>
-                          {b.roomNumber && (
-                            <span className="inline-flex items-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-700">
-                              Room {b.roomNumber}
-                            </span>
-                          )}
+                {pendingEarlyCheckIns.length > 0
+                  ? pendingEarlyCheckIns.map((b) => {
+                      const isFocused = b.id === focusedEarlyCheckinBookingId;
+                      const requestedTime = b.earlyCheckIn?.requestedTime || "—";
+                      const notes = b.earlyCheckIn?.notes?.trim();
+                      const isBusy = resolveEarlyCheckinBusy === b.id;
+                      return (
+                        <div
+                          key={b.id}
+                          ref={isFocused ? focusedEarlyCheckinRowRef : undefined}
+                          className={`grid gap-3 rounded-lg border p-3 shadow-sm sm:grid-cols-[1fr_auto] sm:items-center ${isFocused ? "border-primary bg-primary/5 ring-2 ring-primary/30" : "border-amber-200 bg-white/85"}`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-bold text-gray-900">{b.bookingRef || b.id}</p>
+                              <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800">
+                                early check-in requested
+                              </span>
+                              {b.roomNumber && (
+                                <span className="inline-flex items-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-700">
+                                  Room {b.roomNumber}
+                                </span>
+                              )}
+                            </div>
+                            <p className="truncate text-xs text-gray-600">
+                              {b.guestName} · requested {requestedTime}
+                              {b.checkIn ? ` · check-in ${b.checkIn}` : ""}
+                            </p>
+                            {notes && (
+                              <p className="mt-0.5 text-[11px] italic text-gray-500">
+                                "{notes}"
+                              </p>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setDeclineEarlyCheckinBooking(b)}
+                              disabled={isBusy}
+                              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                              title="Decline the early check-in request"
+                              data-testid="early-checkin-decline"
+                            >
+                              <XCircle size={14} />
+                              Decline
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setResolveEarlyCheckinBusy(b.id);
+                                const result = await resolveEarlyCheckin(b.id, "approved");
+                                setResolveEarlyCheckinBusy(null);
+                                if (result?.success) {
+                                  toast.success("Early check-in approved", `Notified ${b.guestName}.`);
+                                } else {
+                                  toast.error("Could not approve", result?.error || "Try again.");
+                                }
+                              }}
+                              disabled={isBusy}
+                              className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary sm:col-auto"
+                              title="Approve the early check-in request"
+                              data-testid="early-checkin-approve"
+                            >
+                              <Check size={14} />
+                              Approve
+                            </button>
+                          </div>
                         </div>
-                        <p className="truncate text-xs text-gray-600">
-                          {b.guestName} · requested {requestedTime}
-                          {b.checkIn ? ` · check-in ${b.checkIn}` : ""}
-                        </p>
-                        {notes && (
-                          <p className="mt-0.5 text-[11px] italic text-gray-500">
-                            "{notes}"
-                          </p>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setDeclineEarlyCheckinBooking(b)}
-                          disabled={isBusy}
-                          className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
-                          title="Decline the early check-in request"
-                          data-testid="early-checkin-decline"
-                        >
-                          <XCircle size={14} />
-                          Decline
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            setResolveEarlyCheckinBusy(b.id);
-                            const result = await resolveEarlyCheckin(b.id, "approved");
-                            setResolveEarlyCheckinBusy(null);
-                            if (result?.success) {
-                              toast.success("Early check-in approved", `Notified ${b.guestName}.`);
-                            } else {
-                              toast.error("Could not approve", result?.error || "Try again.");
-                            }
-                          }}
-                          disabled={isBusy}
-                          className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary sm:col-auto"
-                          title="Approve the early check-in request"
-                          data-testid="early-checkin-approve"
-                        >
-                          <Check size={14} />
-                          Approve
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })
+                  : null}
               </div>
             </div>
-          )}
 
           {/* Per EC-01 (2026-08-21): inline ConfirmForm for
               the Decline flow. We render it always — but
