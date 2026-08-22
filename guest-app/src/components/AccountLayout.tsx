@@ -37,19 +37,19 @@ export function AccountLayout({ children, activeTab, title, subtitle }: AccountL
   }
 
   const navItems = [
-    { id: "profile", label: "Profile", to: "/account/profile", icon: <User size={18} /> },
-    { id: "stays", label: "My Stays", to: "/account/stays", icon: <Calendar size={18} /> },
-    { id: "rewards", label: "My Rewards", to: "/account/rewards", icon: <Star size={18} /> }
+    { id: "profile", label: "Profile", mobileLabel: "Profile", to: "/account/profile", icon: <User size={18} /> },
+    { id: "stays", label: "My Stays", mobileLabel: "Stays", to: "/account/stays", icon: <Calendar size={18} /> },
+    { id: "rewards", label: "My Rewards", mobileLabel: "Rewards", to: "/account/rewards", icon: <Star size={18} /> }
   ];
 
   return (
-    <main className="min-h-screen bg-gray-50 font-body text-gray-900 flex flex-col justify-between">
+    <main className="min-h-screen min-w-0 bg-gray-50 font-body text-gray-900 flex flex-col justify-between">
       <div>
         <Navbar />
 
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
-            <aside className="w-full lg:sticky lg:top-28 lg:self-start z-20">
+          <div className="grid min-w-0 gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
+            <aside className="z-20 w-full min-w-0 max-w-full lg:sticky lg:top-28 lg:self-start">
               <nav className="hidden lg:flex flex-col gap-2 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
                 {navItems.map((item) => (
                   <Link
@@ -79,34 +79,35 @@ export function AccountLayout({ children, activeTab, title, subtitle }: AccountL
                 </div>
               </nav>
 
-              <nav className="flex lg:hidden overflow-x-auto rounded-card bg-white p-2 shadow-sm ring-1 ring-gray-200 gap-1.5 scrollbar-none">
+              <nav aria-label="Account navigation" className="grid w-full min-w-0 grid-cols-4 gap-1 rounded-card bg-white p-2 shadow-sm ring-1 ring-gray-200 lg:hidden">
                 {navItems.map((item) => (
                   <Link
                     key={item.id}
                     to={item.to}
+                    aria-current={activeTab === item.id ? "page" : undefined}
                     className={cn(
-                      "flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-xs transition whitespace-nowrap shrink-0",
+                      "flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-[10px] font-semibold leading-none transition sm:text-xs",
                       activeTab === item.id
                         ? "bg-primary text-white"
                         : "text-gray-600 hover:bg-gray-50"
                     )}
                   >
                     {item.icon}
-                    {item.label}
+                    <span className="max-w-full truncate">{item.mobileLabel}</span>
                   </Link>
                 ))}
-                <div className="w-px bg-gray-150 mx-1 shrink-0" />
                 <button
+                  type="button"
                   onClick={signOut}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-xs text-red-600 hover:bg-red-50 transition whitespace-nowrap shrink-0"
+                  className="flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-[10px] font-semibold leading-none text-red-600 transition hover:bg-red-50 sm:text-xs"
                 >
-                  <LogOut size={14} className="text-red-500" />
-                  Sign Out
+                  <LogOut size={18} className="text-red-500" />
+                  <span className="max-w-full truncate">Sign out</span>
                 </button>
               </nav>
             </aside>
 
-            <section className="flex-1">
+            <section className="min-w-0 max-w-full flex-1">
               <header className="mb-8">
                 <h1 className="font-heading text-3xl text-gray-950 sm:text-4xl">{title}</h1>
                 <p className="text-sm text-gray-600 mt-2">{subtitle}</p>
