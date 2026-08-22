@@ -340,6 +340,47 @@ export function CorporateBookingPage() {
     _hp: ""
   });
 
+  // Per fix/booking-autofill-member-profile-race (2026-08-22):
+  // the `guestDetails` initializer above runs ONCE on mount.
+  // `memberProfile` arrives asynchronously via
+  // `onAuthStateChanged` + Firestore `onSnapshot` (typically
+  // 200–500ms after mount), so the initializer always sees
+  // `memberProfile = null` and every autofill branch falls
+  // through to `""`. The form fields stayed empty even for
+  // signed-in members on the corporate flow.
+  //
+  // This effect re-applies the autofill when `memberProfile`
+  // lands (or changes). Mirrors the BookingPage.tsx fix exactly.
+  // URL params keep precedence (the corporate re-book flow
+  // can pin first/last/phone via the URL), the "only fill
+  // empty fields" guard preserves user edits typed in the
+  // gap between mount and snapshot.
+  useEffect(() => {
+    if (!memberProfile?.isMember) return;
+    if (!memberProfile.fullName && !memberProfile.email && !memberProfile.phone) return;
+    setGuestDetails((prev) => {
+      const urlFirst = searchParams.get("firstName");
+      const urlLast = searchParams.get("lastName");
+      const urlEmail = searchParams.get("email");
+      const urlPhone = searchParams.get("phone");
+      const derivedFirst = memberProfile.fullName.split(" ")[0] ?? "";
+      const derivedLast = memberProfile.fullName.split(" ").slice(1).join(" ") ?? "";
+      return {
+        ...prev,
+        firstName: prev.firstName || urlFirst || derivedFirst,
+        lastName: prev.lastName || urlLast || derivedLast,
+        email: prev.email || urlEmail || memberProfile.email,
+        phone: prev.phone || urlPhone || memberProfile.phone
+      };
+    });
+  }, [
+    memberProfile?.isMember,
+    memberProfile?.fullName,
+    memberProfile?.email,
+    memberProfile?.phone,
+    searchParams
+  ]);
+
   const [touchedFields, setTouchedFields] = useState<Record<GuestField, boolean>>({
     firstName: false,
     lastName: false,
