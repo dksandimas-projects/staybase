@@ -1565,6 +1565,12 @@ export async function handleCreateBooking(req: any, res: any) {
     }> = [];
     let computedData: any = {};
     let alreadyExistingBookingResponse: any = null;
+    // Public clients cannot read `bookings/*`. Keep the creation status in a
+    // function-scope value so the persisted document and success response use
+    // the same authoritative value.
+    const initialBookingStatus = paymentProofPath || paymentProofUrl
+      ? "payment-uploaded"
+      : "pending";
     // Per PEX-05 (2026-08-01, per decision #147): the snapshotted
     // `holdExpiresAt` is captured inside the transaction (so it
     // matches the `now` used for the retirement pass) and read
@@ -1733,6 +1739,7 @@ export async function handleCreateBooking(req: any, res: any) {
             roomNumber: String(existingChild.roomNumber || ""),
             totalPrice: Number(existingData.totalPrice || existingChild.totalPrice || 0),
             bookingRef: String(existingChild.bookingRef || ""),
+            status: String(existingChild.status || ""),
             rateBreakdown: existingChild.rateBreakdown || null,
             holdExpiresAt: (existingChild as any).holdExpiresAt
               ? ((existingChild as any).holdExpiresAt.toDate
@@ -1803,6 +1810,7 @@ export async function handleCreateBooking(req: any, res: any) {
           roomId: assignedRoomId,
           roomNumber: assignedRoomNumber,
           roomType: String(existing.roomType || roomType),
+          status: String(existing.status || ""),
           rateBreakdown: finalRateBreakdown,
           alreadyExists: true
         };
@@ -2830,7 +2838,7 @@ export async function handleCreateBooking(req: any, res: any) {
           email: guestDetails.email.trim().toLowerCase(),
           phone: guestDetails.phone.trim()
         },
-        status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
+        status: initialBookingStatus,
         // Per PEX-01 (2026-08-01, per decision #147): the
         // snapshotted deadline. Computed from the admin's
         // `paymentHoldWindowHours` setting at the same `now`
@@ -3521,7 +3529,27 @@ export async function handleCreateBooking(req: any, res: any) {
         // bookings (no auto-expiry, staff-review state). The
         // confirmation page renders "Held until X" so the
         // guest knows the exact local time the hold lapses.
-        holdExpiresAt: bookingHoldExpiresAt
+        holdExpiresAt: bookingHoldExpiresAt,
+        // Per fix/booking-confirm-status-via-url-param
+        // (2026-08-22): the booking status is threaded into
+        // the success response so the BookingPage redirect
+        // can put it on the /book/confirm URLSearchParams.
+        // The BookingConfirmPage client-side gate for the
+        // "Request early check-in" widget reads it from
+        // searchParams.get("status") on first render —
+        // synchronous, no Firestore read needed (guests
+        // don't have direct read access on the `bookings`
+        // collection per firebase/firestore.rules:43). The
+        // status mirrors the value persisted to the booking
+        // doc at creation time (line 2833 — `payment-uploaded`
+        // if a payment proof was uploaded, `pending`
+        // otherwise). For pay-at-hotel this is `pending`;
+        // the staff confirm-with-balance path later flips
+        // it to `confirmed` server-side. A stale URL param
+        // is acceptable here — the server-side gate in the
+        // `early-checkin-request` action still protects the
+        // actual click via the 3-status allowlist.
+        status: initialBookingStatus
       }
     });
 

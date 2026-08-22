@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.291.0";
+    VERSION2 = "0.292.1";
   }
 });
 
@@ -228722,6 +228722,7 @@ async function handleCreateBooking(req, res) {
     let finalRooms = [];
     let computedData = {};
     let alreadyExistingBookingResponse = null;
+    const initialBookingStatus = paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending";
     let bookingHoldExpiresAt = null;
     let assignedRoomId = "";
     let assignedRoomNumber = "";
@@ -228780,6 +228781,7 @@ async function handleCreateBooking(req, res) {
             roomNumber: String(existingChild.roomNumber || ""),
             totalPrice: Number(existingData.totalPrice || existingChild.totalPrice || 0),
             bookingRef: String(existingChild.bookingRef || ""),
+            status: String(existingChild.status || ""),
             rateBreakdown: existingChild.rateBreakdown || null,
             holdExpiresAt: existingChild.holdExpiresAt ? existingChild.holdExpiresAt.toDate ? existingChild.holdExpiresAt.toDate() : existingChild.holdExpiresAt : null
           };
@@ -228815,6 +228817,7 @@ async function handleCreateBooking(req, res) {
           roomId: assignedRoomId,
           roomNumber: assignedRoomNumber,
           roomType: String(existing.roomType || roomType),
+          status: String(existing.status || ""),
           rateBreakdown: finalRateBreakdown,
           alreadyExists: true
         };
@@ -229400,7 +229403,7 @@ async function handleCreateBooking(req, res) {
           email: guestDetails.email.trim().toLowerCase(),
           phone: guestDetails.phone.trim()
         },
-        status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
+        status: initialBookingStatus,
         // Per PEX-01 (2026-08-01, per decision #147): the
         // snapshotted deadline. Computed from the admin's
         // `paymentHoldWindowHours` setting at the same `now`
@@ -229959,7 +229962,27 @@ async function handleCreateBooking(req, res) {
         // bookings (no auto-expiry, staff-review state). The
         // confirmation page renders "Held until X" so the
         // guest knows the exact local time the hold lapses.
-        holdExpiresAt: bookingHoldExpiresAt
+        holdExpiresAt: bookingHoldExpiresAt,
+        // Per fix/booking-confirm-status-via-url-param
+        // (2026-08-22): the booking status is threaded into
+        // the success response so the BookingPage redirect
+        // can put it on the /book/confirm URLSearchParams.
+        // The BookingConfirmPage client-side gate for the
+        // "Request early check-in" widget reads it from
+        // searchParams.get("status") on first render —
+        // synchronous, no Firestore read needed (guests
+        // don't have direct read access on the `bookings`
+        // collection per firebase/firestore.rules:43). The
+        // status mirrors the value persisted to the booking
+        // doc at creation time (line 2833 — `payment-uploaded`
+        // if a payment proof was uploaded, `pending`
+        // otherwise). For pay-at-hotel this is `pending`;
+        // the staff confirm-with-balance path later flips
+        // it to `confirmed` server-side. A stale URL param
+        // is acceptable here — the server-side gate in the
+        // `early-checkin-request` action still protects the
+        // actual click via the 3-status allowlist.
+        status: initialBookingStatus
       }
     });
   } catch (error) {

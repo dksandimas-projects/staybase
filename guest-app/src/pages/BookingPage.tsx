@@ -1679,6 +1679,12 @@ export function BookingPage() {
       if (confirmedBreakdown) {
         confirmParams.set("rateBreakdown", encodeURIComponent(JSON.stringify(confirmedBreakdown)));
       }
+      // Guest clients cannot read `bookings/*` directly. Carry the
+      // server-authoritative creation status into the confirmation URL so
+      // BookingConfirmPage can gate the early check-in action without a
+      // Firestore permission error. The submit endpoint still validates the
+      // live status, so this parameter is only a presentation hint.
+      confirmParams.set("status", String(result.data?.status ?? ""));
       navigate(`/book/confirm?${confirmParams.toString()}`);
     } catch (err: any) {
       console.error("Confirm booking error:", err);
