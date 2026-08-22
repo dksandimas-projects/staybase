@@ -459,6 +459,7 @@ CorporateInvoice {
 }
 
 EarlyCheckInDetails {
+  source?: "guest-request" | "staff-granted"
   status: "requested" | "approved" | "declined"
   requestedTime: string
   notes: string
@@ -469,6 +470,8 @@ EarlyCheckInDetails {
   confirmedTime?: string | null
 }
 ```
+
+`source` is optional for backward compatibility. Missing values are treated as `guest-request`; new guest submissions stamp `guest-request`, while an administrator-created grant stamps `staff-granted`. For a staff grant, `requestedTime` and `requestedAt` retain the required legacy shape by storing the granted time and grant-created timestamp.
 
 ### BookingRateBreakdown
 
