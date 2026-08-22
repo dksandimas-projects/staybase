@@ -106,6 +106,29 @@ describe("BookingConfirmPage — early check-in success persistence", () => {
   });
 });
 
+describe("BookingConfirmPage — early check-in placement", () => {
+  it("places the early check-in card after the reservation reference and before reservation details", () => {
+    const referenceIndex = bookingConfirmPage.indexOf("Reservation Reference");
+    const earlyCheckInIndex = bookingConfirmPage.indexOf(
+      'data-testid="early-checkin-request-section"'
+    );
+    const detailsIndex = bookingConfirmPage.indexOf("Reservation Details");
+
+    expect(referenceIndex).toBeGreaterThan(-1);
+    expect(earlyCheckInIndex).toBeGreaterThan(referenceIndex);
+    expect(detailsIndex).toBeGreaterThan(earlyCheckInIndex);
+  });
+
+  it("keeps the special-requests card below the reservation details", () => {
+    const detailsIndex = bookingConfirmPage.indexOf("Reservation Details");
+    const specialRequestsIndex = bookingConfirmPage.indexOf(
+      'data-testid="special-requests-redirect"'
+    );
+
+    expect(specialRequestsIndex).toBeGreaterThan(detailsIndex);
+  });
+});
+
 describe("BookingConfirmPage — early check-in modal header (regression nets)", () => {
   // The X close button at the top of the modal header +
   // the modal's role + aria attributes stay unchanged. The
