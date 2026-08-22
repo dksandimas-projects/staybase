@@ -587,6 +587,7 @@ export function BookingsPage() {
     rooms, 
     updateBookingStatus, 
     resolveEarlyCheckin,
+    grantEarlyCheckin,
     addOnsitePayment, 
     addWalkinBooking,
     resendBookingEmail,
@@ -692,7 +693,7 @@ export function BookingsPage() {
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
   const [chargeToVoid, setChargeToVoid] = useState<IncidentalCharge | null>(null);
 
-  const [earlyCheckInAction, setEarlyCheckInAction] = useState<"approve" | "decline" | null>(null);
+  const [earlyCheckInAction, setEarlyCheckInAction] = useState<"grant" | "approve" | "decline" | null>(null);
   const [earlyCheckInTimeOverride, setEarlyCheckInTimeOverride] = useState<string>("");
   const [earlyCheckInStaffNote, setEarlyCheckInStaffNote] = useState<string>("");
   const [isResolvingEarlyCheckIn, setIsResolvingEarlyCheckIn] = useState(false);
@@ -791,6 +792,11 @@ export function BookingsPage() {
 
   // Booking Drawer States
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  useEffect(() => {
+    setEarlyCheckInAction(null);
+    setEarlyCheckInTimeOverride("");
+    setEarlyCheckInStaffNote("");
+  }, [selectedBooking?.id]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [activeBookingSection, setActiveBookingSection] = useState<BookingDrawerSection>("overview");
   const [showEditRegistration, setShowEditRegistration] = useState(false);
@@ -6278,9 +6284,113 @@ export function BookingsPage() {
 
             {/* Early Check-In Request Panel */}
             <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
-            {selectedBooking.earlyCheckIn && ["confirmed", "checked-in"].includes(selectedBooking.status) && (() => {
+            {!selectedBooking.earlyCheckIn
+              && currentUser?.role === "admin"
+              && ["payment-confirmed", "confirmed"].includes(selectedBooking.status) && (
+              <div className="space-y-3" data-testid="admin-grant-early-checkin-panel">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <Clock size={14} className="text-primary" />
+                  Early Check-In
+                </h3>
+                <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900">
+                  <div>
+                    <p className="font-bold">Grant early check-in</p>
+                    <p className="mt-1 text-emerald-800">Add an early arrival time directly to this booking. The guest will be notified by email.</p>
+                  </div>
+
+                  {earlyCheckInAction !== "grant" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEarlyCheckInAction("grant");
+                        setEarlyCheckInTimeOverride(EARLY_CHECKIN_DEFAULT_TIME);
+                        setEarlyCheckInStaffNote("");
+                      }}
+                      className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-4 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95 sm:w-auto"
+                    >
+                      <CheckCircle2 size={13} />
+                      Grant early check-in
+                    </button>
+                  ) : (
+                    <div className="space-y-3 border-t border-emerald-200 pt-3">
+                      <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                        Early Check-In Time
+                        <select
+                          value={earlyCheckInTimeOverride}
+                          onChange={(e) => setEarlyCheckInTimeOverride(e.target.value)}
+                          className="min-h-[44px] w-full rounded-lg border border-emerald-200 bg-white px-3 text-xs text-gray-900 outline-none"
+                        >
+                          {EARLY_CHECKIN_TIME_OPTIONS.map((time) => (
+                            <option key={time} value={time}>{time}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                        Staff Note (optional, sent to guest)
+                        <textarea
+                          value={earlyCheckInStaffNote}
+                          onChange={(e) => setEarlyCheckInStaffNote(e.target.value)}
+                          placeholder="e.g. Please proceed to the front desk when you arrive."
+                          maxLength={500}
+                          rows={2}
+                          className="min-h-[72px] w-full resize-none rounded-lg border border-emerald-200 bg-white p-3 text-xs text-gray-800 outline-none"
+                        />
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={isResolvingEarlyCheckIn || !earlyCheckInTimeOverride}
+                          onClick={async () => {
+                            setIsResolvingEarlyCheckIn(true);
+                            try {
+                              const result = await grantEarlyCheckin(selectedBooking.id, earlyCheckInTimeOverride, earlyCheckInStaffNote || undefined);
+                              if (!result.success) {
+                                toast.error("Early check-in not granted", result.error || "Please try again.");
+                                return;
+                              }
+                              const now = new Date().toISOString();
+                              syncSelectedBooking({
+                                earlyCheckIn: {
+                                  source: "staff-granted",
+                                  status: "approved",
+                                  requestedTime: earlyCheckInTimeOverride,
+                                  notes: "",
+                                  requestedAt: now,
+                                  resolvedAt: now,
+                                  resolvedBy: currentUser?.email || "Administrator",
+                                  staffNote: earlyCheckInStaffNote || null,
+                                  confirmedTime: earlyCheckInTimeOverride
+                                }
+                              } as Partial<Booking>);
+                              setEarlyCheckInAction(null);
+                              toast.success("Early check-in granted", "The guest has been notified by email.");
+                            } finally {
+                              setIsResolvingEarlyCheckIn(false);
+                            }
+                          }}
+                          className="inline-flex min-h-[44px] flex-grow items-center justify-center gap-1.5 rounded-lg bg-emerald-600 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95 disabled:opacity-60"
+                        >
+                          {isResolvingEarlyCheckIn && <Loader2 size={13} className="animate-spin" />}
+                          Grant & notify guest
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEarlyCheckInAction(null)}
+                          className="min-h-[44px] rounded-lg border border-emerald-200 bg-white px-4 text-[11px] font-bold text-gray-700 hover:bg-emerald-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {selectedBooking.earlyCheckIn && ["payment-confirmed", "confirmed", "checked-in"].includes(selectedBooking.status) && (() => {
               const eci = selectedBooking.earlyCheckIn!;
               const isResolved = eci.status === "approved" || eci.status === "declined";
+              const isStaffGranted = eci.source === "staff-granted";
+              const canManage = !isStaffGranted || currentUser?.role === "admin";
               const statusColors = {
                 requested: "bg-amber-50 border-amber-200 text-amber-800",
                 approved: "bg-emerald-50 border-emerald-200 text-emerald-800",
@@ -6291,12 +6401,12 @@ export function BookingsPage() {
                 <div className="space-y-3">
                   <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
                     <Clock size={14} className="text-primary" />
-                    Early Check-In Request
+                    {isStaffGranted ? "Early Check-In Grant" : "Early Check-In Request"}
                   </h3>
                   <div className={`rounded-lg border p-4 space-y-3 text-xs ${statusColors[eci.status as keyof typeof statusColors] || "bg-gray-50 border-gray-200 text-gray-700"}`}>
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <p className="font-bold uppercase tracking-wide text-[10px]">
-                        Status: {eci.status}
+                        Status: {isStaffGranted && eci.status === "approved" ? "granted" : eci.status}
                       </p>
                       {eci.resolvedBy && (
                         <span className="text-[10px] text-gray-500">Resolved by {eci.resolvedBy}</span>
@@ -6305,11 +6415,11 @@ export function BookingsPage() {
 
                     <div className="grid gap-1.5 sm:grid-cols-2 text-xs">
                       <div>
-                        <p className="text-[10px] text-gray-500 uppercase font-bold">Requested Time</p>
+                        <p className="text-[10px] text-gray-500 uppercase font-bold">{isStaffGranted ? "Granted Time" : "Requested Time"}</p>
                         <p className="font-semibold text-gray-900">{eci.requestedTime || "Not specified"}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-gray-500 uppercase font-bold">Submitted</p>
+                        <p className="text-[10px] text-gray-500 uppercase font-bold">{isStaffGranted ? "Granted" : "Submitted"}</p>
                         <p className="font-semibold text-gray-900">{eci.requestedAt ? new Date(eci.requestedAt).toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" }) : "—"}</p>
                       </div>
                       {eci.notes && (
@@ -6326,15 +6436,15 @@ export function BookingsPage() {
                       )}
                     </div>
 
-                    {!earlyCheckInAction && (
+                    {!earlyCheckInAction && canManage && (
                       <div className="flex gap-2 pt-1 border-t border-current/10">
                         <button
                           type="button"
                           onClick={() => {
                             setEarlyCheckInAction("approve");
                             setEarlyCheckInTimeOverride(
-                              EARLY_CHECKIN_TIME_OPTIONS.includes(eci.requestedTime)
-                                ? eci.requestedTime
+                              EARLY_CHECKIN_TIME_OPTIONS.includes(eci.confirmedTime || eci.requestedTime)
+                                ? (eci.confirmedTime || eci.requestedTime)
                                 : EARLY_CHECKIN_DEFAULT_TIME
                             );
                             setEarlyCheckInStaffNote("");
@@ -6342,7 +6452,7 @@ export function BookingsPage() {
                           className="flex-grow min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-[11px] font-bold text-white shadow-sm transition active:scale-95"
                         >
                           <CheckCircle2 size={13} />
-                          {isResolved && eci.status === "approved" ? "Re-approve" : "Approve"}
+                          {isStaffGranted ? "Change time" : (isResolved && eci.status === "approved" ? "Re-approve" : "Approve")}
                         </button>
                         <button
                           type="button"
@@ -6354,15 +6464,23 @@ export function BookingsPage() {
                           className="flex-grow min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-[11px] font-bold text-red-600 transition"
                         >
                           <XCircle size={13} />
-                          {isResolved && eci.status === "declined" ? "Re-decline" : "Decline"}
+                          {isStaffGranted ? "Remove grant" : (isResolved && eci.status === "declined" ? "Re-decline" : "Decline")}
                         </button>
                       </div>
+                    )}
+
+                    {!canManage && (
+                      <p className="border-t border-current/10 pt-2 text-[10px] font-semibold text-gray-600">
+                        Granted by an administrator. Admin access is required to change it.
+                      </p>
                     )}
 
                     {earlyCheckInAction && (
                       <div className="space-y-3 border-t border-current/10 pt-3">
                         <p className="text-xs font-bold text-gray-800">
-                          {earlyCheckInAction === "approve" ? "Confirm Approval" : "Confirm Decline"}
+                          {isStaffGranted
+                            ? (earlyCheckInAction === "approve" ? "Change Early Check-In Time" : "Remove Early Check-In")
+                            : (earlyCheckInAction === "approve" ? "Confirm Approval" : "Confirm Decline")}
                         </p>
 
                         {earlyCheckInAction === "approve" && (
@@ -6409,7 +6527,9 @@ export function BookingsPage() {
                                   toast.error("Failed to resolve", result.error || "An unexpected error occurred.");
                                 } else {
                                   toast.success(
-                                    earlyCheckInAction === "approve" ? "Early check-in approved" : "Early check-in declined",
+                                    isStaffGranted
+                                      ? (earlyCheckInAction === "approve" ? "Early check-in updated" : "Early check-in removed")
+                                      : (earlyCheckInAction === "approve" ? "Early check-in approved" : "Early check-in declined"),
                                     "Guest will be notified by email."
                                   );
                                   setEarlyCheckInAction(null);
@@ -6433,7 +6553,9 @@ export function BookingsPage() {
                             }`}
                           >
                             {isResolvingEarlyCheckIn ? <Loader2 size={13} className="animate-spin" /> : null}
-                            {earlyCheckInAction === "approve" ? "Send Approval" : "Send Decline"}
+                            {isStaffGranted
+                              ? (earlyCheckInAction === "approve" ? "Update & notify guest" : "Remove & notify guest")
+                              : (earlyCheckInAction === "approve" ? "Send Approval" : "Send Decline")}
                           </button>
                           <button
                             type="button"

@@ -1784,28 +1784,39 @@ export async function sendEarlyCheckinRequestTrigger(booking: any, request: any)
 
 function earlyCheckinResolveEmail(booking: any, status: "approved" | "declined", staffNote?: string) {
   const isApproved = status === "approved";
-  const eyebrow = isApproved ? "Early check-in approved" : "Early check-in unavailable";
-  const title = isApproved ? "Your early check-in request is approved" : "Early check-in request status";
-  const intro = isApproved
-    ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.`
-    : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`;
+  const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
+  const eyebrow = isStaffGranted
+    ? (isApproved ? "Early check-in granted" : "Early check-in updated")
+    : (isApproved ? "Early check-in approved" : "Early check-in unavailable");
+  const title = isStaffGranted
+    ? (isApproved ? "Early check-in added to your stay" : "Your early check-in time has changed")
+    : (isApproved ? "Your early check-in request is approved" : "Early check-in request status");
+  const intro = isStaffGranted
+    ? (isApproved
+      ? `Our team has added early check-in to booking ${booking.bookingRef}. Your room will be ready for your early arrival.`
+      : `We need to update the early check-in arrangement for booking ${booking.bookingRef}. Please arrive from the standard check-in time.`)
+    : (isApproved
+      ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.`
+      : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`);
 
   const timeVal = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime || "Requested time";
 
   return emailLayout({
-    preheader: isApproved 
-      ? `Your early check-in request for booking ${booking.bookingRef} is approved.` 
-      : `Status update regarding your early check-in request for booking ${booking.bookingRef}.`,
+    preheader: isStaffGranted
+      ? (isApproved ? `Early check-in has been added to booking ${booking.bookingRef}.` : `Early check-in update for booking ${booking.bookingRef}.`)
+      : (isApproved
+        ? `Your early check-in request for booking ${booking.bookingRef} is approved.`
+        : `Status update regarding your early check-in request for booking ${booking.bookingRef}.`),
     eyebrow,
     title,
     intro,
     body: `
-      ${card("Request Details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+      ${card(isStaffGranted ? "Early Check-In Details" : "Request Details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
         ${row("Booking ref", booking.bookingRef)}
         ${row("Guest name", booking.guestName)}
         ${row("Check-in date", formatDate(booking.checkIn))}
         ${row("Early check-in time", isApproved ? timeVal : "Standard time (14:00)")}
-        ${row("Status", isApproved ? "Approved" : "Declined (Unavailable)")}
+        ${row("Status", isApproved ? (isStaffGranted ? "Granted" : "Approved") : "Unavailable")}
       </table>`)}
       ${staffNote ? callout("warm", "Message from front desk", escapeHtml(staffNote)) : ""}
     `,
@@ -1815,9 +1826,13 @@ function earlyCheckinResolveEmail(booking: any, status: "approved" | "declined",
 }
 
 export async function sendEarlyCheckinResolveTrigger(booking: any, status: "approved" | "declined", staffNote?: string) {
+  const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
+  const subject = isStaffGranted
+    ? `[${config.brandName}] Early check-in ${status === "approved" ? "added" : "updated"}: ${booking.bookingRef}`
+    : `[${config.brandName}] Early check-in status: ${booking.bookingRef}`;
   await sendEmail(
     booking.guestEmail,
-    `[${config.brandName}] Early check-in status: ${booking.bookingRef}`,
+    subject,
     earlyCheckinResolveEmail(booking, status, staffNote)
   );
 }
@@ -2516,6 +2531,7 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
       const request = parsed.data;
 
       const earlyCheckIn = {
+        source: "guest-request",
         status: "requested",
         requestedTime: request.requestedCheckInTime,
         notes: request.notes || "",

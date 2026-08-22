@@ -10665,6 +10665,7 @@ function buildReservationLookupView(reservation: any, children: any[], anchorRoo
 const resolveEarlyCheckinSchema = z.object({
   bookingId: z.string().trim().min(1).max(80),
   status: z.enum(["approved", "declined"]),
+  grantIfMissing: z.boolean().optional().default(false),
   staffNote: z.string().trim().max(500).optional().default(""),
   // An empty string means "no override" (the admin form sends "" when the
   // guest's requested time could not seed the dropdown) — treat it as absent
@@ -10673,7 +10674,7 @@ const resolveEarlyCheckinSchema = z.object({
     (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
     z.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
   )
-});
+}).strict();
 
 export async function handleResolveEarlyCheckin(req: any, res: any) {
   if (req.method !== "POST") {
@@ -10685,12 +10686,24 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Invalid resolution request details." });
   }
 
-  const { bookingId, status, staffNote, confirmedTime } = parsed.data;
+  const { bookingId, status, grantIfMissing, staffNote, confirmedTime } = parsed.data;
+
+  if (grantIfMissing && req.staff?.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only administrators can grant early check-in." });
+  }
+  if (grantIfMissing && status !== "approved") {
+    return res.status(400).json({ success: false, error: "A new early check-in grant must use approved status." });
+  }
+  if (grantIfMissing && !confirmedTime) {
+    return res.status(400).json({ success: false, error: "Choose an early check-in time before granting it." });
+  }
 
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
     let bookingData: any = null;
+    let didWrite = false;
+    let idempotentReplay = false;
 
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
@@ -10698,8 +10711,61 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
         throw new Error("BOOKING_NOT_FOUND");
       }
       const data = bookingDoc.data()!;
+
+      if (grantIfMissing) {
+        const existing = data.earlyCheckIn;
+        if (existing) {
+          const sameGrant = existing.source === "staff-granted"
+            && existing.status === "approved"
+            && existing.confirmedTime === confirmedTime
+            && String(existing.staffNote || "") === staffNote;
+          if (sameGrant) {
+            idempotentReplay = true;
+            bookingData = { id: bookingDoc.id, ...data };
+            return;
+          }
+          throw new Error("EARLY_CHECKIN_EXISTS");
+        }
+        if (!["payment-confirmed", "confirmed"].includes(data.status)) {
+          throw new Error("GRANT_STATUS_INVALID");
+        }
+        const checkInDate = toDateOrNull(data.checkIn);
+        if (!checkInDate) {
+          throw new Error("INVALID_CHECKIN_DATE");
+        }
+        const checkInKey = typeof data.checkIn === "string"
+          ? data.checkIn.slice(0, 10)
+          : checkInDate.toISOString().slice(0, 10);
+        if (checkInKey < getManilaDateInfo().todayStr) {
+          throw new Error("CHECKIN_DATE_PASSED");
+        }
+
+        const nowIso = new Date().toISOString();
+        const grantedEarlyCheckIn = {
+          source: "staff-granted",
+          status: "approved",
+          requestedTime: confirmedTime,
+          notes: "",
+          requestedAt: nowIso,
+          resolvedAt: nowIso,
+          resolvedBy,
+          staffNote: staffNote || "",
+          confirmedTime
+        };
+        bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: grantedEarlyCheckIn };
+        transaction.update(bookingRef, {
+          earlyCheckIn: grantedEarlyCheckIn,
+          updatedAt: new Date()
+        });
+        didWrite = true;
+        return;
+      }
+
       if (!data.earlyCheckIn) {
         throw new Error("NO_REQUEST_FOUND");
+      }
+      if (data.earlyCheckIn.source === "staff-granted" && req.staff?.role !== "admin") {
+        throw new Error("STAFF_GRANT_ADMIN_ONLY");
       }
       
       const updatedEarlyCheckIn = {
@@ -10717,22 +10783,40 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
         earlyCheckIn: updatedEarlyCheckIn,
         updatedAt: new Date()
       });
+      didWrite = true;
     });
 
     // Send resolve email trigger to the guest
-    try {
-      await sendEarlyCheckinResolveTrigger(bookingData, status, staffNote);
-    } catch (emailErr) {
-      console.error("Failed to send early check-in resolve email:", emailErr);
+    if (didWrite) {
+      try {
+        await sendEarlyCheckinResolveTrigger(bookingData, status, staffNote);
+      } catch (emailErr) {
+        console.error("Failed to send early check-in resolve email:", emailErr);
+      }
     }
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, data: { earlyCheckIn: bookingData?.earlyCheckIn, idempotentReplay } });
   } catch (error: any) {
     if (error?.message === "BOOKING_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
     if (error?.message === "NO_REQUEST_FOUND") {
       return res.status(400).json({ success: false, error: "No early check-in request exists for this booking." });
+    }
+    if (error?.message === "EARLY_CHECKIN_EXISTS") {
+      return res.status(409).json({ success: false, error: "This booking already has an early check-in request or grant." });
+    }
+    if (error?.message === "GRANT_STATUS_INVALID") {
+      return res.status(400).json({ success: false, error: "Early check-in can only be granted after payment is confirmed and before check-in." });
+    }
+    if (error?.message === "INVALID_CHECKIN_DATE") {
+      return res.status(400).json({ success: false, error: "This booking has an invalid check-in date." });
+    }
+    if (error?.message === "CHECKIN_DATE_PASSED") {
+      return res.status(400).json({ success: false, error: "Early check-in cannot be granted after the check-in date has passed." });
+    }
+    if (error?.message === "STAFF_GRANT_ADMIN_ONLY") {
+      return res.status(403).json({ success: false, error: "Only administrators can change an admin-granted early check-in." });
     }
     console.error("Resolve early check-in handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });

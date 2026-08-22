@@ -59,6 +59,12 @@ The calendar icons are non-interactive children of the existing booking-cell but
 
 The green calendar icon renders only for approved requests. The staff-confirmed override time takes priority in the drawer, with the guest's requested time as the fallback when the request was approved as submitted. Pending and declined requests do not render the green icon.
 
+### Admin-Granted Early Check-In
+
+Admins can add early check-in directly from the booking drawer when the booking has no early-check-in record, its status is `payment-confirmed` or `confirmed`, and its check-in date has not passed. The Overview panel collects a required time and optional note, then sends the guest a source-aware confirmation email. The same approved calendar icon and drawer-header badge appear immediately after the write.
+
+The server, not the drawer, is authoritative: grant mode is admin-only, runs in a Firestore transaction, never overwrites a guest request, and treats an exact retry as an idempotent replay without sending a duplicate email. The stored record is marked `source: staff-granted` and includes the resolver and timestamps. Front Desk can view the details but only an administrator can change the time or remove an admin grant. Existing and legacy guest requests keep the current Front Desk/Admin approve-and-decline workflow.
+
 ## New Booking Modal (Walk-in Create) — NBS-2026-08-08 fixes
 
 The New Booking modal + the Calendar's "Book dates" modal are the staff walk-in create paths. Both post to `POST /api/bookings/create-walkin` via the shared `addWalkinBooking` helper in `admin-app/src/context/AdminContext.tsx`. The 2026-08-08 booking-flow audit closed 6 findings in one batch on `fix/new-booking-audit-2026-08-08` (decision #206):
