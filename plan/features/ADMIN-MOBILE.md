@@ -121,7 +121,7 @@ Active-state behavior is unchanged: `bg-primary` for active, `hover:bg-white/10`
 The Stitch mobile header is a three-zone row:
 
 - **Left zone:** Hamburger icon (44×44 touch target) — always visible on mobile, opens the slide-in sidebar.
-- **Center zone:** **Brand wordmark** — the lowercase brand name from `config.brandName` rendered in `font-heading text-lg text-primary` (orange). Absolutely positioned, centered. Decorative only — `aria-hidden="true"`. This is the single most distinctive mobile header element; do not replace it with the page H1.
+- **Center zone:** **Brand wordmark** — the lowercase brand name from `config.brandName` rendered in `font-heading text-sm tracking-tight text-primary` (orange). Absolutely positioned, centered. Decorative only — `aria-hidden="true"`. This is the single most distinctive mobile header element; do not replace it with the page H1. **Size note (decision #225, 2026-08-26):** the previous `text-lg` (18px) wordmark overlapped the right-zone icons on small phones (the 151px center slot between the 60px hamburger+safe-area-left and the 164px right-zone+safe-area-right on a 375px viewport couldn't fit "spark inn" at 18px Apollo = ~160px). Downgraded to `text-sm` (14px) with `tracking-tight` so "spark inn" measures ~110px and fits cleanly. Paired with `max-w-[calc(100vw-11rem)] truncate` as a fail-safe clip for very narrow viewports.
 - **Right zone:** **Contextual action**, not a fixed sign-out. Varies by page:
   - `/` (Dashboard): "Book Now" text link in primary color
   - `/bookings` (and other operational pages): round avatar icon (filled `primary/10` background, `User` icon, opens account menu on tap)
