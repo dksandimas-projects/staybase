@@ -145,8 +145,16 @@ describe("Phase 11.7 — Admin Mobile UX (P0 foundations)", () => {
     it("renders a centered brand wordmark on mobile (per Stitch mobile design)", () => {
       // The mobile header centers the "spark inn" wordmark between the
       // hamburger and the right-side action, per the Stitch mobile designs.
+      //
+      // Per decision #225 (2026-08-26): the historical size was
+      // `text-lg` (18px) but that overflowed the 151px center slot
+      // on a 375px viewport, visually colliding with the right-zone
+      // icons. The current contract uses `text-sm` + `tracking-tight`
+      // so "spark inn" measures ~110px and fits cleanly. The test
+      // pins the new size + the centered absolute positioning +
+      // the primary color (which must stay - it's the brand signal).
       expect(layoutSrc).toMatch(/absolute\s+left-1\/2[^"]*-translate-x-1\/2/);
-      expect(layoutSrc).toMatch(/font-heading[^"]*text-lg[^"]*text-primary/);
+      expect(layoutSrc).toMatch(/font-heading[^"]*text-sm[^"]*tracking-tight[^"]*text-primary/);
     });
 
     it("hides the Operational Dashboard label on mobile", () => {

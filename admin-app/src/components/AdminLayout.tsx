@@ -137,20 +137,31 @@ export function AdminLayout() {
           </div>
 
           {/* Center zone — mobile wordmark per Stitch design.
-                Per #18 / decision #224 (2026-08-19): capped
-                `max-w-[calc(100vw-7rem)] truncate` (the 7rem ≈ 112
-                px is the sum of the left + right zone widths —
-                hamburger 44 + right zone 132 + 2 × safe-area
-                16 ≈ 112, conservatively rounded up) and pinned
-                `truncate` so a long `config.brandName` or a
-                narrow viewport doesn't overflow past the safe-
-                area-inset-right boundary and visually bleed
-                under the NotificationBell. The `data-testid`
-                marker pins the contract for the e2e suite. */}
+                Per #18 / decision #224 (2026-08-19):
+                  capped `max-w-[calc(100vw-...)] truncate` and
+                  pinned `truncate` so a long `config.brandName`
+                  or a narrow viewport doesn't overflow past the
+                  safe-area-inset-right boundary and visually
+                  bleed under the NotificationBell.
+                Per decision #225 (2026-08-26): the #224 cap
+                  `100vw-7rem` (≈263px at 375) was actually
+                  *larger* than the available center slot (hamburger
+                  zone 60px + right zone 164px on a 375px viewport =
+                  151px center slot), so the cap never fired and
+                  the absolute wordmark still overlapped the right
+                  icons. Tightened the cap to `100vw-11rem`
+                  (≈199px at 375, fail-safe at iPhone-5 320px) AND
+                  downgraded `text-lg` → `text-sm` with
+                  `tracking-tight` so "spark inn" measures ~110px
+                  and fits comfortably inside the 151px slot.
+                  The `truncate` ellipsis still kicks in as a
+                  last-resort clip on screens narrower than 375px.
+                The `data-testid` marker pins the contract for the
+                e2e suite. */}
           {isMobile && (
             <span
               data-testid="brand-wordmark"
-              className="pointer-events-none absolute left-1/2 -translate-x-1/2 max-w-[calc(100vw-7rem)] truncate text-center font-heading text-lg font-semibold text-primary"
+              className="pointer-events-none absolute left-1/2 -translate-x-1/2 max-w-[calc(100vw-11rem)] truncate text-center font-heading text-sm font-semibold tracking-tight text-primary"
               aria-hidden="true"
             >
               {config.brandName}
