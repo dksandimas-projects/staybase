@@ -327,9 +327,13 @@ describe("ECE-02 — source-text regression guards", () => {
     // Find the preview switch block. All three templates must pass
     // houseRules through (string-typed + null fallback for the
     // omitted case), matching the ECE-01 payment-confirmed pattern.
-    expect(src).toMatch(/case "booking-confirmed":[\s\S]*?bookingConfirmedEmail\(mockBooking,\s*typeof houseRules === "string" \? houseRules : null\)/);
-    expect(src).toMatch(/case "checkin-reminder":[\s\S]*?checkinReminderEmail\(mockBooking,\s*typeof houseRules === "string" \? houseRules : null\)/);
+    // Per ETR-22.b (2026-09-19): the preview handler enriches the
+    // mockBooking into `enrichedMockBooking` for the banner
+    // auto-detect, so the booking template cases pass the
+    // enriched mock instead of the raw one.
+    expect(src).toMatch(/case "booking-confirmed":[\s\S]*?bookingConfirmedEmail\(enrichedMockBooking,\s*typeof houseRules === "string" \? houseRules : null\)/);
+    expect(src).toMatch(/case "checkin-reminder":[\s\S]*?checkinReminderEmail\(enrichedMockBooking,\s*typeof houseRules === "string" \? houseRules : null\)/);
     // The payment-confirmed preview path is the established pattern.
-    expect(src).toMatch(/case "payment-confirmed":[\s\S]*?paymentConfirmedEmail\(mockBooking,\s*typeof houseRules === "string" \? houseRules : null\)/);
+    expect(src).toMatch(/case "payment-confirmed":[\s\S]*?paymentConfirmedEmail\(enrichedMockBooking,\s*typeof houseRules === "string" \? houseRules : null\)/);
   });
 });
