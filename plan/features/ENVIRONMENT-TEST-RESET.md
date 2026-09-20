@@ -63,6 +63,27 @@ Production receives final end-to-end testing before real hotel operations begin.
 
 ---
 
+### Email environment banner (ETR-22)
+
+> Shipped 2026-09-19 (v0.276.0). Closes the ETR-03 / ETR-07 audit gap flagged in the Q3 review: a tagged production test-run booking still sent real Resend emails with no visible marker that they were test data. The banner ships in two stacked layers — `environmentBanner(state)` renders a test-run callout on top when the booking has `isTestData: true`, then a staging callout below when `isStagingProject()` returns true. Both blocks are gated by the same `STAGING_ALLOWLIST_PROJECT_IDS` allowlist the staging reset uses, so the banner can never disagree with the staging reset's authorization model.
+
+- ✅ **ETR-22.1 — Stamping test-run banner metadata on create.** `handleCreateBooking` (public path) and `handleCreateWalkin` (admin path) both snapshot the validated run's `name` + `environment` into local scope before the create transaction commits, then stamp `testRunName` + `testRunEnvironment` onto the booking doc alongside `isTestData` + `testRunId`. No per-email Firestore round-trip — the booking doc is the canonical record once written.
+- ✅ **ETR-22.2 — Surfacing banner metadata on the email view.** `buildCreateEmailView` (in `bookings.ts`) and `buildReservationEmailView` (in `email.ts`) both forward `isTestData`, `testRunName`, `testRunEnvironment` through to the synthesized reservation + child objects and surface them as top-level fields on the returned view. `loadReservationEmailView` inherits the fields from the reservation header's children — no additional view-builder changes needed.
+- ✅ **ETR-22.3 — Banner helpers live in a testable module.** `guest-app/server/handlers/email-banner.ts` hosts `environmentBanner(state)` + `environmentBannerFromBooking(booking)` with no firebase-admin / resend / jsPDF imports, so unit tests can import the helpers directly. `email.ts` imports both names from the standalone module.
+- ✅ **ETR-22.4 — Auto-detect staging inside the helper.** `environmentBanner({})` (no test-run state) still appends the staging callout when `isStagingProject()` returns true. Every template call site that previously read only the booking view (`environmentBannerFromBooking`) automatically gets the staging banner for free; templates without a booking view (corporate inquiry, contact inquiry, voucher issued, verification) pass `environmentBanner({})` explicitly.
+- ✅ **ETR-22.5 — Banner renders at the top of the white content card.** `emailLayout` accepts a `bannerHtml?: string` option that renders as the first child of the content cell, before the intro paragraph. Stays inside the white card (visible, not breaking the dark hero / footer split). Banner ordering is test-run (more specific) on top, staging (deployment-level) below when both apply.
+- ✅ **ETR-22.6 — Every email template renders the banner.** All 27 `emailLayout({...})` call sites pass `bannerHtml`: 13 booking / staff templates read from the booking view; 14 non-booking + store-order templates pass `environmentBanner({})` so the staging banner still fires on staging. Wired via 26 `bannerHtml:` assignments (one per call site) + 1 `bannerHtml?: string` option declaration.
+- ✅ **ETR-22.7 — Banner copy is honest.** Test-run descriptor falls back from `"test run "Q3 smoke 2026" on staging"` (full) → `"test run "Q3 smoke 2026""` (name only) → `"active test run on staging"` (env only) → `"active test run"` (neither) — always truthful, never guesses. HTML in the run name is escaped (XSS-safe).
+- ✅ **ETR-22.8 — Coverage.** `guest-app/tests/api/email-environment-banner.test.ts` ships 23 tests: 14 unit tests for the helper (staging-only, test-run-only, both stacked, name injection, legacy null safety) + 9 source-text regression tests for the wiring (stamping sites, view-builder surfaces, every emailLayout call has bannerHtml, bannerHtml renders before intro). All pass.
+
+**Out of scope (deferred to a follow-up ticket):**
+
+- 🔲 Suppressing the email sends entirely for tagged test runs — ETR-R07's staging-only contract. The banner is the production-side analog ("you got a real email but it's just a test"). The next round of ETR work can add the suppression switch when we're ready to commit to no-test-emails in production.
+- 🔲 Banner for the receipt PDF attachment (`generateReceiptPdf`) and for in-app staff notifications (`writeNotification` calls). Currently bannered only via the email layer; PDFs + notifications are in-app. Spec the follow-up if / when you want the same callout there.
+- 🔲 Banner for store-order templates reading test-run metadata. Store orders don't currently stamp `isTestData` — they only get the staging banner via `environmentBanner({})`. Extend the stamping pattern if/when store orders participate in test runs.
+
+---
+
 ## Open spec — Production-to-staging refresh and sanitization (ETR-R)
 
 > Owner requirement added 2026-07-16 (revised same day): Admin needs a way to refresh staging from production and may need exact source values to reproduce a defect. The UI therefore includes a default-on sanitization checkbox. Turning it off does not create an ordinary refresh: it automatically activates the restricted diagnostic controls and automatic destruction defined below.

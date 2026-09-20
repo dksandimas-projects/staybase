@@ -368,6 +368,13 @@ function buildCreateEmailView(args: {
   isCorporate: boolean;
   corporateCode: string;
   companyName: string;
+  // ETR-22: test-run banner metadata for the post-commit
+  // booking-submitted email. Read from the validated run
+  // the create transaction just stamped onto each child.
+  isTestData?: boolean;
+  testRunId?: string;
+  testRunName?: string;
+  testRunEnvironment?: "staging" | "production";
 }): any | null {
   if (!args.reservationId || !args.reservationRef) return null;
   if (!Array.isArray(args.finalRooms) || args.finalRooms.length === 0) return null;
@@ -388,7 +395,17 @@ function buildCreateEmailView(args: {
     corporateCode: args.corporateCode,
     companyName: args.companyName,
     paymentMethod: args.paymentMethod,
-    paymentStatus: args.paymentStatus
+    paymentStatus: args.paymentStatus,
+    // ETR-22: stamped onto each child booking doc by the create
+    // transaction — surface on the synthetic reservation so the
+    // top-level email view (`environmentBanner` reads) carries
+    // the same fields without a separate Firestore round-trip.
+    isTestData: args.isTestData === true,
+    testRunId: String(args.testRunId || ""),
+    testRunName: String(args.testRunName || ""),
+    testRunEnvironment: args.testRunEnvironment === "staging" || args.testRunEnvironment === "production"
+      ? args.testRunEnvironment
+      : undefined
     // Per BAR-02 (2026-08-08, per decision #203):
     // the `activeRoomCount` and `cancelledRoomCount`
     // are not stamped onto the synthetic reservation
@@ -430,7 +447,16 @@ function buildCreateEmailView(args: {
       corporateCode: args.corporateCode,
       companyName: args.companyName,
       paymentMethod: args.paymentMethod,
-      status: args.paymentStatus
+      status: args.paymentStatus,
+      // ETR-22: per-child stamped fields so the email view's
+      // `first.isTestData` / `first.testRunName` reads carry
+      // the values through `buildReservationEmailView`.
+      isTestData: args.isTestData === true,
+      testRunId: String(args.testRunId || ""),
+      testRunName: String(args.testRunName || ""),
+      testRunEnvironment: args.testRunEnvironment === "staging" || args.testRunEnvironment === "production"
+        ? args.testRunEnvironment
+        : undefined
     };
   });
   return buildReservationEmailView(reservation, children);
@@ -1432,6 +1458,10 @@ export async function handleCreateBooking(req: any, res: any) {
 
   // ETR-03: validate test token before entering the transaction
   let validatedTestRunId: string | null = null;
+  // ETR-22: snapshot the run's name + environment so the
+  // create transaction can stamp them onto the booking doc.
+  let validatedTestRunName = "";
+  let validatedTestRunEnvironment: "staging" | "production" = "production";
   if (testToken) {
     const hashed = hashToken(testToken);
     const activeRuns = await adminDb
@@ -1453,6 +1483,16 @@ export async function handleCreateBooking(req: any, res: any) {
       });
     }
     validatedTestRunId = run.id;
+    // ETR-22: snapshot the run's display name + environment so
+    // the create transaction can stamp them onto the booking doc
+    // alongside `isTestData`. The trigger functions read these
+    // from the booking view to render the test-run banner — we
+    // don't want a per-email Firestore read for the run name, and
+    // the booking doc is the canonical record once written.
+    validatedTestRunName = typeof run.name === "string" ? run.name.trim().slice(0, 120) : "";
+    validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production"
+      ? run.environment
+      : "production";
   }
 
   // Per MRB-02 (2026-08-02, per decision #159): the
@@ -2959,7 +2999,7 @@ export async function handleCreateBooking(req: any, res: any) {
             }
           : {}),
         ...(validatedTestRunId
-          ? { isTestData: true, testRunId: validatedTestRunId }
+          ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment }
           : {}),
         // Per MRB-02 (2026-08-02, per decision #159): the
         // reservation header linkage. `reservationId` is
@@ -3382,7 +3422,15 @@ export async function handleCreateBooking(req: any, res: any) {
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate === true,
         corporateCode: corporateDetails.corporateCode || "",
-        companyName: corporateDetails.companyName || ""
+        companyName: corporateDetails.companyName || "",
+        // ETR-22: thread the test-run banner metadata into the
+        // synthetic email view so the booking-submitted template
+        // renders the test-run banner above the reservation
+        // details card.
+        isTestData: validatedTestRunId !== null,
+        testRunId: validatedTestRunId || undefined,
+        testRunName: validatedTestRunName || undefined,
+        testRunEnvironment: validatedTestRunEnvironment
       });
       await sendBookingTrigger("booking-submitted", emailView ?? {
         ...computedData,
@@ -3778,6 +3826,8 @@ export async function handleCreateWalkin(req: any, res: any) {
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
 
   let validatedTestRunId: string | null = null;
+  let validatedTestRunName = "";
+  let validatedTestRunEnvironment: "staging" | "production" = "production";
   if (requestedTestRunId) {
     const runDoc = await adminDb.collection("testRuns").doc(requestedTestRunId).get();
     if (!runDoc.exists) {
@@ -3800,6 +3850,13 @@ export async function handleCreateWalkin(req: any, res: any) {
       });
     }
     validatedTestRunId = run.id;
+    // ETR-22: snapshot the run's display name + environment so
+    // the create transaction can stamp them onto the booking
+    // doc alongside `isTestData`.
+    validatedTestRunName = typeof run.name === "string" ? run.name.trim().slice(0, 120) : "";
+    validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production"
+      ? run.environment
+      : "production";
   }
 
   try {
@@ -4675,7 +4732,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
         ...(validatedTestRunId
-          ? { isTestData: true, testRunId: validatedTestRunId }
+          ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment }
           : {}),
         // Per MRB-02.x (2026-08-02, per decision #164): the
         // reservation header linkage. Same shape as the

@@ -1,7 +1,7 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: August 21, 2026 — **EC-01 shipped** (`feature/early-checkin-admin-alerts`): Spark Rewards early check-in requests now surface in the persistent `notifications` bell + a new dashboard widget with Approve / Decline actions. 1581/1581 admin-app tests + 569/569 shared tests green; `tsc -p admin-app` + `tsc -p api` both clean; no new Vercel function (reuses `POST /api/bookings/early-checkin-resolve`).
-> Last ship: August 21, 2026 (EC-01).
+> Last updated: September 19, 2026 — **ETR-22 shipped** (`feature/etr-22-email-banner`): environment banner renders on every server-sent email — a test-run callout when the booking has `isTestData: true` (with the run's name + environment) and a staging callout when `isStagingProject()` returns true. 23/23 new tests in `guest-app/tests/api/email-environment-banner.test.ts`; `tsc -b` + `npm run build:api` clean; full guest-app/api test suite at 1753/1757 (4 pre-existing `dev` failures unchanged). See `plan/features/ENVIRONMENT-TEST-RESET.md §Email environment banner (ETR-22)`.
+> Last ship: September 19, 2026 (ETR-22).
 
 > Last ship: August 21, 2026 (EC-01 — `feature/early-checkin-admin-alerts`; admin-app 1581/1581 + shared 569/569 + tsc clean; Spark Rewards early check-in requests now fan out to the persistent bell + a new dashboard widget with Approve/Decline controls).
 

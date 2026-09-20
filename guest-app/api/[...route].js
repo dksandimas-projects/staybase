@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "0.294.0";
+    VERSION2 = "1.0.1";
   }
 });
 
@@ -224126,2007 +224126,7 @@ var init_notifications = __esm({
   }
 });
 
-// server/handlers/email.ts
-var email_exports = {};
-__export(email_exports, {
-  buildReservationEmailView: () => buildReservationEmailView,
-  handleEmailPreview: () => handleEmailPreview,
-  handleEmailTrigger: () => handleEmailTrigger,
-  loadLiabilityProjectionForEmail: () => loadLiabilityProjectionForEmail,
-  sendBookingConfirmedWithBalanceTrigger: () => sendBookingConfirmedWithBalanceTrigger,
-  sendBookingTrigger: () => sendBookingTrigger,
-  sendContactConfirmationTrigger: () => sendContactConfirmationTrigger,
-  sendContactInquiryTrigger: () => sendContactInquiryTrigger,
-  sendCorporateInquiryConfirmationTrigger: () => sendCorporateInquiryConfirmationTrigger,
-  sendCorporateInquiryTrigger: () => sendCorporateInquiryTrigger,
-  sendEarlyCheckinRequestTrigger: () => sendEarlyCheckinRequestTrigger,
-  sendEarlyCheckinResolveTrigger: () => sendEarlyCheckinResolveTrigger,
-  sendStaffNewBookingTrigger: () => sendStaffNewBookingTrigger,
-  sendStaffNewPaymentTrigger: () => sendStaffNewPaymentTrigger,
-  sendStaffRefundReviewTrigger: () => sendStaffRefundReviewTrigger,
-  sendStoreOrderTrigger: () => sendStoreOrderTrigger,
-  sendVerificationEmailTrigger: () => sendVerificationEmailTrigger,
-  sendVoucherIssuedTrigger: () => sendVoucherIssuedTrigger
-});
-function escapeHtml(value) {
-  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-function generateReceiptPdf(booking) {
-  const doc = new import_jspdf.jsPDF({ unit: "mm", format: "a4" });
-  const left2 = 20;
-  const pageWidth = 170;
-  const right2 = left2 + pageWidth;
-  const pageBottom = 280;
-  const lineHeight = 4.5;
-  let top = 20;
-  function pdfSafe(value) {
-    return String(value ?? "").replace(/₱/g, "PHP ").replace(/[‐-―]/g, "-").replace(/[‘’‛]/g, "'").replace(/[“”]/g, '"').replace(/[•‣⁃]/g, "-").replace(/…/g, "...").replace(/[   ]/g, " ").replace(/[^\x00-\xFF]/g, (character) => character.normalize("NFKD").replace(/[^\x00-\xFF]/g, "")).trim();
-  }
-  function line(y2) {
-    doc.setDrawColor(200);
-    doc.line(left2, y2, right2, y2);
-  }
-  function ensureSpace(needed = 10) {
-    if (top + needed <= pageBottom) return;
-    doc.addPage();
-    top = 20;
-  }
-  function text(label, value, options = {}) {
-    const gap = options.gap ?? 6;
-    const safeLabel = pdfSafe(label);
-    const safeValue = pdfSafe(value);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    const labelWidth = doc.getTextWidth(safeLabel);
-    doc.setFont("helvetica", options.bold ? "bold" : "normal");
-    const valueLines = safeValue ? doc.splitTextToSize(safeValue, Math.max(20, pageWidth - labelWidth - 4)) : [];
-    ensureSpace(Math.max(gap, valueLines.length * lineHeight));
-    doc.setFont("helvetica", "bold");
-    doc.text(safeLabel, left2, top);
-    doc.setFont("helvetica", options.bold ? "bold" : "normal");
-    valueLines.forEach((valueLine, index) => {
-      doc.text(valueLine, right2, top + index * lineHeight, { align: "right" });
-    });
-    top += Math.max(gap, (valueLines.length - 1) * lineHeight + gap);
-  }
-  function plain(value, gap) {
-    ensureSpace(gap);
-    doc.text(pdfSafe(value), left2, top);
-    top += gap;
-  }
-  doc.setFontSize(16);
-  doc.setFont("helvetica", "bold");
-  doc.text(pdfSafe(hotel_config_default.legalName || hotel_config_default.brandName), left2, top);
-  top += 7;
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  plain(`${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}`, 5);
-  plain(`Tel: ${hotel_config_default.frontDeskPhone} | Email: ${hotel_config_default.supportEmail}`, 8);
-  line(top);
-  top += 6;
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.text("Booking Receipt", left2, top);
-  top += 8;
-  const fmtDate = (v6) => {
-    if (!v6) return "-";
-    const d = toDate3(v6);
-    return d ? new Intl.DateTimeFormat(hotel_config_default.locale, { month: "short", day: "numeric", year: "numeric", timeZone: hotel_config_default.timezone }).format(d) : "-";
-  };
-  const fmtMoney = (v6) => {
-    const amt = Number(v6 || 0);
-    return new Intl.NumberFormat(hotel_config_default.locale, { style: "currency", currency: hotel_config_default.currency, currencyDisplay: "code", maximumFractionDigits: 0 }).format(amt);
-  };
-  text("Booking Ref:", String(booking.bookingRef || "-"));
-  text("Guest:", String(booking.guestName || "-"));
-  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
-  if (rooms && rooms.length > 0) {
-    if (booking.reservationRef) {
-      text("Reservation Ref:", String(booking.reservationRef));
-    }
-    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
-    for (const room of rooms) {
-      const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
-      text(label, value, { gap: 5 });
-    }
-  } else {
-    text("Room Type:", String(booking.roomName || booking.roomType || "-"));
-  }
-  text("Check-in:", fmtDate(booking.checkIn));
-  text("Check-out:", fmtDate(booking.checkOut));
-  text("Nights:", String(booking.numNights || 0));
-  {
-    const numAdults = Number(booking.numAdults);
-    const numChildren = Number(booking.numChildren);
-    const extraBedCount = Number(booking.extraBedCount);
-    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
-      const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
-      text(guestLine, "");
-      if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
-        text(`Extra beds: ${extraBedCount} (${extraBedCount} \xD7 ${fmtMoney(booking.extraBedRate)} / bed / night)`, "");
-      }
-    } else {
-      text("Guests:", String(booking.numGuests || 1));
-    }
-  }
-  if (booking.source) {
-    text("Source:", String(booking.source));
-  }
-  top += 2;
-  ensureSpace(12);
-  line(top);
-  top += 6;
-  if (booking.rateBreakdown) {
-    const bd = booking.rateBreakdown;
-    if (Array.isArray(bd.roomLines)) {
-      bd.roomLines.forEach((entry) => {
-        text(entry.label || "Room rate", `${entry.nights || 0} night(s) x ${fmtMoney(entry.nightlyRate)} = ${fmtMoney(entry.subtotal)}`, { gap: 5 });
-      });
-    }
-    if (Array.isArray(bd.addOns)) {
-      bd.addOns.forEach((entry) => {
-        text(entry.label || "Add-on", fmtMoney(entry.amount), { gap: 5 });
-      });
-    }
-    if (Array.isArray(bd.deductions)) {
-      bd.deductions.forEach((entry) => {
-        text(entry.label || "Discount", `-${fmtMoney(entry.amount)}`, { gap: 5 });
-      });
-    }
-  }
-  top += 2;
-  ensureSpace(12);
-  line(top);
-  top += 6;
-  text("Total Amount Due:", fmtMoney(booking.totalPrice), { gap: 8, bold: true });
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  plain(`Payment Method: ${booking.paymentMethod || "-"}`, 5);
-  plain(`Status: ${booking.status || "-"}`, 8);
-  ensureSpace(12);
-  line(top);
-  top += 5;
-  doc.setFontSize(8);
-  doc.setTextColor(128);
-  plain(`Generated on ${(/* @__PURE__ */ new Date()).toLocaleString(hotel_config_default.locale, { timeZone: hotel_config_default.timezone })}`, 4);
-  plain(`Thank you for choosing ${hotel_config_default.brandName}.`, 4);
-  return Buffer.from(doc.output("arraybuffer"));
-}
-function siteUrl(path = "") {
-  return `${getServerBaseUrl()}${path}`;
-}
-function adminUrl(path = "") {
-  return `${getServerAdminBaseUrl()}${path}`;
-}
-async function loadLiabilityProjectionForEmail(params) {
-  const reservationId = String(params.reservationId || "").trim();
-  const bookingId = String(params.bookingId || "").trim();
-  if (!bookingId) return null;
-  let liability = null;
-  let refundsRef = null;
-  if (reservationId) {
-    const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
-    if (reservationDoc.exists) {
-      liability = reservationDoc.data()?.cancellationLiability || null;
-      if (liability) {
-        refundsRef = adminDb.collection("reservations").doc(reservationId).collection("refunds");
-      }
-    }
-  }
-  if (!liability) {
-    const bookingDoc = await adminDb.collection("bookings").doc(bookingId).get();
-    if (bookingDoc.exists) {
-      liability = bookingDoc.data()?.cancellationLiability || null;
-    }
-    refundsRef = adminDb.collection("bookings").doc(bookingId).collection("payments");
-  }
-  if (!liability) return null;
-  let processedAmount = 0;
-  if (refundsRef) {
-    try {
-      const snap = await refundsRef.get();
-      processedAmount = snap.docs.reduce((sum, d) => {
-        const amount = Number(d.data()?.amount || 0);
-        return sum + Math.abs(amount);
-      }, 0);
-    } catch (err) {
-      console.warn("[email] Failed to read refunds subcollection for liability projection:", err);
-    }
-  }
-  const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
-  return computeCancellationLiabilityState2({ liability, processedAmount });
-}
-function buildReservationEmailView(reservation, children) {
-  if (!reservation || !Array.isArray(children) || children.length === 0) return null;
-  const first = children[0] || {};
-  const roomTypeLabels = children.map((c2) => String(c2.roomName || c2.roomType || "Room"));
-  const aggregateRoomLines = [];
-  let aggregateAddOns = [];
-  let aggregateDeductions = [];
-  let aggregateSubtotal = 0;
-  let aggregateTotal = 0;
-  for (let index = 0; index < children.length; index += 1) {
-    const child = children[index];
-    const bd = child.rateBreakdown;
-    if (bd && Array.isArray(bd.roomLines)) {
-      for (const line of bd.roomLines) {
-        aggregateRoomLines.push({
-          ...line,
-          // Per MRB-09 (decision #168): each room
-          // line is prefixed with the room's
-          // 1-indexed position so the email
-          // reader can match the line to the
-          // rooms list above. N=1 stays as
-          // "Room 1 — Room rate" (the prefix
-          // is always present).
-          label: children.length > 1 ? `Room ${index + 1} \u2014 ${line.label || "Room rate"}` : line.label || "Room rate"
-        });
-      }
-    }
-    if (bd && Array.isArray(bd.addOns)) {
-      aggregateAddOns = aggregateAddOns.concat(bd.addOns);
-    }
-    if (bd && Array.isArray(bd.deductions)) {
-      aggregateDeductions = aggregateDeductions.concat(bd.deductions);
-    }
-    aggregateSubtotal += Number(child.totalPrice || 0);
-  }
-  aggregateTotal = Number(reservation.totalPrice ?? aggregateSubtotal) || aggregateSubtotal;
-  const aggregateRateBreakdown = {
-    roomSubtotal: aggregateRoomLines.reduce((sum, line) => sum + Number(line.subtotal || 0), 0),
-    addOns: aggregateAddOns,
-    deductions: aggregateDeductions,
-    roomLines: aggregateRoomLines,
-    total: aggregateTotal
-  };
-  const roomProjections = children.map((child, index) => ({
-    position: index + 1,
-    bookingId: String(child.id || child.bookingId || ""),
-    bookingRef: String(child.bookingRef || ""),
-    lookupToken: String(child.lookupToken || ""),
-    roomId: String(child.roomId || ""),
-    roomNumber: String(child.roomNumber || ""),
-    roomType: String(child.roomType || ""),
-    roomName: child.roomName || child.roomType || "",
-    // Per MRB-14 (2026-08-03, per decision #180): per-child
-    // dates on the room projection. The header's
-    // `checkIn` / `checkOut` is the original create-time
-    // shared range and may differ from the actual range
-    // once a room has been rescheduled; the email's
-    // reservation branch reads `actualDateRange` and the
-    // per-room `checkIn` / `checkOut` below when the
-    // children have diverged.
-    checkIn: child.checkIn,
-    checkOut: child.checkOut,
-    numNights: Number(child.numNights || 0),
-    numGuests: Number(child.numGuests || 0),
-    numAdults: Number(child.numAdults || 0),
-    numChildren: Number(child.numChildren || 0),
-    extraBedCount: Number(child.extraBedCount || 0),
-    hasBreakfast: child.hasBreakfast === true,
-    ratePerNight: Number(child.ratePerNight || 0),
-    totalPrice: Number(child.totalPrice || 0)
-  }));
-  return {
-    // The legacy single-room shape — kept so the
-    // existing templates' top-level fields render
-    // the same way they did pre-MRB-09. The legacy
-    // `bookingRef` is the first room's ref (so
-    // single-room emails stay byte-equivalent);
-    // the reservation ref is the new top-level
-    // `reservationRef` field.
-    bookingRef: first.bookingRef || "",
-    guestName: String(reservation.leadGuestName || first.guestName || ""),
-    guestEmail: String(reservation.leadGuestEmail || first.guestEmail || ""),
-    guestPhone: String(reservation.leadGuestPhone || first.guestPhone || ""),
-    roomName: first.roomName || first.roomType || "",
-    roomType: first.roomType || "",
-    roomNumber: first.roomNumber || "",
-    checkIn: reservation.checkIn ?? first.checkIn,
-    checkOut: reservation.checkOut ?? first.checkOut,
-    numNights: Number(reservation.numNights ?? first.numNights ?? 0),
-    totalPrice: aggregateTotal,
-    rateBreakdown: aggregateRateBreakdown,
-    // Per MRB-09: the new top-level reservation
-    // fields. Templates + subject-line pickers
-    // check `isReservation || rooms.length > 1`
-    // to switch into the multi-room shape.
-    reservationRef: String(reservation.reservationRef || ""),
-    reservationId: String(reservation.id || ""),
-    isReservation: true,
-    // Per BAR-02 (2026-08-08, per decision #203): the
-    // `activeRoomCount` is no longer read from the
-    // reservation header — it is always derived from
-    // the children. Pre-BAR-02 the header mirror was
-    // maintained transactionally; BAR-02 makes the
-    // derivation the canonical answer. `roomCount` was
-    // already a derivation over `children.length`.
-    roomCount: children.length,
-    activeRoomCount: Math.max(
-      children.length - children.filter((c2) => c2.status === "cancelled").length,
-      0
-    ),
-    rooms: roomProjections,
-    roomTypeLabels,
-    // Per MRB-14 (2026-08-03, per decision #180): the
-    // denormalised actual range (MIN of children.checkIn
-    // / MAX of children.checkOut) plus the divergent
-    // flag. Pre-MRB-14 reservations carry no field
-    // (`undefined` here); the email template falls
-    // through to the legacy shared-range render
-    // (byte-equivalent to pre-MRB-14). The `earliestCheckIn`
-    // / `latestCheckOut` are emitted as the original
-    // Firestore values (Date | Timestamp | ISO string —
-    // whatever the shared `computeReservationActualDateRange`
-    // produced) so the template can format them via the
-    // existing `formatDate` / `toDate` helpers.
-    actualDateRange: reservation.actualDateRange ? {
-      earliestCheckIn: reservation.actualDateRange.earliestCheckIn,
-      latestCheckOut: reservation.actualDateRange.latestCheckOut,
-      isDivergent: Boolean(reservation.actualDateRange.isDivergent)
-    } : null,
-    // Per MRB-09: source / corporate context.
-    source: reservation.source || first.source || "online",
-    isCorporate: reservation.isCorporate === true,
-    corporateCode: reservation.corporateCode || first.corporateCode || "",
-    companyName: reservation.companyName || first.companyName || "",
-    // Status passthrough so the templates can
-    // render the same "Payment recorded" / "See
-    // you soon" copy as the single-room path.
-    status: reservation.paymentStatus || first.status || "pending",
-    paymentMethod: reservation.paymentMethod || first.paymentMethod || "",
-    // Cancellation metadata (used by the
-    // reservation-scope cancel template that
-    // MRB-13 will call).
-    cancellationReason: first.cancellationReason || "",
-    cancellationSource: first.cancellationSource || ""
-  };
-}
-function lookupUrl(booking) {
-  const reservationRef = String(booking.reservationRef || "").trim();
-  const leadGuestEmail = String(booking.guestEmail || "").trim();
-  if (reservationRef && leadGuestEmail) {
-    return siteUrl(
-      `/my-booking?reservationRef=${encodeURIComponent(reservationRef)}&email=${encodeURIComponent(leadGuestEmail.toLowerCase())}`
-    );
-  }
-  const ref = encodeURIComponent(booking.bookingRef || "");
-  const token2 = encodeURIComponent(booking.lookupToken || "");
-  if (!ref || !token2) return siteUrl("/my-booking");
-  return siteUrl(`/my-booking?ref=${ref}&token=${token2}`);
-}
-function addressLine() {
-  return `${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}, ${hotel_config_default.address.postalCode}`;
-}
-function brandLogoUrl() {
-  return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.white)}`);
-}
-function toDate3(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value.toDate === "function") return value.toDate();
-  const parsed2 = new Date(value);
-  return Number.isNaN(parsed2.getTime()) ? null : parsed2;
-}
-function formatDate(value) {
-  const date = toDate3(value);
-  if (!date) return "Not set";
-  return new Intl.DateTimeFormat(hotel_config_default.locale, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: hotel_config_default.timezone
-  }).format(date);
-}
-function formatMoney(value) {
-  const amount = Number(value || 0);
-  return new Intl.NumberFormat(hotel_config_default.locale, {
-    style: "currency",
-    currency: hotel_config_default.currency,
-    maximumFractionDigits: 0
-  }).format(amount);
-}
-function row(label, value) {
-  return `
-    <tr>
-      <td class="row-label" style="padding: 10px 0; color: #6b7280; font-size: 14px;">${escapeHtml(label)}</td>
-      <td class="row-value" style="padding: 10px 0; color: #111827; font-size: 14px; font-weight: 700; text-align: right;">${escapeHtml(value)}</td>
-    </tr>
-  `;
-}
-function rateBreakdownRows(booking) {
-  const breakdown = booking.rateBreakdown;
-  if (!breakdown || !Array.isArray(breakdown.roomLines) || breakdown.roomLines.length === 0) return "";
-  const roomRows = breakdown.roomLines.map(
-    (line) => row(
-      line.label || "Room rate",
-      `${Number(line.nights || 0)} night(s) x ${formatMoney(line.nightlyRate)} = ${formatMoney(line.subtotal)}`
-    )
-  ).join("");
-  const addOnRows = Array.isArray(breakdown.addOns) ? breakdown.addOns.map((line) => row(line.label || "Add-on", formatMoney(line.amount))).join("") : "";
-  const deductionRows = Array.isArray(breakdown.deductions) ? breakdown.deductions.map((line) => row(line.label || "Discount", `-${formatMoney(line.amount)}`)).join("") : "";
-  return `
-    ${roomRows}
-    ${addOnRows}
-    ${deductionRows}
-  `;
-}
-function bookingRows(booking) {
-  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
-  const isReservation = rooms && rooms.length > 0;
-  if (isReservation) {
-    const actualRange = booking.actualDateRange;
-    const isDivergent = Boolean(actualRange && actualRange.isDivergent);
-    const roomsTable = `
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${rooms.map((room) => {
-      const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut ? ` \xB7 ${formatDate(room.checkIn)} \u2192 ${formatDate(room.checkOut)}` : "";
-      return row(
-        `Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
-        room.bookingRef ? `${escapeHtml(String(room.bookingRef))} \xB7 ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
-      );
-    }).join("")}
-      </table>
-    `;
-    const checkInValue = isDivergent && actualRange.earliestCheckIn ? `${formatDate(actualRange.earliestCheckIn)} from ${hotel_config_default.checkInTime || "14:00"} (varies by room)` : `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`;
-    const checkOutValue = isDivergent && actualRange.latestCheckOut ? `${formatDate(actualRange.latestCheckOut)} by ${hotel_config_default.checkOutTime || "12:00"} (varies by room)` : `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`;
-    return `
-      ${booking.reservationRef ? row("Reservation reference", booking.reservationRef) : ""}
-      ${row("Guest", booking.guestName)}
-      ${row("Rooms", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`)}
-      ${roomsTable}
-      ${row("Check-in", checkInValue)}
-      ${row("Check-out", checkOutValue)}
-      ${row("Nights", `${booking.numNights || 0} night(s)`)}
-      ${row("Total", formatMoney(booking.totalPrice))}
-    `;
-  }
-  const roomLabel = booking.roomName || booking.roomType || "Not set";
-  return `
-    ${row("Booking reference", booking.bookingRef)}
-    ${row("Guest", booking.guestName)}
-    ${row("Room type", roomLabel)}
-    ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
-    ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
-    ${row("Nights", `${booking.numNights || 0} night(s)`)}
-    ${rateBreakdownRows(booking)}
-    ${row("Total", formatMoney(booking.totalPrice))}
-  `;
-}
-function card(title, body) {
-  return `
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px;">
-      <tr>
-        <td style="padding: 18px 18px 6px;">
-          <h3 style="margin: 0; color: #111827; font-size: 16px; line-height: 1.3;">${escapeHtml(title)}</h3>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding: 4px 18px 18px;">
-          ${body}
-        </td>
-      </tr>
-    </table>
-  `;
-}
-function callout(tone, title, body) {
-  const tones = {
-    warm: { bg: hotel_config_default.colors.primaryLight, border: hotel_config_default.colors.primary, title: hotel_config_default.colors.primaryDark },
-    green: { bg: "#ecfdf5", border: "#16a34a", title: "#166534" },
-    red: { bg: "#fef2f2", border: "#dc2626", title: "#991b1b" }
-  };
-  const toneValues = tones[tone];
-  return `
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0; background: ${toneValues.bg}; border-left: 4px solid ${toneValues.border}; border-radius: 12px;">
-      <tr>
-        <td style="padding: 16px 18px;">
-          <p style="margin: 0 0 6px; color: ${toneValues.title}; font-weight: 800; font-size: 14px;">${escapeHtml(title)}</p>
-          <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.6;">${body}</p>
-        </td>
-      </tr>
-    </table>
-  `;
-}
-function emailLayout(options) {
-  const primary = hotel_config_default.colors.primary;
-  const sidebar = hotel_config_default.colors.sidebar;
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${escapeHtml(options.title)}</title>
-    <style>
-      @media only screen and (max-width: 640px) {
-        .outer { padding: 16px 10px !important; }
-        .container { width: 100% !important; border-radius: 18px !important; }
-        .hero { padding: 24px 18px !important; }
-        .content { padding: 24px 18px !important; }
-        .title { font-size: 26px !important; }
-        .row-label, .row-value { display: block !important; width: 100% !important; text-align: left !important; }
-        .row-value { padding-top: 0 !important; }
-        .button { display: block !important; text-align: center !important; }
-      }
-    </style>
-  </head>
-  <body style="margin: 0; padding: 0; background: #f6f2ec; font-family: Inter, Arial, sans-serif; color: #111827;">
-    <div style="display: none; max-height: 0; overflow: hidden; opacity: 0;">${escapeHtml(options.preheader)}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" class="outer" style="border-collapse: collapse; background: #f6f2ec; padding: 28px 16px;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="640" cellspacing="0" cellpadding="0" class="container" style="border-collapse: collapse; width: 640px; max-width: 640px; background: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 18px 50px rgba(17, 24, 39, 0.10);">
-            <tr>
-              <td class="hero" style="background: ${sidebar}; padding: 30px 34px;">
-                <img src="${brandLogoUrl()}" width="168" alt="${escapeHtml(hotel_config_default.brandName)}" style="display: block; max-width: 168px; height: auto; margin: 0 0 28px;">
-                <p style="margin: 0 0 10px; color: ${primary}; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">${escapeHtml(options.eyebrow)}</p>
-                <h1 class="title" style="margin: 0; color: #ffffff; font-size: 34px; line-height: 1.12; letter-spacing: 0; font-weight: 800;">${escapeHtml(options.title)}</h1>
-              </td>
-            </tr>
-            <tr>
-              <td class="content" style="padding: 32px 34px 28px;">
-                <p style="margin: 0 0 18px; color: #374151; font-size: 16px; line-height: 1.7;">${options.intro}</p>
-                ${options.body}
-                ${options.ctaLabel && options.ctaUrl ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin: 28px 0 10px;">
-                        <tr>
-                          <td>
-                            <a class="button" href="${options.ctaUrl}" style="background: ${primary}; color: #ffffff; text-decoration: none; font-size: 15px; line-height: 1; font-weight: 800; padding: 15px 20px; border-radius: 8px; display: inline-block;">${escapeHtml(options.ctaLabel)}</a>
-                          </td>
-                        </tr>
-                      </table>` : ""}
-                <p style="margin: 28px 0 0; color: #6b7280; font-size: 13px; line-height: 1.6;">
-                  ${escapeHtml(addressLine())}<br>
-                  Front desk: <a href="tel:${escapeHtml(hotel_config_default.frontDeskPhone)}" style="color: ${primary}; text-decoration: none;">${escapeHtml(hotel_config_default.frontDeskPhone)}</a><br>
-                  Support: <a href="mailto:${escapeHtml(hotel_config_default.supportEmail)}" style="color: ${primary}; text-decoration: none;">${escapeHtml(hotel_config_default.supportEmail)}</a>
-                </p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-}
-async function sendEmail(to3, subject, html, attachments) {
-  const trimmed = typeof to3 === "string" ? to3.trim().toLowerCase() : "";
-  if (trimmed.endsWith("@example.invalid") || trimmed.endsWith("@invalid")) {
-    console.log(`Skipping email send to placeholder address: ${to3}`);
-    return;
-  }
-  try {
-    await resend.emails.send({
-      from: FROM_EMAIL,
-      to: to3,
-      subject,
-      html,
-      replyTo: hotel_config_default.supportEmail,
-      attachments
-    });
-  } catch (error) {
-    try {
-      await adminDb.collection("failed_emails").add({
-        recipient: to3,
-        subject,
-        error: typeof error?.message === "string" ? error.message : String(error),
-        lastAttemptAt: /* @__PURE__ */ new Date(),
-        retryCount: 0
-      });
-    } catch (dlqErr) {
-      console.error("[#11] failed to write failed_emails DLQ row:", dlqErr);
-    }
-    throw error;
-  }
-}
-async function findBooking(req, options) {
-  const { bookingId, bookingRef, guestEmail } = req.body || {};
-  let snapshot = null;
-  const user = req.user || {};
-  if (bookingId) {
-    const doc = await adminDb.collection("bookings").doc(String(bookingId)).get();
-    if (!doc.exists) return null;
-    snapshot = doc;
-  } else if (bookingRef) {
-    const trimmed = String(bookingRef).trim();
-    let query;
-    if (RESERVATION_REF_REGEX.test(trimmed)) {
-      const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).limit(1).get();
-      if (reservationSnap.empty) return null;
-      const reservationDoc = reservationSnap.docs[0];
-      const childrenSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("reservationPosition", "asc").limit(1).get();
-      if (childrenSnap.empty) {
-        const fallbackSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("createdAt", "asc").limit(1).get();
-        if (fallbackSnap.empty) return null;
-        snapshot = fallbackSnap.docs[0];
-      } else {
-        snapshot = childrenSnap.docs[0];
-      }
-    } else {
-      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
-      if (options.requireGuestMatch && !user.uid) {
-        if (!guestEmail) {
-          throw new Error("Booking reference and guest email are required.");
-        }
-        query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).where("guestEmail", "==", String(guestEmail).trim()).limit(1);
-      }
-      const results = await query.get();
-      if (results.empty) return null;
-      snapshot = results.docs[0];
-    }
-  } else {
-    throw new Error("Booking ID or booking reference is required.");
-  }
-  const booking = { id: snapshot.id, ...snapshot.data() };
-  if (options.requireGuestMatch && user.uid) {
-    const emailMatches = user.email_verified === true && user.email && String(booking.guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
-    const memberMatches = String(booking.memberId || "") === String(user.uid);
-    if (!emailMatches && !memberMatches) {
-      return null;
-    }
-  } else if (options.requireGuestMatch && bookingId) {
-    if (!guestEmail) {
-      throw new Error("Guest email is required.");
-    }
-    if (String(booking.guestEmail || "").toLowerCase() !== String(guestEmail).trim().toLowerCase()) {
-      return null;
-    }
-  }
-  return booking;
-}
-function bookingSubmittedEmail(booking) {
-  const paymentNote = booking.paymentMethod === "pay-at-hotel" ? "Your stay request is queued for review. Payment is due upon arrival once your booking is accepted." : "Your uploaded payment proof is queued for manual verification. We will send a final confirmation after review.";
-  return emailLayout({
-    preheader: `We received booking request ${booking.bookingRef}.`,
-    eyebrow: "Booking received",
-    title: "Your stay request is under review",
-    intro: `Dear ${escapeHtml(booking.guestName)}, thank you for choosing <strong>${escapeHtml(hotel_config_default.brandName)}</strong>. We received your booking request and our front desk team is reviewing the details.`,
-    body: `
-      ${callout("warm", "Manual review in progress", escapeHtml(paymentNote))}
-      ${card("Reservation details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">You can check the latest status any time using your booking reference and email address.</p>
-    `,
-    ctaLabel: "Check booking status",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function houseRulesCard(houseRules) {
-  const trimmedRules = typeof houseRules === "string" ? houseRules.trim() : "";
-  if (!trimmedRules) return "";
-  return card(
-    "House rules",
-    `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(trimmedRules)}</p>`
-  );
-}
-function paymentConfirmedEmail(booking, houseRules) {
-  return emailLayout({
-    preheader: `Payment received for booking ${booking.bookingRef}.`,
-    eyebrow: "Payment verified",
-    title: "Your payment has been confirmed",
-    intro: `Dear ${escapeHtml(booking.guestName)}, we have verified the payment for your stay at <strong>${escapeHtml(hotel_config_default.brandName)}</strong>.`,
-    body: `
-      ${callout("green", "Payment recorded", "Your reservation is one step closer to final confirmation. We will send a separate booking confirmation once the front desk completes the final review.")}
-      ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
-      ${houseRulesCard(houseRules)}
-    `,
-    ctaLabel: "View booking",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function bookingConfirmedEmail(booking, houseRules) {
-  return emailLayout({
-    preheader: `Booking ${booking.bookingRef} is confirmed.`,
-    eyebrow: "Booking confirmed",
-    title: "Your room is ready on our calendar",
-    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
-    body: `
-      ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(hotel_config_default.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
-      ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-      ${houseRulesCard(houseRules)}
-    `,
-    ctaLabel: "Review booking details",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function bookingConfirmedWithBalanceEmail(booking, balance, reason) {
-  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
-  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
-  const reasonBlock = safeReason ? `<p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;"><strong>Reason from our team:</strong> ${escapeHtml(safeReason)}</p>` : "";
-  return emailLayout({
-    preheader: `Booking ${booking.bookingRef} is confirmed. \u20B1${safeBalance.toLocaleString("en-PH")} to settle at check-in.`,
-    eyebrow: "Booking confirmed \u2014 balance due",
-    title: "Your room is ready on our calendar",
-    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
-    body: `
-      ${callout("warm", "Balance to settle at check-in", `A balance of <strong>${escapeHtml(formatMoney(safeBalance))}</strong> remains and will be collected when you arrive.${reasonBlock}`)}
-      ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(hotel_config_default.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
-      ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-    `,
-    ctaLabel: "Review booking details",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function bookingRescheduledEmail(booking) {
-  return emailLayout({
-    preheader: `Your reservation ${booking.bookingRef} has been updated.`,
-    eyebrow: "Reservation updated",
-    title: "Your booking dates or room have changed",
-    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been updated by the front desk.`,
-    body: `
-      ${callout("green", "Rescheduled details", `Your dates or room have been updated. The details below reflect your active booking.`)}
-      ${card("Updated reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-    `,
-    ctaLabel: "Review booking details",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function checkinReminderEmail(booking, houseRules) {
-  return emailLayout({
-    preheader: `Your ${hotel_config_default.brandName} check-in is coming up.`,
-    eyebrow: "Check-in reminder",
-    title: "Your stay begins tomorrow",
-    intro: `Dear ${escapeHtml(booking.guestName)}, this is a warm reminder that your check-in at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> is coming up.`,
-    body: `
-      ${callout("warm", "Before you arrive", `Check-in starts at ${escapeHtml(hotel_config_default.checkInTime || "14:00")}. If your arrival time changes, please contact the front desk so we can assist you smoothly.`)}
-      ${card("Arrival details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Hotel address", addressLine())}</table>`)}
-      ${houseRulesCard(houseRules)}
-    `,
-    ctaLabel: "Open booking lookup",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function liabilityBreakdownCard(projection) {
-  if (!projection || !projection.liability) return "";
-  const policyResult = projection.liability.policyResult || {};
-  const refundPct = Number(policyResult.refundPct || 0);
-  const policyRefund = Number(policyResult.policyRefund || 0);
-  const netCollected = Number(policyResult.netCollected || 0);
-  const retainedAtCancel = Number(policyResult.retainedAmount || 0);
-  const approved = Number(projection.liability.approvedAmount || 0);
-  const processed = Number(projection.processedAmount || 0);
-  const outstanding = Number(projection.outstandingAmount || 0);
-  const retention = Number(projection.retentionAmount || 0);
-  const stateLabel = String(projection.stateLabel || "Pending refund");
-  const policyText = String(policyResult.policyText || "Standard cancellation policy applies.");
-  const exceptionRow = retention > 0 ? row("Extra retained (exception)", formatMoney(retention)) : "";
-  const retainedAtCancelRow = retainedAtCancel > 0 && retention === 0 ? row("Retained under policy", formatMoney(retainedAtCancel)) : "";
-  return `
-    ${card("Refund summary", `
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Net collected at cancel", formatMoney(netCollected))}
-        ${row(`Policy refund (${refundPct}%)`, formatMoney(policyRefund))}
-        ${retainedAtCancelRow}
-        ${row("Approved refund", formatMoney(approved))}
-        ${row("Processed so far", formatMoney(processed))}
-        ${row("Outstanding", formatMoney(outstanding))}
-        ${exceptionRow}
-        ${row("Current state", escapeHtml(stateLabel))}
-      </table>
-      <p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">${escapeHtml(policyText)}</p>
-    `)}
-  `;
-}
-function bookingCancelledEmail(booking) {
-  const source = String(booking.cancellationSource || "staff");
-  const intro = source === "guest" ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled at your request.` : source === "system" ? `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled because the payment hold expired.` : `Dear ${escapeHtml(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been cancelled by our team.`;
-  const projection = booking.liabilityProjection;
-  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
-  const outstanding = Number(projection?.outstandingAmount || 0);
-  const hasMoneyStory = projection && policyRefund > 0;
-  const whatHappensNext = hasMoneyStory ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed \u2014 our team will reach out to arrange the refund. Processing times vary.` : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.`;
-  return emailLayout({
-    preheader: `Booking ${booking.bookingRef} has been cancelled.`,
-    eyebrow: "Booking cancelled",
-    title: "Your reservation has been cancelled",
-    intro,
-    body: `
-      ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
-      ${callout("warm", "What happens next", whatHappensNext)}
-      ${liabilityBreakdownCard(projection)}
-      ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
-    `,
-    ctaLabel: "Contact support",
-    ctaUrl: `mailto:${hotel_config_default.supportEmail}`
-  });
-}
-function bookingCancelledReservationEmail(booking) {
-  const rooms = Array.isArray(booking.rooms) ? booking.rooms : [];
-  const source = String(booking.cancellationSource || "staff");
-  const intro = source === "guest" ? `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> at your request.` : source === "system" ? `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> because the payment hold expired.` : `Dear ${escapeHtml(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> by our team.`;
-  const cancelledRooms = rooms.filter((room) => room.cancelledAt);
-  const survivingRooms = rooms.filter((room) => !room.cancelledAt);
-  const isFullCancel = survivingRooms.length === 0;
-  const title = isFullCancel ? "Your reservation has been cancelled" : `Part of your reservation was cancelled (${cancelledRooms.length} of ${rooms.length} room${rooms.length === 1 ? "" : "s"})`;
-  const eyebrow = isFullCancel ? "Reservation cancelled" : "Reservation updated";
-  const roomsTable = rooms.length > 0 ? `
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${rooms.map((room) => {
-    const isCancelled = Boolean(room.cancelledAt);
-    const roomLabel = `Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`;
-    const ref = escapeHtml(String(room.bookingRef || "\u2014"));
-    const status = isCancelled ? `<span style="color: #b91c1c; font-weight: 600;">Cancelled</span>${room.cancellationReason ? ` \xB7 ${escapeHtml(String(room.cancellationReason))}` : ""}` : `<span style="color: #166534; font-weight: 600;">Confirmed</span>`;
-    return `<tr>
-            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; vertical-align: top; width: 50%;">${roomLabel}<br/><span style="color: #6b7280; font-size: 12px;">${ref}</span></td>
-            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; text-align: right; vertical-align: top;">${status}</td>
-          </tr>`;
-  }).join("")}
-      </table>
-    ` : "";
-  const projection = booking.liabilityProjection;
-  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
-  const outstanding = Number(projection?.outstandingAmount || 0);
-  const hasMoneyStory = projection && policyRefund > 0;
-  const whatHappensNext = hasMoneyStory ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed \u2014 our team will reach out to arrange the refund. Processing times vary.` : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.`;
-  return emailLayout({
-    preheader: booking.reservationRef ? `Reservation ${booking.reservationRef} was updated.` : `Booking ${booking.bookingRef} has been cancelled.`,
-    eyebrow,
-    title,
-    intro,
-    body: `
-      ${callout("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml(booking.cancellationReason)}` : "No cancellation reason was provided.")}
-      ${callout("warm", "What happens next", whatHappensNext)}
-      ${liabilityBreakdownCard(projection)}
-      ${roomsTable ? card("Rooms", roomsTable) : card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
-    `,
-    ctaLabel: "Contact support",
-    ctaUrl: `mailto:${hotel_config_default.supportEmail}`
-  });
-}
-function bookingRefundProcessedEmail(booking) {
-  const projection = booking.liabilityProjection;
-  const latestRefund = booking.latestRefund || null;
-  const stateLabel = String(projection?.stateLabel || "Refund update");
-  const processed = Number(projection?.processedAmount || 0);
-  const outstanding = Number(projection?.outstandingAmount || 0);
-  const approved = Number(projection?.liability?.approvedAmount || 0);
-  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
-  const retention = Number(projection?.retentionAmount || 0);
-  const subject = booking.reservationRef ? `[${hotel_config_default.brandName}] Refund update: ${booking.reservationRef}` : `[${hotel_config_default.brandName}] Refund update: ${booking.bookingRef}`;
-  const intro = `Dear ${escapeHtml(booking.guestName)}, here's a quick update on the refund for your ${booking.reservationRef ? "reservation" : "booking"} <strong>${escapeHtml(booking.reservationRef || booking.bookingRef)}</strong>.`;
-  const whatHappensNext = projection?.state === "processed" ? `Your refund is now complete. The total of <strong>${formatMoney(approved)}</strong> has been returned to you. No further action is needed.` : projection?.state === "retained" ? `An exception was applied \u2014 <strong>${formatMoney(approved)}</strong> is approved for refund and <strong>${formatMoney(retention)}</strong> is being retained beyond the standard policy. <strong>${formatMoney(outstanding)}</strong> is still being processed.` : projection?.state === "partially-processed" ? `Your refund is in progress. <strong>${formatMoney(processed)}</strong> of <strong>${formatMoney(approved)}</strong> has been returned so far. <strong>${formatMoney(outstanding)}</strong> is still being processed.` : `Your refund is pending. <strong>${formatMoney(approved)}</strong> is approved for return; our team will process it shortly.`;
-  const latestRefundRow = latestRefund ? row("Latest refund", `${formatMoney(Math.abs(Number(latestRefund.amount || 0)))} via ${escapeHtml(String(latestRefund.method || "\u2014"))}${latestRefund.transactionReference ? ` \xB7 Ref ${escapeHtml(String(latestRefund.transactionReference))}` : ""}`) : "";
-  return {
-    subject,
-    html: emailLayout({
-      preheader: `Refund update for ${booking.reservationRef || booking.bookingRef}: ${stateLabel}.`,
-      eyebrow: "Refund update",
-      title: stateLabel,
-      intro,
-      body: `
-        ${callout("warm", "What this means", whatHappensNext)}
-        ${liabilityBreakdownCard(projection)}
-        ${latestRefund ? card("Latest refund", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${latestRefundRow}</table>`) : ""}
-        ${policyRefund > 0 ? `<p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">The cancellation policy applied to your booking entitled you to a refund of <strong>${formatMoney(policyRefund)}</strong>. Processing times vary by payment method.</p>` : ""}
-        <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
-      `,
-      ctaLabel: "Contact support",
-      ctaUrl: `mailto:${hotel_config_default.supportEmail}`
-    })
-  };
-}
-function discountRejectedEmail(booking) {
-  const discountTypeLabel = booking.discountType === "senior" ? "Senior Citizen" : "PWD";
-  const idLabel = booking.discountType === "senior" ? "OSCA Card" : "PWD ID";
-  return emailLayout({
-    preheader: `Discount verification update for booking ${booking.bookingRef}.`,
-    eyebrow: "Discount update",
-    title: "We could not verify your discount ID",
-    intro: `Dear ${escapeHtml(booking.guestName)}, we reviewed the submitted ID for the ${escapeHtml(discountTypeLabel)} discount on booking <strong>${escapeHtml(booking.bookingRef)}</strong>.`,
-    body: `
-      ${callout("red", "Discount not verified", booking.discountRejectionReason ? `Reason: ${escapeHtml(booking.discountRejectionReason)}` : `We were unable to verify the submitted ${escapeHtml(idLabel)}.`)}
-      <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your booking remains active. The full rate of <strong>${escapeHtml(formatMoney(booking.totalPrice))}</strong> will be collected upon check-in. You may still present a valid ${escapeHtml(idLabel)} at check-in for manual review.</p>
-      ${card("Updated booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-    `,
-    ctaLabel: "View my booking",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function paymentRejectedEmail(booking) {
-  const reason = booking.paymentRejectionReason ? `Reason: ${escapeHtml(booking.paymentRejectionReason)}` : "We could not verify the uploaded payment proof against our records.";
-  const payments = Array.isArray(booking?.onsitePayments) ? booking.onsitePayments : [];
-  let refOnFile = null;
-  for (let i2 = payments.length - 1; i2 >= 0; i2 -= 1) {
-    const ref = payments[i2]?.transactionReference;
-    if (ref && String(ref).trim().length > 0) {
-      refOnFile = String(ref);
-      break;
-    }
-  }
-  return emailLayout({
-    preheader: `Action needed: your payment proof for booking ${booking.bookingRef} was rejected.`,
-    eyebrow: "Payment needs your attention",
-    title: "We couldn't verify your payment proof",
-    intro: `Dear ${escapeHtml(booking.guestName)}, we reviewed the payment proof you uploaded for booking <strong>${escapeHtml(booking.bookingRef)}</strong> but couldn't match it to the booking.`,
-    body: `
-      ${callout("red", "Payment not verified", reason)}
-      ${refOnFile ? callout("warm", "Reference on file", `The reference on record is <strong>${escapeHtml(refOnFile)}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
-      <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your room is still held for you. To confirm your stay, please upload a corrected payment proof from the booking lookup page using the link below \u2014 your booking ref <strong>${escapeHtml(booking.bookingRef)}</strong> and email are all you need.</p>
-      ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
-    `,
-    ctaLabel: "Re-upload payment proof",
-    ctaUrl: lookupUrl(booking)
-  });
-}
-function corporateInquiryEmail(inquiry) {
-  const safeInquiry = {
-    companyName: inquiry.companyName || "Not provided",
-    contactPerson: inquiry.contactPerson || "Not provided",
-    email: inquiry.email || "Not provided",
-    phone: inquiry.phone || "Not provided",
-    numRooms: inquiry.numRooms || "Not provided",
-    preferredDates: inquiry.preferredDates || "Not provided",
-    specialRequirements: inquiry.specialRequirements || inquiry.requirements || "None provided"
-  };
-  return emailLayout({
-    preheader: `New corporate inquiry from ${safeInquiry.companyName}.`,
-    eyebrow: "Corporate inquiry",
-    title: "A new corporate stay inquiry arrived",
-    intro: `A company submitted a corporate booking inquiry through the ${escapeHtml(hotel_config_default.brandName)} website. Review it in the admin dashboard and follow up within the service window.`,
-    body: `
-      ${card("Inquiry details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Company", safeInquiry.companyName)}
-        ${row("Contact person", safeInquiry.contactPerson)}
-        ${row("Email", safeInquiry.email)}
-        ${row("Phone", safeInquiry.phone)}
-        ${row("Rooms needed", safeInquiry.numRooms)}
-        ${row("Preferred dates", typeof safeInquiry.preferredDates === "string" ? safeInquiry.preferredDates : JSON.stringify(safeInquiry.preferredDates))}
-      </table>`)}
-      ${callout("warm", "Special requirements", escapeHtml(safeInquiry.specialRequirements))}
-    `,
-    ctaLabel: "Open corporate inbox",
-    ctaUrl: adminUrl("/corporate")
-  });
-}
-async function sendCorporateInquiryTrigger(inquiry) {
-  await sendEmail(
-    ADMIN_EMAIL,
-    `[${hotel_config_default.brandName}] New corporate inquiry: ${inquiry.companyName || "Website inquiry"}`,
-    corporateInquiryEmail(inquiry)
-  );
-}
-function corporateInquiryConfirmationEmail(inquiry) {
-  const safeInquiry = {
-    companyName: inquiry.companyName || "Not provided",
-    contactPerson: inquiry.contactPerson || "Not provided",
-    numRooms: inquiry.numRooms || "Not provided",
-    preferredDates: inquiry.preferredDates || "Not provided"
-  };
-  return emailLayout({
-    preheader: `We received your corporate inquiry for ${safeInquiry.companyName}.`,
-    eyebrow: "Inquiry received",
-    title: "We received your corporate inquiry",
-    intro: `Dear ${escapeHtml(safeInquiry.contactPerson)}, thank you for your interest in <strong>${escapeHtml(hotel_config_default.brandName)}</strong>. We have received your corporate booking inquiry and our team will get back to you soon.`,
-    body: `
-      ${card("Inquiry summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Company", safeInquiry.companyName)}
-        ${row("Rooms needed", safeInquiry.numRooms)}
-        ${row("Preferred dates", typeof safeInquiry.preferredDates === "string" ? safeInquiry.preferredDates : JSON.stringify(safeInquiry.preferredDates))}
-      </table>`)}
-    `
-  });
-}
-async function sendCorporateInquiryConfirmationTrigger(inquiry) {
-  if (!inquiry.email) return;
-  await sendEmail(
-    inquiry.email,
-    `[${hotel_config_default.brandName}] We received your corporate inquiry`,
-    corporateInquiryConfirmationEmail(inquiry)
-  );
-}
-function contactInquiryEmail(inquiry) {
-  return emailLayout({
-    preheader: `Website contact from ${inquiry.name} \u2014 ${inquiry.subject}`,
-    eyebrow: "Website contact",
-    title: "A guest reached out via the contact page",
-    intro: `${escapeHtml(inquiry.name)} (${escapeHtml(inquiry.email)}) used the public /contact form. Reply directly to their email to follow up.`,
-    body: `
-      ${card("Inquiry", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Name", inquiry.name)}
-        ${row("Email", inquiry.email)}
-        ${row("Subject", inquiry.subject)}
-        ${row("Source", inquiry.source || "contact-page")}
-      </table>`)}
-      ${callout("warm", "Message", escapeHtml(inquiry.message))}
-    `,
-    ctaLabel: "Open contact inbox",
-    ctaUrl: adminUrl("/contact")
-  });
-}
-async function sendContactInquiryTrigger(inquiry) {
-  await sendEmail(
-    ADMIN_EMAIL,
-    `[${hotel_config_default.brandName}] New contact: ${inquiry.subject || "Website message"}`,
-    contactInquiryEmail(inquiry)
-  );
-}
-function contactConfirmationEmail(inquiry) {
-  return emailLayout({
-    preheader: `We received your message regarding: ${inquiry.subject || "your contact inquiry"}.`,
-    eyebrow: "Message received",
-    title: "We received your message",
-    intro: `Dear ${escapeHtml(inquiry.name)}, thank you for reaching out to <strong>${escapeHtml(hotel_config_default.brandName)}</strong>. We have received your message and our team will get back to you soon.`,
-    body: `
-      ${card("Message details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Name", inquiry.name)}
-        ${row("Subject", inquiry.subject)}
-      </table>`)}
-      ${callout("warm", "Your message", escapeHtml(inquiry.message))}
-    `
-  });
-}
-async function sendContactConfirmationTrigger(inquiry) {
-  if (!inquiry.email) return;
-  await sendEmail(
-    inquiry.email,
-    `[${hotel_config_default.brandName}] We received your message`,
-    contactConfirmationEmail(inquiry)
-  );
-}
-function earlyCheckinRequestEmail(booking, request) {
-  const requestedTime = request.requestedCheckInTime || "Not specified";
-  const notes = request.notes || "No additional notes";
-  return emailLayout({
-    preheader: `Early check-in request for ${booking.bookingRef} from ${booking.guestName}.`,
-    eyebrow: "Early check-in request",
-    title: "A member has requested early check-in",
-    // Per EC-02 (2026-08-21): the intro now names the
-    // approval loop explicitly so the receiving operator knows
-    // they need to either approve or decline from the booking
-    // drawer / dashboard widget — and that the guest will
-    // receive a confirmation email regardless of the outcome.
-    // The strong disclaimer copy is the same wording used on
-    // the guest-facing button on Step 4 of the booking flow.
-    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk \u2014 subject to availability, not guaranteed, and requires your approval. The guest will receive an email once you approve or decline.`,
-    body: `
-      ${card("Booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Booking ref", booking.bookingRef)}
-        ${row("Guest", booking.guestName)}
-        ${row("Email", booking.guestEmail)}
-        ${row("Phone", booking.guestPhone || "\u2014")}
-        ${row("Room", booking.roomNumber || "\u2014")}
-        ${row("Scheduled check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
-        ${row("Requested check-in time", requestedTime)}
-      </table>`)}
-      ${callout("warm", "Notes from guest", escapeHtml(notes))}
-    `,
-    ctaLabel: "Review booking",
-    ctaUrl: adminUrl(`/bookings?ref=${booking.bookingRef}`)
-  });
-}
-async function sendEarlyCheckinRequestTrigger(booking, request) {
-  await sendEmail(
-    ADMIN_EMAIL,
-    `[${hotel_config_default.brandName}] Early check-in request: ${booking.bookingRef}`,
-    earlyCheckinRequestEmail(booking, request)
-  );
-}
-function earlyCheckinResolveEmail(booking, status, staffNote) {
-  const isApproved = status === "approved";
-  const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
-  const eyebrow = isStaffGranted ? isApproved ? "Early check-in granted" : "Early check-in updated" : isApproved ? "Early check-in approved" : "Early check-in unavailable";
-  const title = isStaffGranted ? isApproved ? "Early check-in added to your stay" : "Your early check-in time has changed" : isApproved ? "Your early check-in request is approved" : "Early check-in request status";
-  const intro = isStaffGranted ? isApproved ? `Our team has added early check-in to booking ${booking.bookingRef}. Your room will be ready for your early arrival.` : `We need to update the early check-in arrangement for booking ${booking.bookingRef}. Please arrive from the standard check-in time.` : isApproved ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.` : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`;
-  const timeVal = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime || "Requested time";
-  return emailLayout({
-    preheader: isStaffGranted ? isApproved ? `Early check-in has been added to booking ${booking.bookingRef}.` : `Early check-in update for booking ${booking.bookingRef}.` : isApproved ? `Your early check-in request for booking ${booking.bookingRef} is approved.` : `Status update regarding your early check-in request for booking ${booking.bookingRef}.`,
-    eyebrow,
-    title,
-    intro,
-    body: `
-      ${card(isStaffGranted ? "Early Check-In Details" : "Request Details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Booking ref", booking.bookingRef)}
-        ${row("Guest name", booking.guestName)}
-        ${row("Check-in date", formatDate(booking.checkIn))}
-        ${row("Early check-in time", isApproved ? timeVal : "Standard time (14:00)")}
-        ${row("Status", isApproved ? isStaffGranted ? "Granted" : "Approved" : "Unavailable")}
-      </table>`)}
-      ${staffNote ? callout("warm", "Message from front desk", escapeHtml(staffNote)) : ""}
-    `,
-    ctaLabel: "View your stays",
-    ctaUrl: siteUrl("/account/stays")
-  });
-}
-async function sendEarlyCheckinResolveTrigger(booking, status, staffNote) {
-  const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
-  const subject = isStaffGranted ? `[${hotel_config_default.brandName}] Early check-in ${status === "approved" ? "added" : "updated"}: ${booking.bookingRef}` : `[${hotel_config_default.brandName}] Early check-in status: ${booking.bookingRef}`;
-  await sendEmail(
-    booking.guestEmail,
-    subject,
-    earlyCheckinResolveEmail(booking, status, staffNote)
-  );
-}
-function voucherCodeBlock(code) {
-  return `
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0;">
-      <tr>
-        <td align="center" style="background: ${hotel_config_default.colors.primaryLight}; border: 2px dashed ${hotel_config_default.colors.primary}; border-radius: 12px; padding: 22px 14px;">
-          <p style="margin: 0 0 8px; color: ${hotel_config_default.colors.primaryDark}; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 800;">Your promo code</p>
-          <p style="margin: 0; color: #111827; font-size: 30px; letter-spacing: 0.18em; font-weight: 800; font-family: 'JetBrains Mono', 'Courier New', monospace;">${escapeHtml(code)}</p>
-        </td>
-      </tr>
-    </table>
-  `;
-}
-function voucherIssuedEmail(voucher) {
-  const valueLabel = voucher.discountType === "percent" ? `${voucher.discountValue}% off` : `${formatMoney(voucher.discountValue)} off`;
-  const roomTypeLabel = Array.isArray(voucher.applicableRoomTypes) && voucher.applicableRoomTypes.length > 0 ? voucher.applicableRoomTypes.join(", ") : "any room";
-  return emailLayout({
-    preheader: `Your ${hotel_config_default.brandName} voucher ${voucher.code} is ready.`,
-    eyebrow: "Voucher issued",
-    title: "A voucher has been added to your account",
-    intro: `Dear guest, ${escapeHtml(hotel_config_default.brandName)} has issued a promo voucher for your next stay. Enter the code at checkout to redeem.`,
-    body: `
-      ${callout("warm", `${valueLabel} on ${escapeHtml(roomTypeLabel)}`, `Use this code when you start a new booking \u2014 it will be applied automatically on the review step.`)}
-      ${voucherCodeBlock(voucher.code)}
-      ${card("Voucher details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Discount", valueLabel)}
-        ${row("Expires", voucher.expiresAt ? formatDate(voucher.expiresAt) : "No expiry")}
-        ${row("Room types", escapeHtml(roomTypeLabel))}
-        ${voucher.usageCap ? row("Usage cap", `${voucher.usageCap} total use${voucher.usageCap === 1 ? "" : "s"}`) : ""}
-      </table>`)}
-    `,
-    ctaLabel: "Start a booking",
-    ctaUrl: siteUrl("/rooms")
-  });
-}
-async function sendVoucherIssuedTrigger(voucher) {
-  if (!voucher?.guestEmail) return;
-  await sendEmail(
-    voucher.guestEmail,
-    `[${hotel_config_default.brandName}] Your voucher: ${voucher.code}`,
-    voucherIssuedEmail(voucher)
-  );
-}
-function sparkRewardsEmailVerificationEmail(data) {
-  const name2 = (data.guestName || "").trim();
-  const greetingName = name2 ? escapeHtml(name2) : "Valued Member";
-  return emailLayout({
-    preheader: `Verify your email address for ${hotel_config_default.rewardsName}.`,
-    eyebrow: `${hotel_config_default.rewardsName} Account Verification`,
-    title: "Verify your email address",
-    intro: `Dear ${greetingName}, thank you for joining ${escapeHtml(hotel_config_default.rewardsName)}! Please verify your email address to complete your account registration.`,
-    body: `
-      ${callout("warm", "Unlock Member Privileges", "Verifying your email address links your past bookings to your account, enables early check-in requests, and activates member rates on future stays.")}
-      ${card("Verification link", `
-        <p style="margin: 0 0 16px; color: #374151; font-size: 14px; line-height: 1.6;">
-          Click the button below to verify your email address (<strong>${escapeHtml(data.email)}</strong>). If you didn't create an account with ${escapeHtml(hotel_config_default.brandName)}, you can safely ignore this message.
-        </p>
-        <p style="margin: 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
-          If the button below doesn't work, copy and paste this link into your browser:<br>
-          <a href="${escapeHtml(data.verificationLink)}" style="color: ${hotel_config_default.colors.primary}; word-break: break-all;">${escapeHtml(data.verificationLink)}</a>
-        </p>
-      `)}
-    `,
-    ctaLabel: "Verify Email Address",
-    ctaUrl: data.verificationLink
-  });
-}
-async function sendVerificationEmailTrigger(data) {
-  if (!data.email) return;
-  await sendEmail(
-    data.email,
-    `[${hotel_config_default.brandName}] Verify your email address for ${hotel_config_default.rewardsName}`,
-    sparkRewardsEmailVerificationEmail(data)
-  );
-}
-function storeOrderItemsTable(items = []) {
-  if (!Array.isArray(items) || items.length === 0) {
-    return "<p style='margin: 0; color: #6b7280; font-size: 14px;'>No items.</p>";
-  }
-  const rows = items.map((item) => `
-    <tr>
-      <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(item.name || "Item")}</td>
-      <td style="padding: 8px 0; color: #111827; font-size: 14px; text-align: center;">${Number(item.quantity || 0)}</td>
-      <td style="padding: 8px 0; color: #111827; font-size: 14px; text-align: right;">${formatMoney(item.price || 0)}</td>
-      <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 700; text-align: right;">${formatMoney(Number(item.price || 0) * Number(item.quantity || 0))}</td>
-    </tr>
-  `).join("");
-  return `
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-      <thead>
-        <tr style="border-bottom: 1px solid #e5e7eb;">
-          <th align="left" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Item</th>
-          <th align="center" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Qty</th>
-          <th align="right" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Unit</th>
-          <th align="right" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Line</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-}
-function storeOrderTotalsRow(total, paymentMethod) {
-  return row("Payment method", paymentMethod) + row("Total", formatMoney(total));
-}
-function storeOrderBaseLayout(action, order) {
-  const paymentLabel = order.paymentMethod === "cod" ? "Cash on delivery" : order.paymentMethod === "add-to-bill" ? "Add to room bill" : order.paymentMethod === "gcash" ? "GCash" : "\u2014";
-  return {
-    order,
-    paymentLabel,
-    itemsTable: storeOrderItemsTable(order.items),
-    totalRow: storeOrderTotalsRow(order.totalAmount || 0, paymentLabel),
-    deepLink: `${siteUrl("/intercom")}?room=${encodeURIComponent(order.roomNumber || "")}&order=${encodeURIComponent(order.orderRef || "")}`
-  };
-}
-function storeOrderPlacedEmail(order) {
-  const { paymentLabel, itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-placed", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} received.`,
-    eyebrow: "Order received",
-    title: "We have your in-room order",
-    intro: `Thank you for ordering from the ${escapeHtml(hotel_config_default.brandName)} in-room store. Your items are being prepared and we'll bring them to your room in about 15 minutes.`,
-    body: `
-      ${callout("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
-      ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink
-  });
-}
-function storeOrderConfirmedEmail(order) {
-  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-confirmed", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} confirmed.`,
-    eyebrow: "Order confirmed",
-    title: "Your order is confirmed and being prepared",
-    intro: `Your order from the ${escapeHtml(hotel_config_default.brandName)} in-room store has been confirmed. Our team is preparing your items now.`,
-    body: `
-      ${callout("warm", "In the kitchen", "Our team is preparing your items. You'll get another email when your order is on its way.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink
-  });
-}
-function storeOrderOutForDeliveryEmail(order) {
-  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-out-for-delivery", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} is on its way.`,
-    eyebrow: "Order on the way",
-    title: "Your order is heading to your room",
-    intro: `Your order from the ${escapeHtml(hotel_config_default.brandName)} in-room store is on its way. Please keep your door accessible \u2014 our team will be there shortly.`,
-    body: `
-      ${callout("warm", "On the way", "Your order is being delivered to your room. You can track progress in the Intercom chat.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink
-  });
-}
-function storeOrderDeliveredEmail(order) {
-  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-delivered", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} delivered.`,
-    eyebrow: "Order delivered",
-    title: "Your order has arrived \u2014 enjoy!",
-    intro: `Your order from the ${escapeHtml(hotel_config_default.brandName)} in-room store has been delivered. We hope you enjoy it.`,
-    body: `
-      ${callout("green", "Delivered", "Your items are in your room. We would love to hear how it went \u2014 please share feedback with the front desk.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Send feedback",
-    ctaUrl: siteUrl("/contact")
-  });
-}
-function storeOrderCancelledEmail(order) {
-  const alreadyBilled = order.status === "delivered" && order.paymentMethod === "add-to-bill";
-  const refundNote = alreadyBilled ? "This order was already added to your room bill \u2014 no refund is needed." : order.paymentMethod === "gcash" ? "If you paid via GCash, the front desk will reach out within 24 hours to coordinate a refund." : "No payment was captured for this order.";
-  const { itemsTable, totalRow } = storeOrderBaseLayout("store-order-cancelled", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} cancelled.`,
-    eyebrow: "Order cancelled",
-    title: "Your order has been cancelled",
-    intro: `Your order from the ${escapeHtml(hotel_config_default.brandName)} in-room store has been cancelled. ${escapeHtml(refundNote)}`,
-    body: `
-      ${callout("red", "Cancellation recorded", order.cancellationReason ? `Reason: ${escapeHtml(order.cancellationReason)}` : "No reason was provided.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Contact support",
-    ctaUrl: `mailto:${hotel_config_default.supportEmail}`
-  });
-}
-async function sendStoreOrderTrigger(action, order) {
-  if (!order?.guestEmail) return;
-  const map2 = {
-    "store-order-placed": {
-      subject: `[${hotel_config_default.brandName}] Order placed: ${order.orderRef || "in-room"}`,
-      html: storeOrderPlacedEmail(order)
-    },
-    "store-order-confirmed": {
-      subject: `[${hotel_config_default.brandName}] Order confirmed: ${order.orderRef || "in-room"}`,
-      html: storeOrderConfirmedEmail(order)
-    },
-    "store-order-out-for-delivery": {
-      subject: `[${hotel_config_default.brandName}] Order on its way: ${order.orderRef || "in-room"}`,
-      html: storeOrderOutForDeliveryEmail(order)
-    },
-    "store-order-delivered": {
-      subject: `[${hotel_config_default.brandName}] Order delivered: ${order.orderRef || "in-room"}`,
-      html: storeOrderDeliveredEmail(order)
-    },
-    "store-order-cancelled": {
-      subject: `[${hotel_config_default.brandName}] Order cancelled: ${order.orderRef || "in-room"}`,
-      html: storeOrderCancelledEmail(order)
-    }
-  };
-  const template = map2[action];
-  if (!template) {
-    throw new Error("Unsupported store order email trigger.");
-  }
-  await sendEmail(order.guestEmail, template.subject, template.html);
-}
-function staffNewBookingEmail(booking) {
-  return emailLayout({
-    preheader: `New online booking ${booking.bookingRef}.`,
-    eyebrow: "New online booking",
-    title: "A new online booking just came in",
-    intro: `A new online booking was created. Review the details and follow up with the guest as needed.`,
-    body: `
-      ${callout("warm", "Action needed", "Verify the payment method and any discount / corporate code with the guest. Confirm the booking once verified.")}
-      ${card("Booking details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Booking ref", booking.bookingRef)}
-        ${row("Guest", booking.guestName)}
-        ${row("Email", booking.guestEmail)}
-        ${row("Phone", booking.guestPhone || "\u2014")}
-        ${row("Room", booking.roomNumber ? `Room ${booking.roomNumber} (${booking.roomType || ""})` : "\u2014")}
-        ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
-        ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
-        ${row("Nights", `${booking.numNights || 0} night(s)`)}
-        ${row("Payment method", booking.paymentMethod || "\u2014")}
-        ${row("Total", formatMoney(booking.totalPrice))}
-        ${row("Source", booking.source || "online")}
-        ${booking.specialRequests ? row("Special requests", escapeHtml(booking.specialRequests)) : ""}
-      </table>`)}
-    `,
-    ctaLabel: "Review booking",
-    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`)
-  });
-}
-function staffNewPaymentEmail(booking, payment) {
-  const proofUrl = payment?.paymentProofUrl || booking.paymentProofUrl || "";
-  return emailLayout({
-    preheader: `New payment proof for ${booking.bookingRef}.`,
-    eyebrow: "New payment proof",
-    title: "A guest uploaded a payment proof",
-    intro: `A guest uploaded a payment proof for an existing booking. Review the screenshot and verify the payment.`,
-    body: `
-      ${callout("warm", "Verify payment", "Open the payment screenshot, confirm the amount matches the booking total, and update the booking to payment-confirmed once verified.")}
-      ${card("Payment and booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Booking ref", booking.bookingRef)}
-        ${row("Guest", booking.guestName)}
-        ${row("Amount", formatMoney(payment?.amount || booking.totalPrice))}
-        ${row("Method", payment?.method || booking.paymentMethod || "\u2014")}
-        ${row("Note", payment?.note ? escapeHtml(payment.note) : "\u2014")}
-        ${row("Total due", formatMoney(booking.totalPrice))}
-        ${proofUrl ? row("Screenshot", `<a href="${escapeHtml(proofUrl)}" style="color: ${hotel_config_default.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
-      </table>`)}
-    `,
-    ctaLabel: "Review payment",
-    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`)
-  });
-}
-async function sendStaffNewBookingTrigger(booking) {
-  await sendEmail(
-    ADMIN_EMAIL,
-    `[${hotel_config_default.brandName}] New online booking: ${booking.bookingRef}`,
-    staffNewBookingEmail(booking)
-  );
-}
-async function sendStaffNewPaymentTrigger(booking, payment) {
-  await sendEmail(
-    ADMIN_EMAIL,
-    `[${hotel_config_default.brandName}] New payment proof: ${booking.bookingRef}`,
-    staffNewPaymentEmail(booking, payment)
-  );
-}
-function staffRefundReviewEmail(order) {
-  return emailLayout({
-    preheader: `Paid store order ${order.orderRef} was cancelled.`,
-    eyebrow: "Refund review needed",
-    title: "A guest cancelled a paid store order",
-    intro: `A guest cancelled a paid store order at <strong>${escapeHtml(hotel_config_default.brandName)}</strong>. The guest was charged via the order's payment method; review the payment proof and record a refund through the order's booking if appropriate.`,
-    body: `
-      ${callout("warm", "Action required", "No refund is issued automatically by the cancellation. Open the order's payment screenshot, confirm the amount, and record a refund via the linked booking's Folio \u2192 Refund action.")}
-      ${card("Cancelled order", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef)}
-        ${row("Room", order.roomNumber || "\u2014")}
-        ${row("Guest", order.guestName || "\u2014")}
-        ${row("Amount", formatMoney(Number(order.totalAmount || 0)))}
-        ${row("Method", order.paymentMethod || "\u2014")}
-        ${row("Reason", order.cancellationReason ? escapeHtml(order.cancellationReason) : "\u2014")}
-        ${order.paymentProofUrl ? row("Payment proof", `<a href="${escapeHtml(order.paymentProofUrl)}" style="color: ${hotel_config_default.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
-      </table>`)}
-    `,
-    ctaLabel: "Open booking",
-    ctaUrl: order.bookingId ? adminUrl(`/bookings?ref=${encodeURIComponent(order.bookingId)}`) : adminUrl("/bookings")
-  });
-}
-async function sendStaffRefundReviewTrigger(order) {
-  await sendEmail(
-    ADMIN_EMAIL,
-    `[${hotel_config_default.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
-    staffRefundReviewEmail(order)
-  );
-}
-async function getTomorrowConfirmedBookings() {
-  const { manilaDate } = getManilaDateInfo(hotel_config_default.timezone);
-  const start = new Date(manilaDate);
-  start.setDate(start.getDate() + 1);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  const snapshot = await adminDb.collection("bookings").where("status", "==", "confirmed").where("checkIn", ">=", start).where("checkIn", "<", end).get();
-  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-}
-async function sendBookingTrigger(action, booking) {
-  const HOUSE_RULES_ACTIONS = /* @__PURE__ */ new Set([
-    "payment-confirmed",
-    "booking-confirmed",
-    "checkin-reminder"
-  ]);
-  let houseRules = null;
-  if (HOUSE_RULES_ACTIONS.has(action)) {
-    try {
-      const doc = await adminDb.collection("settings").doc("websiteContent").get();
-      houseRules = typeof doc.data()?.houseRules === "string" ? doc.data()?.houseRules : null;
-    } catch (error) {
-      console.warn(`Failed to load websiteContent.houseRules for ${action} email; continuing without it.`, error);
-      houseRules = null;
-    }
-  }
-  const templates = {
-    "booking-submitted": {
-      // Per MRB-09 (2026-08-02, per decision #168): the
-      // subject uses the reservation ref when the view
-      // is reservation-scope (N>1). N=1 keeps the
-      // legacy `Booking request received: <bookingRef>`
-      // subject byte-equivalent.
-      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking request received: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking request received: ${booking.bookingRef}`,
-      html: bookingSubmittedEmail(booking)
-    },
-    "payment-confirmed": {
-      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Payment confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Payment confirmed: ${booking.bookingRef}`,
-      html: paymentConfirmedEmail(booking, houseRules)
-    },
-    "booking-confirmed": {
-      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef}`,
-      html: bookingConfirmedEmail(booking, houseRules),
-      // G-03 (E2E audit 2026-07-17): attach the receipt PDF required
-      // by Decision #82. Generated server-side from persisted
-      // booking/folio data. Does not expose private payment-proof
-      // or ID URLs.
-      attachments: [{
-        filename: booking.reservationRef ? `receipt-${String(booking.reservationRef).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf` : `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
-        content: generateReceiptPdf(booking)
-      }]
-    },
-    "checkin-reminder": {
-      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Check-in reminder: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Check-in reminder: ${booking.bookingRef}`,
-      html: checkinReminderEmail(booking, houseRules)
-    },
-    "booking-cancelled": {
-      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking cancelled: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking cancelled: ${booking.bookingRef}`,
-      html: bookingCancelledEmail(booking)
-    },
-    // Per MRB-09 (2026-08-02, per decision #168): the
-    // reservation-scope cancel. Fires from MRB-13's
-    // reservation-scope cancel path (`scope: "reservation"`
-    // in `POST /api/bookings/cancel`). The body lists every
-    // cancelled room with its own ref + final state. The
-    // subject uses the reservation ref (never a per-room
-    // ref) so the email is unambiguous about which
-    // reservation it covers. A partial reservation-scope
-    // action (e.g. one room cancelled out of three) sends
-    // this same action with the surviving rooms'
-    // `status`/`cancelledAt` fields set on the projection
-    // — the template's "rooms affected" / "rooms remaining"
-    // split makes the partial state explicit.
-    "booking-cancelled-reservation": {
-      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Reservation updated: ${booking.bookingRef}`,
-      html: bookingCancelledReservationEmail(booking)
-    },
-    "discount-rejected": {
-      subject: `[${hotel_config_default.brandName}] Discount verification update: ${booking.bookingRef}`,
-      html: discountRejectedEmail(booking)
-    },
-    "booking-rescheduled": {
-      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking updated: ${booking.bookingRef}`,
-      html: bookingRescheduledEmail(booking)
-    },
-    "payment-rejected": {
-      subject: `[${hotel_config_default.brandName}] Action needed: payment proof rejected for ${booking.bookingRef}`,
-      html: paymentRejectedEmail(booking)
-    },
-    // Per CRL-08 (2026-08-03, per decision #174):
-    // the refund-state email. The template function
-    // returns `{ subject, html }` because the
-    // subject depends on the `liabilityProjection`
-    // field (`"Refund update: <ref>"` with no
-    // room-count parenthetical). The handler fires
-    // this action when a successful `add-refund`
-    // commit changes the liability state (the
-    // state-change gate is the trigger, not the
-    // refund entry itself — a sub-state partial
-    // does not re-send). The booking view passed
-    // by the handler carries `liabilityProjection`
-    // (the live `computeCancellationLiabilityState`
-    // result) + `latestRefund` (the just-committed
-    // refund entry, used for the "Latest refund"
-    // row).
-    "booking-refund-processed": bookingRefundProcessedEmail(booking)
-  };
-  const template = templates[action];
-  if (!template) {
-    throw new Error("Unsupported booking email trigger.");
-  }
-  await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
-}
-async function sendBookingConfirmedWithBalanceTrigger(booking, balance, reason) {
-  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
-  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
-  const subject = `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef} (\u20B1${safeBalance.toLocaleString("en-PH")} due at check-in)`;
-  const html = bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason);
-  const attachments = [{
-    filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
-    content: generateReceiptPdf(booking)
-  }];
-  await sendEmail(booking.guestEmail, subject, html, attachments);
-}
-async function handleEmailTrigger(req, res, action) {
-  const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
-  if (req.method !== "POST" && !isCronReminderRequest) {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  try {
-    if (action === "corporate-inquiry") {
-      const inquiry = req.body?.inquiry || req.body || {};
-      await sendCorporateInquiryTrigger(inquiry);
-      return res.status(200).json({ success: true });
-    }
-    if (action === "early-checkin-request") {
-      try {
-        const rewardsRef = adminDb.doc("settings/rewardsConfig");
-        const rewardsSnap = await rewardsRef.get();
-        const rewardsCfg = rewardsSnap.exists ? rewardsSnap.data() : null;
-        if (rewardsCfg && rewardsCfg.earlyCheckInEnabled === false) {
-          return res.status(403).json({
-            success: false,
-            error: "Early check-in requests are currently disabled by the hotel."
-          });
-        }
-      } catch (gateErr) {
-        console.error("[early-checkin] Failed to read rewardsConfig gate:", gateErr);
-      }
-      const hasStaff2 = Boolean(req.staff?.success);
-      const booking2 = await findBooking(req, { requireGuestMatch: !hasStaff2 });
-      if (!booking2) {
-        return res.status(404).json({ success: false, error: "Booking not found." });
-      }
-      const ALLOWED_EARLY_CHECKIN_STATUSES = [
-        "payment-uploaded",
-        "payment-confirmed",
-        "confirmed"
-      ];
-      if (!ALLOWED_EARLY_CHECKIN_STATUSES.includes(booking2.status)) {
-        return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking2.status}'.` });
-      }
-      const checkInDateObj = toDate3(booking2.checkIn);
-      if (!checkInDateObj) {
-        return res.status(400).json({ success: false, error: "Invalid check-in date." });
-      }
-      const year = checkInDateObj.getFullYear();
-      const month = String(checkInDateObj.getMonth() + 1).padStart(2, "0");
-      const day = String(checkInDateObj.getDate()).padStart(2, "0");
-      const checkInStr = `${year}-${month}-${day}`;
-      const { todayStr } = getManilaDateInfo(hotel_config_default.timezone);
-      if (checkInStr < todayStr) {
-        return res.status(400).json({ success: false, error: "Early check-in request is not allowed as the check-in date has already passed." });
-      }
-      if (booking2.earlyCheckIn?.status === "approved") {
-        return res.status(400).json({ success: false, error: "Early check-in has already been approved for this booking." });
-      }
-      const earlyCheckinRequestSchema = external_exports.object({
-        requestedCheckInTime: external_exports.string().trim().min(1).max(20).optional().default("12:00 PM"),
-        notes: external_exports.string().trim().max(500).optional().default("")
-      });
-      const bodyData = req.body?.request || req.body || {};
-      const parsed2 = earlyCheckinRequestSchema.safeParse(bodyData);
-      if (!parsed2.success) {
-        return res.status(400).json({ success: false, error: "Please provide a valid requested check-in time (max 20 characters) and notes (max 500 characters)." });
-      }
-      const request = parsed2.data;
-      const earlyCheckIn = {
-        source: "guest-request",
-        status: "requested",
-        requestedTime: request.requestedCheckInTime,
-        notes: request.notes || "",
-        requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        resolvedAt: null,
-        resolvedBy: null,
-        staffNote: null
-      };
-      await adminDb.collection("bookings").doc(booking2.id).update({
-        earlyCheckIn
-      });
-      await sendEarlyCheckinRequestTrigger(booking2, request);
-      await writeNotification({
-        type: "early-checkin-request",
-        title: `Early check-in requested \u2014 ${booking2.bookingRef || "pending"}`,
-        entityType: "booking",
-        entityId: booking2.id,
-        roomNumber: booking2.roomNumber ?? null,
-        bookingRef: booking2.bookingRef ?? null
-      });
-      return res.status(200).json({ success: true });
-    }
-    if (action === "voucher-issued") {
-      if (!req.staff?.success) {
-        return res.status(401).json({ success: false, error: "Staff authentication is required to issue voucher emails." });
-      }
-      const voucherInput = req.body?.voucher;
-      if (!voucherInput?.code || !voucherInput?.guestEmail) {
-        return res.status(400).json({ success: false, error: "Voucher code and guestEmail are required." });
-      }
-      await sendVoucherIssuedTrigger(voucherInput);
-      return res.status(200).json({ success: true });
-    }
-    if (action === "checkin-reminder" && !req.body?.bookingId && !req.body?.bookingRef) {
-      const bookings = await getTomorrowConfirmedBookings();
-      const pending = bookings.filter((booking2) => !booking2?.reminderSentAt);
-      const reservationGroups = /* @__PURE__ */ new Map();
-      const legacySingles = [];
-      for (const booking2 of pending) {
-        const reservationId = String(booking2?.reservationId || "").trim();
-        if (reservationId) {
-          const list = reservationGroups.get(reservationId) || [];
-          list.push(booking2);
-          reservationGroups.set(reservationId, list);
-        } else {
-          legacySingles.push(booking2);
-        }
-      }
-      const reservationAnchors = [];
-      for (const [reservationId, children] of reservationGroups.entries()) {
-        reservationAnchors.push({ anchor: children[0], reservationId });
-      }
-      const reservationViewPromises = reservationAnchors.map(async ({ anchor, reservationId }) => {
-        const reservationRef = adminDb.collection("reservations").doc(reservationId);
-        const [reservationSnap, childrenSnap] = await Promise.all([
-          reservationRef.get(),
-          adminDb.collection("bookings").where("reservationId", "==", reservationId).get()
-        ]);
-        if (!reservationSnap.exists) {
-          return { anchor, view: anchor };
-        }
-        const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        return { anchor, view: buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children) };
-      });
-      const resolvedReservationViews = await Promise.all(reservationViewPromises);
-      const sendTasks = [];
-      for (const { anchor, view } of resolvedReservationViews) {
-        sendTasks.push(sendBookingTrigger(action, view || anchor));
-      }
-      for (const single of legacySingles) {
-        sendTasks.push(sendBookingTrigger(action, single));
-      }
-      await Promise.all(sendTasks);
-      const stamp = /* @__PURE__ */ new Date();
-      const stampTasks = [];
-      for (const [, children] of reservationGroups.entries()) {
-        for (const child of children) {
-          stampTasks.push(
-            adminDb.collection("bookings").doc(child.id).update({ reminderSentAt: stamp }).catch(() => null)
-          );
-        }
-      }
-      for (const single of legacySingles) {
-        stampTasks.push(
-          adminDb.collection("bookings").doc(single.id).update({ reminderSentAt: stamp }).catch(() => null)
-        );
-      }
-      await Promise.all(stampTasks);
-      return res.status(200).json({
-        success: true,
-        data: {
-          sent: pending.length,
-          skipped: bookings.length - pending.length,
-          // Diagnostic — the cron response surfaces
-          // the grouping (how many reservation-scope
-          // emails vs legacy single-room emails) so
-          // the next audit can verify the
-          // consolidation worked.
-          reservations: reservationAnchors.length,
-          legacySingles: legacySingles.length
-        }
-      });
-    }
-    const hasStaff = Boolean(req.staff?.success);
-    const booking = await findBooking(req, { requireGuestMatch: !hasStaff });
-    if (!booking) {
-      return res.status(404).json({ success: false, error: "Booking not found." });
-    }
-    await sendBookingTrigger(action, booking);
-    return res.status(200).json({ success: true });
-  } catch (error) {
-    console.error("Email trigger failed:", error);
-    const message = error instanceof Error ? error.message : "Unable to send email. Please try again.";
-    const status = message.includes("required") ? 400 : 500;
-    return res.status(status).json({ success: false, error: message });
-  }
-}
-async function handleEmailPreview(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  if (!req.staff?.success) {
-    return res.status(401).json({ success: false, error: "Staff authentication is required." });
-  }
-  const { template, houseRules } = req.body || {};
-  if (!template) {
-    return res.status(400).json({ success: false, error: "Template parameter is required." });
-  }
-  const mockBooking = {
-    bookingRef: "BK-2026-MOCK",
-    guestName: "Juan Dela Cruz",
-    guestEmail: "juan.delacruz@example.com",
-    guestPhone: "+63 917 123 4567",
-    roomNumber: "201",
-    roomName: "Deluxe Ocean View",
-    roomType: "deluxe",
-    checkIn: new Date(Date.now() + 864e5 * 2),
-    // 2 days from now
-    checkOut: new Date(Date.now() + 864e5 * 4),
-    // 4 days from now
-    numNights: 2,
-    totalPrice: 8500,
-    paymentMethod: "gcash",
-    status: "confirmed",
-    specialRequests: "High floor requested. Anniversary trip.",
-    discountType: "senior",
-    discountRejectionReason: "ID photo was blurred and expired.",
-    cancellationReason: "Flight cancelled due to weather.",
-    lookupToken: "mock-lookup-token-xyz"
-  };
-  const mockInquiry = {
-    companyName: "Acme Tech Solutions Inc.",
-    contactPerson: "Jane Smith",
-    email: "corporate@acme.com",
-    phone: "+63 2 8123 4567",
-    numRooms: "5 rooms",
-    preferredDates: "Oct 12 - Oct 15, 2026",
-    specialRequirements: "Requires high-speed Wi-Fi, early breakfast setup, and project room space."
-  };
-  const mockContactInquiry = {
-    name: "Maria Santos",
-    email: "maria.santos@example.com",
-    phone: "+63 917 555 0123",
-    subject: "Airport transfer availability",
-    message: "Do you offer airport pickup for two guests arriving in the afternoon?"
-  };
-  const mockEarlyCheckinRequest = {
-    requestedCheckInTime: "10:30 AM",
-    notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
-  };
-  const mockVoucher = {
-    code: "SPARKWELCOME10",
-    guestEmail: "juan.delacruz@example.com",
-    discountType: "percent",
-    discountValue: 10,
-    applicableRoomTypes: ["deluxe", "executive"],
-    expiresAt: new Date(Date.now() + 864e5 * 30),
-    // 30 days from now
-    usageCap: 1
-  };
-  const mockStoreOrder = {
-    orderRef: "ORD-2026-MOCK",
-    roomNumber: "201",
-    guestEmail: "juan.delacruz@example.com",
-    paymentMethod: "add-to-bill",
-    totalAmount: 450,
-    status: "confirmed",
-    items: [
-      { name: "Pork Silog Extra", quantity: 2, price: 150 },
-      { name: "Mineral Water 1L", quantity: 2, price: 75 }
-    ],
-    cancellationReason: "Decided to dine out instead."
-  };
-  const mockPaymentProof = {
-    amount: 8500,
-    method: "gcash",
-    note: "GCash reference ID: 123456789",
-    paymentProofUrl: "https://example.com/mock-receipt.png"
-  };
-  try {
-    let html = "";
-    switch (template) {
-      case "booking-submitted":
-        html = bookingSubmittedEmail(mockBooking);
-        break;
-      case "payment-confirmed":
-        html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-confirmed":
-        html = bookingConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-confirmed-with-balance":
-        html = bookingConfirmedWithBalanceEmail(
-          { ...mockBooking, roomNumber: "" },
-          2750,
-          "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
-        );
-        break;
-      case "checkin-reminder":
-        html = checkinReminderEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-cancelled":
-        html = bookingCancelledEmail(mockBooking);
-        break;
-      case "booking-cancelled-reservation":
-        html = bookingCancelledReservationEmail({
-          ...mockBooking,
-          reservationRef: "R-20260802-00001",
-          reservationId: "rsv-mock",
-          isReservation: true,
-          roomCount: 3,
-          activeRoomCount: 2,
-          rooms: [
-            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 7200 },
-            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
-            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasBreakfast: true, totalPrice: 9800 }
-          ],
-          cancellationReason: "Guest requested partial cancellation.",
-          cancellationSource: "guest"
-        });
-        break;
-      case "discount-rejected":
-        html = discountRejectedEmail(mockBooking);
-        break;
-      case "payment-rejected":
-        html = paymentRejectedEmail({
-          ...mockBooking,
-          // Per 2026-07-24 (refactor/unify-payment-reference-fields):
-          // the canonical reference lives on the payment ledger,
-          // not on the booking doc. Mock a single onsitePayments
-          // entry so the "Reference on file" callout renders in
-          // the preview.
-          onsitePayments: [{ transactionReference: "1234567890" }],
-          paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
-        });
-        break;
-      case "corporate-inquiry":
-        html = corporateInquiryEmail(mockInquiry);
-        break;
-      case "corporate-inquiry-confirmation":
-        html = corporateInquiryConfirmationEmail(mockInquiry);
-        break;
-      case "contact-inquiry":
-        html = contactInquiryEmail(mockContactInquiry);
-        break;
-      case "contact-confirmation":
-        html = contactConfirmationEmail(mockContactInquiry);
-        break;
-      case "early-checkin-request":
-        html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
-        break;
-      case "early-checkin-resolve":
-        const bookingForResolve = {
-          ...mockBooking,
-          earlyCheckIn: {
-            status: "approved",
-            requestedTime: "10:30 AM",
-            confirmedTime: "11:00 AM",
-            notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
-          }
-        };
-        html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
-        break;
-      case "booking-rescheduled":
-        html = bookingRescheduledEmail(mockBooking);
-        break;
-      case "voucher-issued":
-        html = voucherIssuedEmail(mockVoucher);
-        break;
-      case "store-order-placed":
-        html = storeOrderPlacedEmail(mockStoreOrder);
-        break;
-      case "store-order-confirmed":
-        html = storeOrderConfirmedEmail(mockStoreOrder);
-        break;
-      case "store-order-out-for-delivery":
-        html = storeOrderOutForDeliveryEmail(mockStoreOrder);
-        break;
-      case "store-order-delivered":
-        html = storeOrderDeliveredEmail(mockStoreOrder);
-        break;
-      case "store-order-cancelled":
-        html = storeOrderCancelledEmail(mockStoreOrder);
-        break;
-      case "staff-new-booking":
-        html = staffNewBookingEmail(mockBooking);
-        break;
-      case "staff-new-payment":
-        html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
-        break;
-      case "spark-rewards-email-verification":
-        html = sparkRewardsEmailVerificationEmail({
-          guestName: "Maria Santos",
-          email: "maria.santos@example.com",
-          verificationLink: siteUrl("/account/profile?emailVerified=true")
-        });
-        break;
-      default:
-        return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
-    }
-    res.setHeader("Content-Type", "text/html");
-    return res.status(200).send(html);
-  } catch (error) {
-    console.error("Email preview generation failed:", error);
-    const message = error instanceof Error ? error.message : "Unable to generate preview. Please try again.";
-    return res.status(500).json({ success: false, error: message });
-  }
-}
-var import_jspdf, FROM_ADDRESS, FROM_DISPLAY_NAME, FROM_EMAIL, ADMIN_EMAIL;
-var init_email = __esm({
-  "server/handlers/email.ts"() {
-    "use strict";
-    init_zod();
-    import_jspdf = __toESM(require_jspdf_node_min());
-    init_hotel_config();
-    init_firebase_admin();
-    init_resend();
-    init_siteUrl();
-    init_shared();
-    init_notifications();
-    FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
-    FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
-    FROM_EMAIL = FROM_ADDRESS.includes("<") ? FROM_ADDRESS : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;
-    ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail;
-  }
-});
-
-// server/apiRouter.ts
-var apiRouter_exports = {};
-__export(apiRouter_exports, {
-  default: () => handler
-});
-module.exports = __toCommonJS(apiRouter_exports);
-init_firebase_admin();
-init_email();
-init_notifications();
-
-// server/handlers/bookings.ts
-init_firebase_admin();
-
 // server/handlers/test-runs.ts
-init_zod();
-var import_node_crypto = __toESM(require("node:crypto"));
-init_firebase_admin();
 function getStaff(req) {
   return req.staff || {};
 }
@@ -226136,17 +224136,6 @@ function generateRunId() {
 function hashToken(token2) {
   return import_node_crypto.default.createHash("sha256").update(token2).digest("hex");
 }
-var createTestRunSchema = external_exports.object({
-  name: external_exports.string().trim().min(1).max(120),
-  environment: external_exports.enum(["staging", "production"]),
-  durationMinutes: external_exports.number().int().min(5).max(43200)
-}).strict();
-var closeTestRunSchema = external_exports.object({
-  runId: external_exports.string().trim().min(1).max(64)
-}).strict();
-var deleteTestRunSchema = external_exports.object({
-  runId: external_exports.string().trim().min(1).max(64)
-}).strict();
 async function collectManifest(runId) {
   const affectedRooms = /* @__PURE__ */ new Set();
   const affectedStockItems = /* @__PURE__ */ new Set();
@@ -226284,8 +224273,6 @@ async function handleCloseTestRun(req, res) {
     });
   }
 }
-var CLEANUP_TIMEOUT_MS = 30 * 60 * 1e3;
-var TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"];
 async function deleteTestRunBookingSubcollections(bookingRef) {
   for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
     const snapshot = await bookingRef.collection(subcollection).get();
@@ -226489,14 +224476,6 @@ function isStagingProject() {
   const allowlist = allowlistRaw.split(",").map((s4) => s4.trim()).filter(Boolean);
   return allowlist.includes(projectId);
 }
-var PREVIEW_TTL_MS = 5 * 60 * 1e3;
-var LOCK_TIMEOUT_MS = 30 * 60 * 1e3;
-var RESET_BATCH_SIZE = 20;
-var stagingResetConfirmSchema = external_exports.object({
-  confirmation: external_exports.literal("RESET STAGING"),
-  projectName: external_exports.string().trim().min(1).max(120),
-  previewId: external_exports.string().trim().min(1).max(64)
-}).strict();
 async function acquireResetLock(staff, currentProject, previewId) {
   const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
   const now = /* @__PURE__ */ new Date();
@@ -226547,15 +224526,6 @@ async function releaseResetLock(lockRef, status, phase, checkpoint) {
   } catch {
   }
 }
-var PROTECTED_RESET_COLLECTIONS = [
-  "counters",
-  "settings",
-  "guests",
-  "members",
-  "storeItems",
-  "vouchers",
-  "corporateCodes"
-];
 async function collectProtectedState() {
   const [protectedSnapshots, roomsSnapshot] = await Promise.all([
     Promise.all(PROTECTED_RESET_COLLECTIONS.map(async (name2) => [name2, await adminDb.collection(name2).get()])),
@@ -227057,84 +225027,12 @@ async function handleListTestRuns(req, res) {
     return res.status(500).json({ success: false, error: "Unable to list test runs." });
   }
 }
-var REFRESH_MODES = ["sanitized-snapshot", "config-only", "unsanitized-diagnostic", "sanitized", "unsanitized"];
 function normalizeRefreshMode(mode) {
   if (mode === "sanitized") return "sanitized-snapshot";
   if (mode === "unsanitized") return "unsanitized-diagnostic";
   if (mode === "sanitized-snapshot" || mode === "config-only" || mode === "unsanitized-diagnostic") return mode;
   return "sanitized-snapshot";
 }
-var stagingRefreshSchema = external_exports.object({
-  export: external_exports.object({
-    bookings: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
-    storeOrders: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
-    members: external_exports.array(external_exports.record(external_exports.any())).optional().default([])
-  }).strict(),
-  options: external_exports.object({
-    mode: external_exports.enum(REFRESH_MODES).optional().transform((m2) => normalizeRefreshMode(m2)).default("sanitized-snapshot"),
-    snapshotNote: external_exports.string().trim().max(280).optional().default(""),
-    // Per ETR-R03 (reviewable preservation):
-    // per-field preservation checkboxes for
-    // the unsanitized-diagnostic mode. The
-    // sanitized-snapshot mode + config-only
-    // mode ignore these (sanitized always
-    // scrubs; config-only has no per-doc
-    // preservation). The defaults are
-    // conservative (preserve operational
-    // signal, scrub PII).
-    preserveDates: external_exports.boolean().optional().default(true),
-    preserveFinancialValues: external_exports.boolean().optional().default(true),
-    preserveStatuses: external_exports.boolean().optional().default(true),
-    // Per ETR-D01 (restricted-mode gates):
-    // 5 separate gates before the preview
-    // generates. ALL 5 are required for
-    // unsanitized-diagnostic mode; ignored
-    // for the other two modes.
-    dpoApprovalReference: external_exports.string().trim().max(120).optional().default(""),
-    defectReference: external_exports.string().trim().max(120).optional().default(""),
-    projectConfirmation: external_exports.string().trim().max(60).optional().default(""),
-    reauthenticatedAt: external_exports.string().optional().default(""),
-    acknowledgedRestrictedMode: external_exports.boolean().optional().default(false),
-    // Per ETR-D03 (minimize scope): the
-    // operator must specify the explicit
-    // scope. The full-dataset path is
-    // rejected (the unsanitized mode
-    // requires narrow scope).
-    scopeManifest: external_exports.object({
-      bookingIds: external_exports.array(external_exports.string()).optional().default([]),
-      memberIds: external_exports.array(external_exports.string()).optional().default([]),
-      dateRange: external_exports.object({
-        start: external_exports.string().optional().default(""),
-        end: external_exports.string().optional().default("")
-      }).optional().default({ start: "", end: "" })
-    }).optional().default({ bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } }),
-    // Per ETR-D04 (sensitive-file opt-in):
-    // OFF by default even in unsanitized
-    // mode. The operator has to check a
-    // SEPARATE box to opt into copying
-    // sensitive files (IDs, payment
-    // proofs, signatures).
-    sensitiveFileOptIn: external_exports.boolean().optional().default(false),
-    // Per ETR-D06 (TTL): the snapshot's
-    // expiresAt. Default 24h. Operator can
-    // pick a shorter window.
-    ttlHours: external_exports.number().int().min(1).max(168).optional().default(24)
-  }).strict().optional().default({
-    mode: "sanitized-snapshot",
-    snapshotNote: "",
-    preserveDates: true,
-    preserveFinancialValues: true,
-    preserveStatuses: true,
-    dpoApprovalReference: "",
-    defectReference: "",
-    projectConfirmation: "",
-    reauthenticatedAt: "",
-    acknowledgedRestrictedMode: false,
-    scopeManifest: { bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } },
-    sensitiveFileOptIn: false,
-    ttlHours: 24
-  })
-}).strict();
 function syntheticFromSource(sourceValue, salt, prefix, domain) {
   if (sourceValue === null || sourceValue === void 0) return "";
   const normalized = String(sourceValue).trim().toLowerCase();
@@ -227749,8 +225647,2227 @@ async function handleStagingRefreshDestroy(req, res) {
     });
   }
 }
+var import_node_crypto, createTestRunSchema, closeTestRunSchema, deleteTestRunSchema, CLEANUP_TIMEOUT_MS, TEST_RUN_BOOKING_SUBCOLLECTIONS, PREVIEW_TTL_MS, LOCK_TIMEOUT_MS, RESET_BATCH_SIZE, stagingResetConfirmSchema, PROTECTED_RESET_COLLECTIONS, REFRESH_MODES, stagingRefreshSchema;
+var init_test_runs = __esm({
+  "server/handlers/test-runs.ts"() {
+    "use strict";
+    init_zod();
+    import_node_crypto = __toESM(require("node:crypto"));
+    init_firebase_admin();
+    createTestRunSchema = external_exports.object({
+      name: external_exports.string().trim().min(1).max(120),
+      environment: external_exports.enum(["staging", "production"]),
+      durationMinutes: external_exports.number().int().min(5).max(43200)
+    }).strict();
+    closeTestRunSchema = external_exports.object({
+      runId: external_exports.string().trim().min(1).max(64)
+    }).strict();
+    deleteTestRunSchema = external_exports.object({
+      runId: external_exports.string().trim().min(1).max(64)
+    }).strict();
+    CLEANUP_TIMEOUT_MS = 30 * 60 * 1e3;
+    TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"];
+    PREVIEW_TTL_MS = 5 * 60 * 1e3;
+    LOCK_TIMEOUT_MS = 30 * 60 * 1e3;
+    RESET_BATCH_SIZE = 20;
+    stagingResetConfirmSchema = external_exports.object({
+      confirmation: external_exports.literal("RESET STAGING"),
+      projectName: external_exports.string().trim().min(1).max(120),
+      previewId: external_exports.string().trim().min(1).max(64)
+    }).strict();
+    PROTECTED_RESET_COLLECTIONS = [
+      "counters",
+      "settings",
+      "guests",
+      "members",
+      "storeItems",
+      "vouchers",
+      "corporateCodes"
+    ];
+    REFRESH_MODES = ["sanitized-snapshot", "config-only", "unsanitized-diagnostic", "sanitized", "unsanitized"];
+    stagingRefreshSchema = external_exports.object({
+      export: external_exports.object({
+        bookings: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
+        storeOrders: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
+        members: external_exports.array(external_exports.record(external_exports.any())).optional().default([])
+      }).strict(),
+      options: external_exports.object({
+        mode: external_exports.enum(REFRESH_MODES).optional().transform((m2) => normalizeRefreshMode(m2)).default("sanitized-snapshot"),
+        snapshotNote: external_exports.string().trim().max(280).optional().default(""),
+        // Per ETR-R03 (reviewable preservation):
+        // per-field preservation checkboxes for
+        // the unsanitized-diagnostic mode. The
+        // sanitized-snapshot mode + config-only
+        // mode ignore these (sanitized always
+        // scrubs; config-only has no per-doc
+        // preservation). The defaults are
+        // conservative (preserve operational
+        // signal, scrub PII).
+        preserveDates: external_exports.boolean().optional().default(true),
+        preserveFinancialValues: external_exports.boolean().optional().default(true),
+        preserveStatuses: external_exports.boolean().optional().default(true),
+        // Per ETR-D01 (restricted-mode gates):
+        // 5 separate gates before the preview
+        // generates. ALL 5 are required for
+        // unsanitized-diagnostic mode; ignored
+        // for the other two modes.
+        dpoApprovalReference: external_exports.string().trim().max(120).optional().default(""),
+        defectReference: external_exports.string().trim().max(120).optional().default(""),
+        projectConfirmation: external_exports.string().trim().max(60).optional().default(""),
+        reauthenticatedAt: external_exports.string().optional().default(""),
+        acknowledgedRestrictedMode: external_exports.boolean().optional().default(false),
+        // Per ETR-D03 (minimize scope): the
+        // operator must specify the explicit
+        // scope. The full-dataset path is
+        // rejected (the unsanitized mode
+        // requires narrow scope).
+        scopeManifest: external_exports.object({
+          bookingIds: external_exports.array(external_exports.string()).optional().default([]),
+          memberIds: external_exports.array(external_exports.string()).optional().default([]),
+          dateRange: external_exports.object({
+            start: external_exports.string().optional().default(""),
+            end: external_exports.string().optional().default("")
+          }).optional().default({ start: "", end: "" })
+        }).optional().default({ bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } }),
+        // Per ETR-D04 (sensitive-file opt-in):
+        // OFF by default even in unsanitized
+        // mode. The operator has to check a
+        // SEPARATE box to opt into copying
+        // sensitive files (IDs, payment
+        // proofs, signatures).
+        sensitiveFileOptIn: external_exports.boolean().optional().default(false),
+        // Per ETR-D06 (TTL): the snapshot's
+        // expiresAt. Default 24h. Operator can
+        // pick a shorter window.
+        ttlHours: external_exports.number().int().min(1).max(168).optional().default(24)
+      }).strict().optional().default({
+        mode: "sanitized-snapshot",
+        snapshotNote: "",
+        preserveDates: true,
+        preserveFinancialValues: true,
+        preserveStatuses: true,
+        dpoApprovalReference: "",
+        defectReference: "",
+        projectConfirmation: "",
+        reauthenticatedAt: "",
+        acknowledgedRestrictedMode: false,
+        scopeManifest: { bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } },
+        sensitiveFileOptIn: false,
+        ttlHours: 24
+      })
+    }).strict();
+  }
+});
+
+// server/handlers/email-banner.ts
+function escapeHtml(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function callout(tone, title, body) {
+  const tones = {
+    warm: { bg: hotel_config_default.colors.primaryLight, border: hotel_config_default.colors.primary, title: hotel_config_default.colors.primaryDark },
+    green: { bg: "#ecfdf5", border: "#16a34a", title: "#166534" },
+    red: { bg: "#fef2f2", border: "#dc2626", title: "#991b1b" }
+  };
+  const toneValues = tones[tone];
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0; background: ${toneValues.bg}; border-left: 4px solid ${toneValues.border}; border-radius: 12px;">
+      <tr>
+        <td style="padding: 16px 18px;">
+          <p style="margin: 0 0 6px; color: ${toneValues.title}; font-weight: 800; font-size: 14px;">${title}</p>
+          <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.6;">${body}</p>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+function environmentBanner(state) {
+  const blocks = [];
+  if (state.isTestData === true) {
+    const runName = typeof state.testRunName === "string" ? state.testRunName.trim() : "";
+    const envRaw = state.testRunEnvironment;
+    const env = envRaw === "staging" || envRaw === "production" ? envRaw : "";
+    let descriptor;
+    if (runName && env) {
+      descriptor = `test run &ldquo;${escapeHtml(runName)}&rdquo; on ${env}`;
+    } else if (runName) {
+      descriptor = `test run &ldquo;${escapeHtml(runName)}&rdquo;`;
+    } else if (env) {
+      descriptor = `active test run on ${env}`;
+    } else {
+      descriptor = "active test run";
+    }
+    blocks.push(
+      callout(
+        "warm",
+        "\u{1F9EA} Test run email",
+        `This email was sent as part of ${descriptor}. No real action is required \u2014 please ignore any booking, payment, or check-in instructions in this email.`
+      )
+    );
+  }
+  if (isStagingProject()) {
+    blocks.push(
+      callout(
+        "warm",
+        "\u26A0\uFE0F Staging environment email",
+        "This email was sent from the staging environment. No real action is required \u2014 please ignore any booking, payment, or check-in instructions in this email."
+      )
+    );
+  }
+  return blocks.join("\n");
+}
+function environmentBannerFromBooking(booking) {
+  return environmentBanner({
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : "",
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  });
+}
+var init_email_banner = __esm({
+  "server/handlers/email-banner.ts"() {
+    "use strict";
+    init_hotel_config();
+    init_test_runs();
+  }
+});
+
+// server/handlers/email.ts
+var email_exports = {};
+__export(email_exports, {
+  buildReservationEmailView: () => buildReservationEmailView,
+  handleEmailPreview: () => handleEmailPreview,
+  handleEmailTrigger: () => handleEmailTrigger,
+  loadLiabilityProjectionForEmail: () => loadLiabilityProjectionForEmail,
+  sendBookingConfirmedWithBalanceTrigger: () => sendBookingConfirmedWithBalanceTrigger,
+  sendBookingTrigger: () => sendBookingTrigger,
+  sendContactConfirmationTrigger: () => sendContactConfirmationTrigger,
+  sendContactInquiryTrigger: () => sendContactInquiryTrigger,
+  sendCorporateInquiryConfirmationTrigger: () => sendCorporateInquiryConfirmationTrigger,
+  sendCorporateInquiryTrigger: () => sendCorporateInquiryTrigger,
+  sendEarlyCheckinRequestTrigger: () => sendEarlyCheckinRequestTrigger,
+  sendEarlyCheckinResolveTrigger: () => sendEarlyCheckinResolveTrigger,
+  sendStaffNewBookingTrigger: () => sendStaffNewBookingTrigger,
+  sendStaffNewPaymentTrigger: () => sendStaffNewPaymentTrigger,
+  sendStaffRefundReviewTrigger: () => sendStaffRefundReviewTrigger,
+  sendStoreOrderTrigger: () => sendStoreOrderTrigger,
+  sendVerificationEmailTrigger: () => sendVerificationEmailTrigger,
+  sendVoucherIssuedTrigger: () => sendVoucherIssuedTrigger
+});
+function escapeHtml2(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function generateReceiptPdf(booking) {
+  const doc = new import_jspdf.jsPDF({ unit: "mm", format: "a4" });
+  const left2 = 20;
+  const pageWidth = 170;
+  const right2 = left2 + pageWidth;
+  const pageBottom = 280;
+  const lineHeight = 4.5;
+  let top = 20;
+  function pdfSafe(value) {
+    return String(value ?? "").replace(/₱/g, "PHP ").replace(/[‐-―]/g, "-").replace(/[‘’‛]/g, "'").replace(/[“”]/g, '"').replace(/[•‣⁃]/g, "-").replace(/…/g, "...").replace(/[   ]/g, " ").replace(/[^\x00-\xFF]/g, (character) => character.normalize("NFKD").replace(/[^\x00-\xFF]/g, "")).trim();
+  }
+  function line(y2) {
+    doc.setDrawColor(200);
+    doc.line(left2, y2, right2, y2);
+  }
+  function ensureSpace(needed = 10) {
+    if (top + needed <= pageBottom) return;
+    doc.addPage();
+    top = 20;
+  }
+  function text(label, value, options = {}) {
+    const gap = options.gap ?? 6;
+    const safeLabel = pdfSafe(label);
+    const safeValue = pdfSafe(value);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    const labelWidth = doc.getTextWidth(safeLabel);
+    doc.setFont("helvetica", options.bold ? "bold" : "normal");
+    const valueLines = safeValue ? doc.splitTextToSize(safeValue, Math.max(20, pageWidth - labelWidth - 4)) : [];
+    ensureSpace(Math.max(gap, valueLines.length * lineHeight));
+    doc.setFont("helvetica", "bold");
+    doc.text(safeLabel, left2, top);
+    doc.setFont("helvetica", options.bold ? "bold" : "normal");
+    valueLines.forEach((valueLine, index) => {
+      doc.text(valueLine, right2, top + index * lineHeight, { align: "right" });
+    });
+    top += Math.max(gap, (valueLines.length - 1) * lineHeight + gap);
+  }
+  function plain(value, gap) {
+    ensureSpace(gap);
+    doc.text(pdfSafe(value), left2, top);
+    top += gap;
+  }
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text(pdfSafe(hotel_config_default.legalName || hotel_config_default.brandName), left2, top);
+  top += 7;
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  plain(`${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}`, 5);
+  plain(`Tel: ${hotel_config_default.frontDeskPhone} | Email: ${hotel_config_default.supportEmail}`, 8);
+  line(top);
+  top += 6;
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.text("Booking Receipt", left2, top);
+  top += 8;
+  const fmtDate = (v6) => {
+    if (!v6) return "-";
+    const d = toDate3(v6);
+    return d ? new Intl.DateTimeFormat(hotel_config_default.locale, { month: "short", day: "numeric", year: "numeric", timeZone: hotel_config_default.timezone }).format(d) : "-";
+  };
+  const fmtMoney = (v6) => {
+    const amt = Number(v6 || 0);
+    return new Intl.NumberFormat(hotel_config_default.locale, { style: "currency", currency: hotel_config_default.currency, currencyDisplay: "code", maximumFractionDigits: 0 }).format(amt);
+  };
+  text("Booking Ref:", String(booking.bookingRef || "-"));
+  text("Guest:", String(booking.guestName || "-"));
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
+  if (rooms && rooms.length > 0) {
+    if (booking.reservationRef) {
+      text("Reservation Ref:", String(booking.reservationRef));
+    }
+    text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
+    for (const room of rooms) {
+      const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
+      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
+      text(label, value, { gap: 5 });
+    }
+  } else {
+    text("Room Type:", String(booking.roomName || booking.roomType || "-"));
+  }
+  text("Check-in:", fmtDate(booking.checkIn));
+  text("Check-out:", fmtDate(booking.checkOut));
+  text("Nights:", String(booking.numNights || 0));
+  {
+    const numAdults = Number(booking.numAdults);
+    const numChildren = Number(booking.numChildren);
+    const extraBedCount = Number(booking.extraBedCount);
+    if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
+      const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
+      text(guestLine, "");
+      if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
+        text(`Extra beds: ${extraBedCount} (${extraBedCount} \xD7 ${fmtMoney(booking.extraBedRate)} / bed / night)`, "");
+      }
+    } else {
+      text("Guests:", String(booking.numGuests || 1));
+    }
+  }
+  if (booking.source) {
+    text("Source:", String(booking.source));
+  }
+  top += 2;
+  ensureSpace(12);
+  line(top);
+  top += 6;
+  if (booking.rateBreakdown) {
+    const bd = booking.rateBreakdown;
+    if (Array.isArray(bd.roomLines)) {
+      bd.roomLines.forEach((entry) => {
+        text(entry.label || "Room rate", `${entry.nights || 0} night(s) x ${fmtMoney(entry.nightlyRate)} = ${fmtMoney(entry.subtotal)}`, { gap: 5 });
+      });
+    }
+    if (Array.isArray(bd.addOns)) {
+      bd.addOns.forEach((entry) => {
+        text(entry.label || "Add-on", fmtMoney(entry.amount), { gap: 5 });
+      });
+    }
+    if (Array.isArray(bd.deductions)) {
+      bd.deductions.forEach((entry) => {
+        text(entry.label || "Discount", `-${fmtMoney(entry.amount)}`, { gap: 5 });
+      });
+    }
+  }
+  top += 2;
+  ensureSpace(12);
+  line(top);
+  top += 6;
+  text("Total Amount Due:", fmtMoney(booking.totalPrice), { gap: 8, bold: true });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  plain(`Payment Method: ${booking.paymentMethod || "-"}`, 5);
+  plain(`Status: ${booking.status || "-"}`, 8);
+  ensureSpace(12);
+  line(top);
+  top += 5;
+  doc.setFontSize(8);
+  doc.setTextColor(128);
+  plain(`Generated on ${(/* @__PURE__ */ new Date()).toLocaleString(hotel_config_default.locale, { timeZone: hotel_config_default.timezone })}`, 4);
+  plain(`Thank you for choosing ${hotel_config_default.brandName}.`, 4);
+  return Buffer.from(doc.output("arraybuffer"));
+}
+function siteUrl(path = "") {
+  return `${getServerBaseUrl()}${path}`;
+}
+function adminUrl(path = "") {
+  return `${getServerAdminBaseUrl()}${path}`;
+}
+async function loadLiabilityProjectionForEmail(params) {
+  const reservationId = String(params.reservationId || "").trim();
+  const bookingId = String(params.bookingId || "").trim();
+  if (!bookingId) return null;
+  let liability = null;
+  let refundsRef = null;
+  if (reservationId) {
+    const reservationDoc = await adminDb.collection("reservations").doc(reservationId).get();
+    if (reservationDoc.exists) {
+      liability = reservationDoc.data()?.cancellationLiability || null;
+      if (liability) {
+        refundsRef = adminDb.collection("reservations").doc(reservationId).collection("refunds");
+      }
+    }
+  }
+  if (!liability) {
+    const bookingDoc = await adminDb.collection("bookings").doc(bookingId).get();
+    if (bookingDoc.exists) {
+      liability = bookingDoc.data()?.cancellationLiability || null;
+    }
+    refundsRef = adminDb.collection("bookings").doc(bookingId).collection("payments");
+  }
+  if (!liability) return null;
+  let processedAmount = 0;
+  if (refundsRef) {
+    try {
+      const snap = await refundsRef.get();
+      processedAmount = snap.docs.reduce((sum, d) => {
+        const amount = Number(d.data()?.amount || 0);
+        return sum + Math.abs(amount);
+      }, 0);
+    } catch (err) {
+      console.warn("[email] Failed to read refunds subcollection for liability projection:", err);
+    }
+  }
+  const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
+  return computeCancellationLiabilityState2({ liability, processedAmount });
+}
+function buildReservationEmailView(reservation, children) {
+  if (!reservation || !Array.isArray(children) || children.length === 0) return null;
+  const first = children[0] || {};
+  const roomTypeLabels = children.map((c2) => String(c2.roomName || c2.roomType || "Room"));
+  const aggregateRoomLines = [];
+  let aggregateAddOns = [];
+  let aggregateDeductions = [];
+  let aggregateSubtotal = 0;
+  let aggregateTotal = 0;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    const bd = child.rateBreakdown;
+    if (bd && Array.isArray(bd.roomLines)) {
+      for (const line of bd.roomLines) {
+        aggregateRoomLines.push({
+          ...line,
+          // Per MRB-09 (decision #168): each room
+          // line is prefixed with the room's
+          // 1-indexed position so the email
+          // reader can match the line to the
+          // rooms list above. N=1 stays as
+          // "Room 1 — Room rate" (the prefix
+          // is always present).
+          label: children.length > 1 ? `Room ${index + 1} \u2014 ${line.label || "Room rate"}` : line.label || "Room rate"
+        });
+      }
+    }
+    if (bd && Array.isArray(bd.addOns)) {
+      aggregateAddOns = aggregateAddOns.concat(bd.addOns);
+    }
+    if (bd && Array.isArray(bd.deductions)) {
+      aggregateDeductions = aggregateDeductions.concat(bd.deductions);
+    }
+    aggregateSubtotal += Number(child.totalPrice || 0);
+  }
+  aggregateTotal = Number(reservation.totalPrice ?? aggregateSubtotal) || aggregateSubtotal;
+  const aggregateRateBreakdown = {
+    roomSubtotal: aggregateRoomLines.reduce((sum, line) => sum + Number(line.subtotal || 0), 0),
+    addOns: aggregateAddOns,
+    deductions: aggregateDeductions,
+    roomLines: aggregateRoomLines,
+    total: aggregateTotal
+  };
+  const roomProjections = children.map((child, index) => ({
+    position: index + 1,
+    bookingId: String(child.id || child.bookingId || ""),
+    bookingRef: String(child.bookingRef || ""),
+    lookupToken: String(child.lookupToken || ""),
+    roomId: String(child.roomId || ""),
+    roomNumber: String(child.roomNumber || ""),
+    roomType: String(child.roomType || ""),
+    roomName: child.roomName || child.roomType || "",
+    // Per MRB-14 (2026-08-03, per decision #180): per-child
+    // dates on the room projection. The header's
+    // `checkIn` / `checkOut` is the original create-time
+    // shared range and may differ from the actual range
+    // once a room has been rescheduled; the email's
+    // reservation branch reads `actualDateRange` and the
+    // per-room `checkIn` / `checkOut` below when the
+    // children have diverged.
+    checkIn: child.checkIn,
+    checkOut: child.checkOut,
+    numNights: Number(child.numNights || 0),
+    numGuests: Number(child.numGuests || 0),
+    numAdults: Number(child.numAdults || 0),
+    numChildren: Number(child.numChildren || 0),
+    extraBedCount: Number(child.extraBedCount || 0),
+    hasBreakfast: child.hasBreakfast === true,
+    ratePerNight: Number(child.ratePerNight || 0),
+    totalPrice: Number(child.totalPrice || 0)
+  }));
+  return {
+    // The legacy single-room shape — kept so the
+    // existing templates' top-level fields render
+    // the same way they did pre-MRB-09. The legacy
+    // `bookingRef` is the first room's ref (so
+    // single-room emails stay byte-equivalent);
+    // the reservation ref is the new top-level
+    // `reservationRef` field.
+    bookingRef: first.bookingRef || "",
+    guestName: String(reservation.leadGuestName || first.guestName || ""),
+    guestEmail: String(reservation.leadGuestEmail || first.guestEmail || ""),
+    guestPhone: String(reservation.leadGuestPhone || first.guestPhone || ""),
+    roomName: first.roomName || first.roomType || "",
+    roomType: first.roomType || "",
+    roomNumber: first.roomNumber || "",
+    checkIn: reservation.checkIn ?? first.checkIn,
+    checkOut: reservation.checkOut ?? first.checkOut,
+    numNights: Number(reservation.numNights ?? first.numNights ?? 0),
+    totalPrice: aggregateTotal,
+    rateBreakdown: aggregateRateBreakdown,
+    // Per MRB-09: the new top-level reservation
+    // fields. Templates + subject-line pickers
+    // check `isReservation || rooms.length > 1`
+    // to switch into the multi-room shape.
+    reservationRef: String(reservation.reservationRef || ""),
+    reservationId: String(reservation.id || ""),
+    isReservation: true,
+    // Per BAR-02 (2026-08-08, per decision #203): the
+    // `activeRoomCount` is no longer read from the
+    // reservation header — it is always derived from
+    // the children. Pre-BAR-02 the header mirror was
+    // maintained transactionally; BAR-02 makes the
+    // derivation the canonical answer. `roomCount` was
+    // already a derivation over `children.length`.
+    roomCount: children.length,
+    activeRoomCount: Math.max(
+      children.length - children.filter((c2) => c2.status === "cancelled").length,
+      0
+    ),
+    rooms: roomProjections,
+    roomTypeLabels,
+    // Per MRB-14 (2026-08-03, per decision #180): the
+    // denormalised actual range (MIN of children.checkIn
+    // / MAX of children.checkOut) plus the divergent
+    // flag. Pre-MRB-14 reservations carry no field
+    // (`undefined` here); the email template falls
+    // through to the legacy shared-range render
+    // (byte-equivalent to pre-MRB-14). The `earliestCheckIn`
+    // / `latestCheckOut` are emitted as the original
+    // Firestore values (Date | Timestamp | ISO string —
+    // whatever the shared `computeReservationActualDateRange`
+    // produced) so the template can format them via the
+    // existing `formatDate` / `toDate` helpers.
+    actualDateRange: reservation.actualDateRange ? {
+      earliestCheckIn: reservation.actualDateRange.earliestCheckIn,
+      latestCheckOut: reservation.actualDateRange.latestCheckOut,
+      isDivergent: Boolean(reservation.actualDateRange.isDivergent)
+    } : null,
+    // Per MRB-09: source / corporate context.
+    source: reservation.source || first.source || "online",
+    isCorporate: reservation.isCorporate === true,
+    corporateCode: reservation.corporateCode || first.corporateCode || "",
+    companyName: reservation.companyName || first.companyName || "",
+    // Status passthrough so the templates can
+    // render the same "Payment recorded" / "See
+    // you soon" copy as the single-room path.
+    status: reservation.paymentStatus || first.status || "pending",
+    paymentMethod: reservation.paymentMethod || first.paymentMethod || "",
+    // Cancellation metadata (used by the
+    // reservation-scope cancel template that
+    // MRB-13 will call).
+    cancellationReason: first.cancellationReason || "",
+    cancellationSource: first.cancellationSource || "",
+    // ETR-22: test-run banner metadata. `environmentBanner`
+    // reads these to render the test-run callout. Surfaced
+    // from the first child (the create transaction stamps
+    // them onto each child doc) — reservation-scope views
+    // follow the same convention as the legacy single-room
+    // shape, so a single template read handles both. Missing
+    // on legacy bookings (banner stays off).
+    isTestData: first.isTestData === true || reservation.isTestData === true,
+    testRunId: String(first.testRunId || reservation.testRunId || ""),
+    testRunName: String(first.testRunName || reservation.testRunName || ""),
+    testRunEnvironment: first.testRunEnvironment === "staging" || first.testRunEnvironment === "production" ? first.testRunEnvironment : reservation.testRunEnvironment === "staging" || reservation.testRunEnvironment === "production" ? reservation.testRunEnvironment : void 0
+  };
+}
+function lookupUrl(booking) {
+  const reservationRef = String(booking.reservationRef || "").trim();
+  const leadGuestEmail = String(booking.guestEmail || "").trim();
+  if (reservationRef && leadGuestEmail) {
+    return siteUrl(
+      `/my-booking?reservationRef=${encodeURIComponent(reservationRef)}&email=${encodeURIComponent(leadGuestEmail.toLowerCase())}`
+    );
+  }
+  const ref = encodeURIComponent(booking.bookingRef || "");
+  const token2 = encodeURIComponent(booking.lookupToken || "");
+  if (!ref || !token2) return siteUrl("/my-booking");
+  return siteUrl(`/my-booking?ref=${ref}&token=${token2}`);
+}
+function addressLine() {
+  return `${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}, ${hotel_config_default.address.postalCode}`;
+}
+function brandLogoUrl() {
+  return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.white)}`);
+}
+function toDate3(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value.toDate === "function") return value.toDate();
+  const parsed2 = new Date(value);
+  return Number.isNaN(parsed2.getTime()) ? null : parsed2;
+}
+function formatDate(value) {
+  const date = toDate3(value);
+  if (!date) return "Not set";
+  return new Intl.DateTimeFormat(hotel_config_default.locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: hotel_config_default.timezone
+  }).format(date);
+}
+function formatMoney(value) {
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat(hotel_config_default.locale, {
+    style: "currency",
+    currency: hotel_config_default.currency,
+    maximumFractionDigits: 0
+  }).format(amount);
+}
+function row(label, value) {
+  return `
+    <tr>
+      <td class="row-label" style="padding: 10px 0; color: #6b7280; font-size: 14px;">${escapeHtml2(label)}</td>
+      <td class="row-value" style="padding: 10px 0; color: #111827; font-size: 14px; font-weight: 700; text-align: right;">${escapeHtml2(value)}</td>
+    </tr>
+  `;
+}
+function rateBreakdownRows(booking) {
+  const breakdown = booking.rateBreakdown;
+  if (!breakdown || !Array.isArray(breakdown.roomLines) || breakdown.roomLines.length === 0) return "";
+  const roomRows = breakdown.roomLines.map(
+    (line) => row(
+      line.label || "Room rate",
+      `${Number(line.nights || 0)} night(s) x ${formatMoney(line.nightlyRate)} = ${formatMoney(line.subtotal)}`
+    )
+  ).join("");
+  const addOnRows = Array.isArray(breakdown.addOns) ? breakdown.addOns.map((line) => row(line.label || "Add-on", formatMoney(line.amount))).join("") : "";
+  const deductionRows = Array.isArray(breakdown.deductions) ? breakdown.deductions.map((line) => row(line.label || "Discount", `-${formatMoney(line.amount)}`)).join("") : "";
+  return `
+    ${roomRows}
+    ${addOnRows}
+    ${deductionRows}
+  `;
+}
+function bookingRows(booking) {
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : null;
+  const isReservation = rooms && rooms.length > 0;
+  if (isReservation) {
+    const actualRange = booking.actualDateRange;
+    const isDivergent = Boolean(actualRange && actualRange.isDivergent);
+    const roomsTable = `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${rooms.map((room) => {
+      const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut ? ` \xB7 ${formatDate(room.checkIn)} \u2192 ${formatDate(room.checkOut)}` : "";
+      return row(
+        `Room ${room.position || 1} (${escapeHtml2(String(room.roomType || "Room"))})`,
+        room.bookingRef ? `${escapeHtml2(String(room.bookingRef))} \xB7 ${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+      );
+    }).join("")}
+      </table>
+    `;
+    const checkInValue = isDivergent && actualRange.earliestCheckIn ? `${formatDate(actualRange.earliestCheckIn)} from ${hotel_config_default.checkInTime || "14:00"} (varies by room)` : `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`;
+    const checkOutValue = isDivergent && actualRange.latestCheckOut ? `${formatDate(actualRange.latestCheckOut)} by ${hotel_config_default.checkOutTime || "12:00"} (varies by room)` : `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`;
+    return `
+      ${booking.reservationRef ? row("Reservation reference", booking.reservationRef) : ""}
+      ${row("Guest", booking.guestName)}
+      ${row("Rooms", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`)}
+      ${roomsTable}
+      ${row("Check-in", checkInValue)}
+      ${row("Check-out", checkOutValue)}
+      ${row("Nights", `${booking.numNights || 0} night(s)`)}
+      ${row("Total", formatMoney(booking.totalPrice))}
+    `;
+  }
+  const roomLabel = booking.roomName || booking.roomType || "Not set";
+  return `
+    ${row("Booking reference", booking.bookingRef)}
+    ${row("Guest", booking.guestName)}
+    ${row("Room type", roomLabel)}
+    ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
+    ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
+    ${row("Nights", `${booking.numNights || 0} night(s)`)}
+    ${rateBreakdownRows(booking)}
+    ${row("Total", formatMoney(booking.totalPrice))}
+  `;
+}
+function card(title, body) {
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px;">
+      <tr>
+        <td style="padding: 18px 18px 6px;">
+          <h3 style="margin: 0; color: #111827; font-size: 16px; line-height: 1.3;">${escapeHtml2(title)}</h3>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 4px 18px 18px;">
+          ${body}
+        </td>
+      </tr>
+    </table>
+  `;
+}
+function callout2(tone, title, body) {
+  const tones = {
+    warm: { bg: hotel_config_default.colors.primaryLight, border: hotel_config_default.colors.primary, title: hotel_config_default.colors.primaryDark },
+    green: { bg: "#ecfdf5", border: "#16a34a", title: "#166534" },
+    red: { bg: "#fef2f2", border: "#dc2626", title: "#991b1b" }
+  };
+  const toneValues = tones[tone];
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0; background: ${toneValues.bg}; border-left: 4px solid ${toneValues.border}; border-radius: 12px;">
+      <tr>
+        <td style="padding: 16px 18px;">
+          <p style="margin: 0 0 6px; color: ${toneValues.title}; font-weight: 800; font-size: 14px;">${escapeHtml2(title)}</p>
+          <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.6;">${body}</p>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+function emailLayout(options) {
+  const primary = hotel_config_default.colors.primary;
+  const sidebar = hotel_config_default.colors.sidebar;
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml2(options.title)}</title>
+    <style>
+      @media only screen and (max-width: 640px) {
+        .outer { padding: 16px 10px !important; }
+        .container { width: 100% !important; border-radius: 18px !important; }
+        .hero { padding: 24px 18px !important; }
+        .content { padding: 24px 18px !important; }
+        .title { font-size: 26px !important; }
+        .row-label, .row-value { display: block !important; width: 100% !important; text-align: left !important; }
+        .row-value { padding-top: 0 !important; }
+        .button { display: block !important; text-align: center !important; }
+      }
+    </style>
+  </head>
+  <body style="margin: 0; padding: 0; background: #f6f2ec; font-family: Inter, Arial, sans-serif; color: #111827;">
+    <div style="display: none; max-height: 0; overflow: hidden; opacity: 0;">${escapeHtml2(options.preheader)}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" class="outer" style="border-collapse: collapse; background: #f6f2ec; padding: 28px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" class="container" style="border-collapse: collapse; width: 640px; max-width: 640px; background: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 18px 50px rgba(17, 24, 39, 0.10);">
+            <tr>
+              <td class="hero" style="background: ${sidebar}; padding: 30px 34px;">
+                <img src="${brandLogoUrl()}" width="168" alt="${escapeHtml2(hotel_config_default.brandName)}" style="display: block; max-width: 168px; height: auto; margin: 0 0 28px;">
+                <p style="margin: 0 0 10px; color: ${primary}; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">${escapeHtml2(options.eyebrow)}</p>
+                <h1 class="title" style="margin: 0; color: #ffffff; font-size: 34px; line-height: 1.12; letter-spacing: 0; font-weight: 800;">${escapeHtml2(options.title)}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td class="content" style="padding: 32px 34px 28px;">
+                ${options.bannerHtml || ""}
+                <p style="margin: 0 0 18px; color: #374151; font-size: 16px; line-height: 1.7;">${options.intro}</p>
+                ${options.body}
+                ${options.ctaLabel && options.ctaUrl ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin: 28px 0 10px;">
+                        <tr>
+                          <td>
+                            <a class="button" href="${options.ctaUrl}" style="background: ${primary}; color: #ffffff; text-decoration: none; font-size: 15px; line-height: 1; font-weight: 800; padding: 15px 20px; border-radius: 8px; display: inline-block;">${escapeHtml2(options.ctaLabel)}</a>
+                          </td>
+                        </tr>
+                      </table>` : ""}
+                <p style="margin: 28px 0 0; color: #6b7280; font-size: 13px; line-height: 1.6;">
+                  ${escapeHtml2(addressLine())}<br>
+                  Front desk: <a href="tel:${escapeHtml2(hotel_config_default.frontDeskPhone)}" style="color: ${primary}; text-decoration: none;">${escapeHtml2(hotel_config_default.frontDeskPhone)}</a><br>
+                  Support: <a href="mailto:${escapeHtml2(hotel_config_default.supportEmail)}" style="color: ${primary}; text-decoration: none;">${escapeHtml2(hotel_config_default.supportEmail)}</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+async function sendEmail(to3, subject, html, attachments) {
+  const trimmed = typeof to3 === "string" ? to3.trim().toLowerCase() : "";
+  if (trimmed.endsWith("@example.invalid") || trimmed.endsWith("@invalid")) {
+    console.log(`Skipping email send to placeholder address: ${to3}`);
+    return;
+  }
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: to3,
+      subject,
+      html,
+      replyTo: hotel_config_default.supportEmail,
+      attachments
+    });
+  } catch (error) {
+    try {
+      await adminDb.collection("failed_emails").add({
+        recipient: to3,
+        subject,
+        error: typeof error?.message === "string" ? error.message : String(error),
+        lastAttemptAt: /* @__PURE__ */ new Date(),
+        retryCount: 0
+      });
+    } catch (dlqErr) {
+      console.error("[#11] failed to write failed_emails DLQ row:", dlqErr);
+    }
+    throw error;
+  }
+}
+async function findBooking(req, options) {
+  const { bookingId, bookingRef, guestEmail } = req.body || {};
+  let snapshot = null;
+  const user = req.user || {};
+  if (bookingId) {
+    const doc = await adminDb.collection("bookings").doc(String(bookingId)).get();
+    if (!doc.exists) return null;
+    snapshot = doc;
+  } else if (bookingRef) {
+    const trimmed = String(bookingRef).trim();
+    let query;
+    if (RESERVATION_REF_REGEX.test(trimmed)) {
+      const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).limit(1).get();
+      if (reservationSnap.empty) return null;
+      const reservationDoc = reservationSnap.docs[0];
+      const childrenSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("reservationPosition", "asc").limit(1).get();
+      if (childrenSnap.empty) {
+        const fallbackSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationDoc.id).orderBy("createdAt", "asc").limit(1).get();
+        if (fallbackSnap.empty) return null;
+        snapshot = fallbackSnap.docs[0];
+      } else {
+        snapshot = childrenSnap.docs[0];
+      }
+    } else {
+      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
+      if (options.requireGuestMatch && !user.uid) {
+        if (!guestEmail) {
+          throw new Error("Booking reference and guest email are required.");
+        }
+        query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).where("guestEmail", "==", String(guestEmail).trim()).limit(1);
+      }
+      const results = await query.get();
+      if (results.empty) return null;
+      snapshot = results.docs[0];
+    }
+  } else {
+    throw new Error("Booking ID or booking reference is required.");
+  }
+  const booking = { id: snapshot.id, ...snapshot.data() };
+  if (options.requireGuestMatch && user.uid) {
+    const emailMatches = user.email_verified === true && user.email && String(booking.guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
+    const memberMatches = String(booking.memberId || "") === String(user.uid);
+    if (!emailMatches && !memberMatches) {
+      return null;
+    }
+  } else if (options.requireGuestMatch && bookingId) {
+    if (!guestEmail) {
+      throw new Error("Guest email is required.");
+    }
+    if (String(booking.guestEmail || "").toLowerCase() !== String(guestEmail).trim().toLowerCase()) {
+      return null;
+    }
+  }
+  return booking;
+}
+function bookingSubmittedEmail(booking) {
+  const paymentNote = booking.paymentMethod === "pay-at-hotel" ? "Your stay request is queued for review. Payment is due upon arrival once your booking is accepted." : "Your uploaded payment proof is queued for manual verification. We will send a final confirmation after review.";
+  return emailLayout({
+    preheader: `We received booking request ${booking.bookingRef}.`,
+    eyebrow: "Booking received",
+    title: "Your stay request is under review",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, thank you for choosing <strong>${escapeHtml2(hotel_config_default.brandName)}</strong>. We received your booking request and our front desk team is reviewing the details.`,
+    body: `
+      ${callout2("warm", "Manual review in progress", escapeHtml2(paymentNote))}
+      ${card("Reservation details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">You can check the latest status any time using your booking reference and email address.</p>
+    `,
+    ctaLabel: "Check booking status",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function houseRulesCard(houseRules) {
+  const trimmedRules = typeof houseRules === "string" ? houseRules.trim() : "";
+  if (!trimmedRules) return "";
+  return card(
+    "House rules",
+    `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml2(trimmedRules)}</p>`
+  );
+}
+function paymentConfirmedEmail(booking, houseRules) {
+  return emailLayout({
+    preheader: `Payment received for booking ${booking.bookingRef}.`,
+    eyebrow: "Payment verified",
+    title: "Your payment has been confirmed",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, we have verified the payment for your stay at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong>.`,
+    body: `
+      ${callout2("green", "Payment recorded", "Your reservation is one step closer to final confirmation. We will send a separate booking confirmation once the front desk completes the final review.")}
+      ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
+      ${houseRulesCard(houseRules)}
+    `,
+    ctaLabel: "View booking",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function bookingConfirmedEmail(booking, houseRules) {
+  return emailLayout({
+    preheader: `Booking ${booking.bookingRef} is confirmed.`,
+    eyebrow: "Booking confirmed",
+    title: "Your room is ready on our calendar",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
+    body: `
+      ${callout2("green", "See you soon", `Check-in starts at ${escapeHtml2(hotel_config_default.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
+      ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      ${houseRulesCard(houseRules)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function bookingConfirmedWithBalanceEmail(booking, balance, reason) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const reasonBlock = safeReason ? `<p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;"><strong>Reason from our team:</strong> ${escapeHtml2(safeReason)}</p>` : "";
+  return emailLayout({
+    preheader: `Booking ${booking.bookingRef} is confirmed. \u20B1${safeBalance.toLocaleString("en-PH")} to settle at check-in.`,
+    eyebrow: "Booking confirmed \u2014 balance due",
+    title: "Your room is ready on our calendar",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
+    body: `
+      ${callout2("warm", "Balance to settle at check-in", `A balance of <strong>${escapeHtml2(formatMoney(safeBalance))}</strong> remains and will be collected when you arrive.${reasonBlock}`)}
+      ${callout2("green", "See you soon", `Check-in starts at ${escapeHtml2(hotel_config_default.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
+      ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function bookingRescheduledEmail(booking) {
+  return emailLayout({
+    preheader: `Your reservation ${booking.bookingRef} has been updated.`,
+    eyebrow: "Reservation updated",
+    title: "Your booking dates or room have changed",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> has been updated by the front desk.`,
+    body: `
+      ${callout2("green", "Rescheduled details", `Your dates or room have been updated. The details below reflect your active booking.`)}
+      ${card("Updated reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function checkinReminderEmail(booking, houseRules) {
+  return emailLayout({
+    preheader: `Your ${hotel_config_default.brandName} check-in is coming up.`,
+    eyebrow: "Check-in reminder",
+    title: "Your stay begins tomorrow",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, this is a warm reminder that your check-in at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> is coming up.`,
+    body: `
+      ${callout2("warm", "Before you arrive", `Check-in starts at ${escapeHtml2(hotel_config_default.checkInTime || "14:00")}. If your arrival time changes, please contact the front desk so we can assist you smoothly.`)}
+      ${card("Arrival details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Hotel address", addressLine())}</table>`)}
+      ${houseRulesCard(houseRules)}
+    `,
+    ctaLabel: "Open booking lookup",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function liabilityBreakdownCard(projection) {
+  if (!projection || !projection.liability) return "";
+  const policyResult = projection.liability.policyResult || {};
+  const refundPct = Number(policyResult.refundPct || 0);
+  const policyRefund = Number(policyResult.policyRefund || 0);
+  const netCollected = Number(policyResult.netCollected || 0);
+  const retainedAtCancel = Number(policyResult.retainedAmount || 0);
+  const approved = Number(projection.liability.approvedAmount || 0);
+  const processed = Number(projection.processedAmount || 0);
+  const outstanding = Number(projection.outstandingAmount || 0);
+  const retention = Number(projection.retentionAmount || 0);
+  const stateLabel = String(projection.stateLabel || "Pending refund");
+  const policyText = String(policyResult.policyText || "Standard cancellation policy applies.");
+  const exceptionRow = retention > 0 ? row("Extra retained (exception)", formatMoney(retention)) : "";
+  const retainedAtCancelRow = retainedAtCancel > 0 && retention === 0 ? row("Retained under policy", formatMoney(retainedAtCancel)) : "";
+  return `
+    ${card("Refund summary", `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Net collected at cancel", formatMoney(netCollected))}
+        ${row(`Policy refund (${refundPct}%)`, formatMoney(policyRefund))}
+        ${retainedAtCancelRow}
+        ${row("Approved refund", formatMoney(approved))}
+        ${row("Processed so far", formatMoney(processed))}
+        ${row("Outstanding", formatMoney(outstanding))}
+        ${exceptionRow}
+        ${row("Current state", escapeHtml2(stateLabel))}
+      </table>
+      <p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">${escapeHtml2(policyText)}</p>
+    `)}
+  `;
+}
+function bookingCancelledEmail(booking) {
+  const source = String(booking.cancellationSource || "staff");
+  const intro = source === "guest" ? `Dear ${escapeHtml2(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> has been cancelled at your request.` : source === "system" ? `Dear ${escapeHtml2(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> has been cancelled because the payment hold expired.` : `Dear ${escapeHtml2(booking.guestName)}, this confirms that your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> has been cancelled by our team.`;
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed \u2014 our team will reach out to arrange the refund. Processing times vary.` : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your booking and reach out to arrange any applicable refund. Processing times vary.`;
+  return emailLayout({
+    preheader: `Booking ${booking.bookingRef} has been cancelled.`,
+    eyebrow: "Booking cancelled",
+    title: "Your reservation has been cancelled",
+    intro,
+    body: `
+      ${callout2("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml2(booking.cancellationReason)}` : "No cancellation reason was provided.")}
+      ${callout2("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
+      ${card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
+    `,
+    ctaLabel: "Contact support",
+    ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function bookingCancelledReservationEmail(booking) {
+  const rooms = Array.isArray(booking.rooms) ? booking.rooms : [];
+  const source = String(booking.cancellationSource || "staff");
+  const intro = source === "guest" ? `Dear ${escapeHtml2(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> at your request.` : source === "system" ? `Dear ${escapeHtml2(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> because the payment hold expired.` : `Dear ${escapeHtml2(booking.guestName)}, this confirms the change to your reservation at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong> by our team.`;
+  const cancelledRooms = rooms.filter((room) => room.cancelledAt);
+  const survivingRooms = rooms.filter((room) => !room.cancelledAt);
+  const isFullCancel = survivingRooms.length === 0;
+  const title = isFullCancel ? "Your reservation has been cancelled" : `Part of your reservation was cancelled (${cancelledRooms.length} of ${rooms.length} room${rooms.length === 1 ? "" : "s"})`;
+  const eyebrow = isFullCancel ? "Reservation cancelled" : "Reservation updated";
+  const roomsTable = rooms.length > 0 ? `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${rooms.map((room) => {
+    const isCancelled = Boolean(room.cancelledAt);
+    const roomLabel = `Room ${room.position || 1} (${escapeHtml2(String(room.roomType || "Room"))})`;
+    const ref = escapeHtml2(String(room.bookingRef || "\u2014"));
+    const status = isCancelled ? `<span style="color: #b91c1c; font-weight: 600;">Cancelled</span>${room.cancellationReason ? ` \xB7 ${escapeHtml2(String(room.cancellationReason))}` : ""}` : `<span style="color: #166534; font-weight: 600;">Confirmed</span>`;
+    return `<tr>
+            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; vertical-align: top; width: 50%;">${roomLabel}<br/><span style="color: #6b7280; font-size: 12px;">${ref}</span></td>
+            <td style="padding: 8px 0; color: #374151; font-size: 14px; line-height: 1.5; text-align: right; vertical-align: top;">${status}</td>
+          </tr>`;
+  }).join("")}
+      </table>
+    ` : "";
+  const projection = booking.liabilityProjection;
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const hasMoneyStory = projection && policyRefund > 0;
+  const whatHappensNext = hasMoneyStory ? `Cancellation is permanent. <strong>${formatMoney(policyRefund)}</strong> of your payment is approved for refund and <strong>${formatMoney(outstanding)}</strong> is still being processed \u2014 our team will reach out to arrange the refund. Processing times vary.` : `Cancellation is permanent and the booking record is kept in our audit log. <strong>No refund is issued automatically</strong> \u2014 if any payment was collected, our team will review your reservation and reach out to arrange any applicable refund. Processing times vary.`;
+  return emailLayout({
+    preheader: booking.reservationRef ? `Reservation ${booking.reservationRef} was updated.` : `Booking ${booking.bookingRef} has been cancelled.`,
+    eyebrow,
+    title,
+    intro,
+    body: `
+      ${callout2("red", "Cancellation recorded", booking.cancellationReason ? `Reason: ${escapeHtml2(booking.cancellationReason)}` : "No cancellation reason was provided.")}
+      ${callout2("warm", "What happens next", whatHappensNext)}
+      ${liabilityBreakdownCard(projection)}
+      ${roomsTable ? card("Rooms", roomsTable) : card("Cancelled reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
+    `,
+    ctaLabel: "Contact support",
+    ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function bookingRefundProcessedEmail(booking) {
+  const projection = booking.liabilityProjection;
+  const latestRefund = booking.latestRefund || null;
+  const stateLabel = String(projection?.stateLabel || "Refund update");
+  const processed = Number(projection?.processedAmount || 0);
+  const outstanding = Number(projection?.outstandingAmount || 0);
+  const approved = Number(projection?.liability?.approvedAmount || 0);
+  const policyRefund = Number(projection?.liability?.policyResult?.policyRefund || 0);
+  const retention = Number(projection?.retentionAmount || 0);
+  const subject = booking.reservationRef ? `[${hotel_config_default.brandName}] Refund update: ${booking.reservationRef}` : `[${hotel_config_default.brandName}] Refund update: ${booking.bookingRef}`;
+  const intro = `Dear ${escapeHtml2(booking.guestName)}, here's a quick update on the refund for your ${booking.reservationRef ? "reservation" : "booking"} <strong>${escapeHtml2(booking.reservationRef || booking.bookingRef)}</strong>.`;
+  const whatHappensNext = projection?.state === "processed" ? `Your refund is now complete. The total of <strong>${formatMoney(approved)}</strong> has been returned to you. No further action is needed.` : projection?.state === "retained" ? `An exception was applied \u2014 <strong>${formatMoney(approved)}</strong> is approved for refund and <strong>${formatMoney(retention)}</strong> is being retained beyond the standard policy. <strong>${formatMoney(outstanding)}</strong> is still being processed.` : projection?.state === "partially-processed" ? `Your refund is in progress. <strong>${formatMoney(processed)}</strong> of <strong>${formatMoney(approved)}</strong> has been returned so far. <strong>${formatMoney(outstanding)}</strong> is still being processed.` : `Your refund is pending. <strong>${formatMoney(approved)}</strong> is approved for return; our team will process it shortly.`;
+  const latestRefundRow = latestRefund ? row("Latest refund", `${formatMoney(Math.abs(Number(latestRefund.amount || 0)))} via ${escapeHtml2(String(latestRefund.method || "\u2014"))}${latestRefund.transactionReference ? ` \xB7 Ref ${escapeHtml2(String(latestRefund.transactionReference))}` : ""}`) : "";
+  return {
+    subject,
+    html: emailLayout({
+      preheader: `Refund update for ${booking.reservationRef || booking.bookingRef}: ${stateLabel}.`,
+      eyebrow: "Refund update",
+      title: stateLabel,
+      intro,
+      body: `
+        ${callout2("warm", "What this means", whatHappensNext)}
+        ${liabilityBreakdownCard(projection)}
+        ${latestRefund ? card("Latest refund", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${latestRefundRow}</table>`) : ""}
+        ${policyRefund > 0 ? `<p style="margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.6;">The cancellation policy applied to your booking entitled you to a refund of <strong>${formatMoney(policyRefund)}</strong>. Processing times vary by payment method.</p>` : ""}
+        <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
+      `,
+      ctaLabel: "Contact support",
+      ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+      bannerHtml: environmentBannerFromBooking(booking)
+    })
+  };
+}
+function discountRejectedEmail(booking) {
+  const discountTypeLabel = booking.discountType === "senior" ? "Senior Citizen" : "PWD";
+  const idLabel = booking.discountType === "senior" ? "OSCA Card" : "PWD ID";
+  return emailLayout({
+    preheader: `Discount verification update for booking ${booking.bookingRef}.`,
+    eyebrow: "Discount update",
+    title: "We could not verify your discount ID",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, we reviewed the submitted ID for the ${escapeHtml2(discountTypeLabel)} discount on booking <strong>${escapeHtml2(booking.bookingRef)}</strong>.`,
+    body: `
+      ${callout2("red", "Discount not verified", booking.discountRejectionReason ? `Reason: ${escapeHtml2(booking.discountRejectionReason)}` : `We were unable to verify the submitted ${escapeHtml2(idLabel)}.`)}
+      <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your booking remains active. The full rate of <strong>${escapeHtml2(formatMoney(booking.totalPrice))}</strong> will be collected upon check-in. You may still present a valid ${escapeHtml2(idLabel)} at check-in for manual review.</p>
+      ${card("Updated booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "View my booking",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function paymentRejectedEmail(booking) {
+  const reason = booking.paymentRejectionReason ? `Reason: ${escapeHtml2(booking.paymentRejectionReason)}` : "We could not verify the uploaded payment proof against our records.";
+  const payments = Array.isArray(booking?.onsitePayments) ? booking.onsitePayments : [];
+  let refOnFile = null;
+  for (let i2 = payments.length - 1; i2 >= 0; i2 -= 1) {
+    const ref = payments[i2]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) {
+      refOnFile = String(ref);
+      break;
+    }
+  }
+  return emailLayout({
+    preheader: `Action needed: your payment proof for booking ${booking.bookingRef} was rejected.`,
+    eyebrow: "Payment needs your attention",
+    title: "We couldn't verify your payment proof",
+    intro: `Dear ${escapeHtml2(booking.guestName)}, we reviewed the payment proof you uploaded for booking <strong>${escapeHtml2(booking.bookingRef)}</strong> but couldn't match it to the booking.`,
+    body: `
+      ${callout2("red", "Payment not verified", reason)}
+      ${refOnFile ? callout2("warm", "Reference on file", `The reference on record is <strong>${escapeHtml2(refOnFile)}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
+      <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your room is still held for you. To confirm your stay, please upload a corrected payment proof from the booking lookup page using the link below \u2014 your booking ref <strong>${escapeHtml2(booking.bookingRef)}</strong> and email are all you need.</p>
+      ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Re-upload payment proof",
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function corporateInquiryEmail(inquiry) {
+  const safeInquiry = {
+    companyName: inquiry.companyName || "Not provided",
+    contactPerson: inquiry.contactPerson || "Not provided",
+    email: inquiry.email || "Not provided",
+    phone: inquiry.phone || "Not provided",
+    numRooms: inquiry.numRooms || "Not provided",
+    preferredDates: inquiry.preferredDates || "Not provided",
+    specialRequirements: inquiry.specialRequirements || inquiry.requirements || "None provided"
+  };
+  return emailLayout({
+    preheader: `New corporate inquiry from ${safeInquiry.companyName}.`,
+    eyebrow: "Corporate inquiry",
+    title: "A new corporate stay inquiry arrived",
+    intro: `A company submitted a corporate booking inquiry through the ${escapeHtml2(hotel_config_default.brandName)} website. Review it in the admin dashboard and follow up within the service window.`,
+    body: `
+      ${card("Inquiry details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Company", safeInquiry.companyName)}
+        ${row("Contact person", safeInquiry.contactPerson)}
+        ${row("Email", safeInquiry.email)}
+        ${row("Phone", safeInquiry.phone)}
+        ${row("Rooms needed", safeInquiry.numRooms)}
+        ${row("Preferred dates", typeof safeInquiry.preferredDates === "string" ? safeInquiry.preferredDates : JSON.stringify(safeInquiry.preferredDates))}
+      </table>`)}
+      ${callout2("warm", "Special requirements", escapeHtml2(safeInquiry.specialRequirements))}
+    `,
+    ctaLabel: "Open corporate inbox",
+    ctaUrl: adminUrl("/corporate"),
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendCorporateInquiryTrigger(inquiry) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${hotel_config_default.brandName}] New corporate inquiry: ${inquiry.companyName || "Website inquiry"}`,
+    corporateInquiryEmail(inquiry)
+  );
+}
+function corporateInquiryConfirmationEmail(inquiry) {
+  const safeInquiry = {
+    companyName: inquiry.companyName || "Not provided",
+    contactPerson: inquiry.contactPerson || "Not provided",
+    numRooms: inquiry.numRooms || "Not provided",
+    preferredDates: inquiry.preferredDates || "Not provided"
+  };
+  return emailLayout({
+    preheader: `We received your corporate inquiry for ${safeInquiry.companyName}.`,
+    eyebrow: "Inquiry received",
+    title: "We received your corporate inquiry",
+    intro: `Dear ${escapeHtml2(safeInquiry.contactPerson)}, thank you for your interest in <strong>${escapeHtml2(hotel_config_default.brandName)}</strong>. We have received your corporate booking inquiry and our team will get back to you soon.`,
+    body: `
+      ${card("Inquiry summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Company", safeInquiry.companyName)}
+        ${row("Rooms needed", safeInquiry.numRooms)}
+        ${row("Preferred dates", typeof safeInquiry.preferredDates === "string" ? safeInquiry.preferredDates : JSON.stringify(safeInquiry.preferredDates))}
+      </table>`)}
+    `,
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendCorporateInquiryConfirmationTrigger(inquiry) {
+  if (!inquiry.email) return;
+  await sendEmail(
+    inquiry.email,
+    `[${hotel_config_default.brandName}] We received your corporate inquiry`,
+    corporateInquiryConfirmationEmail(inquiry)
+  );
+}
+function contactInquiryEmail(inquiry) {
+  return emailLayout({
+    preheader: `Website contact from ${inquiry.name} \u2014 ${inquiry.subject}`,
+    eyebrow: "Website contact",
+    title: "A guest reached out via the contact page",
+    intro: `${escapeHtml2(inquiry.name)} (${escapeHtml2(inquiry.email)}) used the public /contact form. Reply directly to their email to follow up.`,
+    body: `
+      ${card("Inquiry", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Name", inquiry.name)}
+        ${row("Email", inquiry.email)}
+        ${row("Subject", inquiry.subject)}
+        ${row("Source", inquiry.source || "contact-page")}
+      </table>`)}
+      ${callout2("warm", "Message", escapeHtml2(inquiry.message))}
+    `,
+    ctaLabel: "Open contact inbox",
+    ctaUrl: adminUrl("/contact"),
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendContactInquiryTrigger(inquiry) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${hotel_config_default.brandName}] New contact: ${inquiry.subject || "Website message"}`,
+    contactInquiryEmail(inquiry)
+  );
+}
+function contactConfirmationEmail(inquiry) {
+  return emailLayout({
+    preheader: `We received your message regarding: ${inquiry.subject || "your contact inquiry"}.`,
+    eyebrow: "Message received",
+    title: "We received your message",
+    intro: `Dear ${escapeHtml2(inquiry.name)}, thank you for reaching out to <strong>${escapeHtml2(hotel_config_default.brandName)}</strong>. We have received your message and our team will get back to you soon.`,
+    body: `
+      ${card("Message details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Name", inquiry.name)}
+        ${row("Subject", inquiry.subject)}
+      </table>`)}
+      ${callout2("warm", "Your message", escapeHtml2(inquiry.message))}
+    `,
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendContactConfirmationTrigger(inquiry) {
+  if (!inquiry.email) return;
+  await sendEmail(
+    inquiry.email,
+    `[${hotel_config_default.brandName}] We received your message`,
+    contactConfirmationEmail(inquiry)
+  );
+}
+function earlyCheckinRequestEmail(booking, request) {
+  const requestedTime = request.requestedCheckInTime || "Not specified";
+  const notes = request.notes || "No additional notes";
+  return emailLayout({
+    preheader: `Early check-in request for ${booking.bookingRef} from ${booking.guestName}.`,
+    eyebrow: "Early check-in request",
+    title: "A member has requested early check-in",
+    // Per EC-02 (2026-08-21): the intro now names the
+    // approval loop explicitly so the receiving operator knows
+    // they need to either approve or decline from the booking
+    // drawer / dashboard widget — and that the guest will
+    // receive a confirmation email regardless of the outcome.
+    // The strong disclaimer copy is the same wording used on
+    // the guest-facing button on Step 4 of the booking flow.
+    intro: `${escapeHtml2(booking.guestName)} (${escapeHtml2(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk \u2014 subject to availability, not guaranteed, and requires your approval. The guest will receive an email once you approve or decline.`,
+    body: `
+      ${card("Booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest", booking.guestName)}
+        ${row("Email", booking.guestEmail)}
+        ${row("Phone", booking.guestPhone || "\u2014")}
+        ${row("Room", booking.roomNumber || "\u2014")}
+        ${row("Scheduled check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
+        ${row("Requested check-in time", requestedTime)}
+      </table>`)}
+      ${callout2("warm", "Notes from guest", escapeHtml2(notes))}
+    `,
+    ctaLabel: "Review booking",
+    ctaUrl: adminUrl(`/bookings?ref=${booking.bookingRef}`),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+async function sendEarlyCheckinRequestTrigger(booking, request) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${hotel_config_default.brandName}] Early check-in request: ${booking.bookingRef}`,
+    earlyCheckinRequestEmail(booking, request)
+  );
+}
+function earlyCheckinResolveEmail(booking, status, staffNote) {
+  const isApproved = status === "approved";
+  const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
+  const eyebrow = isStaffGranted ? isApproved ? "Early check-in granted" : "Early check-in updated" : isApproved ? "Early check-in approved" : "Early check-in unavailable";
+  const title = isStaffGranted ? isApproved ? "Early check-in added to your stay" : "Your early check-in time has changed" : isApproved ? "Your early check-in request is approved" : "Early check-in request status";
+  const intro = isStaffGranted ? isApproved ? `Our team has added early check-in to booking ${booking.bookingRef}. Your room will be ready for your early arrival.` : `We need to update the early check-in arrangement for booking ${booking.bookingRef}. Please arrive from the standard check-in time.` : isApproved ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.` : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`;
+  const timeVal = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime || "Requested time";
+  return emailLayout({
+    preheader: isStaffGranted ? isApproved ? `Early check-in has been added to booking ${booking.bookingRef}.` : `Early check-in update for booking ${booking.bookingRef}.` : isApproved ? `Your early check-in request for booking ${booking.bookingRef} is approved.` : `Status update regarding your early check-in request for booking ${booking.bookingRef}.`,
+    eyebrow,
+    title,
+    intro,
+    body: `
+      ${card(isStaffGranted ? "Early Check-In Details" : "Request Details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest name", booking.guestName)}
+        ${row("Check-in date", formatDate(booking.checkIn))}
+        ${row("Early check-in time", isApproved ? timeVal : "Standard time (14:00)")}
+        ${row("Status", isApproved ? isStaffGranted ? "Granted" : "Approved" : "Unavailable")}
+      </table>`)}
+      ${staffNote ? callout2("warm", "Message from front desk", escapeHtml2(staffNote)) : ""}
+    `,
+    ctaLabel: "View your stays",
+    ctaUrl: siteUrl("/account/stays"),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+async function sendEarlyCheckinResolveTrigger(booking, status, staffNote) {
+  const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
+  const subject = isStaffGranted ? `[${hotel_config_default.brandName}] Early check-in ${status === "approved" ? "added" : "updated"}: ${booking.bookingRef}` : `[${hotel_config_default.brandName}] Early check-in status: ${booking.bookingRef}`;
+  await sendEmail(
+    booking.guestEmail,
+    subject,
+    earlyCheckinResolveEmail(booking, status, staffNote)
+  );
+}
+function voucherCodeBlock(code) {
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0;">
+      <tr>
+        <td align="center" style="background: ${hotel_config_default.colors.primaryLight}; border: 2px dashed ${hotel_config_default.colors.primary}; border-radius: 12px; padding: 22px 14px;">
+          <p style="margin: 0 0 8px; color: ${hotel_config_default.colors.primaryDark}; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 800;">Your promo code</p>
+          <p style="margin: 0; color: #111827; font-size: 30px; letter-spacing: 0.18em; font-weight: 800; font-family: 'JetBrains Mono', 'Courier New', monospace;">${escapeHtml2(code)}</p>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+function voucherIssuedEmail(voucher) {
+  const valueLabel = voucher.discountType === "percent" ? `${voucher.discountValue}% off` : `${formatMoney(voucher.discountValue)} off`;
+  const roomTypeLabel = Array.isArray(voucher.applicableRoomTypes) && voucher.applicableRoomTypes.length > 0 ? voucher.applicableRoomTypes.join(", ") : "any room";
+  return emailLayout({
+    preheader: `Your ${hotel_config_default.brandName} voucher ${voucher.code} is ready.`,
+    eyebrow: "Voucher issued",
+    title: "A voucher has been added to your account",
+    intro: `Dear guest, ${escapeHtml2(hotel_config_default.brandName)} has issued a promo voucher for your next stay. Enter the code at checkout to redeem.`,
+    body: `
+      ${callout2("warm", `${valueLabel} on ${escapeHtml2(roomTypeLabel)}`, `Use this code when you start a new booking \u2014 it will be applied automatically on the review step.`)}
+      ${voucherCodeBlock(voucher.code)}
+      ${card("Voucher details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Discount", valueLabel)}
+        ${row("Expires", voucher.expiresAt ? formatDate(voucher.expiresAt) : "No expiry")}
+        ${row("Room types", escapeHtml2(roomTypeLabel))}
+        ${voucher.usageCap ? row("Usage cap", `${voucher.usageCap} total use${voucher.usageCap === 1 ? "" : "s"}`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Start a booking",
+    ctaUrl: siteUrl("/rooms"),
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendVoucherIssuedTrigger(voucher) {
+  if (!voucher?.guestEmail) return;
+  await sendEmail(
+    voucher.guestEmail,
+    `[${hotel_config_default.brandName}] Your voucher: ${voucher.code}`,
+    voucherIssuedEmail(voucher)
+  );
+}
+function sparkRewardsEmailVerificationEmail(data) {
+  const name2 = (data.guestName || "").trim();
+  const greetingName = name2 ? escapeHtml2(name2) : "Valued Member";
+  return emailLayout({
+    preheader: `Verify your email address for ${hotel_config_default.rewardsName}.`,
+    eyebrow: `${hotel_config_default.rewardsName} Account Verification`,
+    title: "Verify your email address",
+    intro: `Dear ${greetingName}, thank you for joining ${escapeHtml2(hotel_config_default.rewardsName)}! Please verify your email address to complete your account registration.`,
+    body: `
+      ${callout2("warm", "Unlock Member Privileges", "Verifying your email address links your past bookings to your account, enables early check-in requests, and activates member rates on future stays.")}
+      ${card("Verification link", `
+        <p style="margin: 0 0 16px; color: #374151; font-size: 14px; line-height: 1.6;">
+          Click the button below to verify your email address (<strong>${escapeHtml2(data.email)}</strong>). If you didn't create an account with ${escapeHtml2(hotel_config_default.brandName)}, you can safely ignore this message.
+        </p>
+        <p style="margin: 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+          If the button below doesn't work, copy and paste this link into your browser:<br>
+          <a href="${escapeHtml2(data.verificationLink)}" style="color: ${hotel_config_default.colors.primary}; word-break: break-all;">${escapeHtml2(data.verificationLink)}</a>
+        </p>
+      `)}
+    `,
+    ctaLabel: "Verify Email Address",
+    ctaUrl: data.verificationLink,
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendVerificationEmailTrigger(data) {
+  if (!data.email) return;
+  await sendEmail(
+    data.email,
+    `[${hotel_config_default.brandName}] Verify your email address for ${hotel_config_default.rewardsName}`,
+    sparkRewardsEmailVerificationEmail(data)
+  );
+}
+function storeOrderItemsTable(items = []) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return "<p style='margin: 0; color: #6b7280; font-size: 14px;'>No items.</p>";
+  }
+  const rows = items.map((item) => `
+    <tr>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml2(item.name || "Item")}</td>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px; text-align: center;">${Number(item.quantity || 0)}</td>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px; text-align: right;">${formatMoney(item.price || 0)}</td>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 700; text-align: right;">${formatMoney(Number(item.price || 0) * Number(item.quantity || 0))}</td>
+    </tr>
+  `).join("");
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 1px solid #e5e7eb;">
+          <th align="left" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Item</th>
+          <th align="center" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Qty</th>
+          <th align="right" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Unit</th>
+          <th align="right" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Line</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+function storeOrderTotalsRow(total, paymentMethod) {
+  return row("Payment method", paymentMethod) + row("Total", formatMoney(total));
+}
+function storeOrderBaseLayout(action, order) {
+  const paymentLabel = order.paymentMethod === "cod" ? "Cash on delivery" : order.paymentMethod === "add-to-bill" ? "Add to room bill" : order.paymentMethod === "gcash" ? "GCash" : "\u2014";
+  return {
+    order,
+    paymentLabel,
+    itemsTable: storeOrderItemsTable(order.items),
+    totalRow: storeOrderTotalsRow(order.totalAmount || 0, paymentLabel),
+    deepLink: `${siteUrl("/intercom")}?room=${encodeURIComponent(order.roomNumber || "")}&order=${encodeURIComponent(order.orderRef || "")}`
+  };
+}
+function storeOrderPlacedEmail(order) {
+  const { paymentLabel, itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-placed", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} received.`,
+    eyebrow: "Order received",
+    title: "We have your in-room order",
+    intro: `Thank you for ordering from the ${escapeHtml2(hotel_config_default.brandName)} in-room store. Your items are being prepared and we'll bring them to your room in about 15 minutes.`,
+    body: `
+      ${callout2("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
+      ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "\u2014")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Open the chat",
+    ctaUrl: deepLink,
+    bannerHtml: environmentBanner({})
+  });
+}
+function storeOrderConfirmedEmail(order) {
+  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-confirmed", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} confirmed.`,
+    eyebrow: "Order confirmed",
+    title: "Your order is confirmed and being prepared",
+    intro: `Your order from the ${escapeHtml2(hotel_config_default.brandName)} in-room store has been confirmed. Our team is preparing your items now.`,
+    body: `
+      ${callout2("warm", "In the kitchen", "Our team is preparing your items. You'll get another email when your order is on its way.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "\u2014")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Open the chat",
+    ctaUrl: deepLink,
+    bannerHtml: environmentBanner({})
+  });
+}
+function storeOrderOutForDeliveryEmail(order) {
+  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-out-for-delivery", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} is on its way.`,
+    eyebrow: "Order on the way",
+    title: "Your order is heading to your room",
+    intro: `Your order from the ${escapeHtml2(hotel_config_default.brandName)} in-room store is on its way. Please keep your door accessible \u2014 our team will be there shortly.`,
+    body: `
+      ${callout2("warm", "On the way", "Your order is being delivered to your room. You can track progress in the Intercom chat.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "\u2014")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Open the chat",
+    ctaUrl: deepLink,
+    bannerHtml: environmentBanner({})
+  });
+}
+function storeOrderDeliveredEmail(order) {
+  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-delivered", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} delivered.`,
+    eyebrow: "Order delivered",
+    title: "Your order has arrived \u2014 enjoy!",
+    intro: `Your order from the ${escapeHtml2(hotel_config_default.brandName)} in-room store has been delivered. We hope you enjoy it.`,
+    body: `
+      ${callout2("green", "Delivered", "Your items are in your room. We would love to hear how it went \u2014 please share feedback with the front desk.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "\u2014")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Send feedback",
+    ctaUrl: siteUrl("/contact"),
+    bannerHtml: environmentBanner({})
+  });
+}
+function storeOrderCancelledEmail(order) {
+  const alreadyBilled = order.status === "delivered" && order.paymentMethod === "add-to-bill";
+  const refundNote = alreadyBilled ? "This order was already added to your room bill \u2014 no refund is needed." : order.paymentMethod === "gcash" ? "If you paid via GCash, the front desk will reach out within 24 hours to coordinate a refund." : "No payment was captured for this order.";
+  const { itemsTable, totalRow } = storeOrderBaseLayout("store-order-cancelled", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} cancelled.`,
+    eyebrow: "Order cancelled",
+    title: "Your order has been cancelled",
+    intro: `Your order from the ${escapeHtml2(hotel_config_default.brandName)} in-room store has been cancelled. ${escapeHtml2(refundNote)}`,
+    body: `
+      ${callout2("red", "Cancellation recorded", order.cancellationReason ? `Reason: ${escapeHtml2(order.cancellationReason)}` : "No reason was provided.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "\u2014")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Contact support",
+    ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendStoreOrderTrigger(action, order) {
+  if (!order?.guestEmail) return;
+  const map2 = {
+    "store-order-placed": {
+      subject: `[${hotel_config_default.brandName}] Order placed: ${order.orderRef || "in-room"}`,
+      html: storeOrderPlacedEmail(order)
+    },
+    "store-order-confirmed": {
+      subject: `[${hotel_config_default.brandName}] Order confirmed: ${order.orderRef || "in-room"}`,
+      html: storeOrderConfirmedEmail(order)
+    },
+    "store-order-out-for-delivery": {
+      subject: `[${hotel_config_default.brandName}] Order on its way: ${order.orderRef || "in-room"}`,
+      html: storeOrderOutForDeliveryEmail(order)
+    },
+    "store-order-delivered": {
+      subject: `[${hotel_config_default.brandName}] Order delivered: ${order.orderRef || "in-room"}`,
+      html: storeOrderDeliveredEmail(order)
+    },
+    "store-order-cancelled": {
+      subject: `[${hotel_config_default.brandName}] Order cancelled: ${order.orderRef || "in-room"}`,
+      html: storeOrderCancelledEmail(order)
+    }
+  };
+  const template = map2[action];
+  if (!template) {
+    throw new Error("Unsupported store order email trigger.");
+  }
+  await sendEmail(order.guestEmail, template.subject, template.html);
+}
+function staffNewBookingEmail(booking) {
+  return emailLayout({
+    preheader: `New online booking ${booking.bookingRef}.`,
+    eyebrow: "New online booking",
+    title: "A new online booking just came in",
+    intro: `A new online booking was created. Review the details and follow up with the guest as needed.`,
+    body: `
+      ${callout2("warm", "Action needed", "Verify the payment method and any discount / corporate code with the guest. Confirm the booking once verified.")}
+      ${card("Booking details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest", booking.guestName)}
+        ${row("Email", booking.guestEmail)}
+        ${row("Phone", booking.guestPhone || "\u2014")}
+        ${row("Room", booking.roomNumber ? `Room ${booking.roomNumber} (${booking.roomType || ""})` : "\u2014")}
+        ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
+        ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
+        ${row("Nights", `${booking.numNights || 0} night(s)`)}
+        ${row("Payment method", booking.paymentMethod || "\u2014")}
+        ${row("Total", formatMoney(booking.totalPrice))}
+        ${row("Source", booking.source || "online")}
+        ${booking.specialRequests ? row("Special requests", escapeHtml2(booking.specialRequests)) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Review booking",
+    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+function staffNewPaymentEmail(booking, payment) {
+  const proofUrl = payment?.paymentProofUrl || booking.paymentProofUrl || "";
+  return emailLayout({
+    preheader: `New payment proof for ${booking.bookingRef}.`,
+    eyebrow: "New payment proof",
+    title: "A guest uploaded a payment proof",
+    intro: `A guest uploaded a payment proof for an existing booking. Review the screenshot and verify the payment.`,
+    body: `
+      ${callout2("warm", "Verify payment", "Open the payment screenshot, confirm the amount matches the booking total, and update the booking to payment-confirmed once verified.")}
+      ${card("Payment and booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest", booking.guestName)}
+        ${row("Amount", formatMoney(payment?.amount || booking.totalPrice))}
+        ${row("Method", payment?.method || booking.paymentMethod || "\u2014")}
+        ${row("Note", payment?.note ? escapeHtml2(payment.note) : "\u2014")}
+        ${row("Total due", formatMoney(booking.totalPrice))}
+        ${proofUrl ? row("Screenshot", `<a href="${escapeHtml2(proofUrl)}" style="color: ${hotel_config_default.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Review payment",
+    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`),
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+async function sendStaffNewBookingTrigger(booking) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${hotel_config_default.brandName}] New online booking: ${booking.bookingRef}`,
+    staffNewBookingEmail(booking)
+  );
+}
+async function sendStaffNewPaymentTrigger(booking, payment) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${hotel_config_default.brandName}] New payment proof: ${booking.bookingRef}`,
+    staffNewPaymentEmail(booking, payment)
+  );
+}
+function staffRefundReviewEmail(order) {
+  return emailLayout({
+    preheader: `Paid store order ${order.orderRef} was cancelled.`,
+    eyebrow: "Refund review needed",
+    title: "A guest cancelled a paid store order",
+    intro: `A guest cancelled a paid store order at <strong>${escapeHtml2(hotel_config_default.brandName)}</strong>. The guest was charged via the order's payment method; review the payment proof and record a refund through the order's booking if appropriate.`,
+    body: `
+      ${callout2("warm", "Action required", "No refund is issued automatically by the cancellation. Open the order's payment screenshot, confirm the amount, and record a refund via the linked booking's Folio \u2192 Refund action.")}
+      ${card("Cancelled order", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef)}
+        ${row("Room", order.roomNumber || "\u2014")}
+        ${row("Guest", order.guestName || "\u2014")}
+        ${row("Amount", formatMoney(Number(order.totalAmount || 0)))}
+        ${row("Method", order.paymentMethod || "\u2014")}
+        ${row("Reason", order.cancellationReason ? escapeHtml2(order.cancellationReason) : "\u2014")}
+        ${order.paymentProofUrl ? row("Payment proof", `<a href="${escapeHtml2(order.paymentProofUrl)}" style="color: ${hotel_config_default.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Open booking",
+    ctaUrl: order.bookingId ? adminUrl(`/bookings?ref=${encodeURIComponent(order.bookingId)}`) : adminUrl("/bookings"),
+    bannerHtml: environmentBanner({})
+  });
+}
+async function sendStaffRefundReviewTrigger(order) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${hotel_config_default.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
+    staffRefundReviewEmail(order)
+  );
+}
+async function getTomorrowConfirmedBookings() {
+  const { manilaDate } = getManilaDateInfo(hotel_config_default.timezone);
+  const start = new Date(manilaDate);
+  start.setDate(start.getDate() + 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  const snapshot = await adminDb.collection("bookings").where("status", "==", "confirmed").where("checkIn", ">=", start).where("checkIn", "<", end).get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+async function sendBookingTrigger(action, booking) {
+  const HOUSE_RULES_ACTIONS = /* @__PURE__ */ new Set([
+    "payment-confirmed",
+    "booking-confirmed",
+    "checkin-reminder"
+  ]);
+  let houseRules = null;
+  if (HOUSE_RULES_ACTIONS.has(action)) {
+    try {
+      const doc = await adminDb.collection("settings").doc("websiteContent").get();
+      houseRules = typeof doc.data()?.houseRules === "string" ? doc.data()?.houseRules : null;
+    } catch (error) {
+      console.warn(`Failed to load websiteContent.houseRules for ${action} email; continuing without it.`, error);
+      houseRules = null;
+    }
+  }
+  const templates = {
+    "booking-submitted": {
+      // Per MRB-09 (2026-08-02, per decision #168): the
+      // subject uses the reservation ref when the view
+      // is reservation-scope (N>1). N=1 keeps the
+      // legacy `Booking request received: <bookingRef>`
+      // subject byte-equivalent.
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking request received: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking request received: ${booking.bookingRef}`,
+      html: bookingSubmittedEmail(booking)
+    },
+    "payment-confirmed": {
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Payment confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Payment confirmed: ${booking.bookingRef}`,
+      html: paymentConfirmedEmail(booking, houseRules)
+    },
+    "booking-confirmed": {
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking confirmed: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef}`,
+      html: bookingConfirmedEmail(booking, houseRules),
+      // G-03 (E2E audit 2026-07-17): attach the receipt PDF required
+      // by Decision #82. Generated server-side from persisted
+      // booking/folio data. Does not expose private payment-proof
+      // or ID URLs.
+      attachments: [{
+        filename: booking.reservationRef ? `receipt-${String(booking.reservationRef).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf` : `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+        content: generateReceiptPdf(booking)
+      }]
+    },
+    "checkin-reminder": {
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Check-in reminder: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Check-in reminder: ${booking.bookingRef}`,
+      html: checkinReminderEmail(booking, houseRules)
+    },
+    "booking-cancelled": {
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Booking cancelled: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking cancelled: ${booking.bookingRef}`,
+      html: bookingCancelledEmail(booking)
+    },
+    // Per MRB-09 (2026-08-02, per decision #168): the
+    // reservation-scope cancel. Fires from MRB-13's
+    // reservation-scope cancel path (`scope: "reservation"`
+    // in `POST /api/bookings/cancel`). The body lists every
+    // cancelled room with its own ref + final state. The
+    // subject uses the reservation ref (never a per-room
+    // ref) so the email is unambiguous about which
+    // reservation it covers. A partial reservation-scope
+    // action (e.g. one room cancelled out of three) sends
+    // this same action with the surviving rooms'
+    // `status`/`cancelledAt` fields set on the projection
+    // — the template's "rooms affected" / "rooms remaining"
+    // split makes the partial state explicit.
+    "booking-cancelled-reservation": {
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Reservation updated: ${booking.bookingRef}`,
+      html: bookingCancelledReservationEmail(booking)
+    },
+    "discount-rejected": {
+      subject: `[${hotel_config_default.brandName}] Discount verification update: ${booking.bookingRef}`,
+      html: discountRejectedEmail(booking)
+    },
+    "booking-rescheduled": {
+      subject: booking.reservationRef ? `[${hotel_config_default.brandName}] Reservation updated: ${booking.reservationRef} (${booking.roomCount || 1} room${booking.roomCount === 1 ? "" : "s"})` : `[${hotel_config_default.brandName}] Booking updated: ${booking.bookingRef}`,
+      html: bookingRescheduledEmail(booking)
+    },
+    "payment-rejected": {
+      subject: `[${hotel_config_default.brandName}] Action needed: payment proof rejected for ${booking.bookingRef}`,
+      html: paymentRejectedEmail(booking)
+    },
+    // Per CRL-08 (2026-08-03, per decision #174):
+    // the refund-state email. The template function
+    // returns `{ subject, html }` because the
+    // subject depends on the `liabilityProjection`
+    // field (`"Refund update: <ref>"` with no
+    // room-count parenthetical). The handler fires
+    // this action when a successful `add-refund`
+    // commit changes the liability state (the
+    // state-change gate is the trigger, not the
+    // refund entry itself — a sub-state partial
+    // does not re-send). The booking view passed
+    // by the handler carries `liabilityProjection`
+    // (the live `computeCancellationLiabilityState`
+    // result) + `latestRefund` (the just-committed
+    // refund entry, used for the "Latest refund"
+    // row).
+    "booking-refund-processed": bookingRefundProcessedEmail(booking)
+  };
+  const template = templates[action];
+  if (!template) {
+    throw new Error("Unsupported booking email trigger.");
+  }
+  await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
+}
+async function sendBookingConfirmedWithBalanceTrigger(booking, balance, reason) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const subject = `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef} (\u20B1${safeBalance.toLocaleString("en-PH")} due at check-in)`;
+  const html = bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason);
+  const attachments = [{
+    filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+    content: generateReceiptPdf(booking)
+  }];
+  await sendEmail(booking.guestEmail, subject, html, attachments);
+}
+async function handleEmailTrigger(req, res, action) {
+  const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
+  if (req.method !== "POST" && !isCronReminderRequest) {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  try {
+    if (action === "corporate-inquiry") {
+      const inquiry = req.body?.inquiry || req.body || {};
+      await sendCorporateInquiryTrigger(inquiry);
+      return res.status(200).json({ success: true });
+    }
+    if (action === "early-checkin-request") {
+      try {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsSnap = await rewardsRef.get();
+        const rewardsCfg = rewardsSnap.exists ? rewardsSnap.data() : null;
+        if (rewardsCfg && rewardsCfg.earlyCheckInEnabled === false) {
+          return res.status(403).json({
+            success: false,
+            error: "Early check-in requests are currently disabled by the hotel."
+          });
+        }
+      } catch (gateErr) {
+        console.error("[early-checkin] Failed to read rewardsConfig gate:", gateErr);
+      }
+      const hasStaff2 = Boolean(req.staff?.success);
+      const booking2 = await findBooking(req, { requireGuestMatch: !hasStaff2 });
+      if (!booking2) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const ALLOWED_EARLY_CHECKIN_STATUSES = [
+        "payment-uploaded",
+        "payment-confirmed",
+        "confirmed"
+      ];
+      if (!ALLOWED_EARLY_CHECKIN_STATUSES.includes(booking2.status)) {
+        return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking2.status}'.` });
+      }
+      const checkInDateObj = toDate3(booking2.checkIn);
+      if (!checkInDateObj) {
+        return res.status(400).json({ success: false, error: "Invalid check-in date." });
+      }
+      const year = checkInDateObj.getFullYear();
+      const month = String(checkInDateObj.getMonth() + 1).padStart(2, "0");
+      const day = String(checkInDateObj.getDate()).padStart(2, "0");
+      const checkInStr = `${year}-${month}-${day}`;
+      const { todayStr } = getManilaDateInfo(hotel_config_default.timezone);
+      if (checkInStr < todayStr) {
+        return res.status(400).json({ success: false, error: "Early check-in request is not allowed as the check-in date has already passed." });
+      }
+      if (booking2.earlyCheckIn?.status === "approved") {
+        return res.status(400).json({ success: false, error: "Early check-in has already been approved for this booking." });
+      }
+      const earlyCheckinRequestSchema = external_exports.object({
+        requestedCheckInTime: external_exports.string().trim().min(1).max(20).optional().default("12:00 PM"),
+        notes: external_exports.string().trim().max(500).optional().default("")
+      });
+      const bodyData = req.body?.request || req.body || {};
+      const parsed2 = earlyCheckinRequestSchema.safeParse(bodyData);
+      if (!parsed2.success) {
+        return res.status(400).json({ success: false, error: "Please provide a valid requested check-in time (max 20 characters) and notes (max 500 characters)." });
+      }
+      const request = parsed2.data;
+      const earlyCheckIn = {
+        source: "guest-request",
+        status: "requested",
+        requestedTime: request.requestedCheckInTime,
+        notes: request.notes || "",
+        requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        resolvedAt: null,
+        resolvedBy: null,
+        staffNote: null
+      };
+      await adminDb.collection("bookings").doc(booking2.id).update({
+        earlyCheckIn
+      });
+      await sendEarlyCheckinRequestTrigger(booking2, request);
+      await writeNotification({
+        type: "early-checkin-request",
+        title: `Early check-in requested \u2014 ${booking2.bookingRef || "pending"}`,
+        entityType: "booking",
+        entityId: booking2.id,
+        roomNumber: booking2.roomNumber ?? null,
+        bookingRef: booking2.bookingRef ?? null
+      });
+      return res.status(200).json({ success: true });
+    }
+    if (action === "voucher-issued") {
+      if (!req.staff?.success) {
+        return res.status(401).json({ success: false, error: "Staff authentication is required to issue voucher emails." });
+      }
+      const voucherInput = req.body?.voucher;
+      if (!voucherInput?.code || !voucherInput?.guestEmail) {
+        return res.status(400).json({ success: false, error: "Voucher code and guestEmail are required." });
+      }
+      await sendVoucherIssuedTrigger(voucherInput);
+      return res.status(200).json({ success: true });
+    }
+    if (action === "checkin-reminder" && !req.body?.bookingId && !req.body?.bookingRef) {
+      const bookings = await getTomorrowConfirmedBookings();
+      const pending = bookings.filter((booking2) => !booking2?.reminderSentAt);
+      const reservationGroups = /* @__PURE__ */ new Map();
+      const legacySingles = [];
+      for (const booking2 of pending) {
+        const reservationId = String(booking2?.reservationId || "").trim();
+        if (reservationId) {
+          const list = reservationGroups.get(reservationId) || [];
+          list.push(booking2);
+          reservationGroups.set(reservationId, list);
+        } else {
+          legacySingles.push(booking2);
+        }
+      }
+      const reservationAnchors = [];
+      for (const [reservationId, children] of reservationGroups.entries()) {
+        reservationAnchors.push({ anchor: children[0], reservationId });
+      }
+      const reservationViewPromises = reservationAnchors.map(async ({ anchor, reservationId }) => {
+        const reservationRef = adminDb.collection("reservations").doc(reservationId);
+        const [reservationSnap, childrenSnap] = await Promise.all([
+          reservationRef.get(),
+          adminDb.collection("bookings").where("reservationId", "==", reservationId).get()
+        ]);
+        if (!reservationSnap.exists) {
+          return { anchor, view: anchor };
+        }
+        const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        return { anchor, view: buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children) };
+      });
+      const resolvedReservationViews = await Promise.all(reservationViewPromises);
+      const sendTasks = [];
+      for (const { anchor, view } of resolvedReservationViews) {
+        sendTasks.push(sendBookingTrigger(action, view || anchor));
+      }
+      for (const single of legacySingles) {
+        sendTasks.push(sendBookingTrigger(action, single));
+      }
+      await Promise.all(sendTasks);
+      const stamp = /* @__PURE__ */ new Date();
+      const stampTasks = [];
+      for (const [, children] of reservationGroups.entries()) {
+        for (const child of children) {
+          stampTasks.push(
+            adminDb.collection("bookings").doc(child.id).update({ reminderSentAt: stamp }).catch(() => null)
+          );
+        }
+      }
+      for (const single of legacySingles) {
+        stampTasks.push(
+          adminDb.collection("bookings").doc(single.id).update({ reminderSentAt: stamp }).catch(() => null)
+        );
+      }
+      await Promise.all(stampTasks);
+      return res.status(200).json({
+        success: true,
+        data: {
+          sent: pending.length,
+          skipped: bookings.length - pending.length,
+          // Diagnostic — the cron response surfaces
+          // the grouping (how many reservation-scope
+          // emails vs legacy single-room emails) so
+          // the next audit can verify the
+          // consolidation worked.
+          reservations: reservationAnchors.length,
+          legacySingles: legacySingles.length
+        }
+      });
+    }
+    const hasStaff = Boolean(req.staff?.success);
+    const booking = await findBooking(req, { requireGuestMatch: !hasStaff });
+    if (!booking) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    await sendBookingTrigger(action, booking);
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Email trigger failed:", error);
+    const message = error instanceof Error ? error.message : "Unable to send email. Please try again.";
+    const status = message.includes("required") ? 400 : 500;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
+async function handleEmailPreview(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  if (!req.staff?.success) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  const { template, houseRules } = req.body || {};
+  if (!template) {
+    return res.status(400).json({ success: false, error: "Template parameter is required." });
+  }
+  const mockBooking = {
+    bookingRef: "BK-2026-MOCK",
+    guestName: "Juan Dela Cruz",
+    guestEmail: "juan.delacruz@example.com",
+    guestPhone: "+63 917 123 4567",
+    roomNumber: "201",
+    roomName: "Deluxe Ocean View",
+    roomType: "deluxe",
+    checkIn: new Date(Date.now() + 864e5 * 2),
+    // 2 days from now
+    checkOut: new Date(Date.now() + 864e5 * 4),
+    // 4 days from now
+    numNights: 2,
+    totalPrice: 8500,
+    paymentMethod: "gcash",
+    status: "confirmed",
+    specialRequests: "High floor requested. Anniversary trip.",
+    discountType: "senior",
+    discountRejectionReason: "ID photo was blurred and expired.",
+    cancellationReason: "Flight cancelled due to weather.",
+    lookupToken: "mock-lookup-token-xyz"
+  };
+  const mockInquiry = {
+    companyName: "Acme Tech Solutions Inc.",
+    contactPerson: "Jane Smith",
+    email: "corporate@acme.com",
+    phone: "+63 2 8123 4567",
+    numRooms: "5 rooms",
+    preferredDates: "Oct 12 - Oct 15, 2026",
+    specialRequirements: "Requires high-speed Wi-Fi, early breakfast setup, and project room space."
+  };
+  const mockContactInquiry = {
+    name: "Maria Santos",
+    email: "maria.santos@example.com",
+    phone: "+63 917 555 0123",
+    subject: "Airport transfer availability",
+    message: "Do you offer airport pickup for two guests arriving in the afternoon?"
+  };
+  const mockEarlyCheckinRequest = {
+    requestedCheckInTime: "10:30 AM",
+    notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+  };
+  const mockVoucher = {
+    code: "SPARKWELCOME10",
+    guestEmail: "juan.delacruz@example.com",
+    discountType: "percent",
+    discountValue: 10,
+    applicableRoomTypes: ["deluxe", "executive"],
+    expiresAt: new Date(Date.now() + 864e5 * 30),
+    // 30 days from now
+    usageCap: 1
+  };
+  const mockStoreOrder = {
+    orderRef: "ORD-2026-MOCK",
+    roomNumber: "201",
+    guestEmail: "juan.delacruz@example.com",
+    paymentMethod: "add-to-bill",
+    totalAmount: 450,
+    status: "confirmed",
+    items: [
+      { name: "Pork Silog Extra", quantity: 2, price: 150 },
+      { name: "Mineral Water 1L", quantity: 2, price: 75 }
+    ],
+    cancellationReason: "Decided to dine out instead."
+  };
+  const mockPaymentProof = {
+    amount: 8500,
+    method: "gcash",
+    note: "GCash reference ID: 123456789",
+    paymentProofUrl: "https://example.com/mock-receipt.png"
+  };
+  try {
+    let html = "";
+    switch (template) {
+      case "booking-submitted":
+        html = bookingSubmittedEmail(mockBooking);
+        break;
+      case "payment-confirmed":
+        html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        break;
+      case "booking-confirmed":
+        html = bookingConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        break;
+      case "booking-confirmed-with-balance":
+        html = bookingConfirmedWithBalanceEmail(
+          { ...mockBooking, roomNumber: "" },
+          2750,
+          "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
+        );
+        break;
+      case "checkin-reminder":
+        html = checkinReminderEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        break;
+      case "booking-cancelled":
+        html = bookingCancelledEmail(mockBooking);
+        break;
+      case "booking-cancelled-reservation":
+        html = bookingCancelledReservationEmail({
+          ...mockBooking,
+          reservationRef: "R-20260802-00001",
+          reservationId: "rsv-mock",
+          isReservation: true,
+          roomCount: 3,
+          activeRoomCount: 2,
+          rooms: [
+            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 7200 },
+            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
+            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasBreakfast: true, totalPrice: 9800 }
+          ],
+          cancellationReason: "Guest requested partial cancellation.",
+          cancellationSource: "guest"
+        });
+        break;
+      case "discount-rejected":
+        html = discountRejectedEmail(mockBooking);
+        break;
+      case "payment-rejected":
+        html = paymentRejectedEmail({
+          ...mockBooking,
+          // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+          // the canonical reference lives on the payment ledger,
+          // not on the booking doc. Mock a single onsitePayments
+          // entry so the "Reference on file" callout renders in
+          // the preview.
+          onsitePayments: [{ transactionReference: "1234567890" }],
+          paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
+        });
+        break;
+      case "corporate-inquiry":
+        html = corporateInquiryEmail(mockInquiry);
+        break;
+      case "corporate-inquiry-confirmation":
+        html = corporateInquiryConfirmationEmail(mockInquiry);
+        break;
+      case "contact-inquiry":
+        html = contactInquiryEmail(mockContactInquiry);
+        break;
+      case "contact-confirmation":
+        html = contactConfirmationEmail(mockContactInquiry);
+        break;
+      case "early-checkin-request":
+        html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
+        break;
+      case "early-checkin-resolve":
+        const bookingForResolve = {
+          ...mockBooking,
+          earlyCheckIn: {
+            status: "approved",
+            requestedTime: "10:30 AM",
+            confirmedTime: "11:00 AM",
+            notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+          }
+        };
+        html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
+        break;
+      case "booking-rescheduled":
+        html = bookingRescheduledEmail(mockBooking);
+        break;
+      case "voucher-issued":
+        html = voucherIssuedEmail(mockVoucher);
+        break;
+      case "store-order-placed":
+        html = storeOrderPlacedEmail(mockStoreOrder);
+        break;
+      case "store-order-confirmed":
+        html = storeOrderConfirmedEmail(mockStoreOrder);
+        break;
+      case "store-order-out-for-delivery":
+        html = storeOrderOutForDeliveryEmail(mockStoreOrder);
+        break;
+      case "store-order-delivered":
+        html = storeOrderDeliveredEmail(mockStoreOrder);
+        break;
+      case "store-order-cancelled":
+        html = storeOrderCancelledEmail(mockStoreOrder);
+        break;
+      case "staff-new-booking":
+        html = staffNewBookingEmail(mockBooking);
+        break;
+      case "staff-new-payment":
+        html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        break;
+      case "spark-rewards-email-verification":
+        html = sparkRewardsEmailVerificationEmail({
+          guestName: "Maria Santos",
+          email: "maria.santos@example.com",
+          verificationLink: siteUrl("/account/profile?emailVerified=true")
+        });
+        break;
+      default:
+        return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
+    }
+    res.setHeader("Content-Type", "text/html");
+    return res.status(200).send(html);
+  } catch (error) {
+    console.error("Email preview generation failed:", error);
+    const message = error instanceof Error ? error.message : "Unable to generate preview. Please try again.";
+    return res.status(500).json({ success: false, error: message });
+  }
+}
+var import_jspdf, FROM_ADDRESS, FROM_DISPLAY_NAME, FROM_EMAIL, ADMIN_EMAIL;
+var init_email = __esm({
+  "server/handlers/email.ts"() {
+    "use strict";
+    init_zod();
+    import_jspdf = __toESM(require_jspdf_node_min());
+    init_hotel_config();
+    init_firebase_admin();
+    init_resend();
+    init_siteUrl();
+    init_shared();
+    init_notifications();
+    init_email_banner();
+    FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
+    FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
+    FROM_EMAIL = FROM_ADDRESS.includes("<") ? FROM_ADDRESS : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;
+    ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail;
+  }
+});
+
+// server/apiRouter.ts
+var apiRouter_exports = {};
+__export(apiRouter_exports, {
+  default: () => handler
+});
+module.exports = __toCommonJS(apiRouter_exports);
+init_firebase_admin();
+init_email();
+init_notifications();
 
 // server/handlers/bookings.ts
+init_firebase_admin();
+init_test_runs();
 init_firestore();
 init_email();
 init_notifications();
@@ -228041,7 +228158,15 @@ function buildCreateEmailView(args) {
     corporateCode: args.corporateCode,
     companyName: args.companyName,
     paymentMethod: args.paymentMethod,
-    paymentStatus: args.paymentStatus
+    paymentStatus: args.paymentStatus,
+    // ETR-22: stamped onto each child booking doc by the create
+    // transaction — surface on the synthetic reservation so the
+    // top-level email view (`environmentBanner` reads) carries
+    // the same fields without a separate Firestore round-trip.
+    isTestData: args.isTestData === true,
+    testRunId: String(args.testRunId || ""),
+    testRunName: String(args.testRunName || ""),
+    testRunEnvironment: args.testRunEnvironment === "staging" || args.testRunEnvironment === "production" ? args.testRunEnvironment : void 0
     // Per BAR-02 (2026-08-08, per decision #203):
     // the `activeRoomCount` and `cancelledRoomCount`
     // are not stamped onto the synthetic reservation
@@ -228077,7 +228202,14 @@ function buildCreateEmailView(args) {
       corporateCode: args.corporateCode,
       companyName: args.companyName,
       paymentMethod: args.paymentMethod,
-      status: args.paymentStatus
+      status: args.paymentStatus,
+      // ETR-22: per-child stamped fields so the email view's
+      // `first.isTestData` / `first.testRunName` reads carry
+      // the values through `buildReservationEmailView`.
+      isTestData: args.isTestData === true,
+      testRunId: String(args.testRunId || ""),
+      testRunName: String(args.testRunName || ""),
+      testRunEnvironment: args.testRunEnvironment === "staging" || args.testRunEnvironment === "production" ? args.testRunEnvironment : void 0
     };
   });
   return buildReservationEmailView(reservation, children);
@@ -228702,6 +228834,8 @@ async function handleCreateBooking(req, res) {
     });
   }
   let validatedTestRunId = null;
+  let validatedTestRunName = "";
+  let validatedTestRunEnvironment = "production";
   if (testToken) {
     const hashed = hashToken(testToken);
     const activeRuns = await adminDb.collection("testRuns").where("tokenHash", "==", hashed).where("status", "==", "active").get();
@@ -228719,6 +228853,8 @@ async function handleCreateBooking(req, res) {
       });
     }
     validatedTestRunId = run.id;
+    validatedTestRunName = typeof run.name === "string" ? run.name.trim().slice(0, 120) : "";
+    validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production" ? run.environment : "production";
   }
   const isCorporateIntent = Boolean(corporateCode) || corporateFlatRate === true;
   const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
@@ -229563,7 +229699,7 @@ async function handleCreateBooking(req, res) {
             billingArrangement: guestDetails.preferredBillingArrangement === "personal" ? "personal" : "chargeback"
           }
         } : {},
-        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId } : {},
+        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment } : {},
         // Per MRB-02 (2026-08-02, per decision #159): the
         // reservation header linkage. `reservationId` is
         // the pre-allocated (or server-minted) UUID; the three
@@ -229905,7 +230041,15 @@ async function handleCreateBooking(req, res) {
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate === true,
         corporateCode: corporateDetails.corporateCode || "",
-        companyName: corporateDetails.companyName || ""
+        companyName: corporateDetails.companyName || "",
+        // ETR-22: thread the test-run banner metadata into the
+        // synthetic email view so the booking-submitted template
+        // renders the test-run banner above the reservation
+        // details card.
+        isTestData: validatedTestRunId !== null,
+        testRunId: validatedTestRunId || void 0,
+        testRunName: validatedTestRunName || void 0,
+        testRunEnvironment: validatedTestRunEnvironment
       });
       await sendBookingTrigger("booking-submitted", emailView ?? {
         ...computedData,
@@ -230206,6 +230350,8 @@ async function handleCreateWalkin(req, res) {
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
   let validatedTestRunId = null;
+  let validatedTestRunName = "";
+  let validatedTestRunEnvironment = "production";
   if (requestedTestRunId) {
     const runDoc = await adminDb.collection("testRuns").doc(requestedTestRunId).get();
     if (!runDoc.exists) {
@@ -230228,6 +230374,8 @@ async function handleCreateWalkin(req, res) {
       });
     }
     validatedTestRunId = run.id;
+    validatedTestRunName = typeof run.name === "string" ? run.name.trim().slice(0, 120) : "";
+    validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production" ? run.environment : "production";
   }
   try {
     let finalBookingRef = "";
@@ -230738,7 +230886,7 @@ async function handleCreateWalkin(req, res) {
         breakfastSelections: {},
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
-        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId } : {},
+        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment } : {},
         // Per MRB-02.x (2026-08-02, per decision #164): the
         // reservation header linkage. Same shape as the
         // public path — `reservationId` is the
@@ -238560,6 +238708,7 @@ async function handleGetPrivateStorageUrl(req, res) {
 }
 
 // server/apiRouter.ts
+init_test_runs();
 init_hotel_config();
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",

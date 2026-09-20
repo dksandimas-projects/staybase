@@ -15,6 +15,13 @@ import { toDateOrNull, getManilaDateInfo, generateLookupToken, RESERVATION_REF_R
 // helper to anchor "today" in the property's timezone, then
 // adds 1 day for the "tomorrow at 00:00 local" range.
 import { writeNotification } from "../lib/notifications";
+// ETR-22: environment-aware banner helpers. Lives in a
+// standalone module so tests can import the helpers without
+// dragging in firebase-admin / resend / jsPDF. The function
+// names are unchanged from the original inline implementation
+// (`environmentBanner`, `environmentBannerFromBooking`) so the
+// per-template wiring in this file is a one-line replacement.
+import { environmentBanner, environmentBannerFromBooking } from "./email-banner";
 
 type EmailAction =
   | "booking-submitted"
@@ -650,7 +657,23 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
     // reservation-scope cancel template that
     // MRB-13 will call).
     cancellationReason: first.cancellationReason || "",
-    cancellationSource: first.cancellationSource || ""
+    cancellationSource: first.cancellationSource || "",
+    // ETR-22: test-run banner metadata. `environmentBanner`
+    // reads these to render the test-run callout. Surfaced
+    // from the first child (the create transaction stamps
+    // them onto each child doc) — reservation-scope views
+    // follow the same convention as the legacy single-room
+    // shape, so a single template read handles both. Missing
+    // on legacy bookings (banner stays off).
+    isTestData: first.isTestData === true || reservation.isTestData === true,
+    testRunId: String(first.testRunId || reservation.testRunId || ""),
+    testRunName: String(first.testRunName || reservation.testRunName || ""),
+    testRunEnvironment:
+      first.testRunEnvironment === "staging" || first.testRunEnvironment === "production"
+        ? first.testRunEnvironment
+        : (reservation.testRunEnvironment === "staging" || reservation.testRunEnvironment === "production"
+          ? reservation.testRunEnvironment
+          : undefined)
   };
 }
 
@@ -876,6 +899,13 @@ function callout(tone: "warm" | "green" | "red", title: string, body: string) {
   `;
 }
 
+// ETR-22: the `environmentBanner` + `environmentBannerFromBooking`
+// helpers live in `./email-banner` (imported at the top of this
+// file). They were extracted so tests can import them without
+// pulling in firebase-admin / resend / jsPDF. The per-template
+// `bannerHtml: environmentBannerFromBooking(booking)` lines
+// below are the only consumer side.
+
 function emailLayout(options: {
   preheader: string;
   eyebrow: string;
@@ -884,6 +914,11 @@ function emailLayout(options: {
   body: string;
   ctaLabel?: string;
   ctaUrl?: string;
+  // ETR-22: optional banner block rendered at the top of the
+  // white content card, just below the dark hero header.
+  // Templates pass `environmentBanner({...})`; passing `""`
+  // (or omitting the option) renders no banner.
+  bannerHtml?: string;
 }) {
   const primary = config.colors.primary;
   const sidebar = config.colors.sidebar;
@@ -921,6 +956,7 @@ function emailLayout(options: {
             </tr>
             <tr>
               <td class="content" style="padding: 32px 34px 28px;">
+                ${options.bannerHtml || ""}
                 <p style="margin: 0 0 18px; color: #374151; font-size: 16px; line-height: 1.7;">${options.intro}</p>
                 ${options.body}
                 ${
@@ -1147,7 +1183,8 @@ function bookingSubmittedEmail(booking: any) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">You can check the latest status any time using your booking reference and email address.</p>
     `,
     ctaLabel: "Check booking status",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1187,7 +1224,8 @@ function paymentConfirmedEmail(booking: any, houseRules?: string | null) {
       ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "View booking",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1203,7 +1241,8 @@ function bookingConfirmedEmail(booking: any, houseRules?: string | null) {
       ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "Review booking details",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1230,7 +1269,8 @@ function bookingConfirmedWithBalanceEmail(booking: any, balance: number, reason:
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "Review booking details",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1245,7 +1285,8 @@ function bookingRescheduledEmail(booking: any) {
       ${card("Updated reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "Review booking details",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1261,7 +1302,8 @@ function checkinReminderEmail(booking: any, houseRules?: string | null) {
       ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "Open booking lookup",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1385,7 +1427,8 @@ function bookingCancelledEmail(booking: any) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${config.supportEmail}`
+    ctaUrl: `mailto:${config.supportEmail}`,
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1481,7 +1524,8 @@ function bookingCancelledReservationEmail(booking: any) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${config.supportEmail}`
+    ctaUrl: `mailto:${config.supportEmail}`,
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1551,7 +1595,8 @@ function bookingRefundProcessedEmail(booking: any) {
         <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
       `,
       ctaLabel: "Contact support",
-      ctaUrl: `mailto:${config.supportEmail}`
+      ctaUrl: `mailto:${config.supportEmail}`,
+      bannerHtml: environmentBannerFromBooking(booking)
     })
   };
 }
@@ -1570,7 +1615,8 @@ function discountRejectedEmail(booking: any) {
       ${card("Updated booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "View my booking",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1613,7 +1659,8 @@ function paymentRejectedEmail(booking: any) {
       ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "Re-upload payment proof",
-    ctaUrl: lookupUrl(booking)
+    ctaUrl: lookupUrl(booking),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1645,7 +1692,8 @@ function corporateInquiryEmail(inquiry: any) {
       ${callout("warm", "Special requirements", escapeHtml(safeInquiry.specialRequirements))}
     `,
     ctaLabel: "Open corporate inbox",
-    ctaUrl: adminUrl("/corporate")
+    ctaUrl: adminUrl("/corporate"),
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -1676,7 +1724,8 @@ function corporateInquiryConfirmationEmail(inquiry: any) {
         ${row("Rooms needed", safeInquiry.numRooms)}
         ${row("Preferred dates", typeof safeInquiry.preferredDates === "string" ? safeInquiry.preferredDates : JSON.stringify(safeInquiry.preferredDates))}
       </table>`)}
-    `
+    `,
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -1705,7 +1754,8 @@ function contactInquiryEmail(inquiry: any) {
       ${callout("warm", "Message", escapeHtml(inquiry.message))}
     `,
     ctaLabel: "Open contact inbox",
-    ctaUrl: adminUrl("/contact")
+    ctaUrl: adminUrl("/contact"),
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -1729,7 +1779,8 @@ function contactConfirmationEmail(inquiry: any) {
         ${row("Subject", inquiry.subject)}
       </table>`)}
       ${callout("warm", "Your message", escapeHtml(inquiry.message))}
-    `
+    `,
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -1770,7 +1821,8 @@ function earlyCheckinRequestEmail(booking: any, request: any) {
       ${callout("warm", "Notes from guest", escapeHtml(notes))}
     `,
     ctaLabel: "Review booking",
-    ctaUrl: adminUrl(`/bookings?ref=${booking.bookingRef}`)
+    ctaUrl: adminUrl(`/bookings?ref=${booking.bookingRef}`),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1821,7 +1873,8 @@ function earlyCheckinResolveEmail(booking: any, status: "approved" | "declined",
       ${staffNote ? callout("warm", "Message from front desk", escapeHtml(staffNote)) : ""}
     `,
     ctaLabel: "View your stays",
-    ctaUrl: siteUrl("/account/stays")
+    ctaUrl: siteUrl("/account/stays"),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -1881,7 +1934,8 @@ function voucherIssuedEmail(voucher: any) {
       </table>`)}
     `,
     ctaLabel: "Start a booking",
-    ctaUrl: siteUrl("/rooms")
+    ctaUrl: siteUrl("/rooms"),
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -1915,7 +1969,8 @@ function sparkRewardsEmailVerificationEmail(data: { guestName?: string; email: s
       `)}
     `,
     ctaLabel: "Verify Email Address",
-    ctaUrl: data.verificationLink
+    ctaUrl: data.verificationLink,
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -1992,7 +2047,8 @@ function storeOrderPlacedEmail(order: any) {
       </table>`)}
     `,
     ctaLabel: "Open the chat",
-    ctaUrl: deepLink
+    ctaUrl: deepLink,
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -2013,7 +2069,8 @@ function storeOrderConfirmedEmail(order: any) {
       </table>`)}
     `,
     ctaLabel: "Open the chat",
-    ctaUrl: deepLink
+    ctaUrl: deepLink,
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -2034,7 +2091,8 @@ function storeOrderOutForDeliveryEmail(order: any) {
       </table>`)}
     `,
     ctaLabel: "Open the chat",
-    ctaUrl: deepLink
+    ctaUrl: deepLink,
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -2055,7 +2113,8 @@ function storeOrderDeliveredEmail(order: any) {
       </table>`)}
     `,
     ctaLabel: "Send feedback",
-    ctaUrl: siteUrl("/contact")
+    ctaUrl: siteUrl("/contact"),
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -2082,7 +2141,8 @@ function storeOrderCancelledEmail(order: any) {
       </table>`)}
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${config.supportEmail}`
+    ctaUrl: `mailto:${config.supportEmail}`,
+    bannerHtml: environmentBanner({})
   });
 }
 
@@ -2143,7 +2203,8 @@ function staffNewBookingEmail(booking: any) {
       </table>`)}
     `,
     ctaLabel: "Review booking",
-    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`)
+    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -2167,7 +2228,8 @@ function staffNewPaymentEmail(booking: any, payment: any) {
       </table>`)}
     `,
     ctaLabel: "Review payment",
-    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`)
+    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`),
+    bannerHtml: environmentBannerFromBooking(booking)
   });
 }
 
@@ -2218,7 +2280,8 @@ function staffRefundReviewEmail(order: any) {
     ctaLabel: "Open booking",
     ctaUrl: order.bookingId
       ? adminUrl(`/bookings?ref=${encodeURIComponent(order.bookingId)}`)
-      : adminUrl("/bookings")
+      : adminUrl("/bookings"),
+    bannerHtml: environmentBanner({})
   });
 }
 
