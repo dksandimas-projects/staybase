@@ -21,7 +21,7 @@ import { writeNotification } from "../lib/notifications";
 // names are unchanged from the original inline implementation
 // (`environmentBanner`, `environmentBannerFromBooking`) so the
 // per-template wiring in this file is a one-line replacement.
-import { environmentBanner, environmentBannerFromBooking } from "./email-banner";
+import { environmentBanner, environmentBannerFromBooking, subjectPrefix, subjectPrefixFromBooking } from "./email-banner";
 // ETR-22.b: the email preview handler auto-detects the most
 // recent active test run in the current deployment environment
 // so the preview renders the same banner the guest would
@@ -992,7 +992,20 @@ function emailLayout(options: {
 </html>`;
 }
 
-async function sendEmail(to: string, subject: string, html: string, attachments?: Array<{ filename: string; content: Buffer }>) {
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  attachments?: Array<{ filename: string; content: Buffer }>,
+  // ETR-22.10: subject-line prefix state. Mirrors the
+  // booking view's test-run fields; staging is auto-detected
+  // inside `subjectPrefix` via `isStagingProject()`. When
+  // omitted (the default), no prefix is added — callers that
+  // don't carry a booking view (voucher / verification /
+  // store-order templates) just get the staging prefix when
+  // the deployment is staging.
+  banner?: { isTestData?: boolean; testRunName?: string; testRunEnvironment?: string }
+) {
   // Per Spark Rewards audit 2026-07-18 LOW-7: the send-skip guard
   // covers BOTH the @example.invalid placeholder (used by the
   // early "unverified email" test path) and the @invalid
@@ -1009,6 +1022,16 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
     console.log(`Skipping email send to placeholder address: ${to}`);
     return;
   }
+  // ETR-22.10: prepend the environment subject prefix when
+  // the deployment is staging OR when the booking view marks
+  // a test-run. Subject + DLQ entry both carry the prefixed
+  // string so the failed-emails row stays consistent with
+  // what the recipient would have seen if delivery had
+  // succeeded.
+  const prefix = subjectPrefix({
+    isTestData: banner?.isTestData === true
+  });
+  const finalSubject = prefix + subject;
   // Per #11 (operator-reported 2026-08-20, tracked in
   // `plan/project/ROADMAP.md §Open Operator-Reported Bugs → #11`):
   // the pre-#11 `resend.emails.send` call was unguarded — any
@@ -1028,7 +1051,7 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
     await resend.emails.send({
       from: FROM_EMAIL,
       to,
-      subject,
+      subject: finalSubject,
       html,
       replyTo: config.supportEmail,
       attachments
@@ -1040,7 +1063,7 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
     try {
       await adminDb.collection("failed_emails").add({
         recipient: to,
-        subject,
+        subject: finalSubject,
         error: typeof error?.message === "string" ? error.message : String(error),
         lastAttemptAt: new Date(),
         retryCount: 0
@@ -1834,10 +1857,21 @@ function earlyCheckinRequestEmail(booking: any, request: any) {
 }
 
 export async function sendEarlyCheckinRequestTrigger(booking: any, request: any) {
+  // ETR-22.10: subject prefix from the booking's test-run
+  // banner state. Staging auto-detects inside `sendEmail`.
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
+      ? booking.testRunEnvironment
+      : undefined
+  };
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] Early check-in request: ${booking.bookingRef}`,
-    earlyCheckinRequestEmail(booking, request)
+    earlyCheckinRequestEmail(booking, request),
+    undefined,
+    banner
   );
 }
 
@@ -1890,10 +1924,21 @@ export async function sendEarlyCheckinResolveTrigger(booking: any, status: "appr
   const subject = isStaffGranted
     ? `[${config.brandName}] Early check-in ${status === "approved" ? "added" : "updated"}: ${booking.bookingRef}`
     : `[${config.brandName}] Early check-in status: ${booking.bookingRef}`;
+  // ETR-22.10: subject prefix from the booking's test-run
+  // banner state. Staging auto-detects inside `sendEmail`.
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
+      ? booking.testRunEnvironment
+      : undefined
+  };
   await sendEmail(
     booking.guestEmail,
     subject,
-    earlyCheckinResolveEmail(booking, status, staffNote)
+    earlyCheckinResolveEmail(booking, status, staffNote),
+    undefined,
+    banner
   );
 }
 
@@ -2241,18 +2286,40 @@ function staffNewPaymentEmail(booking: any, payment: any) {
 }
 
 export async function sendStaffNewBookingTrigger(booking: any) {
+  // ETR-22.10: subject prefix from the booking's test-run
+  // banner state. Staging auto-detects inside `sendEmail`.
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
+      ? booking.testRunEnvironment
+      : undefined
+  };
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] New online booking: ${booking.bookingRef}`,
-    staffNewBookingEmail(booking)
+    staffNewBookingEmail(booking),
+    undefined,
+    banner
   );
 }
 
 export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
+  // ETR-22.10: subject prefix from the booking's test-run
+  // banner state. Staging auto-detects inside `sendEmail`.
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
+      ? booking.testRunEnvironment
+      : undefined
+  };
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] New payment proof: ${booking.bookingRef}`,
-    staffNewPaymentEmail(booking, payment)
+    staffNewPaymentEmail(booking, payment),
+    undefined,
+    banner
   );
 }
 
@@ -2454,7 +2521,17 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     throw new Error("Unsupported booking email trigger.");
   }
 
-  await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
+  // ETR-22.10: pass the booking view's test-run fields so
+  // `sendEmail` can prepend the subject prefix (`[PROD TEST] ` /
+  // `[STG TEST] `). Staging auto-detects inside `sendEmail`.
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
+      ? booking.testRunEnvironment
+      : undefined
+  };
+  await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments, banner);
 }
 
 // Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
@@ -2482,7 +2559,16 @@ export async function sendBookingConfirmedWithBalanceTrigger(booking: any, balan
     filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
     content: generateReceiptPdf(booking)
   }];
-  await sendEmail(booking.guestEmail, subject, html, attachments);
+  // ETR-22.10: pass the booking's test-run banner state for
+  // the subject prefix. Staging auto-detects inside `sendEmail`.
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
+      ? booking.testRunEnvironment
+      : undefined
+  };
+  await sendEmail(booking.guestEmail, subject, html, attachments, banner);
 }
 
 export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse, action: EmailAction) {
