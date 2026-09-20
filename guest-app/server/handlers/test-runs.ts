@@ -432,7 +432,12 @@ export async function handleDeleteTestRun(req: any, res: any) {
   }
 }
 
-function isStagingProject(): boolean {
+// ETR-22: exported so the email layer can render the
+// staging banner against the same allowlist the staging
+// reset uses. The check is `FIREBASE_PROJECT_ID` against
+// `STAGING_ALLOWLIST_PROJECT_IDS` — never trust the request
+// hostname or client env vars.
+export function isStagingProject(): boolean {
   const projectId = process.env.FIREBASE_PROJECT_ID || "";
   const allowlistRaw = process.env.STAGING_ALLOWLIST_PROJECT_IDS || "";
   const allowlist = allowlistRaw.split(",").map(s => s.trim()).filter(Boolean);
