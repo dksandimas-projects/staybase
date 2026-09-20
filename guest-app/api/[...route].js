@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.0.1";
+    VERSION2 = "1.1.0";
   }
 });
 
@@ -227707,33 +227707,64 @@ async function handleEmailPreview(req, res) {
     paymentProofUrl: "https://example.com/mock-receipt.png"
   };
   try {
+    let enrichedMockBooking = { ...mockBooking };
+    try {
+      const body = req.body || {};
+      const overrideFlag = body.isTestData === true;
+      const overrideNameRaw = typeof body.testRunName === "string" ? body.testRunName.trim() : "";
+      const overrideEnvRaw = body.testRunEnvironment;
+      const overrideEnv = overrideEnvRaw === "staging" || overrideEnvRaw === "production" ? overrideEnvRaw : null;
+      if (overrideFlag || overrideNameRaw || overrideEnv) {
+        enrichedMockBooking = {
+          ...enrichedMockBooking,
+          isTestData: true,
+          testRunName: overrideNameRaw,
+          testRunEnvironment: overrideEnv || void 0
+        };
+      } else {
+        const currentEnv = isStagingProject() ? "staging" : "production";
+        const snap = await adminDb.collection("testRuns").where("status", "==", "active").where("environment", "==", currentEnv).orderBy("createdAt", "desc").limit(1).get();
+        if (!snap.empty) {
+          const run = snap.docs[0].data() || {};
+          const runEnv = run.environment === "staging" || run.environment === "production" ? run.environment : currentEnv;
+          enrichedMockBooking = {
+            ...enrichedMockBooking,
+            isTestData: true,
+            testRunName: typeof run.name === "string" ? run.name : "",
+            testRunEnvironment: runEnv
+          };
+        }
+      }
+    } catch (previewRunErr) {
+      console.error("Failed to enrich preview with active test run:", previewRunErr);
+    }
     let html = "";
     switch (template) {
       case "booking-submitted":
-        html = bookingSubmittedEmail(mockBooking);
+        html = bookingSubmittedEmail(enrichedMockBooking);
         break;
       case "payment-confirmed":
-        html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        html = paymentConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed":
-        html = bookingConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        html = bookingConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed-with-balance":
         html = bookingConfirmedWithBalanceEmail(
-          { ...mockBooking, roomNumber: "" },
+          { ...enrichedMockBooking, roomNumber: "" },
           2750,
           "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
         );
         break;
       case "checkin-reminder":
-        html = checkinReminderEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        html = checkinReminderEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-cancelled":
-        html = bookingCancelledEmail(mockBooking);
+        html = bookingCancelledEmail(enrichedMockBooking);
         break;
       case "booking-cancelled-reservation":
         html = bookingCancelledReservationEmail({
-          ...mockBooking,
+          ...enrichedMockBooking,
           reservationRef: "R-20260802-00001",
           reservationId: "rsv-mock",
           isReservation: true,
@@ -227749,11 +227780,11 @@ async function handleEmailPreview(req, res) {
         });
         break;
       case "discount-rejected":
-        html = discountRejectedEmail(mockBooking);
+        html = discountRejectedEmail(enrichedMockBooking);
         break;
       case "payment-rejected":
         html = paymentRejectedEmail({
-          ...mockBooking,
+          ...enrichedMockBooking,
           // Per 2026-07-24 (refactor/unify-payment-reference-fields):
           // the canonical reference lives on the payment ledger,
           // not on the booking doc. Mock a single onsitePayments
@@ -227776,11 +227807,11 @@ async function handleEmailPreview(req, res) {
         html = contactConfirmationEmail(mockContactInquiry);
         break;
       case "early-checkin-request":
-        html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
+        html = earlyCheckinRequestEmail(enrichedMockBooking, mockEarlyCheckinRequest);
         break;
       case "early-checkin-resolve":
         const bookingForResolve = {
-          ...mockBooking,
+          ...enrichedMockBooking,
           earlyCheckIn: {
             status: "approved",
             requestedTime: "10:30 AM",
@@ -227791,7 +227822,7 @@ async function handleEmailPreview(req, res) {
         html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
         break;
       case "booking-rescheduled":
-        html = bookingRescheduledEmail(mockBooking);
+        html = bookingRescheduledEmail(enrichedMockBooking);
         break;
       case "voucher-issued":
         html = voucherIssuedEmail(mockVoucher);
@@ -227812,10 +227843,10 @@ async function handleEmailPreview(req, res) {
         html = storeOrderCancelledEmail(mockStoreOrder);
         break;
       case "staff-new-booking":
-        html = staffNewBookingEmail(mockBooking);
+        html = staffNewBookingEmail(enrichedMockBooking);
         break;
       case "staff-new-payment":
-        html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        html = staffNewPaymentEmail(enrichedMockBooking, mockPaymentProof);
         break;
       case "spark-rewards-email-verification":
         html = sparkRewardsEmailVerificationEmail({
@@ -227848,6 +227879,7 @@ var init_email = __esm({
     init_shared();
     init_notifications();
     init_email_banner();
+    init_test_runs();
     FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail;
     FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
     FROM_EMAIL = FROM_ADDRESS.includes("<") ? FROM_ADDRESS : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;

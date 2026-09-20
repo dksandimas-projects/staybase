@@ -22,6 +22,13 @@ import { writeNotification } from "../lib/notifications";
 // (`environmentBanner`, `environmentBannerFromBooking`) so the
 // per-template wiring in this file is a one-line replacement.
 import { environmentBanner, environmentBannerFromBooking } from "./email-banner";
+// ETR-22.b: the email preview handler auto-detects the most
+// recent active test run in the current deployment environment
+// so the preview renders the same banner the guest would
+// actually see. `isStagingProject()` is the same allowlist the
+// staging reset + the staging banner use — never trust the
+// request hostname or a client-supplied env string.
+import { isStagingProject } from "./test-runs";
 
 type EmailAction =
   | "booking-submitted"
@@ -2864,21 +2871,82 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
   };
 
   try {
+    // ETR-22.b: enrich `mockBooking` with the most-recent active
+    // test run in the current deployment environment, so the
+    // preview renders the same banner the guest would actually
+    // see when the email fires. Falls back to no test-run banner
+    // when (a) the read fails, (b) no active run exists in this
+    // environment, or (c) the request body explicitly overrides
+    // the auto-detect. The override path is opt-in — staff set
+    // `{ isTestData: true, testRunName: "...", testRunEnvironment:
+    // "staging"|"production" }` in the JSON body to force a
+    // specific scenario (useful for QAing a closed run without
+    // re-opening it).
+    let enrichedMockBooking = { ...mockBooking };
+    try {
+      const body = (req.body || {}) as Record<string, unknown>;
+      const overrideFlag = body.isTestData === true;
+      const overrideNameRaw = typeof body.testRunName === "string" ? body.testRunName.trim() : "";
+      const overrideEnvRaw = body.testRunEnvironment;
+      const overrideEnv = overrideEnvRaw === "staging" || overrideEnvRaw === "production"
+        ? overrideEnvRaw
+        : null;
+      if (overrideFlag || overrideNameRaw || overrideEnv) {
+        enrichedMockBooking = {
+          ...enrichedMockBooking,
+          isTestData: true,
+          testRunName: overrideNameRaw,
+          testRunEnvironment: overrideEnv || undefined
+        };
+      } else {
+        // Auto-detect: query testRuns for the most recent active
+        // run in the current deployment environment. Scoped
+        // query (status + environment equality + orderBy
+        // createdAt) — uses the existing testRuns collection
+        // composite index.
+        const currentEnv = isStagingProject() ? "staging" : "production";
+        const snap = await adminDb.collection("testRuns")
+          .where("status", "==", "active")
+          .where("environment", "==", currentEnv)
+          .orderBy("createdAt", "desc")
+          .limit(1)
+          .get();
+        if (!snap.empty) {
+          const run = snap.docs[0].data() || {};
+          const runEnv = run.environment === "staging" || run.environment === "production"
+            ? run.environment
+            : currentEnv;
+          enrichedMockBooking = {
+            ...enrichedMockBooking,
+            isTestData: true,
+            testRunName: typeof run.name === "string" ? run.name : "",
+            testRunEnvironment: runEnv
+          };
+        }
+      }
+    } catch (previewRunErr) {
+      // Best-effort: never block the preview on a failed
+      // read. Falls back to no test-run banner (the staging
+      // banner still fires inside `environmentBanner` if the
+      // deployment is staging).
+      console.error("Failed to enrich preview with active test run:", previewRunErr);
+    }
+
     let html = "";
     switch (template) {
       case "booking-submitted":
-        html = bookingSubmittedEmail(mockBooking);
+        html = bookingSubmittedEmail(enrichedMockBooking);
         break;
       case "payment-confirmed":
         // ECE-01: pass houseRules from request body so the staff can
         // preview exactly what the guest will see.
-        html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        html = paymentConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed":
         // ECE-02: pass houseRules from request body so the staff can
         // preview exactly what the guest will see (mirrors the
         // payment-confirmed preview above).
-        html = bookingConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        html = bookingConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed-with-balance":
         // Per CWB-02: preview uses mock balance + reason so
@@ -2887,7 +2955,7 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         // flow. The room number is intentionally omitted
         // (booking is not yet `checked-in`).
         html = bookingConfirmedWithBalanceEmail(
-          { ...mockBooking, roomNumber: "" },
+          { ...enrichedMockBooking, roomNumber: "" },
           2750,
           "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
         );
@@ -2896,10 +2964,10 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         // ECE-02: pass houseRules from request body so the staff can
         // preview exactly what the guest will see (mirrors the
         // payment-confirmed preview above).
-        html = checkinReminderEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
+        html = checkinReminderEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-cancelled":
-        html = bookingCancelledEmail(mockBooking);
+        html = bookingCancelledEmail(enrichedMockBooking);
         break;
       case "booking-cancelled-reservation":
         // Per MRB-09 (2026-08-02, per decision #168):
@@ -2909,7 +2977,7 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         // the full-cancel and the partial-cancel
         // shape from the preview pane.
         html = bookingCancelledReservationEmail({
-          ...mockBooking,
+          ...enrichedMockBooking,
           reservationRef: "R-20260802-00001",
           reservationId: "rsv-mock",
           isReservation: true,
@@ -2925,11 +2993,11 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         });
         break;
       case "discount-rejected":
-        html = discountRejectedEmail(mockBooking);
+        html = discountRejectedEmail(enrichedMockBooking);
         break;
       case "payment-rejected":
         html = paymentRejectedEmail({
-          ...mockBooking,
+          ...enrichedMockBooking,
           // Per 2026-07-24 (refactor/unify-payment-reference-fields):
           // the canonical reference lives on the payment ledger,
           // not on the booking doc. Mock a single onsitePayments
@@ -2952,11 +3020,11 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         html = contactConfirmationEmail(mockContactInquiry);
         break;
       case "early-checkin-request":
-        html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
+        html = earlyCheckinRequestEmail(enrichedMockBooking, mockEarlyCheckinRequest);
         break;
       case "early-checkin-resolve":
         const bookingForResolve = {
-          ...mockBooking,
+          ...enrichedMockBooking,
           earlyCheckIn: {
             status: "approved",
             requestedTime: "10:30 AM",
@@ -2967,7 +3035,7 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
         break;
       case "booking-rescheduled":
-        html = bookingRescheduledEmail(mockBooking);
+        html = bookingRescheduledEmail(enrichedMockBooking);
         break;
       case "voucher-issued":
         html = voucherIssuedEmail(mockVoucher);
@@ -2988,10 +3056,10 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         html = storeOrderCancelledEmail(mockStoreOrder);
         break;
       case "staff-new-booking":
-        html = staffNewBookingEmail(mockBooking);
+        html = staffNewBookingEmail(enrichedMockBooking);
         break;
       case "staff-new-payment":
-        html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        html = staffNewPaymentEmail(enrichedMockBooking, mockPaymentProof);
         break;
       case "spark-rewards-email-verification":
         html = sparkRewardsEmailVerificationEmail({
@@ -3003,7 +3071,7 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
       default:
         return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
     }
-    
+
     res.setHeader("Content-Type", "text/html");
     return res.status(200).send(html);
   } catch (error) {

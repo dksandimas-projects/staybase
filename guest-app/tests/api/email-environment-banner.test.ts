@@ -276,3 +276,94 @@ describe("environmentBanner — source-text wiring", () => {
     expect(bannerIdx).toBeLessThan(introIdx);
   });
 });
+
+// ─── ETR-22.b — handleEmailPreview auto-detect ─────────────────────
+//
+// The preview handler enriches `mockBooking` with test-run banner
+// metadata so the rendered template matches what the guest would
+// actually see. Two paths:
+//   1. Body opt-in:  `{ isTestData: true, testRunName, testRunEnvironment }`
+//   2. Auto-detect:  query `testRuns` for the most recent active run
+//                    in the current deployment environment
+// Fallback: no banner (preview never breaks on a failed read).
+
+describe("ETR-22.b — handleEmailPreview banner source", () => {
+  beforeEach(() => {
+    process.env.FIREBASE_PROJECT_ID = "spark-inn-prod";
+    process.env.STAGING_ALLOWLIST_PROJECT_IDS = "staging-spark-inn";
+  });
+
+  // Source-text guards for the ETR-22.b wiring. The
+  // email.ts handle reads from the request body + auto-detects
+  // an active test run; we pin both paths.
+  const emailSrc = readFileSync(
+    resolve(__dirname, "../../server/handlers/email.ts"),
+    "utf8"
+  );
+
+  it("reads isTestData + testRunName + testRunEnvironment from the request body when provided", () => {
+    // Source-text: the override branch reads three fields from
+    // `req.body`. We pin the wiring so a future refactor
+    // doesn't drop the opt-in.
+    expect(emailSrc).toMatch(/body\.isTestData\s*===\s*true/);
+    expect(emailSrc).toMatch(/body\.testRunName/);
+    expect(emailSrc).toMatch(/body\.testRunEnvironment/);
+  });
+
+  it("queries testRuns for active runs in the current environment when no body override is set", () => {
+    // The auto-detect path: scoped query (status + environment)
+    // ordered by createdAt desc, limit 1.
+    expect(emailSrc).toMatch(/collection\(["']testRuns["']\)/);
+    expect(emailSrc).toMatch(/["']status["']\s*,\s*["']==["']\s*,\s*["']active["']/);
+    expect(emailSrc).toMatch(/["']environment["']\s*,\s*["']==["']\s*,\s*currentEnv/);
+    expect(emailSrc).toMatch(/orderBy\(["']createdAt["']\s*,\s*["']desc["']\)/);
+  });
+
+  it("uses enrichedMockBooking in every booking template case (not the raw mockBooking)", () => {
+    // The 14 switch cases that previously used `mockBooking`
+    // (booking templates + staff templates) now use
+    // `enrichedMockBooking`. The non-booking cases
+    // (corporate/contact/voucher/store/spark-rewards) keep
+    // their typed mocks — those templates don't read booking
+    // metadata so the test-run banner can't fire there.
+    const bookingCases = [
+      "booking-submitted",
+      "payment-confirmed",
+      "booking-confirmed",
+      "booking-confirmed-with-balance",
+      "checkin-reminder",
+      "booking-cancelled",
+      "booking-cancelled-reservation",
+      "discount-rejected",
+      "payment-rejected",
+      "early-checkin-request",
+      "early-checkin-resolve",
+      "booking-rescheduled",
+      "staff-new-booking",
+      "staff-new-payment"
+    ];
+    for (const c of bookingCases) {
+      const caseStart = emailSrc.indexOf(`case "${c}":`);
+      expect(caseStart, `case "${c}": not found`).toBeGreaterThan(0);
+      // Look at the next 30 lines — none of them should call
+      // the raw `mockBooking` (only `enrichedMockBooking`).
+      const snippet = emailSrc.slice(caseStart, caseStart + 1500);
+      // The literal `mockBooking` (not the enriched variant)
+      // should NOT appear inside the case body.
+      const rawUses = (snippet.match(/\bmockBooking\b/g) || []).filter(s => s === "mockBooking");
+      expect(
+        rawUses,
+        `case "${c}" still references raw mockBooking (should be enrichedMockBooking)`
+      ).toEqual([]);
+    }
+  });
+
+  it("falls back to no test-run banner when the auto-detect read fails", () => {
+    // The try/catch around the auto-detect must log + swallow
+    // so the preview never breaks on a Firestore read failure.
+    expect(emailSrc).toMatch(/Failed to enrich preview with active test run/);
+    // No re-throw — the outer try/catch wraps the switch,
+    // so a re-thrown error would surface as 500.
+    expect(emailSrc).toMatch(/catch \(previewRunErr\)/);
+  });
+});
