@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { environmentBanner, environmentBannerFromBooking } from "../../server/handlers/email-banner";
+import {
+  environmentBanner,
+  environmentBannerFromBooking,
+  subjectPrefix,
+  subjectPrefixFromBooking
+} from "../../server/handlers/email-banner";
 
 // ETR-22: regression tests for the environment banner helpers.
 // The banner fires on two paths:
@@ -365,5 +370,153 @@ describe("ETR-22.b — handleEmailPreview banner source", () => {
     // No re-throw — the outer try/catch wraps the switch,
     // so a re-thrown error would surface as 500.
     expect(emailSrc).toMatch(/catch \(previewRunErr\)/);
+  });
+});
+
+// ─── ETR-22.10 — subject-line environment prefix ───────────────────
+//
+// The prefix mirrors the body banner's state machine:
+//   Production, no test-run   → (no prefix)
+//   Production, test-run      → `[PROD TEST] `
+//   Staging, no test-run      → `[STG] `
+//   Staging, test-run         → `[STG TEST] `
+//
+// Auto-detection for staging uses the same
+// `isStagingProject()` allowlist as the body banner.
+
+describe("subjectPrefix — production, no test-run", () => {
+  beforeEach(() => {
+    process.env.FIREBASE_PROJECT_ID = "spark-inn-prod";
+    process.env.STAGING_ALLOWLIST_PROJECT_IDS = "staging-spark-inn";
+  });
+
+  it("returns no prefix when neither staging nor test-run", () => {
+    expect(subjectPrefix({ isTestData: false })).toBe("");
+    expect(subjectPrefix({})).toBe("");
+    expect(subjectPrefix({ isTestData: undefined })).toBe("");
+  });
+
+  it("returns `[PROD TEST] ` for a production test-run", () => {
+    expect(subjectPrefix({ isTestData: true })).toBe("[PROD TEST] ");
+  });
+});
+
+describe("subjectPrefix — staging", () => {
+  beforeEach(() => {
+    process.env.FIREBASE_PROJECT_ID = "staging-spark-inn";
+    process.env.STAGING_ALLOWLIST_PROJECT_IDS = "staging-spark-inn";
+  });
+
+  it("returns `[STG] ` for staging with no test-run", () => {
+    expect(subjectPrefix({})).toBe("[STG] ");
+    expect(subjectPrefix({ isTestData: false })).toBe("[STG] ");
+  });
+
+  it("returns `[STG TEST] ` for staging test-run (test-run appended, not duplicated)", () => {
+    expect(subjectPrefix({ isTestData: true })).toBe("[STG TEST] ");
+  });
+
+  it("orders `[STG]` before `[TEST]` so the more specific test-run tag appears last", () => {
+    // `[STG TEST]` order matters — STG identifies the deployment,
+    // TEST identifies the run context. Reverse order would read
+    // confusingly as "test-run, on staging".
+    const prefix = subjectPrefix({ isTestData: true });
+    const stgIdx = prefix.indexOf("STG");
+    const testIdx = prefix.indexOf("TEST");
+    expect(stgIdx).toBeLessThan(testIdx);
+  });
+});
+
+describe("subjectPrefix — production, multi-project staging allowlist", () => {
+  it("returns no prefix when project is staging-mirror but allowlist excludes it", () => {
+    process.env.FIREBASE_PROJECT_ID = "staging-mirror";
+    process.env.STAGING_ALLOWLIST_PROJECT_IDS = "staging-spark-inn";
+    expect(subjectPrefix({})).toBe("");
+  });
+
+  it("returns the staging prefix when both projects are in the allowlist", () => {
+    process.env.FIREBASE_PROJECT_ID = "staging-mirror";
+    process.env.STAGING_ALLOWLIST_PROJECT_IDS = "staging-spark-inn,staging-mirror";
+    expect(subjectPrefix({})).toBe("[STG] ");
+  });
+});
+
+describe("subjectPrefixFromBooking", () => {
+  beforeEach(() => {
+    process.env.FIREBASE_PROJECT_ID = "spark-inn-prod";
+    process.env.STAGING_ALLOWLIST_PROJECT_IDS = "staging-spark-inn";
+  });
+
+  it("reads isTestData off the booking view", () => {
+    expect(subjectPrefixFromBooking({ isTestData: true })).toBe("[PROD TEST] ");
+    expect(subjectPrefixFromBooking({ isTestData: false })).toBe("");
+    expect(subjectPrefixFromBooking({})).toBe("");
+  });
+
+  it("is null/undefined safe", () => {
+    expect(subjectPrefixFromBooking(null)).toBe("");
+    expect(subjectPrefixFromBooking(undefined)).toBe("");
+  });
+});
+
+describe("subjectPrefix — sendEmail wiring", () => {
+  // Source-text guards for the ETR-22.10 wiring. Pin the
+  // contract so a future refactor that drops the prefix from
+  // the subject line fails here rather than as a missed
+  // inbox marker in production.
+  const emailSrc = readFileSync(
+    resolve(__dirname, "../../server/handlers/email.ts"),
+    "utf8"
+  );
+
+  it("sendEmail accepts a 5th `banner` param and prepends the prefix to the subject", () => {
+    // Function signature — the 5th param is `banner?:`. The
+    // nested braces in `attachments?: Array<{ ... }>` make a
+    // greedy regex brittle, so we anchor on the unique tokens.
+    expect(emailSrc).toMatch(/async function sendEmail\(/);
+    expect(emailSrc).toMatch(/attachments\?:\s*Array<\{[^}]*\}>/);
+    expect(emailSrc).toMatch(/,\s*\/\/[^\n]*ETR-22\.10:[\s\S]*?banner\?:\s*\{/);
+    // Prefix computation
+    expect(emailSrc).toMatch(/const prefix = subjectPrefix\(\{/);
+    // Prepended to subject
+    expect(emailSrc).toMatch(/subject:\s*finalSubject/);
+    // DLQ entry uses the prefixed subject so a failed send
+    // stays consistent with what would have been delivered.
+    expect(emailSrc).toMatch(/subject:\s*finalSubject[\s\S]*?failed_emails/);
+  });
+
+  it("every booking trigger that has a booking view passes the banner state to sendEmail", () => {
+    // The 6 trigger functions that read a booking view must
+    // construct a `banner` object and pass it as the 5th arg.
+    // Some triggers pass `banner` via a literal at the call
+    // site (`sendEmail(..., undefined, banner)`); we accept
+    // either shape. We do NOT accept `sendBookingTrigger`'s
+    // body before its `await sendEmail(...)` call missing a
+    // banner construction — that would be a regression.
+    const bookingTriggers = [
+      "sendBookingTrigger",
+      "sendBookingConfirmedWithBalanceTrigger",
+      "sendStaffNewBookingTrigger",
+      "sendStaffNewPaymentTrigger",
+      "sendEarlyCheckinRequestTrigger",
+      "sendEarlyCheckinResolveTrigger"
+    ];
+    for (const triggerName of bookingTriggers) {
+      const exportIdx = emailSrc.indexOf(`export async function ${triggerName}(`);
+      expect(exportIdx, `${triggerName} not found`).toBeGreaterThan(0);
+      // `sendBookingTrigger` is the longest function here
+      // (~6.9KB) because of the per-action subject map. Read
+      // a generous window so the assertion reaches the
+      // `await sendEmail(...)` call at the bottom.
+      const body = emailSrc.slice(exportIdx, exportIdx + 10000);
+      expect(
+        body,
+        `${triggerName} does not construct a banner object for sendEmail`
+      ).toMatch(/const banner\s*=\s*\{/);
+      expect(
+        body,
+        `${triggerName} does not pass banner to sendEmail as the 5th arg`
+      ).toMatch(/sendEmail\([\s\S]{0,2000}?banner\s*\)/);
+    }
   });
 });
