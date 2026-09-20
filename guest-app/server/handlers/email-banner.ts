@@ -100,3 +100,52 @@ export function environmentBannerFromBooking(booking: any): string {
         : undefined
   });
 }
+
+// ETR-22.10: subject-line prefix so the environment is
+// immediately visible in inbox list views + push notifications
+// (without the recipient having to open the email to see the
+// body banner). Mirrors the environmentBanner state machine so
+// subject and body stay consistent.
+//
+//   Production, no test-run   → (no prefix)
+//   Production, test-run      → `[PROD TEST] `
+//   Staging, no test-run      → `[STG] `
+//   Staging, test-run         → `[STG TEST] `
+//
+// Order rule: production test-runs explicitly tag `PROD` so
+// the recipient can confirm "yes, this came from the
+// production server" + "but it's a test-run, ignore it" in
+// one glance. The staging case collapses to `[STG]` when
+// no test-run is in scope (the staging banner inside the
+// body still flags it).
+//
+// The prefix is appended in `sendEmail` from the canonical
+// `isStagingProject()` check + the caller-supplied test-run
+// state — never from a client-controlled header or hostname.
+export type SubjectPrefixState = {
+  isTestData?: boolean;
+};
+
+export function subjectPrefix(state: SubjectPrefixState): string {
+  const isStaging = isStagingProject();
+  const isTestData = state.isTestData === true;
+  if (!isStaging && !isTestData) return "";
+
+  const tags: string[] = [];
+  if (isStaging) {
+    tags.push("STG");
+    if (isTestData) tags.push("TEST");
+  } else {
+    // production
+    tags.push("PROD");
+    tags.push("TEST");
+  }
+  return `[${tags.join(" ")}] `;
+}
+
+// ETR-22.10: shorthand for the trigger functions. Reads the
+// test-run state off a booking view; staging is auto-detected
+// inside `subjectPrefix` via `isStagingProject()`.
+export function subjectPrefixFromBooking(booking: any): string {
+  return subjectPrefix({ isTestData: booking?.isTestData === true });
+}

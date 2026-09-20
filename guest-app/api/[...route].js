@@ -225823,6 +225823,20 @@ function environmentBannerFromBooking(booking) {
     testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
   });
 }
+function subjectPrefix(state) {
+  const isStaging = isStagingProject();
+  const isTestData = state.isTestData === true;
+  if (!isStaging && !isTestData) return "";
+  const tags = [];
+  if (isStaging) {
+    tags.push("STG");
+    if (isTestData) tags.push("TEST");
+  } else {
+    tags.push("PROD");
+    tags.push("TEST");
+  }
+  return `[${tags.join(" ")}] `;
+}
 var init_email_banner = __esm({
   "server/handlers/email-banner.ts"() {
     "use strict";
@@ -226405,17 +226419,21 @@ function emailLayout(options) {
   </body>
 </html>`;
 }
-async function sendEmail(to3, subject, html, attachments) {
+async function sendEmail(to3, subject, html, attachments, banner) {
   const trimmed = typeof to3 === "string" ? to3.trim().toLowerCase() : "";
   if (trimmed.endsWith("@example.invalid") || trimmed.endsWith("@invalid")) {
     console.log(`Skipping email send to placeholder address: ${to3}`);
     return;
   }
+  const prefix = subjectPrefix({
+    isTestData: banner?.isTestData === true
+  });
+  const finalSubject = prefix + subject;
   try {
     await resend.emails.send({
       from: FROM_EMAIL,
       to: to3,
-      subject,
+      subject: finalSubject,
       html,
       replyTo: hotel_config_default.supportEmail,
       attachments
@@ -226424,7 +226442,7 @@ async function sendEmail(to3, subject, html, attachments) {
     try {
       await adminDb.collection("failed_emails").add({
         recipient: to3,
-        subject,
+        subject: finalSubject,
         error: typeof error?.message === "string" ? error.message : String(error),
         lastAttemptAt: /* @__PURE__ */ new Date(),
         retryCount: 0
@@ -226928,10 +226946,17 @@ function earlyCheckinRequestEmail(booking, request) {
   });
 }
 async function sendEarlyCheckinRequestTrigger(booking, request) {
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] Early check-in request: ${booking.bookingRef}`,
-    earlyCheckinRequestEmail(booking, request)
+    earlyCheckinRequestEmail(booking, request),
+    void 0,
+    banner
   );
 }
 function earlyCheckinResolveEmail(booking, status, staffNote) {
@@ -226964,10 +226989,17 @@ function earlyCheckinResolveEmail(booking, status, staffNote) {
 async function sendEarlyCheckinResolveTrigger(booking, status, staffNote) {
   const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
   const subject = isStaffGranted ? `[${hotel_config_default.brandName}] Early check-in ${status === "approved" ? "added" : "updated"}: ${booking.bookingRef}` : `[${hotel_config_default.brandName}] Early check-in status: ${booking.bookingRef}`;
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
   await sendEmail(
     booking.guestEmail,
     subject,
-    earlyCheckinResolveEmail(booking, status, staffNote)
+    earlyCheckinResolveEmail(booking, status, staffNote),
+    void 0,
+    banner
   );
 }
 function voucherCodeBlock(code) {
@@ -227275,17 +227307,31 @@ function staffNewPaymentEmail(booking, payment) {
   });
 }
 async function sendStaffNewBookingTrigger(booking) {
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New online booking: ${booking.bookingRef}`,
-    staffNewBookingEmail(booking)
+    staffNewBookingEmail(booking),
+    void 0,
+    banner
   );
 }
 async function sendStaffNewPaymentTrigger(booking, payment) {
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New payment proof: ${booking.bookingRef}`,
-    staffNewPaymentEmail(booking, payment)
+    staffNewPaymentEmail(booking, payment),
+    void 0,
+    banner
   );
 }
 function staffRefundReviewEmail(order) {
@@ -227429,7 +227475,12 @@ async function sendBookingTrigger(action, booking) {
   if (!template) {
     throw new Error("Unsupported booking email trigger.");
   }
-  await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
+  await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments, banner);
 }
 async function sendBookingConfirmedWithBalanceTrigger(booking, balance, reason) {
   const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
@@ -227440,7 +227491,12 @@ async function sendBookingConfirmedWithBalanceTrigger(booking, balance, reason) 
     filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
     content: generateReceiptPdf(booking)
   }];
-  await sendEmail(booking.guestEmail, subject, html, attachments);
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
+  await sendEmail(booking.guestEmail, subject, html, attachments, banner);
 }
 async function handleEmailTrigger(req, res, action) {
   const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
