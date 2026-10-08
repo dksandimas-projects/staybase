@@ -52,6 +52,7 @@ import {
   IN_FLOW_HOLD_MINUTES,
   MAX_IN_FLOW_HOLD_MINUTES,
   MIN_IN_FLOW_HOLD_MINUTES,
+  clampIntegerInRange,
   computeInFlowHoldExpiresAt,
   generateHoldId,
   isInFlowHoldActive,
@@ -385,59 +386,134 @@ describe("IFH-01.2 follow-up — Settings-routing (per-hotel `inFlowHoldMinutes`
   const sharedUtilSrc = read("shared/utils/bookingInFlowHold.ts");
 
   it("the shared `normalizeInFlowHoldMinutes` clamps 5..30 (same shape as `normalizePaymentHoldWindowHours`)", () => {
-    // The default fallback is the constant.
     expect(sharedUtilSrc).toMatch(/DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES/);
-    // The normalize function signature mirrors the
-    // payment-hold one.
     expect(sharedUtilSrc).toMatch(
       /export function normalizeInFlowHoldMinutes\(raw: unknown\): number \{/
     );
-    // Clamps to MIN/MAX.
     expect(sharedUtilSrc).toMatch(
       /Math\.min\(\s*MAX_IN_FLOW_HOLD_MINUTES,\s*Math\.max\(MIN_IN_FLOW_HOLD_MINUTES/
     );
-    // Returns the default for non-finite / non-positive.
     expect(sharedUtilSrc).toMatch(
       /if \(!Number\.isFinite\(value\) \|\| value <= 0\) return DEFAULT_IN_FLOW_HOLD_MINUTES/
     );
   });
 
   it("the AdminContext defaults `inFlowHoldMinutes: 15` + normalizes on hydrate (mirrors `paymentHoldWindowHours`)", () => {
-    // The default is in the useState initializer.
     expect(adminContextSrc).toMatch(/inFlowHoldMinutes: 15,/);
-    // The normalize helper is imported from the
-    // shared module — same import block as
-    // `normalizePaymentHoldWindowHours`.
     expect(adminContextSrc).toMatch(/normalizeInFlowHoldMinutes/);
-    // The hydrate path normalizes the incoming field
-    // so a legacy settings doc (no field) hydrates to
-    // the 15-minute default.
     expect(adminContextSrc).toMatch(
       /inFlowHoldMinutes: normalizeInFlowHoldMinutes\(\(data as Partial<typeof hotelConfig>\)\?\.inFlowHoldMinutes\)/
     );
   });
 
   it("the start handler reads from `settings/hotelConfig.inFlowHoldMinutes` and falls back to the constant", () => {
-    // The handler reads the settings doc once at
-    // start time and snapshots the value onto the
-    // hold doc as `holdMinutes`.
     expect(handlerSrc).toMatch(
       /adminDb\.collection\("settings"\)\.doc\("hotelConfig"\)/
     );
-    // The fallback is the shared normalize helper
-    // (which returns the default for legacy settings).
     expect(handlerSrc).toMatch(
       /normalizeInFlowHoldMinutes\(\s*\(hotelConfig as \{ inFlowHoldMinutes\?: unknown \}\)\.inFlowHoldMinutes\s*\)/
     );
-    // The `holdMinutes` field on the hold doc is the
-    // snapshot — NOT the module constant — so a later
-    // Settings change never shortens or lengthens an
-    // existing guest's promise.
     expect(handlerSrc).toMatch(/holdMinutes: effectiveHoldMinutes/);
-    // The `expiresAt` is computed from the per-hotel
-    // value, not the module constant.
     expect(handlerSrc).toMatch(
       /computeInFlowHoldExpiresAt\(effectiveHoldMinutes, now\)/
     );
+  });
+});
+
+describe("IFH-01.3 follow-up — Settings UI editor (Booking & Holds tab)", () => {
+  const settingsPageSrc = read("admin-app/src/pages/SettingsPage.tsx");
+  const sharedUtilSrc = read("shared/utils/bookingInFlowHold.ts");
+
+  it("the Settings page adds a new 'holds' tab with the Clock4 icon", () => {
+    // The TabId type is widened to include 'holds'.
+    expect(settingsPageSrc).toMatch(/type TabId = .*"holds"/);
+    // The VALID_TAB_IDS list includes 'holds'.
+    expect(settingsPageSrc).toMatch(/"holds"\s*$/m);
+    // The tabs array adds the Booking & Holds entry
+    // with the Clock4 icon.
+    expect(settingsPageSrc).toMatch(
+      /id: "holds" as const, label: "Booking & Holds", icon: Clock4/
+    );
+  });
+
+  it("the SettingsSaveKey type is widened to include 'holds' (the save-status map can track the new tab)", () => {
+    expect(settingsPageSrc).toMatch(
+      /type SettingsSaveKey = .*"holds"/
+    );
+  });
+
+  it("the Booking & Holds form renders two number inputs with min/max validation", () => {
+    // The form is gated behind `isAdmin` (same as
+    // the Discounts tab — both surfaces are admin-only).
+    expect(settingsPageSrc).toMatch(/activeTab === "holds"/);
+    // The two inputs have the min/max attributes.
+    expect(settingsPageSrc).toMatch(
+      /id="paymentHoldWindowHours"[\s\S]{0,400}min=\{MIN_PAYMENT_HOLD_WINDOW_HOURS\}[\s\S]{0,200}max=\{MAX_PAYMENT_HOLD_WINDOW_HOURS\}/
+    );
+    expect(settingsPageSrc).toMatch(
+      /id="inFlowHoldMinutes"[\s\S]{0,400}min=\{MIN_IN_FLOW_HOLD_MINUTES\}[\s\S]{0,200}max=\{MAX_IN_FLOW_HOLD_MINUTES\}/
+    );
+  });
+
+  it("the `clampIntegerInRange` helper is the form-layer validation (Save is disabled when out of range)", () => {
+    expect(sharedUtilSrc).toMatch(
+      /export function clampIntegerInRange\(\s*raw: unknown,\s*min: number,\s*max: number\s*\): number \| null \{/
+    );
+    // Returns null for non-finite.
+    expect(sharedUtilSrc).toMatch(/if \(!Number\.isFinite\(value\)\) return null;/);
+    // Floors to integer.
+    expect(sharedUtilSrc).toMatch(/const floored = Math\.floor\(value\);/);
+    // Rejects out-of-range.
+    expect(sharedUtilSrc).toMatch(/if \(floored < min \|\| floored > max\) return null;/);
+  });
+
+  it("the form calls `updateSettings('hotelConfig', {...})` for both fields, gated on the validate-and-normalize path", () => {
+    // The save handler validates first (toast.error
+    // if either value is out of range), then writes
+    // both fields.
+    expect(settingsPageSrc).toMatch(/handleSaveHolds/);
+    expect(settingsPageSrc).toMatch(
+      /paymentHoldWindowHours: paymentHoldWindowHoursValid!/
+    );
+    expect(settingsPageSrc).toMatch(
+      /inFlowHoldMinutes: inFlowHoldMinutesValid!/
+    );
+  });
+
+  it("the SaveActionFooter + SaveActionButton both accept the new `disabled` prop", () => {
+    // SaveActionFooter's `disabled` prop type — the
+    // JSDoc block + destructure are about 15 lines
+    // apart, so use a 1500-char window.
+    expect(settingsPageSrc).toMatch(
+      /function SaveActionFooter[\s\S]{0,1500}disabled\?: boolean;/
+    );
+    // SaveActionButton's `disabled` prop type.
+    expect(settingsPageSrc).toMatch(
+      /function SaveActionButton[\s\S]{0,500}disabled\?: boolean;/
+    );
+  });
+});
+
+describe("IFH-01.3 — clampIntegerInRange (shared/utils/bookingInFlowHold.ts)", () => {
+  it("returns null for non-finite / non-numeric input", () => {
+    expect(clampIntegerInRange(undefined, 1, 72)).toBeNull();
+    expect(clampIntegerInRange(null, 1, 72)).toBeNull();
+    expect(clampIntegerInRange(NaN, 1, 72)).toBeNull();
+    expect(clampIntegerInRange("not a number", 1, 72)).toBeNull();
+  });
+
+  it("returns null for out-of-range integers", () => {
+    expect(clampIntegerInRange(0, 1, 72)).toBeNull();
+    expect(clampIntegerInRange(73, 1, 72)).toBeNull();
+    expect(clampIntegerInRange(4, 5, 30)).toBeNull();
+    expect(clampIntegerInRange(31, 5, 30)).toBeNull();
+  });
+
+  it("returns the integer verbatim when in range (floored)", () => {
+    expect(clampIntegerInRange(15, 5, 30)).toBe(15);
+    expect(clampIntegerInRange(24, 1, 72)).toBe(24);
+    expect(clampIntegerInRange(15.7, 5, 30)).toBe(15);
+    expect(clampIntegerInRange(5, 5, 30)).toBe(5);
+    expect(clampIntegerInRange(30, 5, 30)).toBe(30);
   });
 });

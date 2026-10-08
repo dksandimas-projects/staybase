@@ -94,6 +94,30 @@ export function normalizeInFlowHoldMinutes(raw: unknown): number {
   return clamped;
 }
 
+// Per the IFH-01.3 (Settings UI editor) follow-up:
+// reusable integer-clamp helper that the Settings page
+// uses to validate both `paymentHoldWindowHours` (1..72)
+// and `inFlowHoldMinutes` (5..30) at the input layer
+// (mirrors the server-side normalize helpers so the
+// client's "Save" button is disabled when the value is
+// out of range, hand-typed, or non-finite). Returns
+// `null` when the value is invalid so the UI can render
+// the field's error state without falling back to the
+// default (the default is a server-side concern — the
+// client should NOT silently rewrite the operator's
+// input to a "safe" value, that hides typos).
+export function clampIntegerInRange(
+  raw: unknown,
+  min: number,
+  max: number
+): number | null {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  const floored = Math.floor(value);
+  if (floored < min || floored > max) return null;
+  return floored;
+}
+
 // UUIDv4 shape used for `holdId` — the client preallocates
 // before the API call so a retry-after-uncertain-response can
 // re-use the same id (mirrors the `reservationId` pattern from
