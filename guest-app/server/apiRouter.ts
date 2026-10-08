@@ -1539,15 +1539,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // surface, rate-limited at 30/IP/min (matches the public
   // availability endpoint's surface; a guest browsing dates
   // and starting a hold should not collide with the
-  // booking-create limit). The start endpoint also runs
-  // through Turnstile because it mints server-side state.
+  // booking-create limit).
+  //
+  // No Turnstile gate on the start endpoint — the
+  // `useInFlowHold` hook fires POST on Step 2 mount,
+  // BEFORE the BookingPage's Turnstile widget (gated to
+  // `isReviewStep`) has loaded a token. Requiring
+  // Turnstile here made the banner 400 in production with
+  // "We couldn't load the hold timer" (see
+  // `fix/holds-start-turnstile`). The actual security gate
+  // is the booking transaction (`/api/bookings/create` IS
+  // Turnstile-gated) — a hold is a soft UX signal, not a
+  // server-state change with security implications. A
+  // spam attacker creating fake hold docs gets nothing
+  // (they can't book a room — the booking transaction is
+  // the real security boundary). Rate limit (30/IP/min)
+  // is the spam protection. The daily Janitor sweep keeps
+  // the `bookingHolds` collection bounded.
   if (domain === "holds" && action === "start" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-start:${ip}`, 30, 60000)) {
       return res.status(429).json({ success: false, error: "Too many hold requests. Please try again in a minute." });
-    }
-    const turnstileVerification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!turnstileVerification.success) {
-      return res.status(400).json({ success: false, error: turnstileVerification.error });
     }
 
     return await handleStartInFlowHold(req, res);
