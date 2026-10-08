@@ -214,7 +214,8 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] User refreshes the page on Step 2 — the URL still carries `?hold=<id>`, the hook reads + re-starts the timer (idempotent, same `expiresAt` if the doc already exists)
 - [x] User navigates back to Step 1, changes the room type + dates, then re-enters Step 2 — the `holdId` is preserved (the start endpoint is idempotent on the same `holdId`), the banner continues from the original `expiresAt`. A future enhancement could detect a `roomType` / `checkIn` mismatch and start a fresh hold; for v1 the same hold is reused.
 - [x] Network blip on the `POST /api/holds/start` call — the hook shows the amber "We couldn't load the hold timer" state with a Retry button; the user can still submit the booking (the consume is best-effort)
-- [x] User on Step 2 with the timer ticking; the API endpoint returns 404 for the hold doc (e.g. the future Janitor cleaned it up) — the banner shows "This hold was not found. It may have expired — please return to Step 1 to pick a new room."
+- [x] User on Step 2 with the timer ticking; the API endpoint returns 404 for the hold doc (e.g. the Janitor sweep cleaned it up) — the banner shows "This hold was not found. It may have expired — please return to Step 1 to pick a new room."
+- [x] The hourly Janitor sweep (`POST /api/holds/sweep`, registered in `vercel.json §crons` with `0 * * * *`) marks stale `"active"` holds past their `expiresAt` as `"expired"`. Per-doc Firestore transaction with a recheck (a hold consumed by a booking between the coarse query and the per-doc write is NOT re-marked `"expired"`). Idempotent — a re-fire of the same tick finds zero matches. Auth: same `CRON_SECRET` pattern as the PEX-06 expire cron.
 
 ### Manual QA
 

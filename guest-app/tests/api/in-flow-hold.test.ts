@@ -63,6 +63,18 @@ function read(relativePath: string): string {
   return readFileSync(resolve(repoRoot, relativePath), "utf-8");
 }
 
+// Hoist the source-text reads to file scope so the
+// follow-up describe block can reuse them without
+// re-reading.
+const bookingPageSrc = read("guest-app/src/pages/BookingPage.tsx");
+const corporatePageSrc = read("guest-app/src/pages/CorporateBookingPage.tsx");
+const bannerSrc = read("guest-app/src/components/HoldCountdownBanner.tsx");
+const hookSrc = read("guest-app/src/hooks/useInFlowHold.ts");
+const handlerSrc = read("guest-app/server/handlers/in-flow-hold.ts");
+const routerSrc = read("guest-app/server/apiRouter.ts");
+const bookingHandlerSrc = read("guest-app/server/handlers/bookings.ts");
+const vercelSrc = read("guest-app/vercel.json");
+
 describe("IFH-01 — Constants + helpers (shared/utils/bookingInFlowHold.ts)", () => {
   it("IN_FLOW_HOLD_MINUTES is 15 by default (industry norm for in-checkout holds)", () => {
     expect(IN_FLOW_HOLD_MINUTES).toBe(15);
@@ -217,14 +229,6 @@ describe("IFH-01 — StartBookingHoldSchema (shared/schemas/booking.ts)", () => 
 });
 
 describe("IFH-01 — Source-text pins", () => {
-  const bookingPageSrc = read("guest-app/src/pages/BookingPage.tsx");
-  const corporatePageSrc = read("guest-app/src/pages/CorporateBookingPage.tsx");
-  const bannerSrc = read("guest-app/src/components/HoldCountdownBanner.tsx");
-  const hookSrc = read("guest-app/src/hooks/useInFlowHold.ts");
-  const handlerSrc = read("guest-app/server/handlers/in-flow-hold.ts");
-  const routerSrc = read("guest-app/server/apiRouter.ts");
-  const bookingHandlerSrc = read("guest-app/server/handlers/bookings.ts");
-
   it("BookingPage + CorporateBookingPage preallocate `holdId` via the shared helper", () => {
     expect(bookingPageSrc).toMatch(/generateHoldId/);
     expect(corporatePageSrc).toMatch(/generateHoldId/);
@@ -299,5 +303,45 @@ describe("IFH-01 — Source-text pins", () => {
 
   it("the consume is idempotent on a replayed request (a second consume returns `already-consumed`)", () => {
     expect(handlerSrc).toMatch(/reason: "already-consumed"/);
+  });
+});
+
+describe("IFH-01 follow-up — Janitor sweep cron", () => {
+  it("the sweep handler is registered in the apiRouter (no new Vercel function, just a new catch-all branch)", () => {
+    expect(routerSrc).toMatch(
+      /domain === "holds" && action === "sweep"/
+    );
+  });
+
+  it("the sweep uses the same `CRON_SECRET` auth as the existing PEX-06 expire cron", () => {
+    // The sweep handler must reject requests without
+    // the `x-cron-secret` header or `Authorization:
+    // Bearer <secret>` (defense-in-depth — the route
+    // also enforces it in apiRouter.ts).
+    expect(handlerSrc).toMatch(/process\.env\.CRON_SECRET/);
+    expect(handlerSrc).toMatch(/req\.headers\?\.authorization/);
+  });
+
+  it("the sweep uses Firestore transactions with a per-doc recheck (a consumed hold is NOT re-marked `expired`)", () => {
+    // The per-doc recheck inside the transaction is
+    // the authoritative gate — a booking transaction
+    // may have consumed the hold between the coarse
+    // query and the per-doc write.
+    expect(handlerSrc).toMatch(/if \(freshData\.status === "consumed"\) return;/);
+    expect(handlerSrc).toMatch(/if \(isInFlowHoldActive\(\{ status: freshData\.status, expiresAt \}, now\)\) \{/);
+  });
+
+  it("the sweep is ordered by `expiresAt ASC` (oldest deadlines swept first)", () => {
+    expect(handlerSrc).toMatch(/\.orderBy\("expiresAt", "asc"\)/);
+  });
+
+  it("the sweep is registered as an hourly cron in vercel.json (schedule: 0 * * * *)", () => {
+    expect(vercelSrc).toMatch(/"path":\s*"\/api\/holds\/sweep"/);
+    expect(vercelSrc).toMatch(/"schedule":\s*"0 \* \* \* \*"/);
+  });
+
+  it("the sweep returns a `{ swept, scanned, runAt }` audit payload (idempotent re-fires report `swept: 0`)", () => {
+    expect(handlerSrc).toMatch(/swept \+= 1;/);
+    expect(handlerSrc).toMatch(/runAt: now\.toISOString\(\)/);
   });
 });

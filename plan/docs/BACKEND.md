@@ -73,7 +73,7 @@ Ephemeral hold stamp that powers the public booking flow's Steps 2 + 3 countdown
 | `holdMinutes` | number | Snapshot of `IN_FLOW_HOLD_MINUTES` at start time. Future reports can attribute expired holds to a specific window even if the constant changes. |
 | `createdAt` / `updatedAt` | timestamp | Audit timestamps. |
 
-> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. The future Janitor sweep transitions `"active" → "expired"` for holds past their `expiresAt`.
+> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. The hourly Janitor sweep (`/api/holds/sweep`, registered in `vercel.json §crons` as `0 * * * *`) transitions `"active" → "expired"` for holds past their `expiresAt` using a per-doc Firestore transaction with a recheck (a hold consumed by a booking between the coarse query and the per-doc write is NOT re-marked `"expired"`). Idempotent — a re-fire of the same cron tick finds zero matches.
 > **Firestore rules:** `bookingHolds/{id}` is denied for guest reads + writes (the guest client never touches this collection directly — the `useInFlowHold` hook uses the `/api/holds/read` + `/api/holds/start` Vercel routes). Admin reads are open for debugging.
 
 ---

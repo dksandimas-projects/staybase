@@ -264,3 +264,137 @@ export async function handleConsumeInFlowHold(
   await ref.update({ status: "consumed", updatedAt: Timestamp.fromDate(now) });
   return { ok: true, hold: serializeHold(snap) };
 }
+
+// Cron-driven Janitor sweep for stale in-flow holds.
+//
+// Per the IFH-01 follow-up: the IFH-01 commit shipped
+// the start + read + consume handlers but deferred the
+// Janitor sweep (the read-time `isInFlowHoldActive`
+// evaluation already reports stale holds as `"expired"`
+// honestly, so the sweep is a cleanup of the on-disk
+// `status`, not a UX-critical path). This handler is
+// the dedicated sweep:
+//
+//   1. Query `bookingHolds` for `status == "active"` + `expiresAt < now`.
+//   2. Mark each match `"expired"` (no delete — the
+//      audit trail is more useful when the doc is
+//      preserved with a tombstone status).
+//   3. Return a count so the cron response is auditable.
+//   4. Idempotent: a re-fire of the same cron tick
+//      finds zero matches (the first run marked them
+//      all `"expired"`).
+//
+// Auth: same `CRON_SECRET` pattern as the existing
+// `/api/holds/expire` PEX-06 cron. Vercel sets the
+// `x-cron-secret` header on every cron invocation.
+//
+// Schedule: hourly (in `vercel.json`). The 15-minute
+// `IN_FLOW_HOLD_MINUTES` window means a stale hold can
+// be left in `"active"` for up to 60 minutes before
+// this sweep runs. The read-time evaluation already
+// reports it as `"expired"` to the banner — the sweep
+// is purely an on-disk cleanup so future reports +
+// the `bookingHolds` collection size stay bounded.
+
+const SWEEP_BATCH_SIZE = 200;
+
+export interface SweepInFlowHoldsResult {
+  swept: number;
+  scanned: number;
+  runAt: string;
+}
+
+export async function handleSweepInFlowHolds(
+  req: any,
+  res: any,
+  options: { now?: Date; skipAuthCheck?: boolean } = {}
+): Promise<SweepInFlowHoldsResult | { ok: false; status: number; error: string }> {
+  // The route registration in apiRouter.ts enforces
+  // the method + CRON_SECRET. This handler also
+  // re-checks for defense-in-depth (the function can
+  // be called directly from a future ops endpoint
+  // without going through the apiRouter path).
+  if (!options.skipAuthCheck) {
+    if (req.method !== "POST" && req.method !== "GET") {
+      return { ok: false, status: 405, error: "Method not allowed." };
+    }
+    const expected = process.env.CRON_SECRET;
+    if (!expected) {
+      return { ok: false, status: 500, error: "CRON_SECRET is not configured on the server." };
+    }
+    const headerSecret = req.headers?.["x-cron-secret"];
+    const authHeader = req.headers?.authorization;
+    const authorized =
+      (typeof headerSecret === "string" && headerSecret === expected) ||
+      (typeof authHeader === "string" &&
+        authHeader.startsWith("Bearer ") &&
+        authHeader.slice("Bearer ".length) === expected);
+    if (!authorized) {
+      return { ok: false, status: 401, error: "Unauthorized cron request." };
+    }
+  }
+
+  const now = options.now ?? new Date();
+  let swept = 0;
+  let scanned = 0;
+
+  try {
+    // Per the same PEX-06 pattern: the coarse Firestore
+    // filter is `status == "active"` + `expiresAt < now`,
+    // ordered by `expiresAt` so the oldest deadlines are
+    // swept first (matters at scale). The per-doc
+    // recheck inside the transaction is the
+    // authoritative gate — a hold may have been
+    // consumed by a booking between the coarse query
+    // and the per-doc write.
+    const expiredSnapshot = await adminDb
+      .collection(HOLDS_COLLECTION)
+      .where("status", "==", "active")
+      .where("expiresAt", "<", Timestamp.fromDate(now))
+      .orderBy("expiresAt", "asc")
+      .limit(SWEEP_BATCH_SIZE)
+      .get();
+
+    scanned = expiredSnapshot.size;
+
+    for (const doc of expiredSnapshot.docs) {
+      try {
+        await adminDb.runTransaction(async (transaction) => {
+          const freshDoc = await transaction.get(doc.ref);
+          if (!freshDoc.exists) return;
+          const freshData = freshDoc.data() ?? {};
+          // Recheck eligibility — a booking
+          // transaction may have consumed this hold
+          // between the coarse query and the per-doc
+          // write.
+          if (freshData.status === "consumed") return;
+          if (freshData.status === "expired") return;
+          const expiresAt = toIsoOrNull(freshData.expiresAt);
+          if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
+            return;
+          }
+          transaction.update(doc.ref, {
+            status: "expired",
+            updatedAt: Timestamp.fromDate(now)
+          });
+        });
+        swept += 1;
+      } catch (err) {
+        // A single bad doc must not stop the
+        // sweep. Log + continue.
+        console.error(
+          `In-flow hold sweep failed for ${doc.id}:`,
+          err
+        );
+      }
+    }
+
+    return {
+      swept,
+      scanned,
+      runAt: now.toISOString()
+    };
+  } catch (err) {
+    return { ok: false, status: 500, error: "Failed to sweep in-flow holds." };
+  }
+}
