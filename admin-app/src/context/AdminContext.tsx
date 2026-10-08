@@ -48,6 +48,10 @@ import {
   generateReservationId,
   normalizeDiscountScope,
   normalizePaymentHoldWindowHours,
+  // Per the IFH-01.2 (settings-routing) follow-up:
+  // mirrors the payment-hold normalize helper for the
+  // in-flow hold window.
+  normalizeInFlowHoldMinutes,
   normalizeSeasonalRateOverrides,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   type BookingRateBreakdown,
@@ -5231,6 +5235,18 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // Settings UI; the per-booking `holdExpiresAt` is the only
     // field the rest of the system reads.
     paymentHoldWindowHours: 24,
+    // Per the IFH-01.2 (settings-routing) follow-up: the
+    // window (in minutes) the in-flow hold banner shows
+    // on the public booking flow's Steps 2 + 3.
+    // Snapshotted onto the `bookingHolds/{id}` doc at
+    // start time as `holdMinutes` — a later Settings
+    // change never shortens or lengthens an existing
+    // guest's promise. Default 15 min per
+    // `IN_FLOW_HOLD_MINUTES` (industry norm for in-checkout
+    // holds: 10..20 min, Booking.com ~20, Expedia ~30).
+    // Bounded 5..30 via `normalizeInFlowHoldMinutes`.
+    // Mirrors the `paymentHoldWindowHours` pattern (PEX-01).
+    inFlowHoldMinutes: 15,
     // Per EXB-10 (2026-08-01, per decision #157): the
     // hotel-wide rollaway-bed inventory. The server-side
     // `handleCreateBooking` / `handleCreateWalkin` /
@@ -5608,7 +5624,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));

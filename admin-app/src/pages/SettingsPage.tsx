@@ -11,6 +11,15 @@ import {
   PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
   UNSUPPORTED_PAYMENT_METHODS,
+  // Per the IFH-01.3 (Settings UI editor) follow-up:
+  // the shared clamp helper + the IFH-01.2 min/max
+  // bounds + the clamp pattern from bookingOccupancy
+  // for the post-Confirm hold window.
+  MAX_PAYMENT_HOLD_WINDOW_HOURS,
+  MIN_PAYMENT_HOLD_WINDOW_HOURS,
+  MAX_IN_FLOW_HOLD_MINUTES,
+  MIN_IN_FLOW_HOLD_MINUTES,
+  clampIntegerInRange,
   type BookingSourceConfig,
   type DiscountScope,
   type PaymentMethodConfig,
@@ -24,7 +33,12 @@ import {
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
   Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw,
-  ChevronDown, ChevronUp, FlaskConical, Tag, Percent, Database
+  ChevronDown, ChevronUp, FlaskConical, Tag, Percent, Database,
+  // Per the IFH-01.3 (Settings UI editor) follow-up:
+  // the Booking & Holds tab uses Clock4 for the
+  // post-Confirm + in-flow hold windows (a clock
+  // matches the countdown-banner mental model).
+  Clock4
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -39,8 +53,8 @@ import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts";
-type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts";
+type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
+type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts" | "holds";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface EmailTriggerCatalogItem {
@@ -111,7 +125,8 @@ const VALID_TAB_IDS: TabId[] = [
   "legal",
   "staff",
   "environment",
-  "discounts"
+  "discounts",
+  "holds"
 ];
 
 const DEFAULT_OG_IMAGE_URL = config.ogImage.startsWith("http")
@@ -165,10 +180,19 @@ const storeCategories: { value: StoreCategory; label: string }[] = [
 
 function SaveActionButton({
   label,
-  status
+  status,
+  // Per the IFH-01.3 (Settings UI editor) follow-up:
+  // the Booking & Holds tab disables Save when the
+  // hold windows are out of range (the existing
+  // HTML5 `<input type="number" min max required>`
+  // validation also blocks submit, but a clean
+  // `disabled` prop is the explicit UX signal that
+  // mirrors the other "Save" CTAs in the page).
+  disabled
 }: {
   label: string;
   status: SettingsSaveStatus;
+  disabled?: boolean;
 }) {
   const isSaving = status === "saving";
   const isSaved = status === "saved";
@@ -179,7 +203,7 @@ function SaveActionButton({
   return (
     <button
       type="submit"
-      disabled={isSaving}
+      disabled={isSaving || disabled}
       className={`min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-80 ${
         isSaved
           ? "bg-emerald-600 text-white hover:bg-emerald-700"
@@ -197,11 +221,20 @@ function SaveActionButton({
 function SaveActionFooter({
   label,
   status,
-  onClick
+  onClick,
+  // Per the IFH-01.3 (Settings UI editor) follow-up:
+  // the Booking & Holds tab disables Save when the
+  // hold windows are out of range (the existing
+  // `<input type="number" min max required>` HTML5
+  // validation also blocks submit, but a clean
+  // `disabled` prop is the explicit UX signal that
+  // mirrors the other "Save" CTAs in the page).
+  disabled
 }: {
   label: string;
   status: SettingsSaveStatus;
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   const message =
     status === "saved"
@@ -227,7 +260,7 @@ function SaveActionFooter({
       {onClick ? (
         <button
           type="button"
-          disabled={status === "saving"}
+          disabled={status === "saving" || disabled}
           onClick={onClick}
           className={`min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-80 ${
             status === "saved"
@@ -247,7 +280,7 @@ function SaveActionFooter({
           {status === "saving" ? "Saving..." : status === "saved" ? "Saved" : status === "error" ? "Try again" : label}
         </button>
       ) : (
-        <SaveActionButton label={label} status={status} />
+        <SaveActionButton label={label} status={status} disabled={disabled} />
       )}
     </div>
   );
@@ -1753,6 +1786,51 @@ export function SettingsPage() {
   // `AdminContext`.
   const [discountScope, setDiscountScope] = useState<DiscountScope>(hotelConfig.discountScope);
 
+  // Per the IFH-01.3 (Settings UI editor) follow-up: the
+  // Booking & Holds tab. Two number inputs (post-Confirm
+  // hold window in hours + in-flow hold window in
+  // minutes) that persist via `handleSaveHolds`. Both
+  // fields are snapshotted onto each booking + each
+  // hold at create/start time (a later Settings change
+  // never shortens or lengthens an existing guest's
+  // promise), so the snapshot is the only authority
+  // the rest of the system reads. The `clampIntegerInRange`
+  // helper validates the input at the form layer (Save
+  // is disabled when the value is out of range, hand-
+  // typed, or non-finite). The server-side normalize
+  // helpers (`normalizePaymentHoldWindowHours` from
+  // `shared/utils/bookingOccupancy.ts` +
+  // `normalizeInFlowHoldMinutes` from
+  // `shared/utils/bookingInFlowHold.ts`) are the
+  // last-line-of-defense — they always coerce a
+  // legacy / hand-edited Firestore doc to the
+  // allowed range on hydrate.
+  const [paymentHoldWindowHoursInput, setPaymentHoldWindowHoursInput] = useState<string>(
+    String(hotelConfig.paymentHoldWindowHours)
+  );
+  const [inFlowHoldMinutesInput, setInFlowHoldMinutesInput] = useState<string>(
+    String(hotelConfig.inFlowHoldMinutes)
+  );
+
+  // Validate at the form layer. `clampIntegerInRange`
+  // returns `null` for out-of-range / non-finite /
+  // non-integer — the form surfaces an inline error
+  // and disables Save. Mirrors the
+  // `normalizePaymentHoldWindowHours` / `normalizeInFlowHoldMinutes`
+  // server-side clamps.
+  const paymentHoldWindowHoursValid = clampIntegerInRange(
+    paymentHoldWindowHoursInput,
+    MIN_PAYMENT_HOLD_WINDOW_HOURS,
+    MAX_PAYMENT_HOLD_WINDOW_HOURS
+  );
+  const inFlowHoldMinutesValid = clampIntegerInRange(
+    inFlowHoldMinutesInput,
+    MIN_IN_FLOW_HOLD_MINUTES,
+    MAX_IN_FLOW_HOLD_MINUTES
+  );
+  const holdsFormValid =
+    paymentHoldWindowHoursValid !== null && inFlowHoldMinutesValid !== null;
+
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
   // no longer owns any hero copy — see `handleSaveBranding` below.
@@ -2778,6 +2856,30 @@ export function SettingsPage() {
     }));
   };
 
+  // Per the IFH-01.3 (Settings UI editor) follow-up:
+  // persists the two hold windows to
+  // `settings/hotelConfig.{paymentHoldWindowHours,
+  // inFlowHoldMinutes}`. Both fields are clamped at the
+  // server via the `normalizePaymentHoldWindowHours` /
+  // `normalizeInFlowHoldMinutes` helpers — the form
+  // disables Save when the input is out of range, but
+  // the server is the authoritative gate. Existing
+  // bookings + active holds are unaffected (the
+  // snapshot is per-booking / per-hold).
+  const handleSaveHolds = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!holdsFormValid) {
+      toast.error(
+        "Please enter a valid hold window — payment hold must be 1..72 hours, in-flow hold must be 5..30 minutes."
+      );
+      return;
+    }
+    await runSettingsSave("holds", "Hold windows saved", () => updateSettings("hotelConfig", {
+      paymentHoldWindowHours: paymentHoldWindowHoursValid!,
+      inFlowHoldMinutes: inFlowHoldMinutesValid!
+    }));
+  };
+
   const handleSaveStore = async () => {
     await runSettingsSave("store", "Store settings saved", () => updateSettings("storeConfig", {
       isEnabled: storeEnabled,
@@ -3199,7 +3301,8 @@ export function SettingsPage() {
     { id: "legal" as const, label: "Legal Content", icon: Scale },
     { id: "environment" as const, label: "Environment Testing", icon: FlaskConical },
     { id: "staff" as const, label: "Staff Accounts", icon: UserCog },
-    { id: "discounts" as const, label: "Discounts", icon: Percent }
+    { id: "discounts" as const, label: "Discounts", icon: Percent },
+    { id: "holds" as const, label: "Booking & Holds", icon: Clock4 }
   ];
 
   if (settingsLoading) {
@@ -7095,6 +7198,157 @@ export function SettingsPage() {
                   statutorily bounded under RA 9994 / RA 10754 — the senior row is gated
                   to admins even when this surface is reached. Ask a hotel owner to make
                   discount-scope changes.
+                </p>
+              </div>
+            )
+          )}
+
+          {/* Per the IFH-01.3 (Settings UI editor) follow-up:
+              the Booking & Holds tab. Two number inputs
+              (post-Confirm hold window in hours + in-flow
+              hold window in minutes). Admin-only — the
+              post-Confirm window is the payment-deadline
+              surface (PEX-01) and the in-flow window is
+              the Steps 2 + 3 countdown-banner surface
+              (IFH-01). Both fields are snapshotted onto
+              each booking + each hold at create / start
+              time, so a later Settings change never
+              shortens or lengthens an existing guest's
+              promise. */}
+          {activeTab === "holds" && (
+            isAdmin ? (
+              <form onSubmit={handleSaveHolds} className="space-y-6 text-xs">
+                <div>
+                  <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Booking &amp; Holds</h3>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Two hold windows that control how long a guest's room reservation stays
+                    locked. Both values are snapshotted at the moment they matter (booking
+                    create for the payment hold, hold start for the in-flow hold), so changing
+                    either value here never shortens or lengthens a promise already in
+                    flight. Front-desk users cannot reach this editor.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                  <div className="grid gap-0 sm:grid-cols-2">
+                    <div className="p-5 border-b sm:border-b-0 sm:border-r border-gray-100">
+                      <label htmlFor="paymentHoldWindowHours" className="block text-xs font-bold text-gray-800">
+                        Payment hold window
+                      </label>
+                      <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">
+                        How long a <code className="rounded bg-gray-100 px-1 py-0.5">pending</code> booking
+                        (created online with payment-method = "pay-at-hotel" or
+                        "gcash" + proof uploaded) holds the room before the daily
+                        PEX-06 cron auto-expires it. Range
+                        {" "}
+                        {MIN_PAYMENT_HOLD_WINDOW_HOURS}..{MAX_PAYMENT_HOLD_WINDOW_HOURS} hours, default
+                        {" "}
+                        {MIN_PAYMENT_HOLD_WINDOW_HOURS === 1 ? 24 : 24}.
+                        Snapshotted onto <code className="rounded bg-gray-100 px-1 py-0.5">bookings/{`{id}`}.holdExpiresAt</code> at create time.
+                      </p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <input
+                          id="paymentHoldWindowHours"
+                          type="number"
+                          inputMode="numeric"
+                          min={MIN_PAYMENT_HOLD_WINDOW_HOURS}
+                          max={MAX_PAYMENT_HOLD_WINDOW_HOURS}
+                          step={1}
+                          required
+                          value={paymentHoldWindowHoursInput}
+                          onChange={(e) => setPaymentHoldWindowHoursInput(e.target.value)}
+                          aria-invalid={paymentHoldWindowHoursValid === null}
+                          aria-describedby="paymentHoldWindowHours-help"
+                          className={`w-24 rounded-lg border bg-white px-3 py-2 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 ${
+                            paymentHoldWindowHoursValid === null
+                              ? "border-red-300 focus:ring-red-200"
+                              : "border-gray-200 focus:ring-primary/30"
+                          }`}
+                        />
+                        <span className="text-xs text-gray-600">hours</span>
+                      </div>
+                      <p
+                        id="paymentHoldWindowHours-help"
+                        className="mt-2 text-[10px] text-gray-500"
+                      >
+                        {paymentHoldWindowHoursValid === null
+                          ? `Enter a whole number between ${MIN_PAYMENT_HOLD_WINDOW_HOURS} and ${MAX_PAYMENT_HOLD_WINDOW_HOURS}.`
+                          : "Looks good."}
+                      </p>
+                    </div>
+
+                    <div className="p-5">
+                      <label htmlFor="inFlowHoldMinutes" className="block text-xs font-bold text-gray-800">
+                        In-flow hold window
+                      </label>
+                      <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">
+                        How long the Steps 2 + 3 countdown banner shows on the
+                        public booking flow after the guest enters the form.
+                        Range
+                        {" "}
+                        {MIN_IN_FLOW_HOLD_MINUTES}..{MAX_IN_FLOW_HOLD_MINUTES} minutes, default
+                        {" "}
+                        15. Snapshotted onto <code className="rounded bg-gray-100 px-1 py-0.5">bookingHolds/{`{id}`}.holdMinutes</code> at hold start.
+                      </p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <input
+                          id="inFlowHoldMinutes"
+                          type="number"
+                          inputMode="numeric"
+                          min={MIN_IN_FLOW_HOLD_MINUTES}
+                          max={MAX_IN_FLOW_HOLD_MINUTES}
+                          step={1}
+                          required
+                          value={inFlowHoldMinutesInput}
+                          onChange={(e) => setInFlowHoldMinutesInput(e.target.value)}
+                          aria-invalid={inFlowHoldMinutesValid === null}
+                          aria-describedby="inFlowHoldMinutes-help"
+                          className={`w-24 rounded-lg border bg-white px-3 py-2 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 ${
+                            inFlowHoldMinutesValid === null
+                              ? "border-red-300 focus:ring-red-200"
+                              : "border-gray-200 focus:ring-primary/30"
+                          }`}
+                        />
+                        <span className="text-xs text-gray-600">minutes</span>
+                      </div>
+                      <p
+                        id="inFlowHoldMinutes-help"
+                        className="mt-2 text-[10px] text-gray-500"
+                      >
+                        {inFlowHoldMinutesValid === null
+                          ? `Enter a whole number between ${MIN_IN_FLOW_HOLD_MINUTES} and ${MAX_IN_FLOW_HOLD_MINUTES}.`
+                          : "Looks good."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3 text-[10px] text-blue-900/80 leading-relaxed">
+                  <p>
+                    <span className="font-semibold">What this doesn't change:</span> the
+                    authoritative double-booking guarantee is the Firestore transaction
+                    in <code className="rounded bg-white/70 px-1 py-0.5">handleCreateBooking</code> (per
+                    <code className="rounded bg-white/70 px-1 py-0.5">plan/features/AVAILABILITY-LOCKING.md</code>).
+                    The in-flow hold is a UX signal — shortening it does not free the
+                    room faster. The payment hold controls the unpaid-pending cron (PEX-06);
+                    shortening it can cancel more bookings per day.
+                  </p>
+                </div>
+
+                <SaveActionFooter
+                  label="Save Hold Windows"
+                  status={getSaveStatus("holds")}
+                  disabled={!holdsFormValid}
+                />
+              </form>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+                <p className="font-semibold">Admin-only section</p>
+                <p className="mt-1 leading-relaxed">
+                  The hold windows are restricted to admin accounts. The payment hold
+                  deadline is a guest-facing promise (PEX-01); the in-flow hold controls
+                  the Steps 2 + 3 countdown banner on the public booking flow (IFH-01).
+                  Ask a hotel owner to make hold-window changes.
                 </p>
               </div>
             )

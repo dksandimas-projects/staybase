@@ -56,7 +56,14 @@ import {
   // `requestFingerprint`) or returns a 409 (different
   // `requestFingerprint`). Same pattern as the public
   // `/book` flow (`BookingPage.tsx`).
-  generateReservationId
+  generateReservationId,
+  // In-flow hold (Steps 2 + 3 countdown banner). The
+  // `generateHoldId` helper is the client-side source
+  // of the UUIDv4 id the corporate booking flow threads
+  // through the URL. The `useInFlowHold` hook
+  // (consumed by the `HoldCountdownBanner` component)
+  // calls POST /api/holds/start on first read.
+  generateHoldId
 } from "@spark-inn/shared";
 // Per MRB-08 (2026-08-02, per decision #167): the
 // corporate `/corporate/book` page mirrors
@@ -85,6 +92,13 @@ import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
+// In-flow hold (Steps 2 + 3 countdown banner). The
+// banner is a thin wrapper around `useInFlowHold` that
+// renders the live MM:SS countdown + the "Hold
+// expired" red state. Same component used by the public
+// `/book` flow; the corporate variant just passes its
+// own `startInput` (room type, dates, Turnstile token).
+import { HoldCountdownBanner } from "../components/HoldCountdownBanner";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
@@ -131,6 +145,21 @@ export function CorporateBookingPage() {
   // shape is guaranteed to pass `RESERVATION_ID_REGEX`
   // validation on the server.
   const [reservationId] = useState(() => generateReservationId());
+
+  // Per BI-01 (booking-intercom audit 2026-07-06): two REAL
+  // Turnstile challenges. The gate widget covers
+  // /api/validate/corporate-code; the review widget covers
+  // /api/bookings/create. Previously the gate hardcoded
+  // `"mock_token"` and the create body sent no token at all, so
+  // corporate bookings were rejected outside NODE_ENV=test (the
+  // In-flow hold (Steps 2 + 3 countdown banner). The
+  // id is preallocated client-side and threaded through
+  // the URL (`?hold=<id>`) so the Step 1 → Step 2
+  // transition preserves it across renders. The
+  // `useInFlowHold` hook stamps the server-side doc on
+  // first read; the booking transaction consumes the
+  // hold best-effort after the booking commits.
+  const [holdId] = useState(() => generateHoldId());
 
   // Per BI-01 (booking-intercom audit 2026-07-06): two REAL
   // Turnstile challenges. The gate widget covers
@@ -1125,6 +1154,12 @@ export function CorporateBookingPage() {
     guests: String(guests),
     roomType: selectedTypeEntry?.value ?? "",
     breakfast: hasBreakfast ? "yes" : "no",
+    // In-flow hold id — the Step 2 / Step 3 banner reads
+    // this and the `useInFlowHold` hook stamps the
+    // server-side doc on first read. Optional in the URL
+    // (legacy pre-hold-banner URLs omit it; the banner
+    // silently renders nothing in that case).
+    hold: holdId,
     // Per MRB-08 (2026-08-02, per decision #167):
     // round-trip the room cart through the `?rooms=`
     // URL param so a Step 1 → Step 2 → back to
@@ -1324,6 +1359,17 @@ export function CorporateBookingPage() {
         // returns a 409 (different
         // `requestFingerprint`).
         reservationId,
+        // In-flow hold (Steps 2 + 3 countdown banner). The
+        // server reads the `bookingHolds/{id}` doc,
+        // validates it is still "active" + not past
+        // `expiresAt`, marks it "consumed" best-effort
+        // after the booking transaction commits, and
+        // snapshots the `inFlowHoldMinutes` field on the
+        // booking doc. Read from the URL so a back-navigation
+        // to Step 1 + forward again preserves the same
+        // hold id (the hook's idempotent start endpoint
+        // returns the existing doc unchanged).
+        holdId: searchParams.get("hold") || undefined,
         _hp: guestDetails._hp || "",
       };
 
@@ -1443,7 +1489,7 @@ export function CorporateBookingPage() {
           </div>
           <div className="min-h-11 min-w-11" />
         </div>
-        
+
         {/* Persistent corporate rate badge — per W2.13 / decision #101.
             Per L-01 (corporate audit 2026-08-10): the wording is now
             aligned with the spec — "Corporate Rate — [Company Name or
@@ -1457,6 +1503,31 @@ export function CorporateBookingPage() {
           </div>
         )}
       </header>
+      {/* In-flow hold (Steps 2 + 3 countdown banner). Only
+          renders when the user is past the gate + past Step 1
+          and the URL carries `?hold=<id>`. The hook inside
+          the banner stamps the server-side hold doc on first
+          read (idempotent) and ticks every second. */}
+      <HoldCountdownBanner
+        holdId={
+          currentStepKey === "guest-details" || currentStepKey === "review"
+            ? searchParams.get("hold")
+            : null
+        }
+        startInput={{
+          reservationId,
+          roomType: selectedRoomType ?? "",
+          checkIn,
+          checkOut,
+          numNights: nights,
+          turnstileToken: reviewTurnstile.token || undefined
+        }}
+        onPickNewRoom={() => {
+          const next = new URLSearchParams();
+          next.set("step", "select-room");
+          setSearchParams(next, { replace: true });
+        }}
+      />
       {content}
     </main>
   );

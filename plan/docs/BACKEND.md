@@ -58,6 +58,26 @@ See `plan/docs/API-ROUTES.md` for API layer.
 
 ---
 
+### `bookingHolds/{holdId}` *(in-flow hold)*
+
+Ephemeral hold stamp that powers the public booking flow's Steps 2 + 3 countdown banner. The client preallocates `holdId` (UUIDv4) on Step 1 mount and threads it through the URL (`?hold=<id>`); the `useInFlowHold` hook stamps the server-side doc on first read. The booking transaction's post-commit `handleConsumeInFlowHold` marks it `"consumed"`. A future Janitor sweep will retire stale `"active"` holds past their `expiresAt`. **The hold is a soft UX signal, not a hard inventory lock** — the public availability endpoint does not consult this collection, and the booking transaction does not read it for conflict checks. See `plan/features/BOOKING-FLOW.md §In-flow Hold` for the UX contract and `plan/features/AVAILABILITY-LOCKING.md §In-flow Hold` for the interaction with the existing locking guarantee.
+
+| Field | Type | Notes |
+|---|---|---|
+| `reservationId` | string | Mirrors the booking flow's preallocated reservation id. The consume path uses it as a sanity check — a hold with a stale `reservationId` (e.g. the guest restarted the flow) is rejected as `stale-reservation`. |
+| `roomType` | string | Room type the guest picked on Step 1. Informational; the authoritative room assignment is still the transaction's type→physical-room pick. |
+| `checkIn` / `checkOut` | string | YYYY-MM-DD. Same shape Step 1 stamps. |
+| `numNights` | number | Snapshotted from the Step 1 picker. |
+| `expiresAt` | timestamp | The hold deadline. Server-stamped from `IN_FLOW_HOLD_MINUTES` (15 by default; range 5–30) at start time; never refreshed. |
+| `status` | string | `"active"` (banner ticks), `"consumed"` (booking succeeded), `"expired"` (past `expiresAt`). Set by the consume path on Confirm; the Janitor sweep will eventually mark stale `"active"` holds as `"expired"`. |
+| `holdMinutes` | number | Snapshot of `settings/hotelConfig.inFlowHoldMinutes` (per IFH-01.2) at start time. Falls back to `IN_FLOW_HOLD_MINUTES = 15` for legacy settings (no field) + hand-edited Firestore docs outside the 5..30 range. Future reports can attribute expired holds to a specific window even if the per-hotel setting changes. |
+| `createdAt` / `updatedAt` | timestamp | Audit timestamps. |
+
+> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. The hourly Janitor sweep (`/api/holds/sweep`, registered in `vercel.json §crons` as `0 * * * *`) transitions `"active" → "expired"` for holds past their `expiresAt` using a per-doc Firestore transaction with a recheck (a hold consumed by a booking between the coarse query and the per-doc write is NOT re-marked `"expired"`). Idempotent — a re-fire of the same cron tick finds zero matches.
+> **Firestore rules:** `bookingHolds/{id}` is denied for guest reads + writes (the guest client never touches this collection directly — the `useInFlowHold` hook uses the `/api/holds/read` + `/api/holds/start` Vercel routes). Admin reads are open for debugging.
+
+---
+
 ### `reservations/{reservationId}` *(MRB-01..06)*
 
 | Field | Type | Notes |
@@ -207,7 +227,7 @@ Transient per-room WebRTC signaling state for the intercom voice call feature (`
 ### `settings/{settingId}`
 
 Single-document collections holding dynamic configuration:
-- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `unpaidCheckoutApprovalThreshold`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`.
+- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`.
 - `settings/websiteContent`: Editable homepage, about, corporate, and legal page copy.
 - `settings/breakfastConfig`: Silog menu items & daily prep settings.
 - `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage.

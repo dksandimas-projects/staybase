@@ -99,6 +99,30 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 
 ---
 
+## In-flow Hold (Steps 2 + 3 Countdown Banner)
+
+> Complements the post-Confirm PEX hold (the 24h `holdExpiresAt` on the booking doc) with a shorter, in-flow hold that runs while the guest fills out the form. See `plan/features/BOOKING-FLOW.md §In-flow Hold` for the UX contract. The in-flow hold is a **soft** UX signal — the authoritative double-booking guarantee is the Firestore transaction in `handleCreateBooking` (the rest of this doc); the in-flow hold exists to make the guest feel the room is being held for them while they finish and pay.
+
+### What it is, what it isn't
+
+- **Is:** a `bookingHolds/{id}` doc with `expiresAt`, `status`, and the booking context. The Step 2 + Step 3 banner subscribes via `GET /api/holds/read` (1Hz tick + 30s resync) and renders a live `MM:SS` countdown.
+- **Is not:** a hard inventory lock. The public availability endpoint does **not** consult `bookingHolds` — two guests can both see the room as available and both have an active hold. The booking transaction picks the first commit; the second gets a "Room no longer available" error on Confirm.
+- **Is not:** a substitute for the 24h `holdExpiresAt` (PEX-01). The 24h post-Confirm hold is a separate, durable signal that triggers the Janitor sweep for stale pending bookings. The in-flow hold is short (15 min) and ephemeral.
+
+### Lifecycle + the consume path
+
+- The booking flow's `handleCreateBooking` transaction reads the hold via `handleConsumeInFlowHold(holdId, reservationId)` **after** the booking transaction commits. The consume is best-effort — a failed consume never rolls back the booking. The consume marks the hold `status: "consumed"` and stamps `inFlowHoldId` + `inFlowHoldMinutes` onto the booking doc for analytics.
+- An idempotent replay (same `reservationId` + same `requestFingerprint`) does NOT re-consume the hold — the original commit already consumed it, and the second `consume` would 409 with "already-consumed".
+- A failed consume (network blip, hold lapsed between booking commit and the consume call) is logged at `warn` level. The hold's on-disk `status` may be stale until the future Janitor sweep runs.
+
+### Why this doesn't weaken the availability guarantee
+
+- The public availability query (`/api/rooms/availability`) continues to filter by `bookings/{id}.status in [occupying]` + `holdExpiresAt > now` (PEX-02). It does NOT add a `bookingHolds/{id}` filter — holds are not bookings, they're UX signals.
+- The create transaction continues to scan `bookings` for date-overlap conflicts. It does NOT scan `bookingHolds` — even if a hold exists for the same room + dates, the transaction only blocks on a real booking. The race "guest A is mid-form, guest B confirms first" is handled the same way it always was: A's confirm returns "Room no longer available".
+- The in-flow hold is honest about this in the copy: "We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room." The banner does NOT promise "the room is reserved for you" — that would be a lie.
+
+---
+
 ## PEX (Hold-Expires) Fan-out (MRB-15-06)
 > Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-06 sub-item, shipped v0.253.0). The `holdExpiresAt` field is shared across the reservation header + every child for new reservations (a pre-arrival reservation has a unified hold per PEX-01). The MRB-15-06 audit pins the fan-out contract so every `holdExpiresAt`-touching path follows the same pattern.
 

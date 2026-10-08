@@ -142,6 +142,19 @@ Guest-facing code must not create `corporateInquiries` directly with the Firesto
 
 ---
 
+### Hold Routes (`/api/holds/*`)
+
+Powers the public booking flow's Steps 2 + 3 countdown banner. The `bookingHolds/{id}` collection is ephemeral and is NOT consulted by the public availability endpoint or the booking transaction — holds are a UX signal, not a hard inventory lock. See `plan/features/BOOKING-FLOW.md §In-flow Hold` + `plan/features/AVAILABILITY-LOCKING.md §In-flow Hold` for the contract.
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/holds/start` | POST | None (Turnstile) | Stamp a fresh `bookingHolds/{holdId}` doc with `expiresAt = now + IN_FLOW_HOLD_MINUTES` and `status: "active"`. Idempotent on the same `holdId` — a second POST returns the existing doc unchanged (the `useInFlowHold` hook relies on this for retry-after-uncertain-response). Body validated against `StartBookingHoldSchema` (`shared/schemas/booking.ts`): `holdId` (UUIDv4), `reservationId` (UUIDv4 from MRB-02), `roomType`, `checkIn` + `checkOut` (YYYY-MM-DD), `numNights`, `turnstileToken`. Rate-limited at 30/IP/min. |
+| `/api/holds/read` | GET | None | Read a hold by `?holdId=<id>`. Returns the doc shape (id + reservationId + roomType + dates + numNights + expiresAt + status + holdMinutes) with a read-time evaluation: a hold past its `expiresAt` is reported as `"expired"` even if the Janitor hasn't run yet (the on-disk `status` stays `"active"` until the Janitor sweep). Returns 404 for a missing id. Rate-limited at 60/IP/min. The `useInFlowHold` hook fires this on mount + every 30 seconds (resync). |
+| `/api/holds/expire` | POST / GET | `CRON_SECRET` | Daily cleanup cron for expired `pending` payment holds (PEX-06). Same `CRON_SECRET` auth as the other Vercel cron handlers. Not related to the in-flow hold (which has its own lifecycle via `handleConsumeInFlowHold`); the in-flow hold Janitor is a future follow-up. |
+| `/api/holds/sweep` | POST / GET | `CRON_SECRET` | Hourly Janitor sweep for stale in-flow holds (IFH-01 follow-up). Queries `bookingHolds` for `status == "active"` + `expiresAt < now`, marks each match `"expired"` inside a per-doc Firestore transaction (a hold consumed by a booking between the coarse query and the per-doc write is NOT re-marked `"expired"`). Idempotent — a re-fire of the same tick finds zero matches. Returns `{ swept, scanned, runAt }` audit payload. Registered in `vercel.json §crons` as `0 * * * *`. |
+
+---
+
 ### Contact Routes (`/api/contact/*`) *(Phase 1 — see `plan/features/CONTACT-INQUIRIES.md`)*
 
 | Route | Method | Auth | Purpose |
