@@ -37,7 +37,7 @@
     },
     {
       "path": "/api/holds/sweep",
-      "schedule": "0 * * * *"
+      "schedule": "0 2 * * *"
     }
   ],
   "rewrites": [

@@ -370,9 +370,15 @@ describe("IFH-01 follow-up — Janitor sweep cron", () => {
     expect(handlerSrc).toMatch(/\.orderBy\("expiresAt", "asc"\)/);
   });
 
-  it("the sweep is registered as an hourly cron in vercel.json (schedule: 0 * * * *)", () => {
+  it("the sweep is registered as a daily cron in vercel.json (schedule: 0 2 * * *, Vercel Hobby-plan-compatible)", () => {
+    // Per the Vercel Hobby plan limit ("Hobby accounts
+    // are limited to daily cron jobs. This cron
+    // expression (0 * * * *) would run more than once
+    // per day") — the previous hourly schedule was
+    // rejected at deploy time. The fix is in
+    // `fix/vercel-hobby-hourly-cron`.
     expect(vercelSrc).toMatch(/"path":\s*"\/api\/holds\/sweep"/);
-    expect(vercelSrc).toMatch(/"schedule":\s*"0 \* \* \* \*"/);
+    expect(vercelSrc).toMatch(/"schedule":\s*"0 2 \* \* \*"/);
   });
 
   it("the sweep returns a `{ swept, scanned, runAt }` audit payload (idempotent re-fires report `swept: 0`)", () => {

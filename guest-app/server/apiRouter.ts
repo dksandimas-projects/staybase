@@ -1561,15 +1561,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleReadInFlowHold(req, res);
   }
 
-  // Per the IFH-01 follow-up: the hourly Janitor sweep
-  // for stale in-flow holds. The IFH-01 commit shipped
-  // the start + read + consume handlers but deferred
-  // the sweep — the read-time `isInFlowHoldActive`
-  // evaluation already reports stale holds as
-  // `"expired"` honestly, so the sweep is a cleanup of
-  // the on-disk `status`, not a UX-critical path. Same
-  // `CRON_SECRET` auth as the existing PEX-06
-  // `/api/holds/expire` cron. See
+  // Per the IFH-01 follow-up: the daily Janitor sweep
+  // for stale in-flow holds (Vercel Hobby plan only
+  // allows daily cron jobs — the previous hourly
+  // schedule was rejected; see
+  // `fix/vercel-hobby-hourly-cron`). The IFH-01 commit
+  // shipped the start + read + consume handlers but
+  // deferred the sweep — the read-time
+  // `isInFlowHoldActive` evaluation already reports
+  // stale holds as `"expired"` honestly, so the sweep
+  // is a cleanup of the on-disk `status`, not a UX-
+  // critical path. Same `CRON_SECRET` auth as the
+  // existing PEX-06 `/api/holds/expire` cron. See
   // `server/handlers/in-flow-hold.ts` +
   // `guest-app/vercel.json §crons`.
   if (domain === "holds" && action === "sweep" && (req.method === "POST" || req.method === "GET")) {
