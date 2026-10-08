@@ -39,7 +39,8 @@ import {
   MIN_IN_FLOW_HOLD_MINUTES,
   StartBookingHoldSchema,
   computeInFlowHoldExpiresAt,
-  isInFlowHoldActive
+  isInFlowHoldActive,
+  normalizeInFlowHoldMinutes
 } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
 
@@ -119,7 +120,25 @@ export async function handleStartInFlowHold(req: any, res: any) {
     });
   }
   const now = new Date();
-  const expiresAt = computeInFlowHoldExpiresAt(holdMinutes, now);
+  // Per the IFH-01.2 (settings-routing) follow-up: the
+  // per-hotel `settings/hotelConfig.inFlowHoldMinutes`
+  // field is the source of truth. The constant
+  // `IN_FLOW_HOLD_MINUTES` is the fallback for legacy
+  // settings (no field) + the hand-edit-Firestore case.
+  // Same pattern as `paymentHoldWindowHours` (PEX-01):
+  // server reads the settings doc once at start time,
+  // snapshots the value onto the hold doc as
+  // `holdMinutes`, and the rest of the lifecycle reads
+  // the snapshot (a later Settings change never
+  // shortens or lengthens an existing guest's promise).
+  const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+  const hotelConfigSnap = await hotelConfigRef.get();
+  const hotelConfig = hotelConfigSnap.exists ? hotelConfigSnap.data() ?? {} : {};
+  const effectiveHoldMinutes = normalizeInFlowHoldMinutes(
+    (hotelConfig as { inFlowHoldMinutes?: unknown }).inFlowHoldMinutes
+  );
+
+  const expiresAt = computeInFlowHoldExpiresAt(effectiveHoldMinutes, now);
   if (!expiresAt) {
     return res.status(500).json({
       success: false,
@@ -162,7 +181,14 @@ export async function handleStartInFlowHold(req: any, res: any) {
       expiresAt: Timestamp.fromDate(expiresAt),
       status: "active",
       createdAt: Timestamp.fromDate(now),
-      holdMinutes
+      // Per the IFH-01.2 (settings-routing) follow-up:
+      // the snapshot is the per-hotel config value
+      // (`effectiveHoldMinutes`), not the module
+      // constant. A later Settings change never
+      // shortens or lengthens an existing guest's
+      // promise — the snapshotted value is the only
+      // field the rest of the lifecycle reads.
+      holdMinutes: effectiveHoldMinutes
     });
 
     const fresh = await ref.get();

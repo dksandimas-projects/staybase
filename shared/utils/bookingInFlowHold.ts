@@ -30,6 +30,14 @@
 export const IN_FLOW_HOLD_MINUTES = 15;
 export const MIN_IN_FLOW_HOLD_MINUTES = 5;
 export const MAX_IN_FLOW_HOLD_MINUTES = 30;
+// Per the IFH-01.2 (settings-routing) follow-up: the
+// `settings/hotelConfig.inFlowHoldMinutes` field is the
+// per-hotel source of truth. The constant above is the
+// fallback for legacy settings (no field) and the
+// hand-edit-Firestore case. Mirrors the
+// `DEFAULT_PAYMENT_HOLD_WINDOW_HOURS` pattern from
+// `shared/utils/bookingOccupancy.ts` (PEX-01).
+export const DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
 
 export const IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"] as const;
 export type InFlowHoldStatus = (typeof IN_FLOW_HOLD_STATUSES)[number];
@@ -65,6 +73,25 @@ export function computeInFlowHoldExpiresAt(
     return null;
   }
   return new Date(now.getTime() + Number(minutes) * 60 * 1000);
+}
+
+// Per the IFH-01.2 (settings-routing) follow-up:
+// clamps any incoming value to the admin-allowed
+// 5..30 minute range. The Settings UI rejects out-of-range
+// at write time, but a legacy persisted value (or a
+// hand-edited Firestore doc) must not crash the
+// snapshot hydrate. Returns the default if the input is
+// not a finite positive number. Mirrors the
+// `normalizePaymentHoldWindowHours` pattern from
+// `shared/utils/bookingOccupancy.ts` (PEX-01).
+export function normalizeInFlowHoldMinutes(raw: unknown): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_IN_FLOW_HOLD_MINUTES;
+  const clamped = Math.min(
+    MAX_IN_FLOW_HOLD_MINUTES,
+    Math.max(MIN_IN_FLOW_HOLD_MINUTES, Math.floor(value))
+  );
+  return clamped;
 }
 
 // UUIDv4 shape used for `holdId` — the client preallocates

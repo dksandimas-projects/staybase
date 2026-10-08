@@ -54,7 +54,8 @@ import {
   MIN_IN_FLOW_HOLD_MINUTES,
   computeInFlowHoldExpiresAt,
   generateHoldId,
-  isInFlowHoldActive
+  isInFlowHoldActive,
+  normalizeInFlowHoldMinutes
 } from "@spark-inn/shared";
 
 const repoRoot = resolve(__dirname, "../../..");
@@ -151,6 +152,42 @@ describe("IFH-01 — Constants + helpers (shared/utils/bookingInFlowHold.ts)", (
         now
       )
     ).toBe(false);
+  });
+});
+
+describe("IFH-01.2 — normalizeInFlowHoldMinutes (shared/utils/bookingInFlowHold.ts)", () => {
+  it("returns the default for missing / non-finite / non-positive values", () => {
+    expect(normalizeInFlowHoldMinutes(undefined)).toBe(IN_FLOW_HOLD_MINUTES);
+    expect(normalizeInFlowHoldMinutes(null)).toBe(IN_FLOW_HOLD_MINUTES);
+    expect(normalizeInFlowHoldMinutes(NaN)).toBe(IN_FLOW_HOLD_MINUTES);
+    expect(normalizeInFlowHoldMinutes(0)).toBe(IN_FLOW_HOLD_MINUTES);
+    expect(normalizeInFlowHoldMinutes(-3)).toBe(IN_FLOW_HOLD_MINUTES);
+    expect(normalizeInFlowHoldMinutes("not a number")).toBe(IN_FLOW_HOLD_MINUTES);
+  });
+
+  it("clamps values below MIN_IN_FLOW_HOLD_MINUTES up to the floor", () => {
+    expect(normalizeInFlowHoldMinutes(1)).toBe(MIN_IN_FLOW_HOLD_MINUTES);
+    expect(normalizeInFlowHoldMinutes(MIN_IN_FLOW_HOLD_MINUTES - 1)).toBe(
+      MIN_IN_FLOW_HOLD_MINUTES
+    );
+  });
+
+  it("clamps values above MAX_IN_FLOW_HOLD_MINUTES down to the ceiling", () => {
+    expect(normalizeInFlowHoldMinutes(60)).toBe(MAX_IN_FLOW_HOLD_MINUTES);
+    expect(normalizeInFlowHoldMinutes(MAX_IN_FLOW_HOLD_MINUTES + 1)).toBe(
+      MAX_IN_FLOW_HOLD_MINUTES
+    );
+  });
+
+  it("returns in-range values verbatim (floored to integer)", () => {
+    expect(normalizeInFlowHoldMinutes(15)).toBe(15);
+    expect(normalizeInFlowHoldMinutes(15.7)).toBe(15);
+    expect(normalizeInFlowHoldMinutes(MIN_IN_FLOW_HOLD_MINUTES)).toBe(
+      MIN_IN_FLOW_HOLD_MINUTES
+    );
+    expect(normalizeInFlowHoldMinutes(MAX_IN_FLOW_HOLD_MINUTES)).toBe(
+      MAX_IN_FLOW_HOLD_MINUTES
+    );
   });
 });
 
@@ -297,8 +334,13 @@ describe("IFH-01 — Source-text pins", () => {
     expect(handlerSrc).toMatch(/export async function handleConsumeInFlowHold/);
   });
 
-  it("the handler stamps `expiresAt` from `IN_FLOW_HOLD_MINUTES`, NOT inline ms math", () => {
-    expect(handlerSrc).toMatch(/computeInFlowHoldExpiresAt\(holdMinutes, now\)/);
+  it("the handler stamps `expiresAt` from the per-hotel `inFlowHoldMinutes` (fallback to `IN_FLOW_HOLD_MINUTES` via normalize)", () => {
+    // Per the IFH-01.2 (settings-routing) follow-up: the
+    // start handler reads the settings doc and snapshots
+    // the value — NOT the module constant.
+    expect(handlerSrc).toMatch(
+      /computeInFlowHoldExpiresAt\(effectiveHoldMinutes, now\)/
+    );
   });
 
   it("the consume is idempotent on a replayed request (a second consume returns `already-consumed`)", () => {
@@ -314,19 +356,11 @@ describe("IFH-01 follow-up — Janitor sweep cron", () => {
   });
 
   it("the sweep uses the same `CRON_SECRET` auth as the existing PEX-06 expire cron", () => {
-    // The sweep handler must reject requests without
-    // the `x-cron-secret` header or `Authorization:
-    // Bearer <secret>` (defense-in-depth — the route
-    // also enforces it in apiRouter.ts).
     expect(handlerSrc).toMatch(/process\.env\.CRON_SECRET/);
     expect(handlerSrc).toMatch(/req\.headers\?\.authorization/);
   });
 
   it("the sweep uses Firestore transactions with a per-doc recheck (a consumed hold is NOT re-marked `expired`)", () => {
-    // The per-doc recheck inside the transaction is
-    // the authoritative gate — a booking transaction
-    // may have consumed the hold between the coarse
-    // query and the per-doc write.
     expect(handlerSrc).toMatch(/if \(freshData\.status === "consumed"\) return;/);
     expect(handlerSrc).toMatch(/if \(isInFlowHoldActive\(\{ status: freshData\.status, expiresAt \}, now\)\) \{/);
   });
@@ -343,5 +377,67 @@ describe("IFH-01 follow-up — Janitor sweep cron", () => {
   it("the sweep returns a `{ swept, scanned, runAt }` audit payload (idempotent re-fires report `swept: 0`)", () => {
     expect(handlerSrc).toMatch(/swept \+= 1;/);
     expect(handlerSrc).toMatch(/runAt: now\.toISOString\(\)/);
+  });
+});
+
+describe("IFH-01.2 follow-up — Settings-routing (per-hotel `inFlowHoldMinutes`)", () => {
+  const adminContextSrc = read("admin-app/src/context/AdminContext.tsx");
+  const sharedUtilSrc = read("shared/utils/bookingInFlowHold.ts");
+
+  it("the shared `normalizeInFlowHoldMinutes` clamps 5..30 (same shape as `normalizePaymentHoldWindowHours`)", () => {
+    // The default fallback is the constant.
+    expect(sharedUtilSrc).toMatch(/DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES/);
+    // The normalize function signature mirrors the
+    // payment-hold one.
+    expect(sharedUtilSrc).toMatch(
+      /export function normalizeInFlowHoldMinutes\(raw: unknown\): number \{/
+    );
+    // Clamps to MIN/MAX.
+    expect(sharedUtilSrc).toMatch(
+      /Math\.min\(\s*MAX_IN_FLOW_HOLD_MINUTES,\s*Math\.max\(MIN_IN_FLOW_HOLD_MINUTES/
+    );
+    // Returns the default for non-finite / non-positive.
+    expect(sharedUtilSrc).toMatch(
+      /if \(!Number\.isFinite\(value\) \|\| value <= 0\) return DEFAULT_IN_FLOW_HOLD_MINUTES/
+    );
+  });
+
+  it("the AdminContext defaults `inFlowHoldMinutes: 15` + normalizes on hydrate (mirrors `paymentHoldWindowHours`)", () => {
+    // The default is in the useState initializer.
+    expect(adminContextSrc).toMatch(/inFlowHoldMinutes: 15,/);
+    // The normalize helper is imported from the
+    // shared module — same import block as
+    // `normalizePaymentHoldWindowHours`.
+    expect(adminContextSrc).toMatch(/normalizeInFlowHoldMinutes/);
+    // The hydrate path normalizes the incoming field
+    // so a legacy settings doc (no field) hydrates to
+    // the 15-minute default.
+    expect(adminContextSrc).toMatch(
+      /inFlowHoldMinutes: normalizeInFlowHoldMinutes\(\(data as Partial<typeof hotelConfig>\)\?\.inFlowHoldMinutes\)/
+    );
+  });
+
+  it("the start handler reads from `settings/hotelConfig.inFlowHoldMinutes` and falls back to the constant", () => {
+    // The handler reads the settings doc once at
+    // start time and snapshots the value onto the
+    // hold doc as `holdMinutes`.
+    expect(handlerSrc).toMatch(
+      /adminDb\.collection\("settings"\)\.doc\("hotelConfig"\)/
+    );
+    // The fallback is the shared normalize helper
+    // (which returns the default for legacy settings).
+    expect(handlerSrc).toMatch(
+      /normalizeInFlowHoldMinutes\(\s*\(hotelConfig as \{ inFlowHoldMinutes\?: unknown \}\)\.inFlowHoldMinutes\s*\)/
+    );
+    // The `holdMinutes` field on the hold doc is the
+    // snapshot — NOT the module constant — so a later
+    // Settings change never shortens or lengthens an
+    // existing guest's promise.
+    expect(handlerSrc).toMatch(/holdMinutes: effectiveHoldMinutes/);
+    // The `expiresAt` is computed from the per-hotel
+    // value, not the module constant.
+    expect(handlerSrc).toMatch(
+      /computeInFlowHoldExpiresAt\(effectiveHoldMinutes, now\)/
+    );
   });
 });
