@@ -314,13 +314,21 @@ export async function handleConsumeInFlowHold(
 // `/api/holds/expire` PEX-06 cron. Vercel sets the
 // `x-cron-secret` header on every cron invocation.
 //
-// Schedule: hourly (in `vercel.json`). The 15-minute
-// `IN_FLOW_HOLD_MINUTES` window means a stale hold can
-// be left in `"active"` for up to 60 minutes before
-// this sweep runs. The read-time evaluation already
-// reports it as `"expired"` to the banner — the sweep
-// is purely an on-disk cleanup so future reports +
-// the `bookingHolds` collection size stay bounded.
+// Schedule: daily at 02:00 UTC (in `vercel.json`).
+// The Vercel Hobby plan only allows daily cron jobs
+// (the previous `0 * * * *` hourly schedule was
+// rejected with "Hobby accounts are limited to daily
+// cron jobs" — see `fix/vercel-hobby-hourly-cron`).
+// The 15-minute `IN_FLOW_HOLD_MINUTES` window means a
+// stale hold can be left in `"active"` for up to 24
+// hours before this sweep runs. The read-time
+// evaluation already reports it as `"expired"` to the
+// banner — the sweep is purely an on-disk cleanup so
+// future reports + the `bookingHolds` collection size
+// stay bounded. The daily cadence is acceptable for
+// the soft-UX-signal use case; a hard inventory lock
+// would need a sub-daily sweep (Pro plan required) or
+// a different cleanup strategy.
 
 const SWEEP_BATCH_SIZE = 200;
 
