@@ -177,6 +177,54 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] **Per NBS-2026-08-08 (F2, booking-flow audit 2026-08-08): every server-side 4xx surfaces a matching recovery CTA on the Step 3 sticky footer.** The previous catch only auto-redirected for the "Room no longer available" message; every other 4xx (rate-limit 429, `MAX_STAY_NIGHTS`, `MAX_ADVANCE_DAYS`, past-checkin, etc.) stranded the user on Step 3 with a generic message and no next step. The fix maps the server error to one of three recovery actions via a `submitErrorAction: "back-to-step-1" | "retry" | "none"` discriminator: `back-to-step-1` for the stay/date-validation cases (room not available, max stay length, advance window, past check-in); `retry` for transient cases (rate limit, network); `none` for everything else (with a Dismiss button). The auto-redirect for the "Room no longer available" path now holds its timer on a `useRef` so a user-initiated nav (clicking the back CTA or the browser back button) cancels the timer (F11).
 - [x] **Per NBS-2026-08-08 (F11, booking-flow audit 2026-08-08): the 5s auto-redirect for "Room no longer available" is cancellable.** The previous bare `setTimeout` raced a user-initiated nav (the user clicks the back CTA before 5s elapses) and clobbered the URL the user already moved to. The timer is held on `redirectTimerRef: useRef<number | null>(null)`. The cleanup effect cancels any pending timer on unmount; the manual-nav CTA cancels the timer before navigating; a fresh `handleConfirmBooking` submit cancels the timer before re-firing the request.
 
+## In-flow Hold (Steps 2 + 3 Countdown Banner)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` entry that ships with the feature. The booking flow's Steps 2 and 3 show a live countdown banner so the guest has a visible signal that the room is being held for them while they finish and pay. The hold is **soft** — it does not block the public availability query, and the authoritative double-booking guarantee is unchanged (the Firestore transaction in `handleCreateBooking` is still the only safety net). The banner is honest about this in the copy: "We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room."
+
+### Lifecycle
+
+1. **Preallocate (Step 1, on mount):** The public `/book` + corporate `/corporate/book` flows preallocate a `holdId` (UUIDv4) via the shared `generateHoldId()` helper, alongside the existing `bookingId` + `reservationId` preallocations. Held in `useState` lazy init so a re-render never re-rolls the id.
+2. **Carry in URL (Step 1 → Step 2):** The `continueParams` URLSearchParams adds `hold=<id>` so the id survives the route change. The Step 2 / Step 3 banner reads it via `searchParams.get("hold")`.
+3. **Stamp on first read (Step 2 mount):** The `useInFlowHold(holdId, startInput)` hook fires `GET /api/holds/read?holdId=<id>`. A 404 means the hold isn't stamped yet (the user just navigated from Step 1); the hook then fires `POST /api/holds/start` with the booking context (reservationId + roomType + checkIn + checkOut + numNights + turnstileToken). The start endpoint is idempotent on the same `holdId` — a retry returns the existing doc unchanged.
+4. **Tick (1s + 30s resync):** The hook ticks every 1 second using `Date.now() - expiresAt` so the displayed `MM:SS` reflects the local clock. A 30-second resync re-fetch re-reads the server's `expiresAt` to guard against the rare clock-skew case.
+5. **Expire (timer hits 0):** The banner flips to the red "Hold expired" state with a "Pick a new room" CTA. The CTA routes back to Step 1 with `replace: true` so the history is clean. The user can still try to submit (the booking transaction re-checks the hold server-side).
+6. **Consume (Step 3 Confirm):** `handleCreateBooking` reads the optional `holdId` from the request body, calls `handleConsumeInFlowHold(holdId, reservationId)` best-effort **after** the booking transaction commits, and snapshots `inFlowHoldId` + `inFlowHoldMinutes` onto the booking doc. A failed consume never rolls back the booking (the hold is a UX signal, not a hard inventory lock).
+
+### Data & Logic Checklist
+
+- [x] Client preallocates a `holdId` (UUIDv4) on Step 1 mount via `generateHoldId()` — same pattern as `bookingId` + `reservationId`
+- [x] `continueParams` URLSearchParams includes `hold=<id>` so the id survives the Step 1 → Step 2 route change
+- [x] `useInFlowHold(holdId, startInput)` hook fires `GET /api/holds/read` on mount; on 404, fires `POST /api/holds/start` (idempotent on the same `holdId`)
+- [x] The 1-second tick uses `Date.now() - expiresAt` so the `MM:SS` reflects the local clock; a 30-second resync re-reads the server's `expiresAt` to guard against clock skew
+- [x] Banner renders a loading skeleton until the first fetch resolves (the user sees a continuous layout, no jump)
+- [x] Banner has three states — `active` (blue, live countdown), `expired` (red, "Pick a new room" CTA), `error` (amber, "Retry" button)
+- [x] `HoldCountdownBanner` only renders when the user is on Step 2 or Step 3 (gated by `isGuestDetailsStep || isReviewStep`); Step 1 + Step 4 do not show the banner
+- [x] The "Pick a new room" CTA routes back to Step 1 with `replace: true` so the history is clean (no back-button to a stale Step 2)
+- [x] `handleCreateBooking` accepts an optional `holdId` in the request body (validated against `HOLD_ID_REGEX`); when present, the post-transaction `handleConsumeInFlowHold` marks the hold `consumed` and snapshots `inFlowHoldId` + `inFlowHoldMinutes` on the booking doc
+- [x] An idempotent replay (same `reservationId` + same `requestFingerprint`) does NOT re-consume the hold (the hold was already consumed by the original commit)
+- [x] A failed consume (network blip, hold lapsed between booking commit and the consume call) is logged at `warn` level; the booking still commits. The hold's on-disk `status` may be stale until the future Janitor sweep runs.
+- [x] The public availability endpoint does NOT consult `bookingHolds` — a hold is a UX signal, not an inventory lock. Two guests can both see the room as available and both have an active hold; the booking transaction picks the first commit and the second gets a "Room no longer available" error on Confirm.
+- [x] Walk-in bookings (`/api/bookings/create-walkin`) do NOT stamp an in-flow hold — the desk has the keys, no UX timer needed
+- [x] The hold copy is honest: "We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room" — not a literal "the room is reserved for you" promise
+
+### Edge Cases
+
+- [x] Two guests starting holds for the same room — both see the banner ticking; the transaction picks the first commit
+- [x] User on Step 3 with the timer at 0:00 — the banner shows red, the Confirm button is **not** disabled (the transaction will simply conflict if the room is gone)
+- [x] User refreshes the page on Step 2 — the URL still carries `?hold=<id>`, the hook reads + re-starts the timer (idempotent, same `expiresAt` if the doc already exists)
+- [x] User navigates back to Step 1, changes the room type + dates, then re-enters Step 2 — the `holdId` is preserved (the start endpoint is idempotent on the same `holdId`), the banner continues from the original `expiresAt`. A future enhancement could detect a `roomType` / `checkIn` mismatch and start a fresh hold; for v1 the same hold is reused.
+- [x] Network blip on the `POST /api/holds/start` call — the hook shows the amber "We couldn't load the hold timer" state with a Retry button; the user can still submit the booking (the consume is best-effort)
+- [x] User on Step 2 with the timer ticking; the API endpoint returns 404 for the hold doc (e.g. the future Janitor cleaned it up) — the banner shows "This hold was not found. It may have expired — please return to Step 1 to pick a new room."
+
+### Manual QA
+
+- [x] Open `/book`, complete Step 1, click "Continue to Step 2" — banner appears with a live countdown, "Time left: 15:00" at start
+- [x] Wait 1 minute — countdown shows "Time left: 14:00", banner remains blue
+- [x] Wait until the timer hits 0:00 — banner flips to red, "Pick a new room" CTA appears
+- [x] Click "Pick a new room" — URL routes to `?step=select-room`, banner disappears
+- [x] Open two browser sessions, both starting holds for the same room + dates — both show ticking countdowns; submit Step 3 in session 1 first — session 1 booking succeeds, session 2 Confirm returns "Room no longer available"
+- [x] Refresh the page on Step 2 — banner re-appears, countdown resumes from the original `expiresAt` (no double-stamping)
+
 ## Manual QA
 
 - [x] Complete full booking flow from Step 1 to Step 4 — verify booking appears in admin dashboard

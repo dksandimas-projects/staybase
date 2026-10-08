@@ -1,5 +1,12 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { hashToken } from "./test-runs";
+// In-flow hold (Steps 2 + 3 countdown banner). The consume
+// helper is called best-effort AFTER the booking transaction
+// commits — the hold is a UX signal, not a hard inventory
+// lock, so a failed consume never rolls back the booking.
+// See `server/handlers/in-flow-hold.ts` for the full
+// lifecycle + the start / read public endpoints.
+import { handleConsumeInFlowHold } from "./in-flow-hold";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger, buildReservationEmailView } from "./email";
 import { writeNotification } from "../lib/notifications";
@@ -67,6 +74,17 @@ import {
   // preallocation) and uses it for the in-transaction
   // idempotency replay / 409 conflict matrix.
   RESERVATION_ID_REGEX,
+  // In-flow hold (Steps 2 + 3 countdown banner) — the
+  // UUIDv4 regex the create schema uses to validate the
+  // client-preallocated `holdId`. See
+  // `shared/utils/bookingInFlowHold.ts`.
+  HOLD_ID_REGEX,
+  // `isInFlowHoldActive` is the read-time gate the
+  // transaction uses to validate a hold before consuming
+  // it (the in-transaction call goes through
+  // `handleConsumeInFlowHold` which reuses the same
+  // helper for the active-now check).
+  isInFlowHoldActive,
   generateReservationId,
   computeRequestFingerprint,
   type FingerprintableReservationRequest,
@@ -130,7 +148,16 @@ import {
   // `handleCancelBooking`) call this helper inside the
   // same `runTransaction` as the booking status flip.
   createCancellationPolicySnapshot,
-  computeReservationAggregatePaymentStatus
+  computeReservationAggregatePaymentStatus,
+  // In-flow hold (Steps 2 + 3 countdown banner). The
+  // constant is snapshotted onto the booking doc at
+  // create time as `inFlowHoldMinutes` so future reports
+  // can attribute expired holds to a specific window even
+  // if the constant changes. The consume function lives
+  // in `guest-app/server/handlers/in-flow-hold.ts` and is
+  // called best-effort AFTER the booking transaction
+  // commits (a UX signal, not a hard inventory lock).
+  IN_FLOW_HOLD_MINUTES
 } from "@spark-inn/shared";
 // Per CRL-06 (2026-08-02): the preview helper
 // (per-scope breakdown). The preview
@@ -1266,6 +1293,15 @@ export const createBookingSchema = z.object({
   // the write boundary. Pre-MRB-11 callers omit it; the
   // server fills it in.
   revenueAllocation: BookingRevenueAllocationSchema.optional(),
+  // In-flow hold (Steps 2 + 3 countdown banner). Optional
+  // for back-compat — when present, the create transaction
+  // reads the hold, validates it is still "active" + not
+  // past `expiresAt`, marks it "consumed", and stores the
+  // `holdMinutes` snapshot on the booking doc so future
+  // reports can attribute expired holds to a specific
+  // window. When absent, the booking still creates
+  // normally (legacy pre-hold-banner callers stay green).
+  holdId: z.string().trim().regex(HOLD_ID_REGEX).optional(),
   // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
   // the LOU (Letter of Undertaking) flag for corporate
   // chargeback bookings. The guest never sets this — the
@@ -1355,7 +1391,14 @@ export async function handleCreateBooking(req: any, res: any) {
     // to send the field.
     roomCount,
     roomSelections: requestedRoomSelections,
-    testToken
+    testToken,
+    // In-flow hold (Steps 2 + 3 countdown banner). The
+    // transaction reads the hold, validates it is still
+    // "active" + not past `expiresAt`, marks it "consumed",
+    // and snapshots the `holdMinutes` onto the booking doc
+    // for analytics. Optional — pre-hold-banner callers
+    // omit the field and stay green.
+    holdId
   } = body;
 
   const guestDetails: GuestDetails = rawGuestDetails;
@@ -2895,6 +2938,17 @@ export async function handleCreateBooking(req: any, res: any) {
           : (computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now)
             ? Timestamp.fromDate(computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now) as Date)
             : null),
+        // In-flow hold (Steps 2 + 3 countdown banner). The
+        // `holdId` is the link back to the `bookingHolds/{id}`
+        // doc; the create transaction below reads + consumes
+        // it. The `holdMinutes` is a snapshot of the
+        // IN_FLOW_HOLD_MINUTES constant at create time so
+        // future reports can attribute expired holds to a
+        // specific window even if the constant changes. Both
+        // fields are null when no hold is present (legacy
+        // pre-hold-banner callers).
+        inFlowHoldId: holdId || null,
+        inFlowHoldMinutes: holdId ? IN_FLOW_HOLD_MINUTES : null,
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): write
         // `null` (not `""`) when no payment proof is attached.
@@ -3386,10 +3440,51 @@ export async function handleCreateBooking(req: any, res: any) {
     // (assignedRoomId / assignedRoomNumber were captured inside the
     // transaction above.)
     if (alreadyExistingBookingResponse) {
+      // Per the in-flow hold decision: an idempotent
+      // replay is by definition the same request firing
+      // twice — the first firing already consumed the
+      // hold, so the replay must not consume it again
+      // (a second consume would 409 because
+      // `handleConsumeInFlowHold` rejects an
+      // already-consumed hold). Skip the consume on
+      // the replay branch.
       return res.status(200).json({
         success: true,
         data: alreadyExistingBookingResponse
       });
+    }
+
+    // In-flow hold (Steps 2 + 3 countdown banner) — the
+    // consume fires OUTSIDE the booking transaction. The
+    // hold is a UX signal, not a hard inventory lock, so
+    // a failed consume never rolls back the booking. The
+    // consume best-effort pattern mirrors the
+    // `sendStaffNewBookingTrigger` call below (the
+    // PEX-05 booking-expired emails, etc.). If the
+    // consume fails (e.g. the hold lapsed between the
+    // booking transaction's success and this call), the
+    // booking still exists; the hold's on-disk `status`
+    // is now stale but will be cleaned by the future
+    // Janitor sweep.
+    if (holdId) {
+      try {
+        const consumeResult = await handleConsumeInFlowHold(
+          holdId,
+          effectiveReservationId
+        );
+        if (!consumeResult.ok) {
+          // "expired" + "stale-reservation" are the
+          // two expected non-fatal outcomes; log
+          // "already-consumed" + "not-found" too for
+          // the audit trail. The booking is
+          // already committed at this point.
+          console.warn(
+            `In-flow hold consume non-fatal outcome: ${consumeResult.reason} (holdId=${holdId}, reservationId=${effectiveReservationId})`
+          );
+        }
+      } catch (consumeErr) {
+        console.error("Failed to consume in-flow hold:", consumeErr);
+      }
     }
 
     // Send acknowledgment email outside the transaction via Resend

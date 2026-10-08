@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RESERVATION_ID_REGEX } from "../utils/references";
+import { HOLD_ID_REGEX } from "../utils/bookingInFlowHold";
 
 export const BookingDatesSchema = z
   .object({
@@ -288,3 +289,43 @@ export const AddRoomBookingSchema = z
 
 export type AddRoomBookingInput = z.infer<typeof AddRoomBookingSchema>;
 
+// In-flow hold schemas for the public booking flow's
+// Steps 2 + 3 countdown banner. The client preallocates a
+// `holdId` (UUIDv4) and a `reservationId` (UUIDv4) on
+// the Step 1 → Step 2 transition, calls
+// `/api/holds/start` to stamp the hold server-side, and
+// threads the `holdId` through to Step 3's
+// `/api/bookings/create` body. The transaction reads the
+// hold, marks it consumed, and proceeds.
+//
+// Per the in-flow hold decision: the hold is a UX signal,
+// NOT a hard inventory lock. The authoritative
+// double-booking guarantee remains the Firestore
+// transaction. The schema below is strict about shape
+// (UUIDv4, YYYY-MM-DD, positive numbers) but never
+// cross-references the `bookings` collection — a stale
+// hold for a stale room is just a stale hold; the
+// transaction is what picks a winner when two guests race
+// for the same room.
+//
+// The `holdId` regex matches the
+// `generateHoldId` / `crypto.randomUUID` shape — UUIDv4
+// with hyphen groups (8-4-4-4-12 hex). The Zod regex is
+// lenient on case so a hand-typed `Hold-...` from a future
+// admin override still validates.
+export const StartBookingHoldSchema = z
+  .object({
+    holdId: z.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+    reservationId: z.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format"),
+    roomType: z.string().trim().min(1).max(64),
+    checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkIn must be YYYY-MM-DD"),
+    checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkOut must be YYYY-MM-DD"),
+    numNights: z.coerce.number().int().min(1).max(60)
+  })
+  .strict()
+  .refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
+    message: "Check-out must be after check-in",
+    path: ["checkOut"]
+  });
+
+export type StartBookingHoldInput = z.infer<typeof StartBookingHoldSchema>;

@@ -1,7 +1,7 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: September 19, 2026 — **ETR-22 shipped** (`feature/etr-22-email-banner`): environment banner renders on every server-sent email — a test-run callout when the booking has `isTestData: true` (with the run's name + environment) and a staging callout when `isStagingProject()` returns true. 23/23 new tests in `guest-app/tests/api/email-environment-banner.test.ts`; `tsc -b` + `npm run build:api` clean; full guest-app/api test suite at 1753/1757 (4 pre-existing `dev` failures unchanged). See `plan/features/ENVIRONMENT-TEST-RESET.md §Email environment banner (ETR-22)`.
-> Last ship: September 19, 2026 (ETR-22).
+> Last updated: October 8, 2026 — **IFH-01 shipped** (`feature/hold-countdown-banner`): the public booking flow's Steps 2 + 3 now show a live `MM:SS` countdown banner that signals the room is being held for the guest while they finish and pay. Soft UX signal — the public availability endpoint + the booking transaction are unchanged (the transaction in `handleCreateBooking` remains the authoritative double-booking guarantee). New `bookingHolds/{id}` ephemeral collection + 2 new API routes (`POST /api/holds/start` Turnstile-gated, `GET /api/holds/read`) registered in the existing catch-all (no new Vercel function). `inFlowHoldId` + `inFlowHoldMinutes` snapshotted on the booking doc for analytics. Full spec in `plan/features/BOOKING-FLOW.md §In-flow Hold` + decision `plan/docs/DECISIONS-FEATURES.md #IFH-01`.
+> Last ship: October 8, 2026 (IFH-01).
 
 > Last ship: August 21, 2026 (EC-01 — `feature/early-checkin-admin-alerts`; admin-app 1581/1581 + shared 569/569 + tsc clean; Spark Rewards early check-in requests now fan out to the persistent bell + a new dashboard widget with Approve/Decline controls).
 

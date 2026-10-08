@@ -72,6 +72,13 @@ import { deriveRoomTypeCapacityFit } from "@spark-inn/shared";
 // `requestFingerprint`).
 import { generateReservationId } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
+// In-flow hold (Steps 2 + 3 countdown banner). The
+// `generateHoldId` helper is the client-side source
+// of the UUIDv4 id the booking flow threads through
+// the URL. The `useInFlowHold` hook (consumed by the
+// `HoldCountdownBanner` component) calls POST
+// /api/holds/start on first read.
+import { generateHoldId } from "@spark-inn/shared";
 // Per BF-29 (booking-flow audit 2026-06-26): replace the
 // inline email regex with Zod's `z.string().email()` so the
 // validation matches the server-side schema (RFC-ish checks,
@@ -87,6 +94,13 @@ import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
+// In-flow hold (Steps 2 + 3 countdown banner). The
+// banner is a thin wrapper around `useInFlowHold` that
+// renders the live MM:SS countdown + the "Hold
+// expired" red state. See
+// `plan/features/BOOKING-FLOW.md §In-flow hold` for
+// the UX contract.
+import { HoldCountdownBanner } from "../components/HoldCountdownBanner";
 import { useGuestAuth } from "../context/GuestAuthContext";
 // Per feat/special-requests-redirect (2026-08-21): the guest
 // booking form no longer collects a free-text special-requests
@@ -204,6 +218,14 @@ export function BookingPage() {
   // shared `generateReservationId` helper so the id shape is
   // guaranteed to pass `RESERVATION_ID_REGEX` validation.
   const [reservationId] = useState(() => generateReservationId());
+  // In-flow hold id (Steps 2 + 3 countdown banner). The
+  // id is preallocated client-side and threaded through
+  // the URL (`?hold=<id>`) so the Step 1 → Step 2
+  // transition preserves it across renders. The
+  // `useInFlowHold` hook stamps the server-side doc on
+  // first read; the booking transaction consumes the
+  // hold best-effort after the booking commits.
+  const [holdId] = useState(() => generateHoldId());
 
   // Dynamic config states loaded from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({
@@ -870,7 +892,13 @@ export function BookingPage() {
     guests: String(guests),
     children: String(numChildren),
     roomType: selectedTypeEntry?.value ?? "",
-    breakfast: hasBreakfast ? "yes" : "no"
+    breakfast: hasBreakfast ? "yes" : "no",
+    // In-flow hold id — the Step 2 / Step 3 banner reads
+    // this and the `useInFlowHold` hook stamps the
+    // server-side doc on first read. Optional in the URL
+    // (legacy pre-hold-banner URLs omit it; the banner
+    // silently renders nothing in that case).
+    hold: holdId
   });
   continueParams.set("rooms", serializeBookingRoomCart(distributedRoomCart));
   const reviewParams = new URLSearchParams(continueParams);
@@ -1553,6 +1581,19 @@ export function BookingPage() {
           // `handleCreateBooking` in
           // `guest-app/server/handlers/bookings.ts`.
           reservationId,
+          // In-flow hold (Steps 2 + 3 countdown banner). The
+          // server reads the `bookingHolds/{id}` doc,
+          // validates it is still "active" + not past
+          // `expiresAt`, marks it "consumed" best-effort
+          // after the booking transaction commits, and
+          // snapshots the `inFlowHoldMinutes` field on the
+          // booking doc. Optional — pre-hold-banner callers
+          // omit the field and the schema accepts its
+          // absence. Read from the URL so a back-navigation
+          // to Step 1 + forward again preserves the same
+          // hold id (the hook's idempotent start endpoint
+          // returns the existing doc unchanged).
+          holdId: searchParams.get("hold") || undefined,
           roomType: firstRoomSelection.roomType,
           // Per BAR-02 (2026-08-08, per decision #203): the
           // `roomCount` field is no longer written to the
@@ -1777,6 +1818,30 @@ export function BookingPage() {
   const bookingShell = (content: React.ReactNode) => (
     <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
       <BookingHeader backTo={getBackToPath()} />
+      {/* In-flow hold (Steps 2 + 3 countdown banner). Only
+          renders when the user is past Step 1 and the URL
+          carries `?hold=<id>`. The hook inside the banner
+          stamps the server-side hold doc on first read
+          (idempotent) and ticks every second. The "Pick a
+          new room" CTA on the expired state routes back
+          to Step 1 with a fresh holdId so the cycle
+          restarts cleanly. */}
+      <HoldCountdownBanner
+        holdId={isGuestDetailsStep || isReviewStep ? searchParams.get("hold") : null}
+        startInput={{
+          reservationId,
+          roomType: selectedTypeEntry?.value ?? "",
+          checkIn,
+          checkOut,
+          numNights: nights,
+          turnstileToken: turnstileToken || undefined
+        }}
+        onPickNewRoom={() => {
+          const next = new URLSearchParams();
+          next.set("step", "select-room");
+          setSearchParams(next, { replace: true });
+        }}
+      />
       {content}
       <Modal
         title={imagePreview?.title ?? "Image preview"}

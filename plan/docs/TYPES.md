@@ -490,6 +490,34 @@ Public guest responses may include `BookingRateBreakdown` because it contains no
 
 ---
 
+## Booking Hold (in-flow hold)
+
+Ephemeral `bookingHolds/{id}` doc that powers the public booking flow's Steps 2 + 3 countdown banner. The client preallocates `holdId` (UUIDv4) on Step 1 mount; the `useInFlowHold` hook stamps the server-side doc on first read; the booking transaction's post-commit `handleConsumeInFlowHold` marks it `"consumed"`. The hold is a soft UX signal — the public availability endpoint does NOT consult this collection, and the booking transaction does NOT read it for conflict checks. See `plan/features/BOOKING-FLOW.md §In-flow Hold` + `plan/features/AVAILABILITY-LOCKING.md §In-flow Hold`.
+
+```
+BookingHold {
+  id: string                              // UUIDv4; preallocated client-side via `generateHoldId()`
+  reservationId: string                   // Mirrors the booking flow's preallocated reservation id
+  roomType: string                        // The room type the guest picked on Step 1
+  checkIn: string                         // YYYY-MM-DD
+  checkOut: string                        // YYYY-MM-DD
+  numNights: number                       // Snapshotted from the Step 1 picker
+  expiresAt: Date                         // Hold deadline; stamped from `IN_FLOW_HOLD_MINUTES` (15 by default)
+  status: "active" | "consumed" | "expired"
+  holdMinutes: number                     // Snapshot of `IN_FLOW_HOLD_MINUTES` at start time
+  createdAt: Date
+}
+```
+
+The `Booking` doc also carries two optional fields stamped at create time (when the create request includes a `holdId`):
+
+- `inFlowHoldId: string | null` — link back to the `bookingHolds/{id}` doc that was consumed
+- `inFlowHoldMinutes: number | null` — snapshot of `IN_FLOW_HOLD_MINUTES` at create time, so future reports can attribute expired holds to a specific window even if the constant changes
+
+Both fields are `null` for walk-in bookings (no in-flow hold — the desk has the keys) and for legacy pre-hold-banner callers.
+
+---
+
 ## Staff (guests collection)
 
 ```
