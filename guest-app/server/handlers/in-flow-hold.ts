@@ -91,8 +91,15 @@ function serializeHold(snap: FirebaseFirestore.DocumentSnapshot): {
 }
 
 // POST /api/holds/start
-// Rate limit + Turnstile are enforced in apiRouter.ts
-// before this handler is invoked.
+// Rate limit (30/IP/min) is enforced in apiRouter.ts
+// before this handler is invoked. No Turnstile gate on
+// this endpoint — the `useInFlowHold` hook fires POST on
+// Step 2 mount, before the BookingPage's Turnstile widget
+// (gated to `isReviewStep`) has loaded a token. The actual
+// security gate is the booking transaction
+// (`/api/bookings/create` IS Turnstile-gated); a hold is a
+// soft UX signal that doesn't unlock anything. See
+// `fix/holds-start-turnstile` for the full reasoning.
 export async function handleStartInFlowHold(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });

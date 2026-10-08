@@ -100,7 +100,15 @@ export function useInFlowHold(
           // Hold not stamped yet — start it. The
           // /api/holds/start endpoint is
           // idempotent on the same holdId, so a
-          // second POST is a no-op replay.
+          // second POST is a no-op replay. The
+          // endpoint is rate-limit-only — no
+          // Turnstile (the useTurnstileToken hook
+          // is gated to isReviewStep and isn't
+          // loaded when the banner fires on
+          // Step 2 mount; the actual security
+          // gate is the booking transaction's
+          // /api/bookings/create). See
+          // fix/holds-start-turnstile.
           await fetch("/api/holds/start", {
             method: "POST",
             headers: {
@@ -109,7 +117,11 @@ export function useInFlowHold(
             },
             body: JSON.stringify({
               holdId,
-              ...startInput
+              reservationId: startInput.reservationId,
+              roomType: startInput.roomType,
+              checkIn: startInput.checkIn,
+              checkOut: startInput.checkOut,
+              numNights: startInput.numNights
             })
           });
           if (cancelled) return;

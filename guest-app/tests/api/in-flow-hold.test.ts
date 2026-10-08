@@ -306,13 +306,36 @@ describe("IFH-01 — Source-text pins", () => {
     expect(routerSrc).toMatch(/domain === "holds" && action === "read"/);
   });
 
-  it("the router rate-limits the start endpoint at 30/IP/min and Turnstile-gates it", () => {
+  it("the router rate-limits the start endpoint at 30/IP/min (no Turnstile — see fix/holds-start-turnstile)", () => {
     // The same 30/min window as the public
     // availability endpoint, so a guest browsing dates
     // and starting a hold doesn't collide with the
     // booking-create limit.
+    //
+    // Per the fix/holds-start-turnstile hotfix: the
+    // start endpoint is NOT Turnstile-gated. The
+    // useInFlowHold hook fires POST on Step 2 mount,
+    // before the BookingPage's Turnstile widget (gated
+    // to isReviewStep) has loaded a token. The actual
+    // security gate is the booking transaction
+    // (/api/bookings/create IS Turnstile-gated). A hold
+    // is a soft UX signal, not a server-state change
+    // with security implications. Rate limit is the
+    // spam protection.
     expect(routerSrc).toMatch(/isRateLimited\(`holds-start:\$\{ip\}`,\s*30,\s*60000\)/);
-    expect(routerSrc).toMatch(/verifyTurnstile\(req\.body\?\.turnstileToken/);
+    // Pin the absence: the start route's body
+    // (the if-block gated on `domain === "holds" &&
+    // action === "start"`) does NOT call
+    // `verifyTurnstile` on `req.body?.turnstileToken`.
+    // The other routes in apiRouter (bookings-create,
+    // bookings-lookup, etc.) DO call verifyTurnstile,
+    // so we narrow the assertion to the start route's
+    // body.
+    const startRouteBody = routerSrc.match(
+      /domain === "holds" && action === "start" && req\.method === "POST"[\s\S]{0,800}?\);/
+    );
+    expect(startRouteBody).not.toBeNull();
+    expect(startRouteBody![0]).not.toMatch(/verifyTurnstile/);
   });
 
   it("the consume call is OUTSIDE the booking transaction (best-effort, FOL-03 read-order unchanged)", () => {
