@@ -20,6 +20,7 @@ import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
+import { handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
@@ -1531,6 +1532,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
 
     return await handleHoldExpiryCron(req, res);
+  }
+
+  // In-flow hold (Steps 2 + 3 countdown banner) — see
+  // `plan/features/BOOKING-FLOW.md §In-flow hold`. Public
+  // surface, rate-limited at 30/IP/min (matches the public
+  // availability endpoint's surface; a guest browsing dates
+  // and starting a hold should not collide with the
+  // booking-create limit). The start endpoint also runs
+  // through Turnstile because it mints server-side state.
+  if (domain === "holds" && action === "start" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-start:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many hold requests. Please try again in a minute." });
+    }
+    const turnstileVerification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!turnstileVerification.success) {
+      return res.status(400).json({ success: false, error: turnstileVerification.error });
+    }
+
+    return await handleStartInFlowHold(req, res);
+  }
+
+  if (domain === "holds" && action === "read" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-read:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many hold read requests. Please try again in a minute." });
+    }
+
+    return await handleReadInFlowHold(req, res);
+  }
+
+  // Per the IFH-01 follow-up: the hourly Janitor sweep
+  // for stale in-flow holds. The IFH-01 commit shipped
+  // the start + read + consume handlers but deferred
+  // the sweep — the read-time `isInFlowHoldActive`
+  // evaluation already reports stale holds as
+  // `"expired"` honestly, so the sweep is a cleanup of
+  // the on-disk `status`, not a UX-critical path. Same
+  // `CRON_SECRET` auth as the existing PEX-06
+  // `/api/holds/expire` cron. See
+  // `server/handlers/in-flow-hold.ts` +
+  // `guest-app/vercel.json §crons`.
+  if (domain === "holds" && action === "sweep" && (req.method === "POST" || req.method === "GET")) {
+
+    const result = await handleSweepInFlowHolds(req, res);
+    if ("ok" in result && result.ok === false) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+
+    return res.status(200).json({ success: true, data: result });
   }
 
   // ── Test Runs (ETR) ──────────────────────────────────────

@@ -724,6 +724,20 @@ export interface Booking {
   // helper in `shared/utils/bookingOccupancy.ts` is the only authority
   // that should read this field.
   holdExpiresAt?: Date | null;
+  // In-flow hold (Steps 2 + 3 countdown banner). The
+  // `inFlowHoldId` is the link back to the
+  // `bookingHolds/{id}` doc that was consumed by the
+  // create transaction. The `inFlowHoldMinutes` is a
+  // snapshot of `IN_FLOW_HOLD_MINUTES` at create time so
+  // future reports can attribute expired holds to a
+  // specific window even if the constant changes. Both
+  // fields are null for pre-hold-banner callers and for
+  // walk-in bookings (the desk has the keys — no in-flow
+  // hold is stamped). See
+  // `shared/utils/bookingInFlowHold.ts` + the
+  // `plan/features/BOOKING-FLOW.md §In-flow hold` spec.
+  inFlowHoldId?: string | null;
+  inFlowHoldMinutes?: number | null;
   rescheduleHistory?: any[];
   // Per H2 (hardening batch 2026-06-26): 32-char hex
   // random token generated at booking-create time. The
@@ -1241,6 +1255,52 @@ export interface CancellationPreview {
   refundPct: number;
   policyText: string;
   policySource: "settings" | "corporate-override" | "legacy-fallback";
+}
+
+// In-flow hold for the public booking flow's Steps 2 + 3
+// countdown banner. See
+// `shared/utils/bookingInFlowHold.ts` for the lifecycle
+// helpers and `plan/features/BOOKING-FLOW.md §In-flow hold`
+// for the UX contract. The hold is a soft UX signal — the
+// authoritative double-booking guarantee remains the
+// Firestore transaction in `handleCreateBooking`; this
+// collection lets the banner show "Your room is held for
+// you until {time} · {MM:SS} left" while the guest fills
+// out the form.
+export interface BookingHold {
+  id: string;
+  // Mirrors the booking flow's preallocated `reservationId`
+  // (per MRB-02). The server's `handleCreateBooking`
+  // transaction reads the hold by `holdId`, then matches
+  // `reservationId` to the booking being created to detect
+  // a stale hold (a guest who restarted the flow).
+  reservationId: string;
+  // The room type the guest picked on Step 1. Server uses
+  // it as a sanity check (a hold for type A is irrelevant
+  // if the guest is now creating a booking for type B),
+  // but the authoritative room assignment is still the
+  // transaction's type→physical-room pick.
+  roomType: string;
+  // yyyy-mm-dd, the same shape Step 1 already stamps.
+  checkIn: string;
+  checkOut: string;
+  numNights: number;
+  // The hold deadline. Server-stamped from `IN_FLOW_HOLD_MINUTES`
+  // at start time; never refreshed. A second call to
+  // `/api/holds/start` from the same client with the same
+  // `holdId` is rejected as a duplicate.
+  expiresAt: Date;
+  // "active" → banner shows the live countdown.
+  // "consumed" → booking transaction succeeded; banner hides.
+  // "expired" → past `expiresAt`; banner shows the red expired
+  //   state. Set by the Janitor / cron, or by
+  //   `isInFlowHoldActive`'s read-time evaluation.
+  status: "active" | "consumed" | "expired";
+  createdAt: Date;
+  // For analytics + future per-hotel tuning — the snapshot
+  // of `IN_FLOW_HOLD_MINUTES` at start time. Future commit
+  // will move this to `settings/hotelConfig.inFlowHoldMinutes`.
+  holdMinutes: number;
 }
 
 // Per-staff intercom audio routing — see `plan/features/INTERCOM-AUDIO-ROUTING.md`.
