@@ -92,6 +92,14 @@ import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
+// Per SR-01..05 (2026-10-12): the corporate Step 2 special-requests
+// block. Same shape as the public `/book` flow.
+import { SpecialRequestsBlock } from "../components/SpecialRequestsBlock";
+// The corporate flow also pulls `hotelCheckInTime` from
+// `usePublicSiteContent` so the arrival-time dropdown
+// derives its 24h options from the same source the
+// public booking page uses.
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 // In-flow hold (Steps 2 + 3 countdown banner). The
 // banner is a thin wrapper around `useInFlowHold` that
 // renders the live MM:SS countdown + the "Hold
@@ -317,7 +325,8 @@ export function CorporateBookingPage() {
 
   // Live rooms from Firestore
   const { rooms, loading: roomsLoading } = useRooms();
-  const { roomTypes } = useRoomTypes();
+  const { roomTypes, bedSetups, bookingPreferences } = useRoomTypes();
+  const { hotelCheckInTime } = usePublicSiteContent();
 
   // Corporate specific details
   const [guestDetails, setGuestDetails] = useState({
@@ -364,10 +373,25 @@ export function CorporateBookingPage() {
     companyAddress: searchParams.get("companyAddress") ?? "",
     purposeOfStay: searchParams.get("purposeOfStay") ?? "Business Travel",
     billingArrangement: (searchParams.get("billingArrangement") as "personal" | "chargeback") ?? "personal",
-    requests: searchParams.get("requests") ?? "",
+    // Per SR-01..05 (2026-10-12): the legacy
+    // `requests` initializer is retired — the
+    // corporate Step 2 captures the free-text +
+    // preferences + bed setup + arrival time via
+    // the `SpecialRequestsBlock`.
     consent: false,
     _hp: ""
   });
+
+  // Per SR-01..05 (2026-10-12): the corporate Step 2
+  // special-requests state. Mirrors the public booking
+  // page — the corporate flow has the same Step 2 surface
+  // (just with the corporate billing fields added), so the
+  // bed set-up + preferences + free-text + arrival time
+  // live alongside the existing corporate form fields.
+  const [bedSelections, setBedSelections] = useState<Record<number, string>>({});
+  const [additionalPreferences, setAdditionalPreferences] = useState<string[]>([]);
+  const [additionalRequest, setAdditionalRequest] = useState("");
+  const [expectedArrivalTime, setExpectedArrivalTime] = useState<string | null>(null);
 
   // Per fix/booking-autofill-member-profile-race (2026-08-22):
   // the `guestDetails` initializer above runs ONCE on mount.
@@ -1181,7 +1205,11 @@ export function CorporateBookingPage() {
   reviewParams.set("companyAddress", guestDetails.companyAddress);
   reviewParams.set("purposeOfStay", guestDetails.purposeOfStay);
   reviewParams.set("billingArrangement", guestDetails.billingArrangement);
-  reviewParams.set("requests", guestDetails.requests);
+  // Per SR-01..05 (2026-10-12): the legacy `requests`
+  // URL-param copy is retired — the corporate Step 2
+  // now captures the free-text + preferences + bed
+  // setup + arrival time via the
+  // `SpecialRequestsBlock`.
 
   const [bookingResponse, setBookingResponse] = useState<{ ref: string } | null>(null);
   const [submitError, setSubmitError] = useState("");
@@ -1310,12 +1338,30 @@ export function CorporateBookingPage() {
         numChildren: firstStay.numChildren,
         extraBedCount: firstStay.extraBedCount,
         hasBreakfast: hasBreakfast,
+        // Per SR-01..05 (2026-10-12): the corporate
+        // booking carries the same special-requests
+        // fields as the public `/book` flow. The
+        // corporate variant is per-request (the cart is
+        // flat-rate + chargeback, not multi-room) so the
+        // bed-set-up selection is per-room on the
+        // reservation, mirrored from the first stay's
+        // per-index choice.
+        bedSetup: bedSelections[0] ?? "",
+        additionalPreferences,
+        additionalRequest: additionalRequest.trim(),
+        expectedArrivalTime,
         guestDetails: {
           firstName: guestDetails.firstName,
           lastName: guestDetails.lastName,
           email: guestDetails.email,
           phone: guestDetails.phone,
-          requests: guestDetails.requests,
+          // Per SR-01..05 (2026-10-12): the legacy
+          // `requests` field on the wire is retired —
+          // the corporate booking body carries the
+          // new `additionalRequest` field above
+          // (sourced from the Step 2 free-text
+          // textarea inside the
+          // `SpecialRequestsBlock`).
           consent: guestDetails.consent,
           companyName: guestDetails.companyName,
           designation: guestDetails.designation,
@@ -2347,20 +2393,29 @@ export function CorporateBookingPage() {
                 id="guestCount"
                 name="guestCount"
               />
-              <label htmlFor="requests" className="grid gap-2 text-sm font-medium text-gray-700">
-                Special requests
-                <span className="relative block">
-                  <MessageSquareText size={17} className="absolute left-3 top-3 text-primary" />
-                  <textarea
-                    id="requests"
-                    name="requests"
-                    className="min-h-24 w-full rounded-lg border border-gray-200 bg-white py-3 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
-                    onChange={(event) => updateGuestDetail("requests", event.target.value)}
-                    placeholder="Late arrival notes, dietary options, quiet room request..."
-                    value={guestDetails.requests}
-                  />
-                </span>
-              </label>
+              {/* Per SR-01..05 (2026-10-12): the special-requests
+                  block. Replaces the legacy `Special requests`
+                  textarea (which is retired in SR-05). The
+                  bed-set-up radios mirror the public booking
+                  page; the corporate flow is per-request so the
+                  cart is treated as a single-room group. */}
+              <SpecialRequestsBlock
+                bedSetups={bedSetups}
+                bookingPreferences={bookingPreferences}
+                selectedRooms={distributedRoomCart
+                  .map((room) => roomTypes.find((t) => t.value === room.roomType))
+                  .filter((t): t is NonNullable<typeof t> => Boolean(t))}
+                bedSelections={bedSelections}
+                onSetBedSelections={setBedSelections}
+                additionalPreferences={additionalPreferences}
+                onSetAdditionalPreferences={setAdditionalPreferences}
+                additionalRequest={additionalRequest}
+                onSetAdditionalRequest={setAdditionalRequest}
+                expectedArrivalTime={expectedArrivalTime}
+                onSetExpectedArrivalTime={setExpectedArrivalTime}
+                checkInTime={hotelCheckInTime ?? "2:00 PM"}
+                locale={config.locale}
+              />
             </motion.div>
 
             <motion.div className="mt-6 rounded-card bg-primary-light p-4" variants={staggerChild}>

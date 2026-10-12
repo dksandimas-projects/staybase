@@ -615,23 +615,36 @@ export function CalendarPage() {
                     // status pill; the tooltip carries the raw
                     // text (truncated at 80 chars to keep the cell
                     // tidy).
+                    //
+                    // Per SR-01..05 (2026-10-12): the gate
+                    // also fires on the per-room `bedSetup`
+                    // snapshot (guest-set at booking time).
+                    // The reservation-level fields
+                    // (`additionalPreferences` +
+                    // `additionalRequest` +
+                    // `expectedArrivalTime`) live on the
+                    // reservation header, which the calendar
+                    // cell doesn't fetch — they still surface
+                    // via the booking drawer, which loads
+                    // both docs.
                     const hasSpecialRequest = (booking.specialRequests ?? "").trim().length > 0;
+                    const hasBedSetupPreference = typeof booking.bedSetup === "string" && booking.bedSetup.trim().length > 0;
                     return (
                       <button key={`${room.id}-${dateKey}`} type="button" onClick={() => openBookingDrawer(booking)} className="relative min-h-[78px] border-l border-gray-100 bg-white px-0 py-3 text-left">
                         <div className={`flex min-h-[46px] flex-col justify-center bg-gray-950 px-3 text-white shadow-sm ${left ? "ml-2 rounded-l-full" : ""} ${right ? "mr-2 rounded-r-full" : ""}`}>
                           <span className="truncate text-[11px] font-bold">{booking.guestName}</span>
                           <span className="truncate text-[10px] text-white/70">{booking.isCorporate && booking.companyName ? booking.companyName : booking.bookingRef}</span>
-                          {(hasSpecialRequest || (left && hasApprovedEarlyCheckIn)) && (
+                          {(hasSpecialRequest || hasBedSetupPreference || (left && hasApprovedEarlyCheckIn)) && (
                             <span
                               data-testid="calendar-booking-indicators"
                               className="absolute right-1 top-1 flex flex-col items-center gap-1"
                             >
-                              {hasSpecialRequest && (
+                              {(hasSpecialRequest || hasBedSetupPreference) && (
                                 <span
                                   data-testid="calendar-special-request-icon"
                                   title={(booking.specialRequests ?? "").length > 80
                                     ? `${booking.specialRequests!.trim().slice(0, 80)}…`
-                                    : booking.specialRequests}
+                                    : (booking.specialRequests || (hasBedSetupPreference ? `Bed set-up: ${booking.bedSetup}` : ""))}
                                   aria-label="Has special request — click booking to view details"
                                   className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm ring-1 ring-inset ring-amber-500/40"
                                 >

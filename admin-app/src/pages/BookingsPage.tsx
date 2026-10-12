@@ -54,6 +54,11 @@ import {
 import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
 import { BookingEmailActions } from "../components/BookingEmailActions";
 import { IncidentalChargeList } from "../components/IncidentalChargeList";
+// Per SR-01..05 (2026-10-12): the read-only "Guest
+// special requests" block in the booking drawer. The
+// staff `BookingSpecialRequestsEditor` stays for
+// post-booking follow-ups from email / phone.
+import { GuestSpecialRequestsBlock } from "../components/GuestSpecialRequestsBlock";
 import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { cn } from "../utils/cn";
@@ -607,7 +612,12 @@ export function BookingsPage() {
     bookingSources,
     currentUser,
     verifyAndRecordPayment,
-    testRuns
+    testRuns,
+    // Per SR-01..05 (2026-10-12): the read-only "Guest
+    // special requests" drawer block consumes the
+    // admin-configurable catalogs (for label lookup).
+    bedSetupsCatalog,
+    bookingPreferencesCatalog
   } = useAdmin();
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
@@ -6445,6 +6455,26 @@ export function BookingsPage() {
 
             {/* Requests and notes follow the time-sensitive early check-in panel. */}
             <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
+              {/* Per SR-01..05 (2026-10-12): the
+                  read-only "Guest special requests"
+                  block surfaces the Step 2 captures
+                  (bed setup + preferences + free text +
+                  arrival time). The staff
+                  `BookingSpecialRequestsEditor` below
+                  stays for post-booking follow-ups. */}
+              <GuestSpecialRequestsBlock
+                bookings={[{
+                  id: selectedBooking.id,
+                  roomNumber: selectedBooking.roomNumber,
+                  roomType: selectedBooking.roomType,
+                  bedSetup: selectedBooking.bedSetup ?? null
+                }]}
+                additionalPreferences={reservationsMap.get(selectedBooking.reservationId ?? "")?.additionalPreferences ?? []}
+                additionalRequest={reservationsMap.get(selectedBooking.reservationId ?? "")?.additionalRequest ?? ""}
+                expectedArrivalTime={reservationsMap.get(selectedBooking.reservationId ?? "")?.expectedArrivalTime ?? null}
+                bedSetupsCatalog={bedSetupsCatalog}
+                bookingPreferencesCatalog={bookingPreferencesCatalog}
+              />
               <BookingSpecialRequestsEditor booking={selectedBooking} />
             </BookingDrawerSectionPanel>
 

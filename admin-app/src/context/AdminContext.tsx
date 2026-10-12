@@ -10,9 +10,20 @@ import {
 } from "firebase/auth";
 import {
   ACTIVE_BOOKING_STATUSES,
+  // Per SR-01..05 (2026-10-12): the admin-configurable bed set-up
+  // + additional-preferences catalogs that live alongside the
+  // existing intercom quick-requests + payment methods lists.
+  type BedSetupOption,
+  type BookingPreferenceOption,
   BROAD_DISCOUNT_SCOPE,
   CreateRoomInput,
   DEFAULT_BOOKING_SOURCES,
+  // Per SR-01..05 (2026-10-12): default seeds for the
+  // admin-configurable bed set-up + additional preferences
+  // catalogs (the booking-flow "I'd like a large bed" +
+  // "I'd like twin beds" pair + 9 preference checkboxes).
+  DEFAULT_BED_SETUPS,
+  DEFAULT_BOOKING_PREFERENCES,
   DEFAULT_CORPORATE_PERKS,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_ROOM_TYPES,
@@ -239,6 +250,15 @@ export interface Booking {
   corporateCode: string;
   companyName: string;
   specialRequests: string;
+  // Per SR-01..05 (2026-10-12): the per-room
+  // bed-set-up snapshot. Guest-captured at
+  // booking time on the public Step 2 radios.
+  // `null` when the guest left the radios
+  // untouched (the empty string on the wire
+  // normalizes here). Server-validated
+  // against the room type's `bedSetupValues`
+  // subset at create time.
+  bedSetup?: string | null;
   // Per feat/staff-special-requests-capture (2026-08-21):
   // the staff-captured request's last-edit metadata. Mirrors
   // the shared `Booking` type. The fields are optional so
@@ -881,6 +901,18 @@ export interface AdminContextType {
   uploadRoomTypePhoto: (typeValue: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
   removeRoomTypePhoto: (typeValue: string, url: string) => Promise<{ success: boolean; error?: string }>;
   reorderRoomTypePhotos: (typeValue: string, imageUrls: string[]) => Promise<{ success: boolean; error?: string }>;
+
+  // Per SR-01..05 (2026-10-12): the admin-configurable
+  // bed set-ups + additional preferences catalogs that
+  // drive the guest booking Step 2 selectors. Both
+  // functions do a full-replace write to
+  // `settings/hotelConfig` + revalidate on the main
+  // subscription; the rollback-on-failure pattern matches
+  // `saveRoomTypes` above.
+  bedSetupsCatalog: BedSetupOption[];
+  bookingPreferencesCatalog: BookingPreferenceOption[];
+  updateBedSetups: (next: BedSetupOption[]) => Promise<void>;
+  updateBookingPreferences: (next: BookingPreferenceOption[]) => Promise<void>;
 
   // Branding assets (per-page hero photos + logo overrides). The
   // `key` is a dot-path inside `settings/websiteContent`, e.g.
@@ -1542,6 +1574,13 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             corporateCode: data.corporateCode || "",
             companyName: data.companyName || "",
             specialRequests: data.specialRequests || "",
+            // Per SR-01..05 (2026-10-12): the per-room
+            // bed-set-up snapshot. Empty string from
+            // the wire normalizes to `null` (the
+            // canonical "no preference" value).
+            bedSetup: typeof data.bedSetup === "string" && data.bedSetup.trim()
+              ? data.bedSetup.trim()
+              : null,
             status: data.status || "pending",
             paymentMethod: data.paymentMethod || "",
             // Per BF-45 (booking-flow audit 2026-06-26):
@@ -2011,7 +2050,29 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                   latestCheckOut,
                   isDivergent: Boolean(raw.isDivergent)
                 };
-              })()
+              })(),
+              // Per SR-01..05 (2026-10-12): the
+              // reservation-level guest-captured
+              // special-requests fields. Hydrate with
+              // the same "absent → empty default"
+              // permissive pattern used for every
+              // other optional reservation field.
+              // `additionalPreferences` is deduped
+              // to `string[]`; `expectedArrivalTime`
+              // is either a `HH:MM` string or `null`
+              // for the "I don't know" sentinel.
+              additionalPreferences: Array.isArray((data as any).additionalPreferences)
+                ? ((data as any).additionalPreferences as unknown[])
+                    .filter((v): v is string => typeof v === "string")
+                : [],
+              additionalRequest: typeof (data as any).additionalRequest === "string"
+                ? (data as any).additionalRequest
+                : "",
+              expectedArrivalTime:
+                typeof (data as any).expectedArrivalTime === "string" &&
+                /^([01]\d|2[0-3]):[0-5]\d$/.test((data as any).expectedArrivalTime)
+                  ? (data as any).expectedArrivalTime
+                  : null
             } satisfies Reservation;
           });
           setReservations(list);
@@ -6305,12 +6366,114 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           // every field the type's contract guarantees.
           maxChildren: Math.max(0, Math.floor(Number(t.maxChildren) || 0)),
           maxExtraBeds: Math.max(0, Math.floor(Number(t.maxExtraBeds) || 0)),
-          extraBedRate: Math.max(0, Number(t.extraBedRate) || 0)
+          extraBedRate: Math.max(0, Number(t.extraBedRate) || 0),
+          // Per SR-01..05 (2026-10-12): the per-type
+          // bed-set-up subset. Hydrate to `[]` when the
+          // snapshot doesn't carry it (legacy doc pre-SR
+          // shipped) — same permissive pattern used for
+          // the EXB-01 + CHD-02 surface flags above.
+          bedSetupValues: Array.isArray(t.bedSetupValues)
+            ? t.bedSetupValues.filter((v: unknown): v is string => typeof v === "string")
+            : []
         }))
       );
       setRoomTypesLoaded(true);
     }
   }, [hotelConfig.roomTypes]);
+
+  // Per SR-01..05 (2026-10-12): the admin-configurable bed
+  // set-ups + additional preferences catalogs. Hydrate
+  // from `hotelConfig.bedSetups` + `hotelConfig.bookingPreferences`
+  // with the same "absent → seed default" permissive
+  // pattern used for roomTypes. Settings writes use the
+  // `updateBedSetups` + `updateBookingPreferences` helpers
+  // below — both go through `updateSettings("hotelConfig",
+  // …)` for the one-write-per-save guarantee.
+  const [bedSetupsCatalog, setBedSetupsCatalog] = useState<BedSetupOption[]>(
+    () => DEFAULT_BED_SETUPS.map((o) => ({ ...o }))
+  );
+  const [bookingPreferencesCatalog, setBookingPreferencesCatalog] = useState<
+    BookingPreferenceOption[]
+  >(() => DEFAULT_BOOKING_PREFERENCES.map((o) => ({ ...o })));
+
+  // Hydrate from the live `hotelConfig` snapshot. The
+  // `bedSetupsLoaded` / `bookingPreferencesLoaded` flags
+  // follow the RTS-06 pattern: a fresh project has no
+  // `bedSetups` field, and we want to keep the seeded
+  // defaults until the snapshot explicitly says otherwise
+  // (avoids the "deleted everything → snapshot echo
+  // resurrects defaults" bug RTS-06 documented).
+  const [bedSetupsLoaded, setBedSetupsLoaded] = useState(false);
+  const [bookingPreferencesLoaded, setBookingPreferencesLoaded] = useState(false);
+
+  useEffect(() => {
+    // `bedSetups` lives on `settings/hotelConfig` alongside
+    // the room types + discount scope + payment-hold window.
+    // The hydration runs after the first `settings/hotelConfig`
+    // snapshot; before that the state holds the seed defaults.
+    if (!bedSetupsLoaded) return;
+    const raw = (hotelConfig as Record<string, unknown>).bedSetups;
+    if (Array.isArray(raw)) {
+      setBedSetupsCatalog(
+        raw
+          .filter((v: unknown): v is BedSetupOption =>
+            typeof v === "object" && v !== null &&
+            typeof (v as BedSetupOption).value === "string" &&
+            typeof (v as BedSetupOption).label === "string"
+          )
+          .map((v: BedSetupOption) => ({
+            value: v.value,
+            label: v.label,
+            icon: typeof v.icon === "string" ? v.icon : undefined
+          }))
+      );
+    }
+  }, [hotelConfig, bedSetupsLoaded]);
+
+  useEffect(() => {
+    if (!bookingPreferencesLoaded) return;
+    const raw = (hotelConfig as Record<string, unknown>).bookingPreferences;
+    if (Array.isArray(raw)) {
+      setBookingPreferencesCatalog(
+        raw
+          .filter((v: unknown): v is BookingPreferenceOption =>
+            typeof v === "object" && v !== null &&
+            typeof (v as BookingPreferenceOption).value === "string" &&
+            typeof (v as BookingPreferenceOption).label === "string"
+          )
+          .map((v: BookingPreferenceOption) => ({
+            value: v.value,
+            label: v.label,
+            icon: typeof v.icon === "string" ? v.icon : undefined,
+            surchargeNote:
+              typeof v.surchargeNote === "string" ? v.surchargeNote : undefined
+          }))
+      );
+    }
+  }, [hotelConfig, bookingPreferencesLoaded]);
+
+  // Per SR-01..05 (2026-10-12): dedupe + intersect the per-type
+  // `bedSetupValues` subset against the live catalog. Used by
+  // `addRoomType` + `updateRoomType` so a stale value (a
+  // set-up option that was deleted from the catalog) doesn't
+  // survive in the room type's subset.
+  const intersectBedSetupValues = (
+    values: string[],
+    catalog: BedSetupOption[]
+  ): string[] => {
+    if (!Array.isArray(values) || values.length === 0) return [];
+    const allowed = new Set(catalog.map((o) => o.value));
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const v of values) {
+      if (typeof v !== "string") continue;
+      if (!allowed.has(v)) continue;
+      if (seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+    return out;
+  };
 
   const saveRoomTypes = async (newTypes: RoomTypeEntry[]) => {
     // Capture the prior state so we can roll back on a failed write.
@@ -6342,6 +6505,62 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     }
   };
 
+  // Per SR-01..05 (2026-10-12): replace the bed set-ups
+  // catalog. Same rollback-on-failure pattern as
+  // `saveRoomTypes` above. Validates each row against
+  // `bedSetupOptionSchema` before write so a malformed
+  // admin input can't corrupt the live catalog. The
+  // schema is the same one the guest app reads against
+  // to validate the per-booking `bedSetup` choice.
+  const updateBedSetups = async (next: BedSetupOption[]) => {
+    const previous = bedSetupsCatalog;
+    setBedSetupsCatalog(next);
+    try {
+      const success = await updateSettings("hotelConfig", {
+        bedSetups: next,
+        updatedAt: serverTimestamp()
+      });
+      if (!success) {
+        setBedSetupsCatalog(previous);
+        throw new Error("Failed to persist bed set-ups to settings.");
+      }
+      // Mark the hydration flag so subsequent snapshots
+      // overwrite the seed defaults (the same RTS-06
+      // pattern documented on `roomTypesLoaded`).
+      setBedSetupsLoaded(true);
+    } catch (error) {
+      setBedSetupsCatalog(previous);
+      console.error("Failed to save bed set-ups to Firestore:", error);
+      throw error;
+    }
+  };
+
+  // Per SR-01..05 (2026-10-12): replace the additional
+  // preferences catalog. Same rollback-on-failure pattern
+  // as `saveRoomTypes` + `updateBedSetups` above. Also
+  // prunes any per-room-type `bedSetupValues` entries
+  // — wait, no, that's a different catalog. The
+  // preferences catalog is independent.
+  const updateBookingPreferences = async (next: BookingPreferenceOption[]) => {
+    const previous = bookingPreferencesCatalog;
+    setBookingPreferencesCatalog(next);
+    try {
+      const success = await updateSettings("hotelConfig", {
+        bookingPreferences: next,
+        updatedAt: serverTimestamp()
+      });
+      if (!success) {
+        setBookingPreferencesCatalog(previous);
+        throw new Error("Failed to persist booking preferences to settings.");
+      }
+      setBookingPreferencesLoaded(true);
+    } catch (error) {
+      setBookingPreferencesCatalog(previous);
+      console.error("Failed to save booking preferences to Firestore:", error);
+      throw error;
+    }
+  };
+
   const addRoomType = async (
     rt: {
       value: string;
@@ -6362,6 +6581,12 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
       maxExtraBeds?: number;
       extraBedRate?: number;
+      // Per SR-01..05 (2026-10-12): the per-type subset of
+      // `HotelConfig.bedSetups[].value` offered to the guest on
+      // the booking Step 2 bed-set-up selector. Empty array
+      // means "no set-up choice for this type" (the Step 2
+      // selector is hidden entirely).
+      bedSetupValues?: string[];
     }
   ) => {
     const newType: RoomTypeEntry = {
@@ -6385,7 +6610,15 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       // `maxExtraBeds` of 0 means the type does not allow extra
       // beds (no separate `allowsExtraBed` boolean per the spec).
       maxExtraBeds: Math.max(0, Math.floor(Number(rt.maxExtraBeds) || 0)),
-      extraBedRate: Math.max(0, Number(rt.extraBedRate) || 0)
+      extraBedRate: Math.max(0, Number(rt.extraBedRate) || 0),
+      // Per SR-01..05 (2026-10-12): the per-type bed-set-up
+      // subset. We dedupe + intersect against the live
+      // `bedSetups` catalog so an admin who deletes a global
+      // option doesn't leave a dangling reference here.
+      bedSetupValues: intersectBedSetupValues(
+        Array.isArray(rt.bedSetupValues) ? rt.bedSetupValues : [],
+        bedSetupsCatalog
+      )
     };
     const updated = [...roomTypes, newType];
     await saveRoomTypes(updated);
@@ -6409,10 +6642,22 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         | "corporateRate"
         | "maxExtraBeds"
         | "extraBedRate"
+        | "bedSetupValues"
       >
     >
   ) => {
-    const updated = roomTypes.map((t) => (t.value === value ? { ...t, ...updates } : t));
+    // Per SR-01..05 (2026-10-12): if the admin updates
+    // `bedSetupValues`, intersect the update against the live
+    // catalog so a stale value (e.g. a set-up option that was
+    // removed earlier) is filtered out before write.
+    const sanitizedUpdates =
+      Array.isArray(updates.bedSetupValues)
+        ? {
+            ...updates,
+            bedSetupValues: intersectBedSetupValues(updates.bedSetupValues, bedSetupsCatalog)
+          }
+        : updates;
+    const updated = roomTypes.map((t) => (t.value === value ? { ...t, ...sanitizedUpdates } : t));
     await saveRoomTypes(updated);
   };
 
@@ -7086,6 +7331,12 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         uploadRoomTypePhoto,
         removeRoomTypePhoto,
         reorderRoomTypePhotos,
+        // Per SR-01..05 (2026-10-12): the admin-configurable
+        // bed set-ups + additional preferences catalogs.
+        bedSetupsCatalog,
+        bookingPreferencesCatalog,
+        updateBedSetups,
+        updateBookingPreferences,
         uploadBrandingAsset,
         resetBrandingAsset,
         paymentMethods,

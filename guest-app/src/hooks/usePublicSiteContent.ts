@@ -137,6 +137,15 @@ export interface PublicSiteContent {
   branding: PublicBranding;
   roomsCatalog: PublicHeroContent;
   notFound: PublicHeroContent;
+  // Per SR-01..05 (2026-10-12): the hotel check-in time
+  // string (e.g. "2:00 PM") surfaced for the booking
+  // Step 2 "Expected arrival time" dropdown. The
+  // arrival-window helper `buildArrivalTimeOptions`
+  // derives its 24h options from this string.
+  // `null` while the Firestore snapshot hasn't resolved
+  // yet (the helper handles the fallback to "2:00 PM"
+  // at the call site).
+  hotelCheckInTime: string | null;
 }
 
 const FALLBACK_HERO_HEADING = "Your sanctuary in Bohol";
@@ -322,7 +331,13 @@ function buildFallback(): PublicSiteContent {
       heroHeading: "lost in bohol?",
       heroSubtext: "We couldn't find the page you were looking for. Let's get you back on track to your comfortable stay.",
       heroPhotoUrl: ""
-    }
+    },
+    // Per SR-01..05 (2026-10-12): the deployment-time
+    // check-in time fallback is the same 14:00 (2 PM)
+    // default the admin Settings → Hotel Info uses, so
+    // the dropdown options never collapse to a single
+    // entry before the Firestore snapshot lands.
+    hotelCheckInTime: "2:00 PM"
   };
 }
 
@@ -425,7 +440,8 @@ function buildEmptyState(): PublicSiteContent {
       heroHeading: "",
       heroSubtext: "",
       heroPhotoUrl: ""
-    }
+    },
+    hotelCheckInTime: null
   };
 }
 
@@ -676,7 +692,15 @@ export function usePublicSiteContent(): PublicSiteContent {
           heroHeading: pickString(notFoundRaw, "heroHeading", fb.notFound.heroHeading),
           heroSubtext: pickString(notFoundRaw, "heroSubtext", fb.notFound.heroSubtext),
           heroPhotoUrl: pickString(notFoundRaw, "heroPhotoUrl", fb.notFound.heroPhotoUrl)
-        }
+        },
+        // Per SR-01..05 (2026-10-12): surface the
+        // `checkInTime` field on `settings/hotelConfig`
+        // so the booking Step 2 "Expected arrival time"
+        // dropdown can derive its 24h options. Falls
+        // back to the deploy-time `hotel.config.ts`
+        // value when the Firestore override is empty
+        // (same pattern as the contact section).
+        hotelCheckInTime: pickString(hc, "checkInTime", "2:00 PM")
       };
 
       setContent(next);
