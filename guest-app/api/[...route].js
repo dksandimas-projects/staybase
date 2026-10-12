@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.9.3";
+    VERSION2 = "1.11.0";
   }
 });
 
@@ -221689,6 +221689,7 @@ var init_booking = __esm({
       // so a future walk-in client that does preallocate can
       // ride the same idempotency contract.
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      staffHoldId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/).optional(),
       // Per MRB-11 (2026-08-03, per decision #177): the
       // optional revenue allocation. Per the 2026-08-03
       // design call, the server always computes this before
@@ -228353,31 +228354,30 @@ async function handleSweepInFlowHolds(req, res, options = {}) {
   let swept = 0;
   let scanned = 0;
   try {
-    const expiredSnapshot = await adminDb.collection(HOLDS_COLLECTION).where("status", "==", "active").where("expiresAt", "<", Timestamp.fromDate(now)).orderBy("expiresAt", "asc").limit(SWEEP_BATCH_SIZE).get();
-    scanned = expiredSnapshot.size;
-    for (const doc of expiredSnapshot.docs) {
-      try {
-        await adminDb.runTransaction(async (transaction) => {
-          const freshDoc = await transaction.get(doc.ref);
-          if (!freshDoc.exists) return;
-          const freshData = freshDoc.data() ?? {};
-          if (freshData.status === "consumed") return;
-          if (freshData.status === "expired") return;
-          const expiresAt = toIsoOrNull(freshData.expiresAt);
-          if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
-            return;
-          }
-          transaction.update(doc.ref, {
-            status: "expired",
-            updatedAt: Timestamp.fromDate(now)
+    for (const collectionName of [HOLDS_COLLECTION, "staffInventoryHolds"]) {
+      const expiredSnapshot = await adminDb.collection(collectionName).where("status", "==", "active").where("expiresAt", "<", Timestamp.fromDate(now)).orderBy("expiresAt", "asc").limit(SWEEP_BATCH_SIZE).get();
+      scanned += expiredSnapshot.size;
+      for (const doc of expiredSnapshot.docs) {
+        try {
+          await adminDb.runTransaction(async (transaction) => {
+            const freshDoc = await transaction.get(doc.ref);
+            if (!freshDoc.exists) return;
+            const freshData = freshDoc.data() ?? {};
+            if (freshData.status === "consumed") return;
+            if (freshData.status === "expired") return;
+            const expiresAt = toIsoOrNull(freshData.expiresAt);
+            if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
+              return;
+            }
+            transaction.update(doc.ref, {
+              status: "expired",
+              updatedAt: Timestamp.fromDate(now)
+            });
           });
-        });
-        swept += 1;
-      } catch (err) {
-        console.error(
-          `In-flow hold sweep failed for ${doc.id}:`,
-          err
-        );
+          swept += 1;
+        } catch (err) {
+          console.error(`Hold sweep failed for ${collectionName}/${doc.id}:`, err);
+        }
       }
     }
     return {
@@ -228387,6 +228387,201 @@ async function handleSweepInFlowHolds(req, res, options = {}) {
     };
   } catch (err) {
     return { ok: false, status: 500, error: "Failed to sweep in-flow holds." };
+  }
+}
+
+// server/handlers/staff-inventory-holds.ts
+init_firestore();
+init_zod();
+init_shared();
+init_firebase_admin();
+var STAFF_HOLD_MINUTES = 15;
+var holdRangeSchema = external_exports.object({
+  roomIds: external_exports.array(external_exports.string().trim().min(1).max(80)).min(1).max(50),
+  startDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/)
+}).strict();
+var holdIdSchema = external_exports.object({
+  holdId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/)
+}).strict();
+function parseRange(startDate, endDate) {
+  const start = /* @__PURE__ */ new Date(`${startDate}T00:00:00Z`);
+  const end = /* @__PURE__ */ new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    throw new Error("End date must be after start date.");
+  }
+  return { start, end };
+}
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+function staffUid(req) {
+  return String(req.staff?.uid || "").trim();
+}
+function isActiveStaffInventoryHold(data, now = /* @__PURE__ */ new Date()) {
+  const expiresAt = toDateOrNull(data?.expiresAt);
+  return data?.status === "active" && Boolean(expiresAt && expiresAt > now);
+}
+function serializeStaffInventoryHold(id, data, now = /* @__PURE__ */ new Date()) {
+  const expiresAt = toDateOrNull(data.expiresAt);
+  const status = data.status === "active" && (!expiresAt || expiresAt <= now) ? "expired" : data.status;
+  return {
+    id,
+    roomIds: Array.isArray(data.roomIds) ? data.roomIds.map(String) : [],
+    roomNumbers: Array.isArray(data.roomNumbers) ? data.roomNumbers.map(String) : [],
+    startDate: toDateOrNull(data.startDate)?.toISOString().slice(0, 10) || "",
+    endDate: toDateOrNull(data.endDate)?.toISOString().slice(0, 10) || "",
+    status,
+    expiresAt: expiresAt?.toISOString() || (/* @__PURE__ */ new Date(0)).toISOString(),
+    createdBy: String(data.createdBy || ""),
+    createdAt: toDateOrNull(data.createdAt)?.toISOString() || "",
+    updatedAt: toDateOrNull(data.updatedAt)?.toISOString() || "",
+    consumedAt: toDateOrNull(data.consumedAt)?.toISOString() || null,
+    releasedAt: toDateOrNull(data.releasedAt)?.toISOString() || null
+  };
+}
+async function hasActiveStaffInventoryHoldConflict(transaction, roomId, start, end, excludeHoldId) {
+  const snapshot = await transaction.get(
+    adminDb.collection("staffInventoryHolds").where("roomIds", "array-contains", roomId).where("status", "==", "active")
+  );
+  const now = /* @__PURE__ */ new Date();
+  return snapshot.docs.some((doc) => {
+    if (excludeHoldId && doc.id === excludeHoldId) return false;
+    const data = doc.data();
+    if (!isActiveStaffInventoryHold(data, now)) return false;
+    const holdStart = toDateOrNull(data.startDate);
+    const holdEnd = toDateOrNull(data.endDate);
+    return Boolean(holdStart && holdEnd && rangesOverlap(holdStart, holdEnd, start, end));
+  });
+}
+async function handleAcquireStaffInventoryHold(req, res) {
+  const parsed2 = holdRangeSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Choose valid rooms and dates." });
+  }
+  const roomIds = Array.from(new Set(parsed2.data.roomIds));
+  if (roomIds.length !== parsed2.data.roomIds.length) {
+    return res.status(400).json({ success: false, error: "Each room can only be selected once." });
+  }
+  try {
+    const { start, end } = parseRange(parsed2.data.startDate, parsed2.data.endDate);
+    const holdRef = adminDb.collection("staffInventoryHolds").doc();
+    const now = /* @__PURE__ */ new Date();
+    const expiresAt = new Date(now.getTime() + STAFF_HOLD_MINUTES * 6e4);
+    let roomNumbers = [];
+    await adminDb.runTransaction(async (transaction) => {
+      const rooms = [];
+      for (const roomId of roomIds) {
+        const roomSnap = await transaction.get(adminDb.collection("rooms").doc(roomId));
+        if (!roomSnap.exists) throw new Error("One of the selected rooms no longer exists.");
+        const room = roomSnap.data() || {};
+        if (room.isActive === false) throw new Error(`Room ${room.roomNumber || roomId} is inactive.`);
+        rooms.push({ id: roomId, data: room });
+      }
+      for (const room of rooms) {
+        const bookingsSnapshot = await transaction.get(
+          adminDb.collection("bookings").where("roomId", "==", room.id).where("status", "in", BOOKING_OCCUPYING_STATUSES)
+        );
+        const bookingConflict = bookingsSnapshot.docs.some((doc) => {
+          const data = doc.data();
+          if (!isBookingOccupyingRoom({ status: data.status, holdExpiresAt: data.holdExpiresAt }, now)) return false;
+          const checkIn = toDateOrNull(data.checkIn);
+          const checkOut = toDateOrNull(data.checkOut);
+          return Boolean(checkIn && checkOut && rangesOverlap(checkIn, checkOut, start, end));
+        });
+        if (bookingConflict) throw new Error(`Room ${room.data.roomNumber || room.id} was just booked for those dates.`);
+        const blocksSnapshot = await transaction.get(
+          adminDb.collection("roomBlocks").where("roomId", "==", room.id).where("status", "==", "active")
+        );
+        const blockConflict = blocksSnapshot.docs.some((doc) => {
+          const data = doc.data();
+          const blockStart = toDateOrNull(data.startDate);
+          const blockEnd = toDateOrNull(data.endDate);
+          return Boolean(blockStart && blockEnd && rangesOverlap(blockStart, blockEnd, start, end));
+        });
+        if (blockConflict) throw new Error(`Room ${room.data.roomNumber || room.id} is blocked for those dates.`);
+        if (await hasActiveStaffInventoryHoldConflict(transaction, room.id, start, end)) {
+          throw new Error(`Room ${room.data.roomNumber || room.id} is already held by another front-desk booking.`);
+        }
+      }
+      roomNumbers = rooms.map((room) => String(room.data.roomNumber || room.id));
+      transaction.set(holdRef, {
+        roomIds,
+        roomNumbers,
+        startDate: Timestamp.fromDate(start),
+        endDate: Timestamp.fromDate(end),
+        status: "active",
+        createdBy: staffUid(req),
+        createdAt: Timestamp.fromDate(now),
+        updatedAt: Timestamp.fromDate(now),
+        expiresAt: Timestamp.fromDate(expiresAt),
+        consumedAt: null,
+        releasedAt: null
+      });
+    });
+    return res.status(201).json({
+      success: true,
+      data: serializeStaffInventoryHold(holdRef.id, {
+        roomIds,
+        roomNumbers,
+        startDate: start,
+        endDate: end,
+        status: "active",
+        createdBy: staffUid(req),
+        createdAt: now,
+        updatedAt: now,
+        expiresAt,
+        consumedAt: null,
+        releasedAt: null
+      })
+    });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Could not hold those rooms." });
+  }
+}
+async function handleReleaseStaffInventoryHold(req, res) {
+  const parsed2 = holdIdSchema.safeParse(req.body || {});
+  if (!parsed2.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
+  try {
+    const ref = adminDb.collection("staffInventoryHolds").doc(parsed2.data.holdId);
+    await adminDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists) throw new Error("Hold not found.");
+      const data = snap.data() || {};
+      if (data.createdBy !== staffUid(req)) throw new Error("This hold belongs to another staff member.");
+      if (data.status !== "active") return;
+      const now = /* @__PURE__ */ new Date();
+      transaction.update(ref, {
+        status: "released",
+        releasedAt: Timestamp.fromDate(now),
+        updatedAt: Timestamp.fromDate(now)
+      });
+    });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Could not release the hold." });
+  }
+}
+async function handleExtendStaffInventoryHold(req, res) {
+  const parsed2 = holdIdSchema.safeParse(req.body || {});
+  if (!parsed2.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
+  try {
+    const ref = adminDb.collection("staffInventoryHolds").doc(parsed2.data.holdId);
+    let responseData = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists) throw new Error("Hold not found.");
+      const data = snap.data() || {};
+      if (data.createdBy !== staffUid(req)) throw new Error("This hold belongs to another staff member.");
+      if (!isActiveStaffInventoryHold(data)) throw new Error("This hold has expired. Return to the calendar and hold the rooms again.");
+      const now = /* @__PURE__ */ new Date();
+      const expiresAt = new Date(now.getTime() + STAFF_HOLD_MINUTES * 6e4);
+      transaction.update(ref, { expiresAt: Timestamp.fromDate(expiresAt), updatedAt: Timestamp.fromDate(now) });
+      responseData = serializeStaffInventoryHold(snap.id, { ...data, expiresAt, updatedAt: now });
+    });
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Could not extend the hold." });
   }
 }
 
@@ -228917,7 +229112,7 @@ function calculateCheckoutPoints(totalPrice, rewardsConfig) {
   const pointsPerHundred = Math.max(Number(rewardsConfig.pointsPerHundred || 0), 0);
   return Math.max(Math.floor(Math.max(totalPrice, 0) / 100 * pointsPerHundred), 0);
 }
-function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+function rangesOverlap2(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
 }
 function dateKeyFromDate(date) {
@@ -228967,7 +229162,7 @@ function getOccupancyConflictReason(input) {
   const existingCheckIn = toDateOrNull(input.bookingData.checkIn);
   const existingCheckOut = toDateOrNull(input.bookingData.checkOut);
   if (!existingCheckIn || !existingCheckOut) return null;
-  if (rangesOverlap(existingCheckIn, existingCheckOut, input.requestedCheckIn, input.requestedCheckOut)) {
+  if (rangesOverlap2(existingCheckIn, existingCheckOut, input.requestedCheckIn, input.requestedCheckOut)) {
     return "overlap";
   }
   if (hasLingeringCheckedInConflict({
@@ -228982,15 +229177,23 @@ function getOccupancyConflictReason(input) {
   }
   return null;
 }
-async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate) {
+async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate, allowedStaffHoldId) {
   const blocksQuery = adminDb.collection("roomBlocks").where("roomId", "==", roomId).where("status", "==", "active");
   const blocksSnapshot = await transaction.get(blocksQuery);
-  return blocksSnapshot.docs.some((doc) => {
+  const hasRoomBlock = blocksSnapshot.docs.some((doc) => {
     const data = doc.data();
     const start = toDateOrNull(data.startDate);
     const end = toDateOrNull(data.endDate);
-    return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
+    return Boolean(start && end && rangesOverlap2(start, end, checkInDate, checkOutDate));
   });
+  if (hasRoomBlock) return true;
+  return hasActiveStaffInventoryHoldConflict(
+    transaction,
+    roomId,
+    checkInDate,
+    checkOutDate,
+    allowedStaffHoldId
+  );
 }
 var lookupSchema = external_exports.preprocess(
   (body) => {
@@ -229713,7 +229916,7 @@ async function handleCreateBooking(req, res) {
             if (isExpiredPendingHold(bookingData2)) {
               const existingCheckIn = toDateOrNull(bookingData2.checkIn);
               const existingCheckOut = toDateOrNull(bookingData2.checkOut);
-              const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+              const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
               if (dateOverlaps) {
                 expiredHoldRetirements.push({
                   ref: doc.ref,
@@ -230970,7 +231173,8 @@ async function handleCreateWalkin(req, res) {
     // the same pattern as the public `/api/bookings/create`
     // path. When present, the server uses it as the
     // canonical idempotency key for the create transaction.
-    reservationId: requestedReservationId
+    reservationId: requestedReservationId,
+    staffHoldId: requestedStaffHoldId
   } = parsedWalkin.data;
   const walkinRoomLines = Array.isArray(requestedRooms) && requestedRooms.length > 0 ? requestedRooms.map((line) => ({
     roomId: String(line.roomId).trim(),
@@ -231099,6 +231303,30 @@ async function handleCreateWalkin(req, res) {
       }
       const roomRef = walkinAssignedRooms[0].ref;
       const roomData = walkinAssignedRooms[0].data;
+      let staffHoldRef = null;
+      if (requestedStaffHoldId) {
+        staffHoldRef = adminDb.collection("staffInventoryHolds").doc(requestedStaffHoldId);
+        const staffHoldSnap = await transaction.get(staffHoldRef);
+        if (!staffHoldSnap.exists) throw new Error("Front-desk room hold was not found.");
+        const staffHold = staffHoldSnap.data() || {};
+        if (String(staffHold.createdBy || "") !== String(req.staff?.uid || "")) {
+          throw new Error("This front-desk room hold belongs to another staff member.");
+        }
+        const consumedBySameReservation = staffHold.status === "consumed" && String(staffHold.reservationId || "") === effectiveReservationId;
+        if (!isActiveStaffInventoryHold(staffHold) && !consumedBySameReservation) {
+          throw new Error("Front-desk room hold has expired. Return to the calendar and hold the rooms again.");
+        }
+        const heldStart = toDateOrNull(staffHold.startDate);
+        const heldEnd = toDateOrNull(staffHold.endDate);
+        if (!heldStart || !heldEnd || heldStart.getTime() !== checkInDate.getTime() || heldEnd.getTime() !== checkOutDate.getTime()) {
+          throw new Error("Booking dates no longer match the front-desk room hold.");
+        }
+        const heldRoomIds = Array.isArray(staffHold.roomIds) ? staffHold.roomIds.map(String).sort() : [];
+        const requestedRoomIds = walkinAssignedRooms.map((room) => room.roomId).sort();
+        if (heldRoomIds.length !== requestedRoomIds.length || heldRoomIds.some((id, index) => id !== requestedRoomIds[index])) {
+          throw new Error("Selected rooms no longer match the front-desk room hold.");
+        }
+      }
       const walkinFingerprintRoomLines = walkinAssignedRooms.map((assigned) => ({
         type: String(assigned.data.type || "").trim(),
         quantity: 1,
@@ -231208,7 +231436,7 @@ async function handleCreateWalkin(req, res) {
           if (isExpiredPendingHold(bookingData2, now)) {
             const existingCheckIn = toDateOrNull(bookingData2.checkIn);
             const existingCheckOut = toDateOrNull(bookingData2.checkOut);
-            const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+            const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
             if (dateOverlaps) {
               expiredHoldRetirements.push({
                 ref: doc.ref,
@@ -231239,7 +231467,13 @@ async function handleCreateWalkin(req, res) {
         if (sawConflict) {
           throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, assigned.roomId, checkInDate, checkOutDate);
+        const hasBlockConflict = await hasActiveRoomBlockConflict(
+          transaction,
+          assigned.roomId,
+          checkInDate,
+          checkOutDate,
+          requestedStaffHoldId
+        );
         if (hasBlockConflict) {
           throw new Error("Room no longer available");
         }
@@ -231721,6 +231955,14 @@ async function handleCreateWalkin(req, res) {
         transaction.set(counterRef, { count: walkinRoomCount });
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      if (staffHoldRef) {
+        transaction.update(staffHoldRef, {
+          status: "consumed",
+          consumedAt: now,
+          updatedAt: now,
+          reservationId: effectiveReservationId
+        });
+      }
       for (let lineIdx = 0; lineIdx < walkinRoomCount; lineIdx++) {
         const assigned = walkinAssignedRooms[lineIdx];
         const lineFinancials = walkinRoomStayFinancials[lineIdx];
@@ -231920,13 +232162,13 @@ async function handleApplyBookingDiscount(req, res) {
         pointsRedeemedValue: pointsValue,
         finalTotal: totalPrice
       });
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const updates = {
         originalTotalPrice: subtotal,
         discountType,
         discountPct,
         discountVerified: Boolean(discountType),
-        discountVerifiedBy: discountType ? staffUid : null,
+        discountVerifiedBy: discountType ? staffUid2 : null,
         discountRejected: false,
         discountRejectedBy: null,
         discountRejectionReason: "",
@@ -231960,7 +232202,7 @@ async function handleApplyReservationDiscount(req, res) {
   if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
     return res.status(400).json({ success: false, error: "Invalid government discount type." });
   }
-  const staffUid = String(req.staff?.uid || "staff");
+  const staffUid2 = String(req.staff?.uid || "staff");
   let childRefs = [];
   try {
     const childSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationId).get();
@@ -232067,7 +232309,7 @@ async function handleApplyReservationDiscount(req, res) {
           discountType,
           discountPct,
           discountVerified: Boolean(discountType),
-          discountVerifiedBy: discountType ? staffUid : null,
+          discountVerifiedBy: discountType ? staffUid2 : null,
           discountRejected: false,
           discountRejectedBy: null,
           discountRejectionReason: "",
@@ -232111,7 +232353,7 @@ async function handleRemoveVoucher(req, res) {
   if (bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Invalid booking id." });
   }
-  const staffUid = String(req.staff?.uid || "staff");
+  const staffUid2 = String(req.staff?.uid || "staff");
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -232173,7 +232415,7 @@ async function handleRemoveVoucher(req, res) {
       const updates = {
         voucherCode: "",
         voucherDiscount: 0,
-        staffRemovedVoucherBy: staffUid,
+        staffRemovedVoucherBy: staffUid2,
         staffRemovedVoucherReason: reason,
         staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
         totalPrice: restoredTotalPrice,
@@ -232290,13 +232532,13 @@ async function handleSetLouReceived(req, res) {
       if (booking.paymentMethod !== "pay-at-hotel") {
         throw new Error("LOU flag only applies to chargeback bookings (paymentMethod: 'pay-at-hotel').");
       }
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const now = /* @__PURE__ */ new Date();
       const updates = {
         louReceived,
         ...louReceived ? {
           louReceivedAt: now,
-          louReceivedBy: staffUid
+          louReceivedBy: staffUid2
         } : {
           louReceivedAt: null,
           louReceivedBy: null
@@ -232338,12 +232580,12 @@ async function handleSetSpecialRequests(req, res) {
       if (!bookingSnap.exists) {
         throw new Error("Booking not found.");
       }
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const now = /* @__PURE__ */ new Date();
       const updates = {
         specialRequests: trimmedValue,
         specialRequestsUpdatedAt: now,
-        specialRequestsUpdatedBy: staffUid,
+        specialRequestsUpdatedBy: staffUid2,
         updatedAt: now
       };
       transaction.update(bookingRef, updates);
@@ -233123,7 +233365,7 @@ async function handleAddPayment(req, res) {
   }
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
-  const staffUid = req.staff?.uid || "staff";
+  const staffUid2 = req.staff?.uid || "staff";
   const paymentRecord = {
     type: "payment",
     amount: numericAmount,
@@ -233132,7 +233374,7 @@ async function handleAddPayment(req, res) {
     transactionReference: safeTransactionReference,
     reason: null,
     approvedBy: null,
-    recordedBy: staffUid,
+    recordedBy: staffUid2,
     recordedAt: /* @__PURE__ */ new Date()
   };
   if (!safeTransactionReference) delete paymentRecord.transactionReference;
@@ -233220,7 +233462,7 @@ async function handleAddPayment(req, res) {
               write: {
                 status: "payment-confirmed",
                 paymentConfirmedAt: now,
-                handledBy: staffUid,
+                handledBy: staffUid2,
                 updatedAt: now
               },
               newStatus: "payment-confirmed"
@@ -233244,7 +233486,7 @@ async function handleAddPayment(req, res) {
         const updatedAt = now;
         Object.assign(bookingUpdates, {
           status: "payment-confirmed",
-          handledBy: staffUid,
+          handledBy: staffUid2,
           paymentConfirmedAt: now,
           updatedAt
         });
@@ -233275,7 +233517,7 @@ async function handleAddPayment(req, res) {
           bookingId,
           bookingRef: bookingData2.bookingRef,
           description: `Settled Stay Earnings (${bookingData2.bookingRef})`,
-          by: staffUid,
+          by: staffUid2,
           createdAt: awardedAt
         });
       }
@@ -233750,7 +233992,7 @@ async function handleVerifyAndRecordPayment(req, res) {
   const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const paymentNote = safeNote || "Verified payment proof";
-  const staffUid = req.staff?.uid || "staff";
+  const staffUid2 = req.staff?.uid || "staff";
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     let bookingData2 = null;
@@ -233831,7 +234073,7 @@ async function handleVerifyAndRecordPayment(req, res) {
               write: {
                 status: "payment-confirmed",
                 paymentConfirmedAt: now,
-                handledBy: staffUid,
+                handledBy: staffUid2,
                 updatedAt: now
               },
               newStatus: "payment-confirmed"
@@ -233853,7 +234095,7 @@ async function handleVerifyAndRecordPayment(req, res) {
         transactionReference: safeTransactionReference,
         reason: null,
         approvedBy: null,
-        recordedBy: staffUid,
+        recordedBy: staffUid2,
         recordedAt: /* @__PURE__ */ new Date()
       };
       if (!safeTransactionReference) delete paymentRecord.transactionReference;
@@ -233864,7 +234106,7 @@ async function handleVerifyAndRecordPayment(req, res) {
       };
       if (targetPostStatus !== data.status) {
         bookingUpdates.status = targetPostStatus;
-        bookingUpdates.handledBy = staffUid;
+        bookingUpdates.handledBy = staffUid2;
         bookingUpdates.paymentConfirmedAt = now;
       }
       if (Object.keys(bookingUpdates).length > 0) {
@@ -233917,7 +234159,7 @@ async function handleVerifyAndRecordPayment(req, res) {
         amount: numericAmount,
         method,
         transactionReference: safeTransactionReference,
-        recordedBy: staffUid,
+        recordedBy: staffUid2,
         totalCollected,
         status: fullyPaid ? "payment-confirmed" : "payment-uploaded",
         fullyPaid,
@@ -234984,7 +235226,7 @@ async function handleRescheduleBooking(req, res) {
       if (room.status === "blocked") {
         const blockedFrom = toDateOrNull(room.blockedFrom);
         const blockedTo = toDateOrNull(room.blockedTo);
-        const windowActive = blockedFrom && blockedTo ? rangesOverlap(blockedFrom, blockedTo, checkInDate, checkOutDate) : true;
+        const windowActive = blockedFrom && blockedTo ? rangesOverlap2(blockedFrom, blockedTo, checkInDate, checkOutDate) : true;
         if (windowActive) throw new Error("Target room is blocked for those dates.");
       }
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
@@ -235001,7 +235243,7 @@ async function handleRescheduleBooking(req, res) {
         if (isExpiredPendingHold(docData, now)) {
           const existingCheckIn = toDateOrNull(docData.checkIn);
           const existingCheckOut = toDateOrNull(docData.checkOut);
-          const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+          const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
           if (dateOverlaps) {
             expiredHoldRetirements.push({
               ref: doc.ref,
@@ -235519,7 +235761,7 @@ async function handleAddRoomToReservation(req, res) {
       if (targetRoom.status === "blocked") {
         const blockedFrom = toDateOrNull(targetRoom.blockedFrom);
         const blockedTo = toDateOrNull(targetRoom.blockedTo);
-        const windowActive = blockedFrom && blockedTo ? rangesOverlap(blockedFrom, blockedTo, headerCheckIn, headerCheckOut) : true;
+        const windowActive = blockedFrom && blockedTo ? rangesOverlap2(blockedFrom, blockedTo, headerCheckIn, headerCheckOut) : true;
         if (windowActive) {
           throw new Error("Target room is blocked for those dates.");
         }
@@ -235971,6 +236213,7 @@ async function handleRoomAvailability(req, res) {
   try {
     const overlapSnapshot = await adminDb.collection("bookings").where("status", "in", ACTIVE_STATUSES).where("checkIn", "<", reqEnd).get();
     const blocksSnapshot = await adminDb.collection("roomBlocks").where("status", "==", "active").where("startDate", "<", reqEnd).get();
+    const staffHoldsSnapshot = await adminDb.collection("staffInventoryHolds").where("status", "==", "active").where("startDate", "<", reqEnd).get();
     const bookedRanges = [];
     overlapSnapshot.forEach((docSnap) => {
       const data = docSnap.data();
@@ -235998,6 +236241,20 @@ async function handleRoomAvailability(req, res) {
       const bEnd = /* @__PURE__ */ new Date(`${endIso}T00:00:00Z`);
       if (bStart < reqEnd && bEnd > reqStart) {
         bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "blocked" });
+      }
+    });
+    staffHoldsSnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (!isActiveStaffInventoryHold(data)) return;
+      const startIso = toIsoDate(data.startDate);
+      const endIso = toIsoDate(data.endDate);
+      const roomIds = Array.isArray(data.roomIds) ? data.roomIds.map(String) : [];
+      if (!startIso || !endIso || roomIds.length === 0) return;
+      const holdStart = /* @__PURE__ */ new Date(`${startIso}T00:00:00Z`);
+      const holdEnd = /* @__PURE__ */ new Date(`${endIso}T00:00:00Z`);
+      if (!(holdStart < reqEnd && holdEnd > reqStart)) return;
+      for (const roomId of roomIds) {
+        bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "staff-hold" });
       }
     });
     return res.status(200).json({
@@ -236033,6 +236290,13 @@ var updateBlockSchema = blockSchema.extend({
 var cancelBlockSchema = external_exports.object({
   blockId: external_exports.string().trim().min(1).max(80)
 });
+var bulkBlockSchema = external_exports.object({
+  roomIds: external_exports.array(external_exports.string().trim().min(1).max(80)).min(1).max(50),
+  startDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: external_exports.string().trim().min(1).max(120),
+  notes: external_exports.string().trim().max(500).optional().default("")
+}).strict();
 function parseStayRange(startDate, endDate) {
   const start = /* @__PURE__ */ new Date(`${startDate}T00:00:00Z`);
   const end = /* @__PURE__ */ new Date(`${endDate}T00:00:00Z`);
@@ -236070,6 +236334,61 @@ async function assertRoomIsFreeForBlock(transaction, roomId, start, end, exclude
   });
   if (blockConflict) {
     throw new Error("These dates already overlap another active block.");
+  }
+  if (await hasActiveStaffInventoryHoldConflict(transaction, roomId, start, end)) {
+    throw new Error("These dates are temporarily held for a front-desk booking.");
+  }
+}
+async function handleCreateBulkRoomBlocks(req, res) {
+  const parsed2 = bulkBlockSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Please choose rooms, valid dates, and a reason." });
+  }
+  const roomIds = Array.from(new Set(parsed2.data.roomIds));
+  if (roomIds.length !== parsed2.data.roomIds.length) {
+    return res.status(400).json({ success: false, error: "Each room can only be selected once." });
+  }
+  try {
+    const { start, end } = parseStayRange(parsed2.data.startDate, parsed2.data.endDate);
+    const batchId = adminDb.collection("roomBlockBatches").doc().id;
+    const blockIds = [];
+    await adminDb.runTransaction(async (transaction) => {
+      const resolvedRooms = [];
+      for (const roomId of roomIds) {
+        const roomDoc = await transaction.get(adminDb.collection("rooms").doc(roomId));
+        if (!roomDoc.exists) throw new Error("One of the selected rooms was not found.");
+        const room = roomDoc.data() || {};
+        if (room.isActive === false) throw new Error(`Room ${room.roomNumber || roomId} is inactive.`);
+        resolvedRooms.push({ id: roomId, data: room });
+      }
+      for (const room of resolvedRooms) {
+        await assertRoomIsFreeForBlock(transaction, room.id, start, end);
+      }
+      const now = /* @__PURE__ */ new Date();
+      for (const room of resolvedRooms) {
+        const blockRef = adminDb.collection("roomBlocks").doc();
+        blockIds.push(blockRef.id);
+        transaction.set(blockRef, {
+          batchId,
+          roomId: room.id,
+          roomNumber: String(room.data.roomNumber || ""),
+          roomType: String(room.data.type || ""),
+          startDate: Timestamp.fromDate(start),
+          endDate: Timestamp.fromDate(end),
+          reason: parsed2.data.reason,
+          notes: parsed2.data.notes || "",
+          status: "active",
+          createdBy: req.staff?.uid || req.staff?.email || "staff",
+          createdAt: now,
+          updatedAt: now,
+          cancelledAt: null,
+          cancelledBy: null
+        });
+      }
+    });
+    return res.status(200).json({ success: true, batchId, blockIds });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Failed to block dates." });
   }
 }
 async function handleCreateRoomBlock(req, res) {
@@ -238253,13 +238572,13 @@ async function handleDeliverStoreOrder(req, res) {
         throw new Error("INVALID_ORDER_TOTAL");
       }
       const deliveredAt = /* @__PURE__ */ new Date();
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const isDirectPaid = order.paymentMethod !== "add-to-bill";
       transaction.update(orderRef, {
         status: "delivered",
         deliveredAt,
         updatedAt: deliveredAt,
-        handledBy: staffUid
+        handledBy: staffUid2
       });
       if (isDirectPaid) {
         const tenderRef = orderRef.collection("payments").doc("delivery-tender");
@@ -238270,7 +238589,7 @@ async function handleDeliverStoreOrder(req, res) {
           note: `Direct store payment for ${String(order.orderRef || orderId)}`.slice(0, 500),
           reason: null,
           approvedBy: null,
-          recordedBy: staffUid,
+          recordedBy: staffUid2,
           recordedAt: deliveredAt,
           source: "store-order",
           sourceId: orderId,
@@ -238517,7 +238836,7 @@ async function handleConfirmStoreOrder(req, res) {
   if (orderRef.length === 0 || orderRef.length > MAX_ORDER_REF_LENGTH) {
     return res.status(400).json({ success: false, error: "Invalid order reference." });
   }
-  const staffUid = String(req.staff?.uid || "staff");
+  const staffUid2 = String(req.staff?.uid || "staff");
   try {
     let confirmedOrder = null;
     await adminDb.runTransaction(async (transaction) => {
@@ -238563,7 +238882,7 @@ async function handleConfirmStoreOrder(req, res) {
       transaction.update(orderRefDoc, {
         status: "confirmed",
         stockDecrementedAt: /* @__PURE__ */ new Date(),
-        handledBy: staffUid,
+        handledBy: staffUid2,
         updatedAt: /* @__PURE__ */ new Date()
       });
       confirmedOrder = { ...orderData, status: "confirmed", stockDecrementedAt: /* @__PURE__ */ new Date() };
@@ -238580,7 +238899,7 @@ async function handleConfirmStoreOrder(req, res) {
         await sendStoreOrderTrigger("store-order-confirmed", {
           ...confirmedOrder,
           guestEmail,
-          handledBy: staffUid
+          handledBy: staffUid2
         });
       } catch (emailErr) {
         console.error("Failed to send store confirmation email:", emailErr);
@@ -239922,7 +240241,7 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleAddRoomToReservation(req, res);
   }
-  if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
+  if (domain === "room-blocks" && ["create", "create-bulk", "update", "cancel"].includes(action) && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`room-blocks-${action}:${ip}`, 60, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many room block requests. Please try again in a minute." });
     }
@@ -239932,8 +240251,22 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     if (action === "create") return await handleCreateRoomBlock(req, res);
+    if (action === "create-bulk") return await handleCreateBulkRoomBlocks(req, res);
     if (action === "update") return await handleUpdateRoomBlock(req, res);
     return await handleCancelRoomBlock(req, res);
+  }
+  if (domain === "staff-inventory-holds" && ["acquire", "extend", "release"].includes(action) && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staff-inventory-holds-${action}:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many room hold requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    if (action === "acquire") return await handleAcquireStaffInventoryHold(req, res);
+    if (action === "extend") return await handleExtendStaffInventoryHold(req, res);
+    return await handleReleaseStaffInventoryHold(req, res);
   }
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkout:${ip}`, 30, 6e4)) {

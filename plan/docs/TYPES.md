@@ -87,6 +87,7 @@ SeasonalRateOverride {
 
 RoomBlock {
   id: string
+  batchId?: string | null        // shared by blocks from one bulk Calendar confirmation
   roomId: string
   roomNumber: string
   roomType: string
@@ -515,6 +516,31 @@ The `Booking` doc also carries two optional fields stamped at create time (when 
 - `inFlowHoldMinutes: number | null` — snapshot of `IN_FLOW_HOLD_MINUTES` at create time, so future reports can attribute expired holds to a specific window even if the constant changes
 
 Both fields are `null` for walk-in bookings (no in-flow hold — the desk has the keys) and for legacy pre-hold-banner callers.
+
+---
+
+## Staff Inventory Hold
+
+Hard inventory lock created by the admin Calendar's **Hold & book** action. It is not interchangeable with the public soft `BookingHold` above.
+
+```
+StaffInventoryHold {
+  id: string
+  roomIds: string[]
+  roomNumbers: string[]
+  startDate: string                       // YYYY-MM-DD, inclusive
+  endDate: string                         // YYYY-MM-DD, exclusive
+  status: "active" | "consumed" | "released" | "expired"
+  createdBy: string                       // staff Firebase Auth UID
+  createdAt: string
+  updatedAt: string
+  expiresAt: string                       // ISO timestamp; 15-minute window
+  consumedAt: string | null
+  releasedAt: string | null
+}
+```
+
+The server may additionally stamp `reservationId` when consumption succeeds. Admin clients receive the serialized ISO-date shape; Firestore stores date fields as timestamps.
 
 ---
 

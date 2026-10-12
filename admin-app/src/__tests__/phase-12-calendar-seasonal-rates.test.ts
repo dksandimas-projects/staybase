@@ -26,7 +26,7 @@ describe("Phase 12 — calendar grid and seasonal rate overrides", () => {
     expect(calendarSrc).toMatch(/handleOpenDateClick/);
     expect(calendarSrc).toMatch(/rangeIncludesDate\(selection,\s*day\)/);
     expect(calendarSrc).toMatch(/Block dates/);
-    expect(calendarSrc).toMatch(/Book dates/);
+    expect(calendarSrc).toMatch(/Hold &amp; book/);
     expect(calendarSrc).toMatch(/Move booking/);
     expect(calendarSrc).toMatch(/roomBlockedOnLegacy/);
   });

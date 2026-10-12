@@ -78,7 +78,9 @@ describe("MRB-07 — New Booking modal: multi-room reservation", () => {
     expect(bookingsPageSrc).toMatch(
       /const walkinReservationIsValid = walkinRoomStayIssues\.every\(\(issue\) => issue === null\)/
     );
-    expect(bookingsPageSrc).toMatch(/disabled=\{!walkinReservationIsValid \|\| isWalkinSubmitting\}/);
+    expect(bookingsPageSrc).toMatch(
+      /disabled=\{!walkinReservationIsValid \|\| isWalkinSubmitting \|\| isStaffHoldUpdating \|\| Boolean\(activeStaffHoldId && staffHoldSecondsRemaining <= 0\)\}/
+    );
   });
 
   it("prices every room stay against its own type and sums them for the preview", () => {
