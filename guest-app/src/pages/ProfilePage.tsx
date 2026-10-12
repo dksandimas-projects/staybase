@@ -222,7 +222,16 @@ export function ProfilePage() {
                   <p className="text-3xl font-heading mt-1" style={{ color: config.colors.primary }}>
                     {memberProfile.rewardsPoints?.toLocaleString() || "0"}
                   </p>
-                  <p className="text-xs opacity-60 mt-1">Standard Member</p>
+                  {/*
+                    Per Phase 7 (2026-10-13): tier name reads from
+                    `memberProfile.currentLevel` (Phase 3 cache
+                    field) instead of the legacy `tier` field.
+                    Falls back to "Member" for pre-Phase-2 docs
+                    that haven't been touched by a checkout yet.
+                  */}
+                  <p className="text-xs opacity-60 mt-1" data-testid="profile-tier-name">
+                    {memberProfile.currentLevel?.name ?? "Member"}
+                  </p>
                 </div>
               </div>
               <div className="mt-5 flex min-w-0 items-center gap-4 border-t border-white/20 pt-4 text-xs opacity-70">

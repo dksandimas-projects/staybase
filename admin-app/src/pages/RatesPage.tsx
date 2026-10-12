@@ -787,6 +787,39 @@ export function RatesPage() {
   // Voucher Columns
   const voucherColumns: Array<DataTableColumn<Voucher>> = [
     { key: "code", header: "Voucher Code" },
+    // Per Phase 5 (2026-10-12): the "Kind" column distinguishes
+    // promo vouchers (admin-created) from reward vouchers
+    // (system-issued via tier trigger / welcome bonus). Reward
+    // vouchers get a distinct badge color so admins can scan-
+    // filter at a glance.
+    {
+      key: "kind",
+      header: "Kind",
+      render: (row) => (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+          row.kind === "reward"
+            ? "bg-amber-100 text-amber-900"
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {row.kind === "reward"
+            ? row.valueType === "free-night" ? "Free Night" : "Reward"
+            : "Promo"}
+        </span>
+      )
+    },
+    // Member column — only populated for reward vouchers. The
+    // memberNumber (e.g. "SR-10023") is the stable identifier
+    // admin would use to look up the member on the Members
+    // page.
+    {
+      key: "memberNumber",
+      header: "Member",
+      render: (row) => (
+        <span className="text-xs text-gray-700">
+          {row.memberNumber ? row.memberNumber : <span className="text-gray-400">—</span>}
+        </span>
+      )
+    },
     {
       key: "discountValue",
       header: "Value",

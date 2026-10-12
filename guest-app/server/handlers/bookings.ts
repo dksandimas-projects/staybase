@@ -229,6 +229,13 @@ import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/bookin
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
 import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange, generateBookingRef } from "@spark-inn/shared";
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+// decision pending): `resolveCurrentLevel` + `calculatePointsWithMultiplier`
+// are the canonical tier-derivation + multiplier helpers. Both
+// are defensive (null/undefined inputs return safe defaults) so
+// they don't crash on legacy `rewardsConfig` docs that pre-date
+// the Phase 2 fields.
+import { resolveCurrentLevel, calculatePointsWithMultiplier } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -2837,11 +2844,42 @@ export async function handleCreateBooking(req: any, res: any) {
       // distinct from the in-scope variable.
       let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): the tier discount takes precedence over
+        // the global `memberDiscountPct` for tier-aware members.
+        // The tier comes from the member's `currentLevel` cache
+        // (refreshed at checkout + register by the handler in
+        // Phase 3 PR). The global fallback is the existing legacy
+        // path — tier-less members still get the configured
+        // `memberDiscountPct`. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        //
+        // Decision (2026-10-12): a tier with `discountPct: 0` does
+        // NOT fall back to the global — the admin set 0
+        // deliberately. The "tier takes precedence" rule is
+        // honored even when the tier's discount is 0 (which means
+        // "no member discount for this tier", e.g. a future
+        // "Points-only" tier).
+        const memberRef = adminDb.doc(`members/${detectedMemberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            // Tier-aware member: tier discount wins (even when
+            // tier says 0 — admin's deliberate choice).
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
+            // Tier-less member: fall back to the global.
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -10199,6 +10237,26 @@ export async function handleCheckoutBooking(req: any, res: any) {
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
     }
 
+    // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+    // decision pending): at checkout, derive the member's current
+    // tier from the live `rewardsConfig.levels[]` + the member's
+    // stored `completedStays`. The tier's `pointsMultiplier` is
+    // applied to the base eligible-points so the credit matches
+    // the tier displayed on the rewards portal. The
+    // `completedStays++` and `currentLevel` cache refresh happen
+    // inside the same transaction as the points credit — the
+    // three writes are atomic so a retry can't double-count.
+    // The multiplier applies to BOTH the `awardNow` and the
+    // `pendingLoyaltyPoints` paths — when the outstanding payment
+    // settles later (the `settlesCheckedOutFolio` branch in
+    // handleAddPayment), the same multiplied value is credited
+    // (the checkout-time `pendingLoyaltyPoints` snapshot is the
+    // source of truth — no recomputation needed at settle time).
+    const memberCurrentLevelBefore = memberDoc?.exists && resolveCurrentLevel
+      ? resolveCurrentLevel(rewardsConfig?.levels, Number(memberDoc.data()?.completedStays || 0))
+      : null;
+    const memberTierMultiplier = memberCurrentLevelBefore?.pointsMultiplier ?? 1;
+
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef);
       if (!freshBookingDoc.exists) {
@@ -10223,9 +10281,19 @@ export async function handleCheckoutBooking(req: any, res: any) {
       const collectedTotal = folioSnapshot.collectedTotal;
       const checkoutFolioTotal = folioSnapshot.folioTotal;
       checkedOutWithBalance = folioSnapshot.computedBalance;
-      eligiblePoints = memberId
+      // Per Phase 2 (2026-10-12): the base `eligiblePoints` is
+      // multiplied by the member's CURRENT tier (read pre-
+      // transaction from `rewardsConfig.levels[]` + member's
+      // pre-checkout `completedStays`). The multiplied value is
+      // what gets credited (or stored as `pendingLoyaltyPoints`
+      // if the guest has an outstanding balance). The multiplier
+      // is applied here once — the settled-credit branch at
+      // line 8109 reads `pendingLoyaltyPoints` as-is so no
+      // double-multiplication occurs.
+      const baseEligiblePoints = memberId
         ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
         : 0;
+      eligiblePoints = calculatePointsWithMultiplier(baseEligiblePoints, memberTierMultiplier);
 
       // UCO-02: require reason for unpaid checkout
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
@@ -10411,23 +10479,134 @@ export async function handleCheckoutBooking(req: any, res: any) {
         });
       }
 
-      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
-        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
-        transaction.update(memberRef, {
-          rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: now
-        });
+      if (canAwardPoints && memberId && memberRef && memberDocInTransaction?.exists) {
+        // Per Phase 2 (2026-10-12): atomic increment of the
+        // member's stay-completion counter + refresh of the
+        // `currentLevel` cache to the new tier (post-increment).
+        // Both writes share the same `transaction.update` so a
+        // transaction retry can't double-count or leave the
+        // cache out of sync. The tier is re-derived using the
+        // post-increment `completedStays` so the cached snapshot
+        // reflects what the next booking will see.
+        //
+        // The increment runs on BOTH paths (immediate credit
+        // AND pending-payment deferral) — the stay IS completed
+        // either way, and the tier progress should be visible
+        // to the member immediately even if the points lag
+        // behind. The settle-payment branch (line 8109+) only
+        // touches `rewardsPoints` + writes the `pointsHistory`
+        // entry; it does NOT touch `completedStays` or
+        // `currentLevel` so no double-increment.
+        const priorCompletedStays = Number(memberDocInTransaction.data()?.completedStays || 0);
+        const nextCompletedStays = priorCompletedStays + 1;
+        const nextCurrentLevel = resolveCurrentLevel(rewardsConfig?.levels, nextCompletedStays);
 
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
-        transaction.set(historyRef, {
-          type: "earn",
-          points: pointsAwarded,
-          bookingId,
-          bookingRef: bookingData.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
-          by: checkedOutBy,
-          createdAt: new Date()
-        });
+        if (awardNow) {
+          // Immediate-credit path: increment rewardsPoints +
+          // write the pointsHistory entry.
+          const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: new Date()
+          });
+        } else {
+          // Deferred-credit path (guest has an outstanding
+          // balance): only bump the stay counter + refresh the
+          // tier cache. The `pendingLoyaltyPoints` snapshot on
+          // the booking + the settle-payment branch handle the
+          // actual credit when the balance clears.
+          transaction.update(memberRef, {
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+        }
+
+        // Per Phase 5 of the Spark Rewards tier system
+        // (2026-10-12, decision pending): free-night reward
+        // voucher. When `rewardsConfig.freeNightEvery > 0` AND
+        // `completedStays % freeNightEvery === 0`, write a
+        // single-use 100%-off voucher (canonical reward voucher
+        // shape: `kind: "reward"`, `valueType: "free-night"`)
+        // valid for 90 days. The voucher write lives INSIDE the
+        // existing transaction so a retry can't double-award —
+        // the nextCompletedStays computation already happened,
+        // so the trigger condition is stable across retries.
+        // The voucher code is deterministic from the
+        // memberNumber + nextCompletedStays so the member can
+        // find it on the rewards portal (Phase 7).
+        //
+        // Decision (2026-10-12): the trigger fires for BOTH the
+        // immediate-credit and the deferred-credit paths — the
+        // stay IS completed either way. If the booking is
+        // later cancelled post-settlement (the MRB-05 path),
+        // the voucher stays valid (cancelled stays still count
+        // toward free-night per Phase 3's clawback philosophy).
+        // Per EC-02 (2026-08-21) pattern: the trigger is gated
+        // on `nextCompletedStays > 0` to avoid the "0 % N === 0"
+        // false-positive when freeNightEvery > 0 and the member
+        // has 0 stays.
+        const freeNightEvery = Number(rewardsConfig?.freeNightEvery || 0);
+        if (
+          freeNightEvery > 0 &&
+          nextCompletedStays > 0 &&
+          nextCompletedStays % freeNightEvery === 0
+        ) {
+          const memberNumber =
+            memberDocInTransaction.data()?.memberNumber ||
+            `M${memberId.slice(0, 8)}`;
+          const freeNightCode = `FREENIGHT-${memberNumber}-${nextCompletedStays}`;
+          const freeNightVoucherRef = adminDb.collection("vouchers").doc(freeNightCode);
+          // 90-day expiry — long enough for a member to plan a
+          // future stay, short enough that abandoned rewards
+          // don't accumulate indefinitely. Matches the
+          // spec copy "Free night every N stays" intent.
+          const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+          transaction.set(freeNightVoucherRef, {
+            code: freeNightCode,
+            // Phase 5 discriminator — pre-Phase-5 promo vouchers
+            // are missing these (treated as "promo" + valueType =
+            // discountType on read).
+            kind: "reward",
+            valueType: "free-night",
+            // Backward-compat with the existing percent/flat
+            // discount math — `discountType: "percent"` +
+            // `discountValue: 100` produces a 100% off discount.
+            // `calculateVoucherDiscount` caps at subtotal so any
+            // over-discount rounds to 0.
+            discountType: "percent",
+            discountValue: 100,
+            usageCap: 1,
+            usageCount: 0,
+            expiresAt,
+            // Empty array = applies to all room types (per
+            // VOU-03 all-or-none rule).
+            applicableRoomTypes: [],
+            isActive: true,
+            guestEmail: memberDocInTransaction.data()?.email || null,
+            // Phase 5 back-link fields for member portal display
+            // + admin "Reward vouchers" filter.
+            memberId,
+            memberNumber,
+            rewardSource: "free-night-tier",
+            createdBy: checkedOutBy || "system",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
       }
     });
 
@@ -11678,11 +11857,30 @@ export async function handleRescheduleBooking(req: any, res: any) {
 
       let appliedMemberDiscountPct = 0;
       if (booking.memberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): same tier-precedence rule as
+        // `handleCreateBooking` — the tier's `discountPct` wins
+        // over the global `memberDiscountPct` for tier-aware
+        // members. See the comment in handleCreateBooking for the
+        // decision rationale. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        const memberRef = adminDb.doc(`members/${booking.memberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }

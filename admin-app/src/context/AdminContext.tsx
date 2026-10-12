@@ -483,6 +483,17 @@ export interface Voucher {
   // voucher-issued email is fired (server-rendered, with the
   // code in a large monospace block).
   guestEmail: string | null;
+  // Per Phase 5 of the Spark Rewards tier system (2026-10-12,
+  // decision pending): reward voucher discriminator + Phase 2
+  // back-link fields. Pre-Phase-5 promo vouchers are missing
+  // these (treated as `kind: "promo"`, `valueType:
+  // discountType` on read) — non-breaking for existing
+  // deployments.
+  kind?: "promo" | "reward";
+  valueType?: "percent" | "flat" | "free-night";
+  memberId?: string | null;
+  memberNumber?: string | null;
+  rewardSource?: "free-night-tier" | "welcome" | null;
 }
 
 export interface CorporateCode {
@@ -3014,6 +3025,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             createdBy: data.createdBy || "",
             createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
             guestEmail: data.guestEmail || null,
+            // Per Phase 5 (2026-10-12): reward voucher fields.
+            // Pre-Phase-5 promo vouchers are missing these —
+            // treat as the legacy "promo" kind with valueType
+            // matching their discountType.
+            kind: data.kind || "promo",
+            valueType: data.valueType || data.discountType || "flat",
+            memberId: data.memberId || null,
+            memberNumber: data.memberNumber || null,
+            rewardSource: data.rewardSource || null,
           });
         });
 

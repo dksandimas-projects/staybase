@@ -14,6 +14,14 @@ import {
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import config from "@config";
 import { auth, db } from "../firebase/config";
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+// decision pending): the `MemberProfile` shape gains two new
+// fields — `completedStays` (counter, default 0) and
+// `currentLevel` (cached `LevelDef` snapshot, default null).
+// Both are optional on the `Member` server-side doc so a
+// legacy pre-Phase-2 member still parses through the snapshot
+// listener without a schema migration.
+import type { LevelDef } from "@spark-inn/shared";
 
 export interface MemberProfile {
   uid: string;
@@ -28,6 +36,9 @@ export interface MemberProfile {
   memberSince: string;
   authProvider: string;
   photoUrl: string;
+  // Phase 2 additions (both optional — legacy docs are valid):
+  completedStays?: number;
+  currentLevel?: LevelDef | null;
 }
 
 interface GuestAuthContextValue {

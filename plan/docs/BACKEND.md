@@ -250,7 +250,7 @@ Single-document collections holding dynamic configuration:
 - `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`.
 - `settings/websiteContent`: Editable homepage, about, corporate, and legal page copy.
 - `settings/breakfastConfig`: Silog menu items & daily prep settings.
-- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage.
+- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage, **Phase 2 (2026-10-12)**: `welcomePoints`, `minPointsToRedeem`, `pointsCanPayUpToBillPct`, `freeNightEvery`, `levels[]` (tier program — name, fromStays, discountPct, pointsMultiplier, perks). See `shared/schemas/rewardsConfig.ts` for the validation contract and `plan/features/SPARK-REWARDS.md §Phase 2` for the rollout sequence.
 
 ---
 
@@ -307,6 +307,11 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/project/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
 | `createdBy` | string | Audit — staff UID |
 | `createdAt` / `updatedAt` | timestamp | Audit |
+| `kind` | `"promo"` \| `"reward"` | **Phase 5 (2026-10-12)**: voucher discriminator. `"promo"` is the legacy default (admin-created discount). `"reward"` is system-issued from the tier program (currently `"free-night-tier"`; `"welcome"` reserved for Phase 6). Absent = treat as `"promo"`. |
+| `valueType` | `"percent"` \| `"flat"` \| `"free-night"` | **Phase 5 (2026-10-12)**: canonical reward type. For `"reward"` vouchers, this is `"free-night"` (uses `discountType: "percent"` + `discountValue: 100` to produce a 100% off discount). For pre-Phase-5 promo vouchers, absent = treated as `discountType`. |
+| `memberId` | string \| null | **Phase 5 (2026-10-12)**: back-link to `members/{uid}` for reward vouchers. Null for promo vouchers. Used by the member portal (Phase 7) to surface available free-night vouchers. |
+| `memberNumber` | string \| null | **Phase 5 (2026-10-12)**: denormalized `SR-XXXXX` for display. Null for promo vouchers. |
+| `rewardSource` | `"free-night-tier"` \| `"welcome"` \| null | **Phase 5 (2026-10-12)**: which Phase 2 feature created the voucher. `"free-night-tier"` is wired by `handleCheckoutBooking` when `completedStays % freeNightEvery === 0` (canonical Phase 5 voucher shape). `"welcome"` reserved for Phase 6 (not yet wired). |
 
 The doc ID is the code string by convention. The validate + create handlers both honour a `code`-field fallback for codes whose Firestore doc ID differs from the public `code` field (BI-10). Public reads go through `POST /api/validate/voucher` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, discountType, discountValue }` — never `usageCount`, `usageCap`, `expiresAt`, or `applicableRoomTypes`. The validator at `shared/utils/vouchers.ts:11` enforces the `isActive` / `expiresAt` / `usageCap` / `applicableRoomTypes` checks. Firestore rules: read/write staff-only — see `plan/docs/SECURITY.md §vouchers`.
 
@@ -350,9 +355,11 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `email` / `firstName` / `lastName` / `phone` | string | Member profile data |
 | `rewardsPoints` | number | Current points balance |
 | `status` | string | `"active"` \| `"suspended"` |
+| `completedStays` | number | **Phase 2 (2026-10-12)**: counter incremented atomically at checkout (same `runTransaction` as the points credit, per FOL-03 read-before-write). The increment runs on both the immediate-credit and the pending-payment-deferral paths — the stay IS completed either way. Not decremented on post-settlement cancellation (MRB-05 philosophy: "stay happened, financial reversal is separate"). Absent = 0 (legacy / pre-Phase-2). |
+| `currentLevel` | object \| null | **Phase 2 (2026-10-12)**: cached `LevelDef` snapshot — refreshed at checkout (post-`completedStays++`) + at member registration (initial base-tier snapshot via `resolveCurrentLevel(levels, 0)`). Null for members below the lowest configured tier's threshold OR for deployments without tiers configured (legacy / off state). The booking engine falls back to the legacy global `memberDiscountPct` for tier-less members. |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
-Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points.
+Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points. **Phase 6 (2026-10-13)**: a single deterministic doc ID `welcome` is reserved for the member-onboarding credit (one-shot, written by `handleRegisterMember` when `rewardsConfig.welcomePoints > 0`). The deterministic ID enables a single `.get()` idempotency check inside the transaction — no query fan-out.
 
 ---
 

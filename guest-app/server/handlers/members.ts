@@ -3,7 +3,15 @@ import {
   BOOKING_REF_REGEX,
   RESERVATION_REF_REGEX,
   generateMemberNumber,
-  validatePointsRedemption
+  validatePointsRedemption,
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+  // decision pending): `resolveCurrentLevel` is the canonical
+  // tier-derivation helper — used here at member registration to
+  // snapshot the base tier (fromStays=0) onto the new member's
+  // `currentLevel` cache field. Defensive on missing/empty
+  // `rewardsConfig.levels[]` (returns null — pre-Phase-2
+  // deployments keep working unchanged).
+  resolveCurrentLevel
 } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 import { adminAuth, adminDb } from "../lib/firebase-admin";
@@ -281,6 +289,71 @@ export async function handleRegisterMember(req: any, res: any) {
       const fullName = parsed.data.fullName || authUser.name || email.split("@")[0];
       const photoUrl = parsed.data.photoUrl || authUser.picture || "";
 
+      // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+      // decision pending): new members start at `completedStays: 0`
+      // and the base tier (the level with `fromStays === 0`) — or
+      // `null` when no tiers are configured. Both fields are
+      // optional on the schema (back-compat) — initializing them
+      // here means the member portal doesn't need to special-case
+      // "this member hasn't been snapshotted yet" on every read.
+      //
+      // The `rewardsConfig` read happens pre-transaction
+      // (consistent with the checkout handler pattern). The
+      // `resolveCurrentLevel` helper is defensive (returns null
+      // for empty levels / non-finite stays) so pre-Phase-2
+      // deployments that haven't configured tiers yet just get
+      // `currentLevel: null` — the booking engine + member portal
+      // both fall back to the legacy global `memberDiscountPct`
+      // when `currentLevel` is null.
+      const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
+      const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
+      const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
+
+      // Per Phase 6 of the Spark Rewards tier system (2026-10-13,
+      // decision pending): welcome bonus on first registration.
+      // When `rewardsConfig.welcomePoints > 0`, the new member
+      // gets a one-time points credit + an idempotent
+      // `pointsHistory` row with `type: "welcome"`. The doc ID
+      // `welcome` is deterministic so the idempotency check is a
+      // single `.get()` (no query needed) — if the row exists, the
+      // bonus was already credited (this happens when a user
+      // re-runs `/api/members/register` for any reason, e.g.
+      // email verification retry per Spark Rewards audit 2026-07-18
+      // HIGH-1).
+      //
+      // Decision (2026-10-13): the bonus credits ONLY when this
+      // is a brand-new registration (the existingMember.memberNumber
+      // short-circuit branch above does NOT credit). Re-registration
+      // is idempotent on the rest of the fields (`memberNumber`,
+      // `memberSince` are preserved) but the welcome bonus stays
+      // one-shot — same as the booking-engine convention that
+      // "points earned at checkout" is per-booking, not per-render.
+      //
+      // Decision (2026-10-13): the welcome bonus applies
+      // regardless of `authUser.email_verified` status. The
+      // HIGH-1 audit gates `linkBookingsByEmail` (a different
+      // concern) — the welcome credit is unconditional once the
+      // user is signed in. The `pointsHistory` row is the audit
+      // trail; admins can see the credit was issued to an
+      // unverified email if they care.
+      const welcomePoints = Math.max(0, Math.floor(Number(rewardsCfg?.welcomePoints || 0)));
+      let welcomeHistoryRef: any = null;
+      let welcomeAlreadyCredited = false;
+      let welcomeAmount = 0;
+      if (welcomePoints > 0) {
+        // Deterministic doc ID — `welcome` is reserved for the
+        // first-credit event. The transaction reads it BEFORE any
+        // writes (FOL-03) so a retry can't double-credit.
+        welcomeHistoryRef = adminDb.collection(`members/${uid}/pointsHistory`).doc("welcome");
+        const welcomeDocSnap = await transaction.get(welcomeHistoryRef);
+        welcomeAlreadyCredited = welcomeDocSnap.exists;
+        if (!welcomeAlreadyCredited) {
+          welcomeAmount = welcomePoints;
+        }
+      }
+
+      const initialRewardsPoints = (Number(existingMember?.rewardsPoints) || 0) + welcomeAmount;
+
       transaction.set(memberRef, {
         fullName,
         email,
@@ -290,12 +363,32 @@ export async function handleRegisterMember(req: any, res: any) {
         memberNumber,
         isMember: true,
         memberSince: now,
-        rewardsPoints: existingMember?.rewardsPoints || 0,
+        rewardsPoints: initialRewardsPoints,
+        // Per Phase 2 (2026-10-12): initialize the stay-counter
+        // + tier cache. Absent on legacy pre-Phase-2 docs — readers
+        // must coalesce missing values to 0 / null.
+        completedStays: Number(existingMember?.completedStays || 0),
+        currentLevel: existingMember?.currentLevel ?? baseCurrentLevel,
         tier: existingMember?.tier || "standard",
         isActive: existingMember?.isActive !== false,
         createdAt: existingMember?.createdAt || now,
         updatedAt: now
       }, { merge: true });
+
+      // Phase 6 — write the welcome ledger row (idempotent —
+      // the `.get()` above confirmed the row doesn't exist yet).
+      // Both writes (member doc + history row) share the same
+      // `runTransaction` so a retry can't double-credit.
+      if (welcomeAmount > 0 && welcomeHistoryRef) {
+        transaction.set(welcomeHistoryRef, {
+          type: "welcome",
+          points: welcomeAmount,
+          memberId: uid,
+          note: `Welcome bonus (${welcomeAmount} points)`,
+          createdAt: now,
+          createdBy: "system"
+        });
+      }
     });
 
     // Per Spark Rewards audit 2026-07-18 HIGH-1: an unverified
@@ -398,6 +491,44 @@ export async function handleRedeemMemberPoints(req: any, res: any) {
       const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
       if (pointsRedemptionRate <= 0) {
         throw new Error("Points redemption is not configured.");
+      }
+
+      // Per Phase 4 of the Spark Rewards tier system
+      // (2026-10-12): two new redemption guards, both sourced
+      // from `settings/rewardsConfig`:
+      //   1. `minPointsToRedeem` — minimum points required for
+      //      any redemption. 0 (the default) = no minimum.
+      //      Rejects with a 400 if the requested amount is below
+      //      the floor (clear error message for the staff).
+      //   2. `pointsCanPayUpToBillPct` — cap on how much of the
+      //      booking's subtotal can be paid with points. Stored
+      //      as a percentage (0..100, default 100 = no cap).
+      //      Computes `maxRedeemablePoints = floor(subtotal ×
+      //      pct/100) / pointsRedemptionRate` and rejects when
+      //      `pointsToRedeem > maxRedeemablePoints`.
+      // Both guards are AFTER the existing balance check
+      // (`validatePointsRedemption` below) so the staff sees the
+      // most actionable error first.
+      const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
+      const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
+      const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
+      if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+        throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+      }
+      // Bill-cap check uses the booking's current totalPrice as the
+      // basis (the post-discount subtotal — the actual amount the
+      // guest owes). `Math.floor` rounds DOWN so the cap is a
+      // hard ceiling: any fraction-of-a-point that would exceed
+      // the cap is rejected. 100% (or 100) means no cap.
+      if (Number.isFinite(billPct) && billPct < 100) {
+        const bookingSubtotal = Number(booking.totalPrice || 0);
+        const maxRedeemableCurrency = Math.floor((bookingSubtotal * Math.max(0, billPct)) / 100);
+        const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
+        if (pointsToRedeem > maxRedeemablePoints) {
+          throw new Error(
+            `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+          );
+        }
       }
 
       const validation = validatePointsRedemption(pointsToRedeem, Number(member.rewardsPoints || 0), pointsRedemptionRate);

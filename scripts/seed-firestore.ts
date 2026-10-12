@@ -225,6 +225,12 @@ async function seedWebsiteContent() {
 
 async function seedRewardsConfig() {
   console.log("\n🏆 Seeding settings/rewardsConfig...");
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+  // decision pending): the seed carries the 3 default tiers from
+  // the Settings → Rewards tab screenshot (Member / Silver / Gold)
+  // so a fresh deployment has a working tier program out of the
+  // box. Admin can rename, edit, add, or remove tiers from the UI
+  // — these are just the starting defaults.
   await setDoc("settings", "rewardsConfig", {
     pointsEnabled: true,
     earningMode: "per-spend",
@@ -233,6 +239,41 @@ async function seedRewardsConfig() {
     memberDiscountEnabled: false,
     memberDiscountPct: 0,
     pointsRedemptionRate: 100,
+    // Phase 2 defaults — all "off" so a fresh deploy matches the
+    // pre-Phase-2 behavior exactly. Admin enables them from the
+    // Settings UI as desired.
+    welcomePoints: 0,
+    minPointsToRedeem: 0,
+    // 100 = no bill cap (matches the screenshot label "Points can
+    // pay up to (% of bill): 50" — admin tunes via the UI).
+    pointsCanPayUpToBillPct: 100,
+    freeNightEvery: 0,
+    levels: [
+      {
+        id: "tier_default_member",
+        name: "Member",
+        fromStays: 0,
+        discountPct: 5,
+        pointsMultiplier: 1,
+        perks: "5% off room rates. Earn 1 point for every ₱100.",
+      },
+      {
+        id: "tier_default_silver",
+        name: "Silver",
+        fromStays: 3,
+        discountPct: 7,
+        pointsMultiplier: 1.25,
+        perks: "7% off room rates. 25% more points. Early check-in when available.",
+      },
+      {
+        id: "tier_default_gold",
+        name: "Gold",
+        fromStays: 8,
+        discountPct: 10,
+        pointsMultiplier: 1.5,
+        perks: "10% off room rates. 50% more points. Late check-out until 2 PM.",
+      },
+    ],
     updatedAt: now,
   });
 }
