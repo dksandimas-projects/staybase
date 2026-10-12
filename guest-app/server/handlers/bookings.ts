@@ -10503,6 +10503,79 @@ export async function handleCheckoutBooking(req: any, res: any) {
             updatedAt: now
           });
         }
+
+        // Per Phase 5 of the Spark Rewards tier system
+        // (2026-10-12, decision pending): free-night reward
+        // voucher. When `rewardsConfig.freeNightEvery > 0` AND
+        // `completedStays % freeNightEvery === 0`, write a
+        // single-use 100%-off voucher (canonical reward voucher
+        // shape: `kind: "reward"`, `valueType: "free-night"`)
+        // valid for 90 days. The voucher write lives INSIDE the
+        // existing transaction so a retry can't double-award —
+        // the nextCompletedStays computation already happened,
+        // so the trigger condition is stable across retries.
+        // The voucher code is deterministic from the
+        // memberNumber + nextCompletedStays so the member can
+        // find it on the rewards portal (Phase 7).
+        //
+        // Decision (2026-10-12): the trigger fires for BOTH the
+        // immediate-credit and the deferred-credit paths — the
+        // stay IS completed either way. If the booking is
+        // later cancelled post-settlement (the MRB-05 path),
+        // the voucher stays valid (cancelled stays still count
+        // toward free-night per Phase 3's clawback philosophy).
+        // Per EC-02 (2026-08-21) pattern: the trigger is gated
+        // on `nextCompletedStays > 0` to avoid the "0 % N === 0"
+        // false-positive when freeNightEvery > 0 and the member
+        // has 0 stays.
+        const freeNightEvery = Number(rewardsConfig?.freeNightEvery || 0);
+        if (
+          freeNightEvery > 0 &&
+          nextCompletedStays > 0 &&
+          nextCompletedStays % freeNightEvery === 0
+        ) {
+          const memberNumber =
+            memberDocInTransaction.data()?.memberNumber ||
+            `M${memberId.slice(0, 8)}`;
+          const freeNightCode = `FREENIGHT-${memberNumber}-${nextCompletedStays}`;
+          const freeNightVoucherRef = adminDb.collection("vouchers").doc(freeNightCode);
+          // 90-day expiry — long enough for a member to plan a
+          // future stay, short enough that abandoned rewards
+          // don't accumulate indefinitely. Matches the
+          // spec copy "Free night every N stays" intent.
+          const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+          transaction.set(freeNightVoucherRef, {
+            code: freeNightCode,
+            // Phase 5 discriminator — pre-Phase-5 promo vouchers
+            // are missing these (treated as "promo" + valueType =
+            // discountType on read).
+            kind: "reward",
+            valueType: "free-night",
+            // Backward-compat with the existing percent/flat
+            // discount math — `discountType: "percent"` +
+            // `discountValue: 100` produces a 100% off discount.
+            // `calculateVoucherDiscount` caps at subtotal so any
+            // over-discount rounds to 0.
+            discountType: "percent",
+            discountValue: 100,
+            usageCap: 1,
+            usageCount: 0,
+            expiresAt,
+            // Empty array = applies to all room types (per
+            // VOU-03 all-or-none rule).
+            applicableRoomTypes: [],
+            isActive: true,
+            guestEmail: memberDocInTransaction.data()?.email || null,
+            // Phase 5 back-link fields for member portal display
+            // + admin "Reward vouchers" filter.
+            memberId,
+            memberNumber,
+            rewardSource: "free-night-tier",
+            createdBy: checkedOutBy || "system",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
       }
     });
 

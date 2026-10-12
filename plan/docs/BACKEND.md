@@ -307,6 +307,11 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/project/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
 | `createdBy` | string | Audit — staff UID |
 | `createdAt` / `updatedAt` | timestamp | Audit |
+| `kind` | `"promo"` \| `"reward"` | **Phase 5 (2026-10-12)**: voucher discriminator. `"promo"` is the legacy default (admin-created discount). `"reward"` is system-issued from the tier program (currently `"free-night-tier"`; `"welcome"` reserved for Phase 6). Absent = treat as `"promo"`. |
+| `valueType` | `"percent"` \| `"flat"` \| `"free-night"` | **Phase 5 (2026-10-12)**: canonical reward type. For `"reward"` vouchers, this is `"free-night"` (uses `discountType: "percent"` + `discountValue: 100` to produce a 100% off discount). For pre-Phase-5 promo vouchers, absent = treated as `discountType`. |
+| `memberId` | string \| null | **Phase 5 (2026-10-12)**: back-link to `members/{uid}` for reward vouchers. Null for promo vouchers. Used by the member portal (Phase 7) to surface available free-night vouchers. |
+| `memberNumber` | string \| null | **Phase 5 (2026-10-12)**: denormalized `SR-XXXXX` for display. Null for promo vouchers. |
+| `rewardSource` | `"free-night-tier"` \| `"welcome"` \| null | **Phase 5 (2026-10-12)**: which Phase 2 feature created the voucher. `"free-night-tier"` is wired by `handleCheckoutBooking` when `completedStays % freeNightEvery === 0` (canonical Phase 5 voucher shape). `"welcome"` reserved for Phase 6 (not yet wired). |
 
 The doc ID is the code string by convention. The validate + create handlers both honour a `code`-field fallback for codes whose Firestore doc ID differs from the public `code` field (BI-10). Public reads go through `POST /api/validate/voucher` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, discountType, discountValue }` — never `usageCount`, `usageCap`, `expiresAt`, or `applicableRoomTypes`. The validator at `shared/utils/vouchers.ts:11` enforces the `isActive` / `expiresAt` / `usageCap` / `applicableRoomTypes` checks. Firestore rules: read/write staff-only — see `plan/docs/SECURITY.md §vouchers`.
 
