@@ -329,3 +329,173 @@ export const StartBookingHoldSchema = z
   });
 
 export type StartBookingHoldInput = z.infer<typeof StartBookingHoldSchema>;
+
+// ============================================================================
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
+// 2026-10-12): the new meal-based breakfast schemas.
+//
+// The legacy flat-rate toggle (`hasBreakfast: boolean` +
+// `breakfastRate: number`) is replaced by a per-meal catalog
+// (`BreakfastMeal[]`), a per-slot snapshot map on the booking
+// (`breakfastSelections: Record<key, BreakfastSelectionEntry>`),
+// and a per-slot served map (`breakfastServed: Record<key,
+// BreakfastServedEntry>`). See `plan/features/BREAKFAST.md
+// §Data Model` for the full spec and rationale.
+//
+// `Timestamp | string` fields use `z.union([z.string(), z.any()])`
+// — the existing codebase's permissive pattern for Firestore
+// Timestamp-on-write / string-on-read values (the `z.any()`
+// half covers both the hydrated `Date` shape and the raw
+// `_seconds/_nanoseconds` payload from the client). Server-side
+// validators that need the strict shape do an explicit
+// `instanceof Date` check after the schema passes.
+// ============================================================================
+
+/**
+ * The meal catalog. `id` is the kebab-case key used in
+ * `BreakfastSelectionEntry.mealId`. `price` is the live
+ * (non-snapshot) price in PHP; the booking snapshots its
+ * own copy at order time so later edits never rewrite
+ * existing bills. `description` is capped at 200 chars
+ * per the spec.
+ */
+export const BreakfastMealSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(80),
+  description: z.string().max(200).default(""),
+  price: z.number().min(0).max(10000),
+  isActive: z.boolean(),
+  displayOrder: z.number().int().min(0).max(1000),
+  createdAt: z.union([z.string(), z.any()]).optional(),
+  updatedAt: z.union([z.string(), z.any()]).optional()
+});
+export type BreakfastMealInput = z.infer<typeof BreakfastMealSchema>;
+
+/**
+ * The settings doc shape at `settings/breakfastConfig`. The
+ * `cutoffTime` regex matches the `HH:MM` 24h format. The
+ * `cutoffTimezone` is IANA (validated by
+ * `isValidTimezone` in the runtime helper, not by Zod —
+ * IANA has no fixed list). `meals` is the catalog; the
+ * individual rows validate against `BreakfastMealSchema`.
+ */
+export const BreakfastConfigSchema = z.object({
+  isEnabled: z.boolean(),
+  cutoffTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),
+  cutoffTimezone: z.string().min(1),
+  frontDeskOverrideEnabled: z.boolean(),
+  defaultMealInstructions: z.string().max(2000).default(""),
+  meals: z.array(BreakfastMealSchema),
+  updatedAt: z.union([z.string(), z.any()]).optional(),
+  updatedBy: z.string().default("")
+});
+export type BreakfastConfigInput = z.infer<typeof BreakfastConfigSchema>;
+
+/**
+ * One per-meal-per-guest slot on a booking. The
+ * `mealId` + `mealName` + `price` triple is the snapshot
+ * — later edits to the meal catalog never rewrite the
+ * booking's price. `removedAt` / `removedBy` track
+ * cancellations (a paid removal opens a refund liability
+ * in BR-06). `overrideCutoff` + `overrideReason` track
+ * late changes from staff (audit trail for the kitchen).
+ */
+export const BreakfastSelectionEntrySchema = z.object({
+  mealId: z.string().min(1),
+  mealName: z.string().min(1),
+  price: z.number().min(0),
+  addedAt: z.union([z.string(), z.any()]),
+  addedBy: z.string().min(1),
+  lastModifiedAt: z.union([z.string(), z.any()]),
+  lastModifiedBy: z.string().min(1),
+  removedAt: z.union([z.string(), z.any()]).nullable().default(null),
+  removedBy: z.string().nullable().default(null),
+  overrideCutoff: z.boolean().default(false),
+  overrideReason: z.string().nullable().default(null)
+});
+export type BreakfastSelectionEntryInput = z.infer<typeof BreakfastSelectionEntrySchema>;
+
+/**
+ * The served record per slot. `unservedAt` +
+ * `unservedBy` capture the grace-window un-mark (within
+ * `BreakfastConfig.servedGraceMinutes`); after the grace
+ * window the un-serve action requires an override reason
+ * — that override writes to the `BreakfastAuditEntry`
+ * rather than mutating this record.
+ */
+export const BreakfastServedEntrySchema = z.object({
+  servedAt: z.union([z.string(), z.any()]),
+  servedBy: z.string().min(1),
+  unservedAt: z.union([z.string(), z.any()]).nullable().default(null),
+  unservedBy: z.string().nullable().default(null)
+});
+export type BreakfastServedEntryInput = z.infer<typeof BreakfastServedEntrySchema>;
+
+/**
+ * The audit subcollection entry. The `action` enum
+ * distinguishes the regular lifecycle (add / change /
+ * remove / serve / unserve) from the override variants
+ * (override-add / override-change / override-remove) —
+ * the kitchen list's "Late changes" column filters on
+ * `occurredAfterCutoff === true` (a separate flag from
+ * `overrideCutoff`, which is the per-slot
+ * override-marker; both are written for an
+ * `override-*` action).
+ */
+export const BreakfastAuditEntrySchema = z.object({
+  id: z.string().optional(),
+  action: z.enum([
+    "add",
+    "change",
+    "remove",
+    "serve",
+    "unserve",
+    "override-add",
+    "override-change",
+    "override-remove"
+  ]),
+  slotKey: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}-\d+$/, "serviceDate-guestIndex format"),
+  mealSnapshot: z
+    .object({
+      mealId: z.string(),
+      mealName: z.string(),
+      price: z.number().min(0)
+    })
+    .nullable(),
+  actorUid: z.string().min(1),
+  actorRole: z.enum(["guest", "front-desk", "admin"]),
+  reason: z.string().nullable().default(null),
+  occurredAt: z.union([z.string(), z.any()]),
+  occurredAfterCutoff: z.boolean()
+});
+export type BreakfastAuditEntryInput = z.infer<typeof BreakfastAuditEntrySchema>;
+
+/**
+ * The refund-context blob stamped onto a
+ * `bookings/{id}/refunds/{refundId}` doc when the
+ * refund is for a removed breakfast meal (vs. the
+ * legacy cancellation refund). Mirrors the snapshot
+ * `price` so a later meal-catalog price change never
+ * rewrites the refund amount.
+ */
+export const BreakfastRefundContextSchema = z.object({
+  mealId: z.string().min(1),
+  slotKey: z.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/),
+  mealName: z.string().min(1),
+  priceSnapshot: z.number().min(0)
+});
+export type BreakfastRefundContextInput = z.infer<typeof BreakfastRefundContextSchema>;
+
+// NOTE: The `BreakfastUpdateSchema` + `StaffBreakfastUpdateSchema`
+// payloads (the Manage Booking save-batch + the staff-override
+// variant) are intentionally NOT in BR-01. They belong in BR-04
+// (Guest Manage Breakfast page) + BR-05 (Staff drawer) — both
+// depend on the route handlers + the audit-subcollection writer,
+// which BR-01 deliberately doesn't add (no new Vercel functions,
+// no new Firestore collections, per the BR-01 ticket scope).
+// See `plan/features/BREAKFAST.md §Implementation order` (BR-04
+// + BR-05 bullet points).

@@ -24,6 +24,21 @@
 // circuit to 0. Same defensive `Number(x) || 0` per operand.
 //
 // Pinned by `shared/__tests__/booking-addons.test.ts`.
+//
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
+// 2026-10-12): `calculateBreakfastAddOn` is now DEPRECATED.
+// The new meal-based model reads prices from per-slot
+// snapshots (`booking.breakfastSelections[key].price`)
+// summed by `recomputeBreakfastTotal` in
+// `shared/utils/breakfastTotal.ts`. The new wrapper
+// `calculateBreakfastMealsTotal` (below) takes the
+// `breakfastSelections` shape directly. Kept here for the
+// booking-create path's existing 71 unit tests; will be
+// removed when BR-03 lands and the create path switches
+// over to the snapshot shape. See
+// `plan/features/BREAKFAST.md §Decisions Locked` (decision
+// 1 — "no migration, the old fields are deleted from the
+// create path").
 
 export interface BreakfastAddOnInput {
   /** `false` (or undefined / null) short-circuits to 0. */
@@ -95,6 +110,14 @@ export interface BreakfastAddOnInput {
  * shape, byte-equivalent to the pre-CHD-10 inline patterns).
  * `breakfastIncludesChildren` defaults to `true` when undefined,
  * matching the historical "children pay the full rate" default.
+ *
+ * @deprecated Per BR-01 (Phase 13 — Breakfast Redesign,
+ *   decision #231, 2026-10-12): replaced by
+ *   {@link calculateBreakfastMealsTotal} in BR-03. Kept here
+ *   for the booking-create path; will be removed when BR-03
+ *   lands. See `plan/features/BREAKFAST.md §Decisions Locked`
+ *   (decision 1 — no migration, old fields deleted from the
+ *   create path).
  */
 export function calculateBreakfastAddOn(input: BreakfastAddOnInput): number {
   if (!input.hasBreakfast) return 0;
@@ -154,4 +177,41 @@ export function calculateExtraBedAddOn(input: ExtraBedAddOnInput): number {
   const nights = Number(input.numNights) || 0;
   if (count === 0 || rate === 0 || nights === 0) return 0;
   return count * rate * nights;
+}
+
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
+// 2026-10-12): the new meal-based model. Wraps
+// `recomputeBreakfastTotal` for callers that have a
+// `breakfastSelections` map on hand (the booking-create path
+// in BR-03, the rate breakdown rebuilder, the email view).
+// Internal-only — the public Step 2 + Manage Booking pages
+// call this directly with the snapshot map returned by
+// `/api/bookings/breakfast/config` or the booking doc read.
+//
+// Defensive coercion is delegated to
+// `recomputeBreakfastTotal`; this wrapper exists so the
+// `bookingAddOns.ts` import surface (the legacy "what's
+// the breakfast term in the pricing chain" entry point)
+// stays the single call site for both pre- and
+// post-redesign helpers. The two helpers will converge
+// in BR-08 (when BR-03's create path lands and the
+// `@deprecated` `calculateBreakfastAddOn` is removed).
+import type { BreakfastSelectionEntry } from "../types";
+import { recomputeBreakfastTotal } from "./breakfastTotal";
+
+/**
+ * Sum the snapshotted prices in a `breakfastSelections`
+ * map. Thin wrapper around `recomputeBreakfastTotal` for
+ * the `bookingAddOns.ts` import surface.
+ *
+ * @param selections The `breakfastSelections` map (or
+ *   null / undefined for legacy / never-had-breakfast
+ *   bookings).
+ * @returns 2dp-rounded sum of non-cancelled entries'
+ *   `price` snapshots.
+ */
+export function calculateBreakfastMealsTotal(
+  selections: Record<string, BreakfastSelectionEntry> | undefined | null
+): number {
+  return recomputeBreakfastTotal(selections);
 }

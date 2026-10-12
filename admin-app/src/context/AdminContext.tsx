@@ -203,6 +203,26 @@ export interface OnsitePayment {
   approvedBy: string | null;
   recordedBy: string;
   recordedAt: string;
+  /**
+   * Per BR-01 / decision #231 (2026-10-12, breakfast redesign): the
+   * lifecycle this payment belongs to. Existing refund subcollection
+   * writes carry `null` (legacy cancellation refunds); the read
+   * helper `getOnsitePaymentCategory(p)` defaults `null` to
+   * `"cancellation"` for back-compat. New breakfast-driven refunds
+   * carry `"breakfast"` + a populated `breakfastRefundContext`.
+   * `"payment"` is the guest-payment side (a positive amount) and
+   * carries `null` for `category` since the concept doesn't apply.
+   */
+  category?: "cancellation" | "breakfast" | null;
+  /**
+   * Per BR-01: required when `category === "breakfast"`, null
+   * otherwise. Snapshots the meal + slot + price at the moment the
+   * refund was opened so a later menu change doesn't rewrite the
+   * audit history. Shape is defined in
+   * `shared/types/index.ts` (re-exported as
+   * `import("@spark-inn/shared").BreakfastRefundContext`).
+   */
+  breakfastRefundContext?: import("@spark-inn/shared").BreakfastRefundContext | null;
 }
 
 export type IncidentalChargeCategory = "late-checkout" | "early-checkin" | "extra-person" | "damage" | "laundry" | "other";

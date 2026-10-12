@@ -44,3 +44,13 @@ export * from "./utils/uploads";
 // server-side validation).
 export * from "./utils/bookingPreferences";
 
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision
+// #231, 2026-10-12): the breakfast cut-off state
+// helper (`computeBreakfastCutoffState`) + the
+// breakfast-total recompute helper
+// (`recomputeBreakfastTotal`). Both are used by the
+// guest app's Manage Booking page, the admin app's
+// booking drawer, and the server's write-side gate.
+export * from "./utils/breakfastCutoff";
+export * from "./utils/breakfastTotal";
+
