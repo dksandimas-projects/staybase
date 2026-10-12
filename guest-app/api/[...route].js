@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.8.0";
+    VERSION2 = "1.9.2";
   }
 });
 
@@ -222527,9 +222527,27 @@ function getBookingVatBreakdown(booking) {
     vatRate: booking.vatRate
   });
 }
+function isVatEnabled(vatConfig) {
+  if (!vatConfig || typeof vatConfig.enabled !== "boolean") return DEFAULT_VAT_CONFIG.enabled;
+  return vatConfig.enabled;
+}
+function getEffectiveVatRate(vatConfig) {
+  if (!isVatEnabled(vatConfig)) return 0;
+  return 0.12;
+}
+function normalizeVatConfig(raw) {
+  if (raw && typeof raw === "object" && raw.enabled === false) {
+    return { enabled: false };
+  }
+  return { ...DEFAULT_VAT_CONFIG };
+}
+var DEFAULT_VAT_CONFIG;
 var init_bookingVat = __esm({
   "../shared/utils/bookingVat.ts"() {
     init_bookingDiscounts();
+    DEFAULT_VAT_CONFIG = {
+      enabled: true
+    };
   }
 });
 
@@ -223973,7 +223991,8 @@ function format12hLabel(hours, minutes, locale) {
   return new Intl.DateTimeFormat(locale, {
     hour: "numeric",
     minute: "2-digit",
-    hour12: true
+    hour12: true,
+    timeZone: "UTC"
   }).format(reference);
 }
 var init_bookingPreferences = __esm({
@@ -224013,6 +224032,7 @@ __export(shared_exports, {
   DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
   DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
+  DEFAULT_VAT_CONFIG: () => DEFAULT_VAT_CONFIG,
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
   GuestDetailsSchema: () => GuestDetailsSchema,
@@ -224124,6 +224144,7 @@ __export(shared_exports, {
   getCheckInReadiness: () => getCheckInReadiness,
   getDateKeyInTimezone: () => getDateKeyInTimezone,
   getEffectiveStorePaymentMethods: () => getEffectiveStorePaymentMethods,
+  getEffectiveVatRate: () => getEffectiveVatRate,
   getLatestPaymentReference: () => getLatestPaymentReference,
   getLegacyCancellationPolicy: () => getLegacyCancellationPolicy,
   getLockedManualNightlyRate: () => getLockedManualNightlyRate,
@@ -224141,6 +224162,7 @@ __export(shared_exports, {
   isValidLookupToken: () => isValidLookupToken,
   isValidReservationId: () => isValidReservationId,
   isValidReservationRef: () => isValidReservationRef,
+  isVatEnabled: () => isVatEnabled,
   isWeekendNight: () => isWeekendNight,
   mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
   nextSequence: () => nextSequence,
@@ -224150,6 +224172,7 @@ __export(shared_exports, {
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
+  normalizeVatConfig: () => normalizeVatConfig,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
   raceUploadWithTimeout: () => raceUploadWithTimeout,
