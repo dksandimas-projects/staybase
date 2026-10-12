@@ -89,6 +89,19 @@ function formatHHMM(hours: number, minutes: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+// Per SR-01..05 follow-up (2026-10-12): the fixed UTC+8
+// offset for the Philippine-time hotel. Philippine
+// Standard Time (PST) is UTC+8 year-round — no DST since
+// the 1970s — so a fixed `+8` offset is correct for every
+// date. The hotel is Philippine-based for the foreseeable
+// product, so we hardcode the offset here rather than
+// reading the deploy-time `config.timezone` (shared/ has
+// no `@config` import). When the project goes white-label
+// to a non-Philippine hotel, switch to reading the offset
+// via `Intl.DateTimeFormat` against the host timezone.
+const HOTEL_TZ_OFFSET_HOURS = 8;
+const HOTEL_TZ_IANA = "Asia/Manila";
+
 // Render a `{ hours, minutes }` pair as a 12h display
 // label like "2:00 PM" / "9:30 AM". Uses `Intl.DateTimeFormat`
 // when `locale` is provided so future Filipino locales
@@ -104,22 +117,26 @@ function format12hLabel(
   // is intentionally stable so callers don't see
   // locale-specific date fragments.
   //
-  // The formatter MUST be pinned to `timeZone: "UTC"` so
-  // the rendered hour matches the wire-format hour
-  // (`"14:00"` formats as "2:00 PM" everywhere, not as
-  // "10:00 PM" in UTC+8). Without this, a guest booking
-  // from the Philippines sees a list of arrival times
-  // shifted by their local timezone — `14:00` (2 PM UTC)
-  // shows up as "10:00 PM" Asia/Manila and the dropdown
-  // order looks completely off. Per `feat/special-requests-bed-setup`
-  // bug catch on 2026-10-12 (decision #SR-01 follow-up).
+  // The wire value `HH:MM` is interpreted in the HOTEL
+  // timezone (Asia/Manila = UTC+8). To make the label render
+  // that wall-clock time regardless of the guest's browser
+  // timezone, we shift the hours back by the hotel offset
+  // before `Date.UTC(...)`, then format with `timeZone:
+  // HOTEL_TZ_IANA` so the formatter treats the constructed
+  // instant as hotel-local time.
+  //
+  // For `hours = 14`, `minutes = 0`:
+  //   utcHours = (14 - 8 + 24) % 24 = 6
+  //   reference = `Date.UTC(1970, 0, 1, 6, 0)` = 06:00 UTC
+  //   = 14:00 Asia/Manila → "2:00 PM"
   const safeHours = ((hours % 24) + 24) % 24;
   const safeMinutes = Math.max(0, Math.min(59, minutes));
-  const reference = new Date(Date.UTC(1970, 0, 1, safeHours, safeMinutes, 0));
+  const utcHours = (safeHours - HOTEL_TZ_OFFSET_HOURS + 24) % 24;
+  const reference = new Date(Date.UTC(1970, 0, 1, utcHours, safeMinutes, 0));
   return new Intl.DateTimeFormat(locale, {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone: "UTC"
+    timeZone: HOTEL_TZ_IANA
   }).format(reference);
 }
