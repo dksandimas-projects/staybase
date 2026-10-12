@@ -1,6 +1,13 @@
 import type { BookingRateBreakdown } from "@spark-inn/shared";
-import { calculateVatBreakdown } from "@spark-inn/shared";
+import { calculateVatBreakdown, isVatEnabled } from "@spark-inn/shared";
 import { formatPrice } from "../utils/format";
+// Per VAT-01 (2026-10-12): the guest `/book` live preview
+// (BookingPage Step 3) + the booking confirmation page +
+// the booking lookup page all render this `PriceBreakdown`.
+// The VAT sub-block is gated on the admin Tax (VAT) toggle
+// surfaced through the public site content hook so the toggle
+// is enforced consistently with the admin drawer + Reports.
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 function formatDateRange(startDate: string, endDate: string) {
   if (!startDate) return "";
@@ -23,6 +30,15 @@ function extractSeniorDiscountFromBreakdown(breakdown: BookingRateBreakdown): nu
 }
 
 export function PriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBreakdown | null; total: number }) {
+  // Per VAT-01 (2026-10-12): the admin Tax (VAT) toggle
+  // is surfaced through the public site content hook
+  // (same fetch as the rest of the hotelConfig read).
+  // The `usePublicSiteContent` hook defaults to the
+  // BIR-compliant `{ enabled: true }` so a missing
+  // snapshot never collapses the live preview to a
+  // zero-VAT state during the cold-load window.
+  const { vatConfig } = usePublicSiteContent();
+  const vatEnabled = isVatEnabled(vatConfig);
   if (!breakdown?.roomLines?.length) return null;
 
   // Per DSC-07 (2026-08-01, per #115): the live preview now
@@ -31,10 +47,15 @@ export function PriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBr
   // the rateBreakdown's deductions list (the chain already
   // wrote it there at server time), so the VAT math is exact
   // for both broad and narrow scope.
+  //
+  // Per VAT-01 (2026-10-12): when the admin toggle is OFF,
+  // the entire sub-block is hidden — the bill is the
+  // operator's net amount, no VAT to reconcile.
   const seniorDiscountAmount = extractSeniorDiscountFromBreakdown(breakdown);
   const vat = calculateVatBreakdown({
     totalPrice: breakdown.finalTotal || total,
-    seniorDiscountAmount
+    seniorDiscountAmount,
+    vatRate: vatEnabled ? 0.12 : 0
   });
 
   return (
@@ -73,7 +94,12 @@ export function PriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBr
             breakdown sub-block. Three muted lines for the
             BIR-reconcilable figures. The senior discount
             (RA 9994) is the VAT-exempt portion when the
-            booking carried one. */}
+            booking carried one.
+            Per VAT-01 (2026-10-12): gated on the admin Tax
+            (VAT) toggle. When OFF, the entire sub-block is
+            omitted (no zero lines) — the bill is the
+            operator's net amount. */}
+        {vatEnabled && (
         <div className="mt-2 space-y-1 border-t border-dashed border-gray-300 pt-2 text-xs text-gray-500">
           <div className="flex justify-between">
             <span>VATable Sales (VAT-exclusive)</span>
@@ -88,6 +114,7 @@ export function PriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBr
             <span className="font-mono">{formatPrice(vat.vatAmount)}</span>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
