@@ -56,11 +56,19 @@ export const ROOM_STATUSES = ["available", "occupied", "blocked"] as const;
 export const HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"] as const;
 
 export const DEFAULT_ROOM_TYPES: readonly RoomTypeEntry[] = [
-  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
-  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
-  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
-  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
-  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
+  // Per SR-01..05 (2026-10-12): `bedSetupValues` is the per-type
+  // subset of `HotelConfig.bedSetups[].value` offered to the guest on
+  // the booking Step 2. The seed below mirrors the original
+  // booking-flow design ("T1 for Twin types, both set-ups for the
+  // Double", and "no set-up selection" for types where it doesn't
+  // apply — Single is a solo product, Family has fixed
+  // 2-double configuration). Admins edit the subset via the Room
+  // Types editor → Bed Set-ups picker.
+  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600, bedSetupValues: [] },
+  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200, bedSetupValues: ["large-bed", "twin-beds"] },
+  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300, bedSetupValues: ["twin-beds", "large-bed"] },
+  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800, bedSetupValues: ["large-bed", "twin-beds"] },
+  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900, bedSetupValues: [] }
 ];
 
 export type RoomTypeEntry = {
@@ -112,7 +120,91 @@ export type RoomTypeEntry = {
   // for the #111 surface flags and CHD.
   maxExtraBeds?: number;
   extraBedRate?: number;
+  // Per SR-01..05 (2026-10-12): the per-type subset of
+  // `HotelConfig.bedSetups[].value` offered to the guest on the
+  // booking Step 2 bed-set-up selector. An empty array means
+  // "this type does not offer a set-up choice" (the Step 2
+  // selector is hidden entirely for the type). Absent fields
+  // normalize to `[]` on read — same permissive pattern used
+  // for the EXB-01 + CHD-02 surface flags.
+  bedSetupValues?: string[];
 };
+
+// Per SR-01..05 (2026-10-12): the admin-configurable catalog of
+// bed set-up options offered to guests on the booking Step 2.
+// Each option is a globally-defined choice; room types carry a
+// `bedSetupValues: string[]` subset that decides whether the
+// selector renders for the picked room type. Single source of
+// truth shared between the admin app's Booking Preferences tab
+// (CRUD) and the guest app's Step 2 bed-set-up radio group.
+// `icon` is optional — admin may attach a lucide icon name from
+// `KNOWN_CONTENT_ICONS` for the admin preview; the guest app
+// renders plain labels either way.
+export interface BedSetupOption {
+  value: string;
+  label: string;
+  icon?: string;
+}
+
+// Per SR-01..05 (2026-10-12): the admin-configurable catalog of
+// additional preferences shown as checkboxes in the guest
+// booking Step 2 "Show additional preferences" accordion.
+// `surchargeNote` is the small "(additional charges may apply)"
+// caveat rendered next to the label — informational only (no
+// pricing/side wiring; the gap is defined per feature/SPECIAL-
+// REQUESTS.md).
+export interface BookingPreferenceOption {
+  value: string;
+  label: string;
+  icon?: string;
+  surchargeNote?: string;
+}
+
+// Default seed for `HotelConfig.bedSetups`. Same shape as the
+// per-row admin-setups table. The defaults mirror the booking-
+// flow screenshot — one "I'd like a large bed" + one "I'd like
+// twin beds" option. Single source of truth shared between the
+// guest-app Step 2 radio group and the admin-app Booking
+// Preferences tab preview.
+export const DEFAULT_BED_SETUPS: readonly BedSetupOption[] = [
+  { value: "large-bed", label: "I'd like a large bed", icon: "bed" },
+  { value: "twin-beds", label: "I'd like twin beds", icon: "bed" }
+];
+
+// Default seed for `HotelConfig.bookingPreferences`. Mirrors the
+// "Show additional preferences" screenshot — 9 admin-editable
+// checkbox options + the optional surcharge note on the baby
+// cot line. Single source of truth shared between the guest-app
+// Step 2 checkbox grid and the admin-app Booking Preferences
+// tab preview. Edit from Settings → Booking Preferences.
+export const DEFAULT_BOOKING_PREFERENCES: readonly BookingPreferenceOption[] = [
+  { value: "high-floor",          label: "I'd like a room on a high floor" },
+  { value: "luggage-storage",     label: "I'd like luggage storage" },
+  { value: "near-elevator",       label: "I'd like to be near the elevator" },
+  { value: "honeymoon",           label: "I'd like honeymoon arrangements" },
+  { value: "airport-transfer",    label: "I'd like an airport transfer" },
+  { value: "quiet-room",          label: "I'd like a quiet room" },
+  { value: "away-from-elevator",  label: "I'd like to be away from the elevator" },
+  { value: "car-parking",         label: "I'd like car parking" },
+  { value: "baby-cot",            label: "I'd like to have a baby cot", surchargeNote: "(additional charges may apply)" }
+];
+
+// Per SR-01..05 (2026-10-12): the maximum free-text length the
+// guest may submit in the "Any additional requests?" textarea on
+// Step 2. Enforced both client- and server-side (the Zod
+// `createBookingSchema.additionalRequest` schema enforces the
+// same bound). The 500-char cap is generous enough for any
+// reasonable special-request paragraph while preventing the
+// "I pasted my whole itinerary" abuse case.
+export const ADDITIONAL_REQUEST_MAX_LENGTH = 500;
+
+// Per SR-01..05 (2026-10-12): the size of the guest's
+// "Expected arrival time" dropdown window (24 hours starting
+// at the hotel's `checkInTime`). Hardcoded per the design
+// decision (decision #<next>, see `plan/features/SPECIAL-
+// REQUESTS.md`). Not admin-configurable per the user's call
+// on 2026-10-12 ("keep it fixed").
+export const ARRIVAL_WINDOW_HOURS = 24;
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
 

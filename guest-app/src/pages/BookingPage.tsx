@@ -101,6 +101,12 @@ import { useTurnstileToken } from "../hooks/useTurnstileToken";
 // `plan/features/BOOKING-FLOW.md §In-flow hold` for
 // the UX contract.
 import { HoldCountdownBanner } from "../components/HoldCountdownBanner";
+// Per SR-01..05 (2026-10-12): the Step 2 special-requests
+// block (bed set-up radios + "Show additional preferences"
+// accordion with free-text + arrival-time dropdown).
+// Replaces the `feat/special-requests-redirect` card in
+// SR-05.
+import { SpecialRequestsBlock } from "../components/SpecialRequestsBlock";
 import { useGuestAuth } from "../context/GuestAuthContext";
 // Per feat/special-requests-redirect (2026-08-21): the guest
 // booking form no longer collects a free-text special-requests
@@ -183,16 +189,17 @@ export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading: roomsLoading } = useRooms();
-  const { roomTypes, seasonalRateOverrides } = useRoomTypes();
+  const { roomTypes, seasonalRateOverrides, bedSetups, bookingPreferences } = useRoomTypes();
   const { memberProfile } = useGuestAuth();
   // Per feat/special-requests-redirect (2026-08-21): the
   // redirect card on the booking form reads the per-hotel
   // contact override (Settings → Hotel Info) with the
   // deploy-time `hotel.config.ts` values as the fallback. Same
-  // pattern as ContactPage + Footer.
-  const { contact } = usePublicSiteContent();
-  const redirectPhone = contact?.frontDeskPhone || config.frontDeskPhone;
-  const redirectEmail = contact?.supportEmail || config.supportEmail;
+  // Per SR-01..05 (2026-10-12): the
+  // `feat/special-requests-redirect` contact override
+  // read is retired. The contact hook is still used
+  // for `hotelCheckInTime` (the arrival-time dropdown).
+  const { hotelCheckInTime } = usePublicSiteContent();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
   const isReviewStep = currentStepKey === "review";
@@ -356,6 +363,18 @@ export function BookingPage() {
     consent: false,
     _hp: ""
   });
+
+  // Per SR-01..05 (2026-10-12): the Step 2 special-requests
+  // state. The bed set-up selection is keyed by the room
+  // INDEX in the cart (the `distributedRoomCart` is the
+  // source of truth for the order); preferences + free
+  // text + arrival time are reservation-level. All four
+  // fields are reset whenever the cart changes (Step 1
+  // edit) so a stale per-room choice doesn't survive.
+  const [bedSelections, setBedSelections] = useState<Record<number, string>>({});
+  const [additionalPreferences, setAdditionalPreferences] = useState<string[]>([]);
+  const [additionalRequest, setAdditionalRequest] = useState("");
+  const [expectedArrivalTime, setExpectedArrivalTime] = useState<string | null>(null);
 
   // Per fix/booking-autofill-member-profile-race (2026-08-22):
   // the `guestDetails` initializer above runs ONCE on mount.
@@ -1615,8 +1634,29 @@ export function BookingPage() {
             // extraBedCount > 0`.
             extraBedBreakfast: room.extraBedBreakfast === true,
             hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
-            breakfastIncludesChildren
+            breakfastIncludesChildren,
+            // Per SR-01..05 (2026-10-12): the
+            // per-room bed-set-up choice. Empty
+            // string means "no preference" (the
+            // guest left the radios untouched).
+            // The server validates the value
+            // against the room type's
+            // `bedSetupValues` subset.
+            bedSetup: bedSelections[index] ?? ""
           })),
+          // Per SR-01..05 (2026-10-12): the
+          // reservation-level special-requests fields.
+          // `additionalPreferences` is the array of
+          // admin-configured preference keys; the server
+          // cross-references against
+          // `settings/hotelConfig.bookingPreferences[].value`.
+          // `additionalRequest` is capped server-side at
+          // `ADDITIONAL_REQUEST_MAX_LENGTH` (500 chars).
+          // `expectedArrivalTime` is `HH:MM` in the hotel
+          // timezone, or `null` for "I don't know".
+          additionalPreferences,
+          additionalRequest: additionalRequest.trim(),
+          expectedArrivalTime,
           checkIn,
           checkOut,
           // Per BI-09 (booking-intercom audit 2026-07-06): the
@@ -1991,52 +2031,37 @@ export function BookingPage() {
                 id="guestCount"
                 name="guestCount"
               />
-              {/* Per feat/special-requests-redirect (2026-08-21):
-                  the textarea is gone. The card below renders the
-                  redirect copy so the guest still has a clear path
-                  for late check-in / dietary / room preferences. The
-                  email + phone read from the per-hotel contact
-                  override (Settings → Hotel Info) with the
-                  deploy-time `hotel.config.ts` as the fallback. */}
-              <div
-                data-testid="special-requests-redirect"
-                className="rounded-card border border-primary/20 bg-primary-light p-4 text-sm text-gray-700"
-              >
-                <div className="flex items-start gap-3">
-                  <MessageSquareText
-                    size={18}
-                    className="mt-0.5 shrink-0 text-primary"
-                    aria-hidden="true"
-                  />
-                  <div className="flex-1">
-                    <p className="font-semibold text-gray-900">Need something special?</p>
-                    <p className="mt-1 leading-relaxed">
-                      We do our best to accommodate requests like late check-in, dietary needs,
-                      and room preferences. Please reach out before your stay:
-                    </p>
-                    <ul className="mt-2 space-y-1 text-xs">
-                      <li className="flex items-center gap-2">
-                        <Mail size={14} className="text-primary" aria-hidden="true" />
-                        <a
-                          href={`mailto:${redirectEmail}`}
-                          className="font-semibold text-primary hover:underline"
-                        >
-                          {redirectEmail}
-                        </a>
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <Phone size={14} className="text-primary" aria-hidden="true" />
-                        <a
-                          href={`tel:${redirectPhone}`}
-                          className="font-semibold text-primary hover:underline"
-                        >
-                          {redirectPhone}
-                        </a>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
+              {/* Per SR-01..05 (2026-10-12): the special-requests
+                  block. Replaces the `feat/special-requests-redirect`
+                  card (which is retired in SR-05). The block is
+                  always rendered on Step 2 — the bed set-up section
+                  renders only when the picked room type offers
+                  choices; the additional preferences are gated by
+                  the (admin-configured) catalog being non-empty. */}
+              <SpecialRequestsBlock
+                bedSetups={bedSetups}
+                bookingPreferences={bookingPreferences}
+                selectedRooms={distributedRoomCart
+                  .map((room) => roomTypes.find((t) => t.value === room.roomType))
+                  .filter((t): t is NonNullable<typeof t> => Boolean(t))}
+                bedSelections={bedSelections}
+                onSetBedSelections={setBedSelections}
+                additionalPreferences={additionalPreferences}
+                onSetAdditionalPreferences={setAdditionalPreferences}
+                additionalRequest={additionalRequest}
+                onSetAdditionalRequest={setAdditionalRequest}
+                expectedArrivalTime={expectedArrivalTime}
+                onSetExpectedArrivalTime={setExpectedArrivalTime}
+                checkInTime={hotelCheckInTime ?? "2:00 PM"}
+                locale={config.locale}
+              />
+              {/* Per SR-01..05 (2026-10-12): the
+                  `feat/special-requests-redirect` card
+                  (formerly here) is retired. The guest
+                  can capture their free-text request +
+                  per-room bed set-up + preference
+                  checkboxes + arrival time on the
+                  `SpecialRequestsBlock` above. */}
             </motion.div>
 
             <motion.div className="mt-6 rounded-card bg-primary-light p-4" variants={staggerChild}>

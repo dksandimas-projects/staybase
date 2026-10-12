@@ -2251,7 +2251,8 @@ function staffNewBookingEmail(booking: any) {
         ${row("Payment method", booking.paymentMethod || "—")}
         ${row("Total", formatMoney(booking.totalPrice))}
         ${row("Source", booking.source || "online")}
-        ${booking.specialRequests ? row("Special requests", escapeHtml(booking.specialRequests)) : ""}
+        ${booking.specialRequests ? row("Special requests (staff-captured)", escapeHtml(booking.specialRequests)) : ""}
+        ${typeof booking.bedSetup === "string" && booking.bedSetup.trim() ? row("Bed set-up", escapeHtml(booking.bedSetup)) : ""}
       </table>`)}
     `,
     ctaLabel: "Review booking",

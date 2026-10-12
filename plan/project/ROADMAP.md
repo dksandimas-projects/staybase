@@ -546,6 +546,24 @@ The agent's initial direct-read pass had 4 errors. The subagent fan-out caught t
 
 ---
 
+## Phase 13 — Guest Booking Special Requests (SR)
+
+> Spec: [`plan/features/SPECIAL-REQUESTS.md`](../features/SPECIAL-REQUESTS.md) · Decision: `plan/docs/DECISIONS-FEATURES.md #SR-01` · Owner-requested 2026-11-12.
+
+### SR-01..05 commit breakdown
+
+- ✅ **SR-01 — Admin: Booking Preferences tab + Room Types bedSetupValues editor (off-roadmap shipped)** — `feat(special-requests-bed-setup)`. New Settings tab with two sub-sections (bed set-ups catalog + additional preferences catalog) + per-type `bedSetupValues: string[]` subset picker in the Room Types Edit modal. Catalog writes use the same `settings/hotelConfig` full-replace + rollback-on-failure pattern as `saveRoomTypes`. AdminContext hydrates from the snapshot with the same "absent → seed default" pattern used for room types.
+- ✅ **SR-02 — Guest + corporate Step 2 UI (off-roadmap shipped)** — `feat(special-requests-bed-setup)`. New shared `<SpecialRequestsBlock />` component (bed set-up radios per unique room type + collapsed "Show additional preferences" accordion with the 2-column checkbox grid + free-text + 24h arrival-time dropdown). Renders on both `/book` and `/corporate/book` Step 2. The arrival-time options are derived from `hotelConfig.checkInTime` via `buildArrivalTimeOptions` (shared helper — client + server use the same function).
+- ✅ **SR-03 — Wire extension + Zod schema + server validation + storage (off-roadmap shipped)** — `feat(special-requests-bed-setup)`. Zod schemas extended for `roomSelections[i].bedSetup`, `additionalPreferences: string[]`, `additionalRequest: string ≤500 chars`, `expectedArrivalTime: HH:MM | null`. Create handler cross-references every field against the live `settings/hotelConfig` in the existing Firestore transaction. Per-room `bedSetup` snapshotted onto each child booking; reservation-level fields snapshotted onto the header. Invalid values → 400 with a specific message.
+- ✅ **SR-04 — Admin read surfaces (off-roadmap shipped)** — `feat(special-requests-bed-setup)`. New read-only `<GuestSpecialRequestsBlock />` in the booking drawer (above the staff `<BookingSpecialRequestsEditor />`); calendar grid amber dot gates on per-room `bedSetup` in addition to staff `specialRequests`; staff new-booking email adds a `Bed set-up` row.
+- ✅ **SR-05 — Retire `feat/special-requests-redirect` redirect card (off-roadmap shipped)** — `feat(special-requests-bed-setup)`. The "Need something special?" card on `BookingPage.tsx` + the "Forgot something?" prompt on `BookingConfirmPage.tsx` are removed. The legacy `Booking.specialRequests` field stays on the schema for post-booking email/phone follow-ups (`feat/staff-special-requests-capture`, 2026-08-21) — the staff `BookingSpecialRequestsEditor` continues to be the source of truth for those captures.
+
+### Open SR Tasks (none)
+
+All five SR tasks are shipped on `feature/special-requests-bed-setup`. No remaining items in this block.
+
+---
+
 ## Open Follow-Ups (post-ship, low-priority)
 
 Cross-referenced from the most recent `Recently shipped` entries below. These are filed tickets for future iterations — NOT active work, NOT blocking anything. Each entry points at the decision that filed it + the source location.

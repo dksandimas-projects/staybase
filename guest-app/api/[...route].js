@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.2.0";
+    VERSION2 = "1.8.0";
   }
 });
 
@@ -221266,7 +221266,7 @@ var init_animations = __esm({
 });
 
 // ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
 var init_constants = __esm({
   "../shared/constants/index.ts"() {
     BOOKING_STATUSES = [
@@ -221291,12 +221291,37 @@ var init_constants = __esm({
     ROOM_STATUSES = ["available", "occupied", "blocked"];
     HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"];
     DEFAULT_ROOM_TYPES2 = [
-      { value: "single", label: "Single", shortLabel: "Single", imageUrls: [], bedDefinition: "1 single bed", description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
-      { value: "standard-double", label: "Standard Double", shortLabel: "Std Double", imageUrls: [], bedDefinition: "1 double bed", description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
-      { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin", imageUrls: [], bedDefinition: "2 single beds", description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
-      { value: "executive", label: "Executive", shortLabel: "Executive", imageUrls: [], bedDefinition: "1 queen size bed", description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
-      { value: "family", label: "Family", shortLabel: "Family", imageUrls: [], bedDefinition: "2 double beds", description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.", amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
+      // Per SR-01..05 (2026-10-12): `bedSetupValues` is the per-type
+      // subset of `HotelConfig.bedSetups[].value` offered to the guest on
+      // the booking Step 2. The seed below mirrors the original
+      // booking-flow design ("T1 for Twin types, both set-ups for the
+      // Double", and "no set-up selection" for types where it doesn't
+      // apply — Single is a solo product, Family has fixed
+      // 2-double configuration). Admins edit the subset via the Room
+      // Types editor → Bed Set-ups picker.
+      { value: "single", label: "Single", shortLabel: "Single", imageUrls: [], bedDefinition: "1 single bed", description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600, bedSetupValues: [] },
+      { value: "standard-double", label: "Standard Double", shortLabel: "Std Double", imageUrls: [], bedDefinition: "1 double bed", description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200, bedSetupValues: ["large-bed", "twin-beds"] },
+      { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin", imageUrls: [], bedDefinition: "2 single beds", description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300, bedSetupValues: ["twin-beds", "large-bed"] },
+      { value: "executive", label: "Executive", shortLabel: "Executive", imageUrls: [], bedDefinition: "1 queen size bed", description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800, bedSetupValues: ["large-bed", "twin-beds"] },
+      { value: "family", label: "Family", shortLabel: "Family", imageUrls: [], bedDefinition: "2 double beds", description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.", amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900, bedSetupValues: [] }
     ];
+    DEFAULT_BED_SETUPS = [
+      { value: "large-bed", label: "I'd like a large bed", icon: "bed" },
+      { value: "twin-beds", label: "I'd like twin beds", icon: "bed" }
+    ];
+    DEFAULT_BOOKING_PREFERENCES = [
+      { value: "high-floor", label: "I'd like a room on a high floor" },
+      { value: "luggage-storage", label: "I'd like luggage storage" },
+      { value: "near-elevator", label: "I'd like to be near the elevator" },
+      { value: "honeymoon", label: "I'd like honeymoon arrangements" },
+      { value: "airport-transfer", label: "I'd like an airport transfer" },
+      { value: "quiet-room", label: "I'd like a quiet room" },
+      { value: "away-from-elevator", label: "I'd like to be away from the elevator" },
+      { value: "car-parking", label: "I'd like car parking" },
+      { value: "baby-cot", label: "I'd like to have a baby cot", surchargeNote: "(additional charges may apply)" }
+    ];
+    ADDITIONAL_REQUEST_MAX_LENGTH = 500;
+    ARRIVAL_WINDOW_HOURS = 24;
     MAX_ROOM_TYPE_PHOTOS = 10;
     DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
     DEFAULT_CORPORATE_PERKS = [
@@ -221477,12 +221502,65 @@ var init_references = __esm({
   }
 });
 
+// ../shared/utils/bookingInFlowHold.ts
+function isInFlowHoldActive(hold, now = /* @__PURE__ */ new Date()) {
+  if (!hold || hold.status !== "active") return false;
+  if (!hold.expiresAt) return false;
+  const expiresAt = hold.expiresAt instanceof Date ? hold.expiresAt : new Date(hold.expiresAt);
+  if (isNaN(expiresAt.getTime())) return false;
+  return expiresAt.getTime() > now.getTime();
+}
+function computeInFlowHoldExpiresAt(minutes, now = /* @__PURE__ */ new Date()) {
+  if (!Number.isFinite(Number(minutes)) || !minutes || minutes <= 0) {
+    return null;
+  }
+  return new Date(now.getTime() + Number(minutes) * 60 * 1e3);
+}
+function normalizeInFlowHoldMinutes(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_IN_FLOW_HOLD_MINUTES;
+  const clamped = Math.min(
+    MAX_IN_FLOW_HOLD_MINUTES,
+    Math.max(MIN_IN_FLOW_HOLD_MINUTES, Math.floor(value))
+  );
+  return clamped;
+}
+function clampIntegerInRange(raw, min, max) {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  const floored = Math.floor(value);
+  if (floored < min || floored > max) return null;
+  return floored;
+}
+function generateHoldId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c2) => {
+    const r3 = Math.random() * 16 | 0;
+    const v6 = c2 === "x" ? r3 : r3 & 3 | 8;
+    return v6.toString(16);
+  });
+}
+var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, HOLD_ID_REGEX;
+var init_bookingInFlowHold = __esm({
+  "../shared/utils/bookingInFlowHold.ts"() {
+    IN_FLOW_HOLD_MINUTES = 15;
+    MIN_IN_FLOW_HOLD_MINUTES = 5;
+    MAX_IN_FLOW_HOLD_MINUTES = 30;
+    DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
+    IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"];
+    HOLD_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  }
+});
+
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     init_zod();
     init_references();
+    init_bookingInFlowHold();
     BookingDatesSchema = external_exports.object({
       checkIn: external_exports.string().min(1, "Choose a check-in date"),
       checkOut: external_exports.string().min(1, "Choose a check-out date"),
@@ -221666,6 +221744,17 @@ var init_booking = __esm({
       // reschedule handler uses for `rescheduleFingerprint`).
       requestFingerprint: external_exports.string().trim().min(1).max(256).optional()
     }).strict();
+    StartBookingHoldSchema = external_exports.object({
+      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format"),
+      roomType: external_exports.string().trim().min(1).max(64),
+      checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkIn must be YYYY-MM-DD"),
+      checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkOut must be YYYY-MM-DD"),
+      numNights: external_exports.coerce.number().int().min(1).max(60)
+    }).strict().refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
+      message: "Check-out must be after check-in",
+      path: ["checkOut"]
+    });
   }
 });
 
@@ -223064,7 +223153,11 @@ function applyRoomTypeDefaults(raw) {
     weekendRate: Number(r3.weekendRate) || 0,
     corporateRate: Number(r3.corporateRate) || 0,
     maxExtraBeds: Number(r3.maxExtraBeds) || 0,
-    extraBedRate: Number(r3.extraBedRate) || 0
+    extraBedRate: Number(r3.extraBedRate) || 0,
+    // Per SR-01..05 (2026-10-12): the per-type bed-set-up
+    // subset. Same permissive "absent → empty" pattern
+    // used for the EXB-01 + CHD-02 surface flags above.
+    bedSetupValues: Array.isArray(r3.bedSetupValues) ? r3.bedSetupValues.filter((v6) => typeof v6 === "string").slice() : []
   };
 }
 function deriveRoomTypeCapacityFit(input) {
@@ -223831,10 +223924,70 @@ var init_uploads = __esm({
   }
 });
 
+// ../shared/utils/bookingPreferences.ts
+function parseCheckInTimeToPair(timeStr) {
+  const normalized = timeStr.trim().toLowerCase();
+  if (!normalized) return { hours: 14, minutes: 0 };
+  const ampm = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+  if (ampm) {
+    let hours = Number(ampm[1]);
+    const minutes = Number(ampm[2] ?? "0");
+    const isPm = ampm[3] === "pm";
+    if (hours === 12) hours = isPm ? 12 : 0;
+    else if (isPm) hours += 12;
+    return { hours, minutes };
+  }
+  const h24 = normalized.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24) {
+    const hours = Number(h24[1]);
+    const minutes = Number(h24[2]);
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return { hours, minutes };
+    }
+  }
+  return { hours: 14, minutes: 0 };
+}
+function buildArrivalTimeOptions(checkInTimeStr, locale = "en-US") {
+  const base = parseCheckInTimeToPair(checkInTimeStr);
+  const options = [
+    { value: null, label: "I don't know" }
+  ];
+  for (let i2 = 0; i2 < ARRIVAL_WINDOW_HOURS; i2 += 1) {
+    const totalMinutes = base.minutes + (base.hours + i2) * 60;
+    const hours24 = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    options.push({
+      value: formatHHMM(hours24, minutes),
+      label: format12hLabel(hours24, minutes, locale)
+    });
+  }
+  return options;
+}
+function formatHHMM(hours, minutes) {
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+function format12hLabel(hours, minutes, locale) {
+  const safeHours = (hours % 24 + 24) % 24;
+  const safeMinutes = Math.max(0, Math.min(59, minutes));
+  const reference = new Date(Date.UTC(1970, 0, 1, safeHours, safeMinutes, 0));
+  return new Intl.DateTimeFormat(locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  }).format(reference);
+}
+var init_bookingPreferences = __esm({
+  "../shared/utils/bookingPreferences.ts"() {
+    init_constants();
+  }
+});
+
 // ../shared/index.ts
 var shared_exports = {};
 __export(shared_exports, {
   ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
+  ADDITIONAL_REQUEST_MAX_LENGTH: () => ADDITIONAL_REQUEST_MAX_LENGTH,
+  ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
   AboutContentSchema: () => AboutContentSchema,
   AddRoomBookingSchema: () => AddRoomBookingSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
@@ -223849,10 +224002,13 @@ __export(shared_exports, {
   CHECK_IN_ELIGIBLE_STATUSES: () => CHECK_IN_ELIGIBLE_STATUSES,
   CorporateContentSchema: () => CorporateContentSchema,
   CreateRoomSchema: () => CreateRoomSchema,
+  DEFAULT_BED_SETUPS: () => DEFAULT_BED_SETUPS,
+  DEFAULT_BOOKING_PREFERENCES: () => DEFAULT_BOOKING_PREFERENCES,
   DEFAULT_BOOKING_SOURCES: () => DEFAULT_BOOKING_SOURCES,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT: () => DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
+  DEFAULT_IN_FLOW_HOLD_MINUTES: () => DEFAULT_IN_FLOW_HOLD_MINUTES,
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
   DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
@@ -223860,19 +224016,24 @@ __export(shared_exports, {
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
   GuestDetailsSchema: () => GuestDetailsSchema,
+  HOLD_ID_REGEX: () => HOLD_ID_REGEX,
   HOUSEKEEPING_STATUSES: () => HOUSEKEEPING_STATUSES,
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
+  IN_FLOW_HOLD_MINUTES: () => IN_FLOW_HOLD_MINUTES,
+  IN_FLOW_HOLD_STATUSES: () => IN_FLOW_HOLD_STATUSES,
   KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
   LEGACY_PAYMENT_METHOD_LABELS: () => LEGACY_PAYMENT_METHOD_LABELS,
   LegacyPaymentMethodConfigSchema: () => LegacyPaymentMethodConfigSchema,
   MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
   MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
   MAX_FEATURED_TYPES: () => MAX_FEATURED_TYPES,
+  MAX_IN_FLOW_HOLD_MINUTES: () => MAX_IN_FLOW_HOLD_MINUTES,
   MAX_PAYMENT_HOLD_WINDOW_HOURS: () => MAX_PAYMENT_HOLD_WINDOW_HOURS,
   MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS: () => MAX_ROOM_TYPE_PHOTOS,
   MAX_STAY_NIGHTS: () => MAX_STAY_NIGHTS,
+  MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
   MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
   PAYMENT_REJECTED_FRESH_DEADLINE_FROM: () => PAYMENT_REJECTED_FRESH_DEADLINE_FROM,
   PROTECTED_BOOKING_SOURCES: () => PROTECTED_BOOKING_SOURCES,
@@ -223894,6 +224055,7 @@ __export(shared_exports, {
   SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
   SeoPublishSchema: () => SeoPublishSchema,
   SetLouReceivedSchema: () => SetLouReceivedSchema,
+  StartBookingHoldSchema: () => StartBookingHoldSchema,
   TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
   TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
   UNSUPPORTED_PAYMENT_METHODS: () => UNSUPPORTED_PAYMENT_METHODS,
@@ -223908,6 +224070,7 @@ __export(shared_exports, {
   assertBookingFinanceInvariant: () => assertBookingFinanceInvariant,
   assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
+  buildArrivalTimeOptions: () => buildArrivalTimeOptions,
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
@@ -223924,6 +224087,7 @@ __export(shared_exports, {
   calculateVoucherBase: () => calculateVoucherBase,
   calculateVoucherDiscount: () => calculateVoucherDiscount,
   checkExtraBedInventory: () => checkExtraBedInventory,
+  clampIntegerInRange: () => clampIntegerInRange,
   clearCache: () => clearCache,
   clearSweepHistory: () => clearSweepHistory,
   compressImageFile: () => compressImageFile,
@@ -223931,6 +224095,7 @@ __export(shared_exports, {
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
+  computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
   computeRequestFingerprint: () => computeRequestFingerprint,
   computeReservationActualDateRange: () => computeReservationActualDateRange,
   computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
@@ -223948,6 +224113,7 @@ __export(shared_exports, {
   fadeIn: () => fadeIn,
   fadeUp: () => fadeUp,
   generateBookingRef: () => generateBookingRef,
+  generateHoldId: () => generateHoldId,
   generateLookupToken: () => generateLookupToken,
   generateMemberNumber: () => generateMemberNumber,
   generateReservationId: () => generateReservationId,
@@ -223969,6 +224135,7 @@ __export(shared_exports, {
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
+  isInFlowHoldActive: () => isInFlowHoldActive,
   isPaymentVerified: () => isPaymentVerified,
   isValidBookingRef: () => isValidBookingRef,
   isValidLookupToken: () => isValidLookupToken,
@@ -223978,11 +224145,13 @@ __export(shared_exports, {
   mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
   nextSequence: () => nextSequence,
   normalizeDiscountScope: () => normalizeDiscountScope,
+  normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
   normalizeMaxChildren: () => normalizeMaxChildren,
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   parseCheckInTime: () => parseCheckInTime,
+  parseCheckInTimeToPair: () => parseCheckInTimeToPair,
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
@@ -224022,6 +224191,7 @@ var init_shared = __esm({
     init_bookingAddOns();
     init_bookingDiscounts();
     init_bookingOccupancy();
+    init_bookingInFlowHold();
     init_extraBedInventory();
     init_bookingVat();
     init_cache();
@@ -224047,6 +224217,7 @@ var init_shared = __esm({
     init_financeInvariants();
     init_cancellation();
     init_uploads();
+    init_bookingPreferences();
   }
 });
 
@@ -227274,7 +227445,8 @@ function staffNewBookingEmail(booking) {
         ${row("Payment method", booking.paymentMethod || "\u2014")}
         ${row("Total", formatMoney(booking.totalPrice))}
         ${row("Source", booking.source || "online")}
-        ${booking.specialRequests ? row("Special requests", escapeHtml2(booking.specialRequests)) : ""}
+        ${booking.specialRequests ? row("Special requests (staff-captured)", escapeHtml2(booking.specialRequests)) : ""}
+        ${typeof booking.bedSetup === "string" && booking.bedSetup.trim() ? row("Bed set-up", escapeHtml2(booking.bedSetup)) : ""}
       </table>`)}
     `,
     ctaLabel: "Review booking",
@@ -227956,6 +228128,242 @@ init_notifications();
 // server/handlers/bookings.ts
 init_firebase_admin();
 init_test_runs();
+
+// server/handlers/in-flow-hold.ts
+init_firestore();
+init_shared();
+init_firebase_admin();
+var HOLDS_COLLECTION = "bookingHolds";
+function toIsoOrNull(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value.toDate === "function") {
+    const d = value.toDate();
+    if (d instanceof Date && !isNaN(d.getTime())) return d.toISOString();
+  }
+  if (typeof value === "string") {
+    const parsed2 = new Date(value);
+    if (!isNaN(parsed2.getTime())) return parsed2.toISOString();
+  }
+  return null;
+}
+function serializeHold(snap) {
+  const data = snap.data() ?? {};
+  return {
+    id: snap.id,
+    reservationId: String(data.reservationId ?? ""),
+    roomType: String(data.roomType ?? ""),
+    checkIn: String(data.checkIn ?? ""),
+    checkOut: String(data.checkOut ?? ""),
+    numNights: Number(data.numNights ?? 0),
+    expiresAt: toIsoOrNull(data.expiresAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    status: data.status === "consumed" || data.status === "expired" ? data.status : "active",
+    createdAt: toIsoOrNull(data.createdAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    holdMinutes: Number(data.holdMinutes ?? IN_FLOW_HOLD_MINUTES)
+  };
+}
+async function handleStartInFlowHold(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = StartBookingHoldSchema.safeParse(req.body);
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid hold request.",
+      details: parsed2.error.flatten()
+    });
+  }
+  const input = parsed2.data;
+  const holdMinutes = IN_FLOW_HOLD_MINUTES;
+  if (!Number.isFinite(holdMinutes) || holdMinutes < MIN_IN_FLOW_HOLD_MINUTES || holdMinutes > MAX_IN_FLOW_HOLD_MINUTES) {
+    return res.status(500).json({
+      success: false,
+      error: "Hold window is misconfigured."
+    });
+  }
+  const now = /* @__PURE__ */ new Date();
+  const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+  const hotelConfigSnap = await hotelConfigRef.get();
+  const hotelConfig = hotelConfigSnap.exists ? hotelConfigSnap.data() ?? {} : {};
+  const effectiveHoldMinutes = normalizeInFlowHoldMinutes(
+    hotelConfig.inFlowHoldMinutes
+  );
+  const expiresAt = computeInFlowHoldExpiresAt(effectiveHoldMinutes, now);
+  if (!expiresAt) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to compute hold deadline."
+    });
+  }
+  const ref = adminDb.collection(HOLDS_COLLECTION).doc(input.holdId);
+  try {
+    const existing = await ref.get();
+    if (existing.exists) {
+      const data = existing.data() ?? {};
+      if (data.reservationId !== input.reservationId) {
+        return res.status(409).json({
+          success: false,
+          error: "Hold id is already in use."
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        data: serializeHold(existing),
+        idempotentReplay: true
+      });
+    }
+    await ref.set({
+      reservationId: input.reservationId,
+      roomType: input.roomType,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      numNights: input.numNights,
+      expiresAt: Timestamp.fromDate(expiresAt),
+      status: "active",
+      createdAt: Timestamp.fromDate(now),
+      // Per the IFH-01.2 (settings-routing) follow-up:
+      // the snapshot is the per-hotel config value
+      // (`effectiveHoldMinutes`), not the module
+      // constant. A later Settings change never
+      // shortens or lengthens an existing guest's
+      // promise — the snapshotted value is the only
+      // field the rest of the lifecycle reads.
+      holdMinutes: effectiveHoldMinutes
+    });
+    const fresh = await ref.get();
+    return res.status(201).json({
+      success: true,
+      data: serializeHold(fresh)
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to start hold."
+    });
+  }
+}
+async function handleReadInFlowHold(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const holdId = String(req.query?.holdId || "").trim();
+  if (!holdId) {
+    return res.status(400).json({ success: false, error: "holdId is required." });
+  }
+  if (!HOLD_ID_REGEX.test(holdId)) {
+    return res.status(400).json({ success: false, error: "Invalid hold id format." });
+  }
+  try {
+    const ref = adminDb.collection(HOLDS_COLLECTION).doc(holdId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ success: false, error: "Hold not found." });
+    }
+    const data = snap.data() ?? {};
+    const expiresAt = toIsoOrNull(data.expiresAt);
+    const activeNow = isInFlowHoldActive({
+      status: data.status,
+      expiresAt
+    });
+    const payload = serializeHold(snap);
+    if (payload.status === "active" && !activeNow) {
+      payload.status = "expired";
+    }
+    return res.status(200).json({
+      success: true,
+      data: payload
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to read hold."
+    });
+  }
+}
+async function handleConsumeInFlowHold(holdId, reservationId, now = /* @__PURE__ */ new Date()) {
+  if (!HOLD_ID_REGEX.test(holdId)) {
+    return { ok: false, reason: "not-found" };
+  }
+  const ref = adminDb.collection(HOLDS_COLLECTION).doc(holdId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, reason: "not-found" };
+  }
+  const data = snap.data() ?? {};
+  if (data.reservationId && data.reservationId !== reservationId) {
+    return { ok: false, reason: "stale-reservation" };
+  }
+  if (data.status === "consumed") {
+    return { ok: false, reason: "already-consumed" };
+  }
+  const expiresAt = toIsoOrNull(data.expiresAt);
+  if (!isInFlowHoldActive({ status: data.status, expiresAt }, now)) {
+    await ref.update({ status: "expired", updatedAt: Timestamp.fromDate(now) });
+    return { ok: false, reason: "expired" };
+  }
+  await ref.update({ status: "consumed", updatedAt: Timestamp.fromDate(now) });
+  return { ok: true, hold: serializeHold(snap) };
+}
+var SWEEP_BATCH_SIZE = 200;
+async function handleSweepInFlowHolds(req, res, options = {}) {
+  if (!options.skipAuthCheck) {
+    if (req.method !== "POST" && req.method !== "GET") {
+      return { ok: false, status: 405, error: "Method not allowed." };
+    }
+    const expected = process.env.CRON_SECRET;
+    if (!expected) {
+      return { ok: false, status: 500, error: "CRON_SECRET is not configured on the server." };
+    }
+    const headerSecret = req.headers?.["x-cron-secret"];
+    const authHeader = req.headers?.authorization;
+    const authorized = typeof headerSecret === "string" && headerSecret === expected || typeof authHeader === "string" && authHeader.startsWith("Bearer ") && authHeader.slice("Bearer ".length) === expected;
+    if (!authorized) {
+      return { ok: false, status: 401, error: "Unauthorized cron request." };
+    }
+  }
+  const now = options.now ?? /* @__PURE__ */ new Date();
+  let swept = 0;
+  let scanned = 0;
+  try {
+    const expiredSnapshot = await adminDb.collection(HOLDS_COLLECTION).where("status", "==", "active").where("expiresAt", "<", Timestamp.fromDate(now)).orderBy("expiresAt", "asc").limit(SWEEP_BATCH_SIZE).get();
+    scanned = expiredSnapshot.size;
+    for (const doc of expiredSnapshot.docs) {
+      try {
+        await adminDb.runTransaction(async (transaction) => {
+          const freshDoc = await transaction.get(doc.ref);
+          if (!freshDoc.exists) return;
+          const freshData = freshDoc.data() ?? {};
+          if (freshData.status === "consumed") return;
+          if (freshData.status === "expired") return;
+          const expiresAt = toIsoOrNull(freshData.expiresAt);
+          if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
+            return;
+          }
+          transaction.update(doc.ref, {
+            status: "expired",
+            updatedAt: Timestamp.fromDate(now)
+          });
+        });
+        swept += 1;
+      } catch (err) {
+        console.error(
+          `In-flow hold sweep failed for ${doc.id}:`,
+          err
+        );
+      }
+    }
+    return {
+      swept,
+      scanned,
+      runAt: now.toISOString()
+    };
+  } catch (err) {
+    return { ok: false, status: 500, error: "Failed to sweep in-flow holds." };
+  }
+}
+
+// server/handlers/bookings.ts
 init_firestore();
 init_email();
 init_notifications();
@@ -228174,6 +228582,15 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
 }
 
 // server/handlers/bookings.ts
+function buildValidArrivalTimeOptions(checkInTimeStr) {
+  const valid = /* @__PURE__ */ new Set();
+  for (const option2 of buildArrivalTimeOptions(checkInTimeStr)) {
+    if (option2.value !== null) {
+      valid.add(option2.value);
+    }
+  }
+  return valid;
+}
 function getConfiguredBookingRefPrefix() {
   return hotel_config_default.bookingRefPrefix || "SI";
 }
@@ -228647,7 +229064,17 @@ var publicRoomSelectionSchema = external_exports.object({
   // The server enforces the invariant
   // `extraBedBreakfast implies extraBedCount > 0`
   // in the `validatedRoomStays` loop below.
-  extraBedBreakfast: external_exports.boolean().optional()
+  extraBedBreakfast: external_exports.boolean().optional(),
+  // Per SR-01..05 (2026-10-12): the per-room
+  // bed-set-up choice. Empty string means
+  // "no preference" (the guest left the
+  // radios untouched). The server validates
+  // the value against the room type's
+  // `bedSetupValues` subset (empty / missing
+  // ⊆ accepted). Optional for back-compat
+  // with pre-SR callers — when absent the
+  // server writes `null` to the booking doc.
+  bedSetup: external_exports.string().trim().max(64).optional().default("")
 }).strict().superRefine((selection, ctx) => {
   if (selection.numAdults + selection.numChildren < 1) {
     ctx.addIssue({
@@ -228753,6 +229180,31 @@ var createBookingSchema = external_exports.object({
   // remain unambiguous. Legacy callers may omit this array and
   // continue using roomType + roomCount + the top-level occupancy.
   roomSelections: external_exports.array(publicRoomSelectionSchema).min(1).max(50).optional(),
+  // Per SR-01..05 (2026-10-12): the corporate booking
+  // path sends `bedSetup` at the top level (the cart is
+  // flat-rate + single-room-group, not the multi-room
+  // MRB-06 shape). The server writes the value onto
+  // every child booking so the per-room shape is
+  // uniform regardless of which client path created the
+  // booking.
+  bedSetup: external_exports.string().trim().max(64).optional().default(""),
+  // Per SR-01..05 (2026-10-12): the reservation-level
+  // special-requests fields. The server cross-references
+  // each `additionalPreferences` key against
+  // `settings/hotelConfig.bookingPreferences[].value` and
+  // `expectedArrivalTime` against the catalog generated
+  // from `hotelConfig.checkInTime` + ARRIVAL_WINDOW_HOURS.
+  // All three are optional for back-compat with callers
+  // (admin walk-in, third-party API) that don't carry
+  // the SR schema.
+  additionalPreferences: external_exports.array(external_exports.string().trim().min(1).max(64)).max(60).optional().default([]),
+  additionalRequest: external_exports.string().trim().max(500).optional().default(""),
+  // Per the high-level decision ("24h window from
+  // checkInTime, times at-or-after checkInTime"):
+  // the server validates the HH:MM string against the
+  // generated options + `null` (the "I don't know"
+  // sentinel). Empty string normalizes to `null`.
+  expectedArrivalTime: external_exports.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
   testToken: external_exports.string().trim().max(512).optional(),
   turnstileToken: external_exports.string().max(4096).optional(),
   // Per MRB-02 (2026-08-02, per decision #159): optional client
@@ -228774,6 +229226,15 @@ var createBookingSchema = external_exports.object({
   // the write boundary. Pre-MRB-11 callers omit it; the
   // server fills it in.
   revenueAllocation: BookingRevenueAllocationSchema.optional(),
+  // In-flow hold (Steps 2 + 3 countdown banner). Optional
+  // for back-compat — when present, the create transaction
+  // reads the hold, validates it is still "active" + not
+  // past `expiresAt`, marks it "consumed", and stores the
+  // `holdMinutes` snapshot on the booking doc so future
+  // reports can attribute expired holds to a specific
+  // window. When absent, the booking still creates
+  // normally (legacy pre-hold-banner callers stay green).
+  holdId: external_exports.string().trim().regex(HOLD_ID_REGEX).optional(),
   // Per LOW-1 (reports audit 2026-08-10) + DECISIONS-FEATURES.md #99:
   // the LOU (Letter of Undertaking) flag for corporate
   // chargeback bookings. The guest never sets this — the
@@ -228852,7 +229313,26 @@ async function handleCreateBooking(req, res) {
     // to send the field.
     roomCount,
     roomSelections: requestedRoomSelections,
-    testToken
+    // Per SR-01..05 (2026-10-12): the corporate path
+    // sends `bedSetup` at the top level; mirror it
+    // onto every room when `roomSelections` is
+    // absent (the cart is flat-rate + single-room-
+    // group). The schema validates the field as a
+    // 64-char string (already trimmed); the room-
+    // type-specific check above rejects values that
+    // aren't in the type's `bedSetupValues` subset.
+    bedSetup,
+    additionalPreferences,
+    additionalRequest,
+    expectedArrivalTime,
+    testToken,
+    // In-flow hold (Steps 2 + 3 countdown banner). The
+    // transaction reads the hold, validates it is still
+    // "active" + not past `expiresAt`, marks it "consumed",
+    // and snapshots the `holdMinutes` onto the booking doc
+    // for analytics. Optional — pre-hold-banner callers
+    // omit the field and stay green.
+    holdId
   } = body;
   const guestDetails = rawGuestDetails;
   const normalizedRoomSelections = requestedRoomSelections?.length ? requestedRoomSelections.map((selection, index) => ({
@@ -228862,7 +229342,14 @@ async function handleCreateBooking(req, res) {
     numChildren: selection.numChildren,
     extraBedCount: selection.extraBedCount || 0,
     hasBreakfast: selection.hasBreakfast,
-    breakfastIncludesChildren: selection.breakfastIncludesChildren
+    breakfastIncludesChildren: selection.breakfastIncludesChildren,
+    // Per SR-01..05 (2026-10-12): the per-room
+    // bed-set-up choice. Empty string means
+    // "no preference" (the guest left the
+    // radios untouched). The server validates
+    // the value against the room type's
+    // `bedSetupValues` subset further down.
+    bedSetup: selection.bedSetup || ""
   })) : Array.from({ length: roomCount }, (_2, index) => ({
     bookingId: index === 0 ? bookingId : adminDb.collection("bookings").doc().id,
     roomType,
@@ -228870,7 +229357,12 @@ async function handleCreateBooking(req, res) {
     numChildren: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
     extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0)),
     hasBreakfast,
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren
+    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per SR-01..05 (2026-10-12): the corporate
+    // path sends `bedSetup` at the top level;
+    // mirror it onto every room (the corporate
+    // cart is flat-rate + single-room-group).
+    bedSetup: bedSetup || ""
   }));
   const requestedRoomCount = normalizedRoomSelections.length;
   const requestedGuestCount = normalizedRoomSelections.reduce(
@@ -229114,11 +229606,37 @@ async function handleCreateBooking(req, res) {
         if (!rawSelectionType) {
           throw new Error(requestedRoomSelections?.length ? `Selected room type is not available: ${selection.roomType}.` : "Selected room type is not available.");
         }
+        const typeBedSetupSubset = Array.isArray(rawSelectionType.bedSetupValues) ? rawSelectionType.bedSetupValues.filter((v6) => typeof v6 === "string") : [];
+        if (selection.bedSetup && !typeBedSetupSubset.includes(selection.bedSetup)) {
+          throw new Error(
+            `Selected bed set-up "${selection.bedSetup}" is not offered for room type ${selection.roomType}.`
+          );
+        }
         return {
           ...selection,
           typeEntry: applyRoomTypeDefaults(rawSelectionType)
         };
       });
+      const bookingPreferencesCatalog = Array.isArray(
+        hotelConfig.bookingPreferences
+      ) ? hotelConfig.bookingPreferences.filter(
+        (v6) => typeof v6 === "object" && v6 !== null && typeof v6.value === "string"
+      ).map((v6) => v6.value) : [];
+      const invalidPreferenceKeys = additionalPreferences.filter(
+        (key) => !bookingPreferencesCatalog.includes(key)
+      );
+      if (invalidPreferenceKeys.length > 0) {
+        throw new Error(
+          `Selected preferences are not configured: ${invalidPreferenceKeys.join(", ")}.`
+        );
+      }
+      const checkInTimeStr = typeof hotelConfig.checkInTime === "string" && hotelConfig.checkInTime.trim() ? hotelConfig.checkInTime : "2:00 PM";
+      const validArrivalOptions = buildValidArrivalTimeOptions(checkInTimeStr);
+      const normalizedArrivalTime = expectedArrivalTime === void 0 ? null : expectedArrivalTime === null ? null : expectedArrivalTime === "" ? null : validArrivalOptions.has(expectedArrivalTime) ? expectedArrivalTime : (() => {
+        throw new Error(
+          `Expected arrival time "${expectedArrivalTime}" is outside the booking window.`
+        );
+      })();
       const primaryRoomType = resolvedRoomSelections2[0]?.roomType || roomType;
       const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === primaryRoomType);
       if (!rawTypeEntry) {
@@ -229689,6 +230207,17 @@ async function handleCreateBooking(req, res) {
         // transactions all read this single field via
         // `isBookingOccupyingRoom`.
         holdExpiresAt: paymentProofPath || paymentProofUrl ? null : computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now) ? Timestamp.fromDate(computeHoldExpiresAt(hotelConfig.paymentHoldWindowHours, now)) : null,
+        // In-flow hold (Steps 2 + 3 countdown banner). The
+        // `holdId` is the link back to the `bookingHolds/{id}`
+        // doc; the create transaction below reads + consumes
+        // it. The `holdMinutes` is a snapshot of the
+        // IN_FLOW_HOLD_MINUTES constant at create time so
+        // future reports can attribute expired holds to a
+        // specific window even if the constant changes. Both
+        // fields are null when no hold is present (legacy
+        // pre-hold-banner callers).
+        inFlowHoldId: holdId || null,
+        inFlowHoldMinutes: holdId ? IN_FLOW_HOLD_MINUTES : null,
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): write
         // `null` (not `""`) when no payment proof is attached.
@@ -229913,6 +230442,23 @@ async function handleCreateBooking(req, res) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: termsConsentVersion,
+        // Per SR-01..05 (2026-10-12): the
+        // reservation-level special-requests fields.
+        // Snapshotted here so a later admin change to
+        // the `bookingPreferences` catalog doesn't
+        // rewrite the guest's recorded choices. The
+        // per-room `bedSetup` lives on each child
+        // booking (different rooms may carry different
+        // choices). `additionalPreferences` is deduped
+        // + intersected against the live catalog above;
+        // `additionalRequest` is capped at
+        // `ADDITIONAL_REQUEST_MAX_LENGTH` (500 chars)
+        // by the Zod schema; `expectedArrivalTime`
+        // is the `HH:MM` snapshot (or `null` for
+        // "I don't know").
+        additionalPreferences: Array.isArray(additionalPreferences) ? Array.from(new Set(additionalPreferences)) : [],
+        additionalRequest: typeof additionalRequest === "string" ? additionalRequest.trim() : "",
+        expectedArrivalTime: normalizedArrivalTime,
         // Per BAR-02 (2026-08-08, per decision #203): the
         // five aggregate counter fields are no longer
         // written to the reservation header. Consumers
@@ -229969,6 +230515,13 @@ async function handleCreateBooking(req, res) {
             roomId: assignedRoomForBooking.id,
             roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
             roomType: assignedRoomForBooking.selection.roomType,
+            // Per SR-01..05 (2026-10-12): the per-room
+            // bed-set-up snapshot. `null` when the
+            // guest left the radios untouched (the
+            // empty string from the wire normalizes
+            // here). Server-validated against the room
+            // type's `bedSetupValues` subset above.
+            bedSetup: assignedRoomForBooking.selection.bedSetup || null,
             numGuests: pricingForRoom.numGuests,
             numAdults: pricingForRoom.numAdults,
             numChildren: pricingForRoom.numChildren,
@@ -230109,6 +230662,21 @@ async function handleCreateBooking(req, res) {
         success: true,
         data: alreadyExistingBookingResponse
       });
+    }
+    if (holdId) {
+      try {
+        const consumeResult = await handleConsumeInFlowHold(
+          holdId,
+          effectiveReservationId
+        );
+        if (!consumeResult.ok) {
+          console.warn(
+            `In-flow hold consume non-fatal outcome: ${consumeResult.reason} (holdId=${holdId}, reservationId=${effectiveReservationId})`
+          );
+        }
+      } catch (consumeErr) {
+        console.error("Failed to consume in-flow hold:", consumeErr);
+      }
     }
     try {
       const emailView = buildCreateEmailView({
@@ -239800,6 +240368,25 @@ async function handler(req, res) {
   }
   if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
     return await handleHoldExpiryCron(req, res);
+  }
+  if (domain === "holds" && action === "start" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-start:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many hold requests. Please try again in a minute." });
+    }
+    return await handleStartInFlowHold(req, res);
+  }
+  if (domain === "holds" && action === "read" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-read:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many hold read requests. Please try again in a minute." });
+    }
+    return await handleReadInFlowHold(req, res);
+  }
+  if (domain === "holds" && action === "sweep" && (req.method === "POST" || req.method === "GET")) {
+    const result = await handleSweepInFlowHolds(req, res);
+    if ("ok" in result && result.ok === false) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    return res.status(200).json({ success: true, data: result });
   }
   if (domain === "test-runs" && action === "create" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`test-runs-create:${ip}`, 5, 6e4)) {

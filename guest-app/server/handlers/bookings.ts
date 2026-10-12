@@ -176,9 +176,33 @@ import {
 import {
   evaluateCancelPreview,
   buildCancellationLiabilitySnapshot,
-  assertBookingRevenueAllocationInvariant
+  assertBookingRevenueAllocationInvariant,
+  // Per SR-01..05 (2026-10-12): the server-side
+  // arrival-time validator (parses the hotel's
+  // `checkInTime` and returns the set of valid
+  // HH:MM values for the 24h window — same helper
+  // shape the guest dropdown uses so the two can
+  // never drift apart).
+  buildArrivalTimeOptions
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
+
+// Per SR-01..05 (2026-10-12): build the Set of
+// HH:MM strings the booking-create handler accepts
+// for `expectedArrivalTime`. Returns `null` when
+// the value is the "I don't know" sentinel (always
+// accepted). The `null` value (from the `[I don't
+// know, …times]` dropdown) maps to `""` in the
+// `Reservation.expectedArrivalTime` field.
+function buildValidArrivalTimeOptions(checkInTimeStr: string): Set<string> {
+  const valid = new Set<string>();
+  for (const option of buildArrivalTimeOptions(checkInTimeStr)) {
+    if (option.value !== null) {
+      valid.add(option.value);
+    }
+  }
+  return valid;
+}
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
 // Per BAR-03 (2026-08-08, per decision #204): the
 // shared FOL-05 sibling-flip helper. The pre-BAR-03
@@ -1157,7 +1181,17 @@ export const publicRoomSelectionSchema = z.object({
   // The server enforces the invariant
   // `extraBedBreakfast implies extraBedCount > 0`
   // in the `validatedRoomStays` loop below.
-  extraBedBreakfast: z.boolean().optional()
+  extraBedBreakfast: z.boolean().optional(),
+  // Per SR-01..05 (2026-10-12): the per-room
+  // bed-set-up choice. Empty string means
+  // "no preference" (the guest left the
+  // radios untouched). The server validates
+  // the value against the room type's
+  // `bedSetupValues` subset (empty / missing
+  // ⊆ accepted). Optional for back-compat
+  // with pre-SR callers — when absent the
+  // server writes `null` to the booking doc.
+  bedSetup: z.string().trim().max(64).optional().default("")
 }).strict().superRefine((selection, ctx) => {
   if (selection.numAdults + selection.numChildren < 1) {
     ctx.addIssue({
@@ -1272,6 +1306,36 @@ export const createBookingSchema = z.object({
   // remain unambiguous. Legacy callers may omit this array and
   // continue using roomType + roomCount + the top-level occupancy.
   roomSelections: z.array(publicRoomSelectionSchema).min(1).max(50).optional(),
+  // Per SR-01..05 (2026-10-12): the corporate booking
+  // path sends `bedSetup` at the top level (the cart is
+  // flat-rate + single-room-group, not the multi-room
+  // MRB-06 shape). The server writes the value onto
+  // every child booking so the per-room shape is
+  // uniform regardless of which client path created the
+  // booking.
+  bedSetup: z.string().trim().max(64).optional().default(""),
+  // Per SR-01..05 (2026-10-12): the reservation-level
+  // special-requests fields. The server cross-references
+  // each `additionalPreferences` key against
+  // `settings/hotelConfig.bookingPreferences[].value` and
+  // `expectedArrivalTime` against the catalog generated
+  // from `hotelConfig.checkInTime` + ARRIVAL_WINDOW_HOURS.
+  // All three are optional for back-compat with callers
+  // (admin walk-in, third-party API) that don't carry
+  // the SR schema.
+  additionalPreferences: z.array(z.string().trim().min(1).max(64)).max(60).optional().default([]),
+  additionalRequest: z.string().trim().max(500).optional().default(""),
+  // Per the high-level decision ("24h window from
+  // checkInTime, times at-or-after checkInTime"):
+  // the server validates the HH:MM string against the
+  // generated options + `null` (the "I don't know"
+  // sentinel). Empty string normalizes to `null`.
+  expectedArrivalTime: z
+    .string()
+    .trim()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .nullable()
+    .optional(),
   testToken: z.string().trim().max(512).optional(),
   turnstileToken: z.string().max(4096).optional(),
   // Per MRB-02 (2026-08-02, per decision #159): optional client
@@ -1391,6 +1455,18 @@ export async function handleCreateBooking(req: any, res: any) {
     // to send the field.
     roomCount,
     roomSelections: requestedRoomSelections,
+    // Per SR-01..05 (2026-10-12): the corporate path
+    // sends `bedSetup` at the top level; mirror it
+    // onto every room when `roomSelections` is
+    // absent (the cart is flat-rate + single-room-
+    // group). The schema validates the field as a
+    // 64-char string (already trimmed); the room-
+    // type-specific check above rejects values that
+    // aren't in the type's `bedSetupValues` subset.
+    bedSetup,
+    additionalPreferences,
+    additionalRequest,
+    expectedArrivalTime,
     testToken,
     // In-flow hold (Steps 2 + 3 countdown banner). The
     // transaction reads the hold, validates it is still
@@ -1413,7 +1489,14 @@ export async function handleCreateBooking(req: any, res: any) {
         numChildren: selection.numChildren,
         extraBedCount: selection.extraBedCount || 0,
         hasBreakfast: selection.hasBreakfast,
-        breakfastIncludesChildren: selection.breakfastIncludesChildren
+        breakfastIncludesChildren: selection.breakfastIncludesChildren,
+        // Per SR-01..05 (2026-10-12): the per-room
+        // bed-set-up choice. Empty string means
+        // "no preference" (the guest left the
+        // radios untouched). The server validates
+        // the value against the room type's
+        // `bedSetupValues` subset further down.
+        bedSetup: selection.bedSetup || ""
       }))
     : Array.from({ length: roomCount }, (_, index) => ({
         bookingId: index === 0 ? bookingId : adminDb.collection("bookings").doc().id,
@@ -1422,7 +1505,12 @@ export async function handleCreateBooking(req: any, res: any) {
         numChildren: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
         extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0)),
         hasBreakfast,
-        breakfastIncludesChildren: requestedBreakfastIncludesChildren
+        breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+        // Per SR-01..05 (2026-10-12): the corporate
+        // path sends `bedSetup` at the top level;
+        // mirror it onto every room (the corporate
+        // cart is flat-rate + single-room-group).
+        bedSetup: bedSetup || ""
       }));
   const requestedRoomCount = normalizedRoomSelections.length;
   const requestedGuestCount = normalizedRoomSelections.reduce(
@@ -1943,11 +2031,80 @@ export async function handleCreateBooking(req: any, res: any) {
             ? `Selected room type is not available: ${selection.roomType}.`
             : "Selected room type is not available.");
         }
+        // Per SR-01..05 (2026-10-12): validate the
+        // per-room bed-set-up choice against the room
+        // type's `bedSetupValues` subset. Empty string
+        // (no preference) is always accepted. A
+        // non-empty value not in the subset is a 400.
+        const typeBedSetupSubset: string[] = Array.isArray(rawSelectionType.bedSetupValues)
+          ? (rawSelectionType.bedSetupValues as unknown[])
+              .filter((v): v is string => typeof v === "string")
+          : [];
+        if (selection.bedSetup && !typeBedSetupSubset.includes(selection.bedSetup)) {
+          throw new Error(
+            `Selected bed set-up "${selection.bedSetup}" is not offered for room type ${selection.roomType}.`
+          );
+        }
         return {
           ...selection,
           typeEntry: applyRoomTypeDefaults(rawSelectionType)
         };
       });
+
+      // Per SR-01..05 (2026-10-12): validate the
+      // reservation-level special-requests fields
+      // against the admin-configured catalogs +
+      // arrival-time window. Empty arrays / empty
+      // strings / `null` arrival all skip validation
+      // (back-compat with callers that don't carry the
+      // SR schema — admin walk-in, third-party API).
+      const bookingPreferencesCatalog: string[] = Array.isArray(
+        hotelConfig.bookingPreferences
+      )
+        ? (hotelConfig.bookingPreferences as unknown[])
+            .filter(
+              (v): v is { value: string } =>
+                typeof v === "object" &&
+                v !== null &&
+                typeof (v as { value?: unknown }).value === "string"
+            )
+            .map((v) => v.value)
+        : [];
+      const invalidPreferenceKeys = additionalPreferences.filter(
+        (key) => !bookingPreferencesCatalog.includes(key)
+      );
+      if (invalidPreferenceKeys.length > 0) {
+        throw new Error(
+          `Selected preferences are not configured: ${invalidPreferenceKeys.join(", ")}.`
+        );
+      }
+      // Per the design call (24h window from
+      // `checkInTime`, times at-or-after checkInTime):
+      // the server validates the HH:MM string against
+      // the generated options. The helper is in
+      // `shared/utils/bookingPreferences.ts` so the
+      // client dropdown + server validation always
+      // agree on the option set.
+      const checkInTimeStr =
+        typeof hotelConfig.checkInTime === "string" && hotelConfig.checkInTime.trim()
+          ? hotelConfig.checkInTime
+          : "2:00 PM";
+      const validArrivalOptions = buildValidArrivalTimeOptions(checkInTimeStr);
+      // `null` ("I don't know") is always accepted.
+      const normalizedArrivalTime =
+        expectedArrivalTime === undefined
+          ? null
+          : expectedArrivalTime === null
+          ? null
+          : expectedArrivalTime === ""
+          ? null
+          : validArrivalOptions.has(expectedArrivalTime)
+          ? expectedArrivalTime
+          : (() => {
+              throw new Error(
+                `Expected arrival time "${expectedArrivalTime}" is outside the booking window.`
+              );
+            })();
       const primaryRoomType = resolvedRoomSelections[0]?.roomType || roomType;
       const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === primaryRoomType);
       if (!rawTypeEntry) {
@@ -3199,6 +3356,25 @@ export async function handleCreateBooking(req: any, res: any) {
         privacyAccepted: true,
         privacyAcceptedAt: now,
         privacyVersion: termsConsentVersion,
+        // Per SR-01..05 (2026-10-12): the
+        // reservation-level special-requests fields.
+        // Snapshotted here so a later admin change to
+        // the `bookingPreferences` catalog doesn't
+        // rewrite the guest's recorded choices. The
+        // per-room `bedSetup` lives on each child
+        // booking (different rooms may carry different
+        // choices). `additionalPreferences` is deduped
+        // + intersected against the live catalog above;
+        // `additionalRequest` is capped at
+        // `ADDITIONAL_REQUEST_MAX_LENGTH` (500 chars)
+        // by the Zod schema; `expectedArrivalTime`
+        // is the `HH:MM` snapshot (or `null` for
+        // "I don't know").
+        additionalPreferences: Array.isArray(additionalPreferences)
+          ? Array.from(new Set(additionalPreferences))
+          : [],
+        additionalRequest: typeof additionalRequest === "string" ? additionalRequest.trim() : "",
+        expectedArrivalTime: normalizedArrivalTime,
         // Per BAR-02 (2026-08-08, per decision #203): the
         // five aggregate counter fields are no longer
         // written to the reservation header. Consumers
@@ -3280,6 +3456,13 @@ export async function handleCreateBooking(req: any, res: any) {
             roomId: assignedRoomForBooking.id,
             roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
             roomType: assignedRoomForBooking.selection.roomType,
+            // Per SR-01..05 (2026-10-12): the per-room
+            // bed-set-up snapshot. `null` when the
+            // guest left the radios untouched (the
+            // empty string from the wire normalizes
+            // here). Server-validated against the room
+            // type's `bedSetupValues` subset above.
+            bedSetup: assignedRoomForBooking.selection.bedSetup || null,
             numGuests: pricingForRoom.numGuests,
             numAdults: pricingForRoom.numAdults,
             numChildren: pricingForRoom.numChildren,

@@ -365,6 +365,27 @@ export interface Reservation {
   // for the state machine.
   cancellationLiability?: CancellationLiability | null;
 
+  // Per SR-01..05 (2026-10-12): the guest-captured
+  // special-requests fields. `additionalPreferences` is
+  // an array of admin-configured preference keys
+  // (cross-referenced against
+  // `settings/hotelConfig.bookingPreferences[].value`).
+  // `additionalRequest` is the free-text payload
+  // (≤500 chars per `ADDITIONAL_REQUEST_MAX_LENGTH`).
+  // `expectedArrivalTime` is the `HH:MM` string in the
+  // hotel timezone, or `null` for "I don't know".
+  // All three are optional for back-compat reads of
+  // pre-SR reservations (the AdminContext hydration
+  // treats absent values as their empty defaults).
+  // The per-room `bedSetup` snapshot lives on each
+  // child `Booking.bedSetup`, since different rooms may
+  // carry different set-ups (a multi-room reservation
+  // with a Twin + a Double would pick twin-beds for
+  // one and large-bed for the other).
+  additionalPreferences?: string[];
+  additionalRequest?: string;
+  expectedArrivalTime?: string | null;
+
   // Per MRB-11 (2026-08-03, per decision #177): the
   // aggregate of every child booking's `revenueAllocation`,
   // recomputed transactionally in MRB-04 whenever a child
@@ -667,6 +688,17 @@ export interface Booking {
   specialRequests: string;
   specialRequestsUpdatedAt: string | null;
   specialRequestsUpdatedBy: string | null;
+  // Per SR-01..05 (2026-10-12): the per-room
+  // bed-set-up snapshot. Guest-captured at booking
+  // time (the public Step 2 radios mirror the
+  // admin-configured catalog for the picked room
+  // type). `null` when the guest left the radios
+  // untouched. Server-validated against the room
+  // type's `bedSetupValues` subset. The per-room
+  // shape allows a multi-room reservation with two
+  // different types to carry distinct choices
+  // (Twin picks twin-beds, Double picks large-bed).
+  bedSetup?: string | null;
   status: BookingStatus;
   paymentMethod: PaymentMethod;
   // Per BF-45 (booking-flow audit 2026-06-26): the

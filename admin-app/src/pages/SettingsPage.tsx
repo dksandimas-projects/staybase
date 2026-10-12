@@ -11,6 +11,11 @@ import {
   PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS,
   UNSUPPORTED_PAYMENT_METHODS,
+  // Per SR-01..05 (2026-10-12): the Booking Preferences
+  // tab uses the shared types for the bed set-ups +
+  // additional preferences catalogs.
+  type BedSetupOption,
+  type BookingPreferenceOption,
   // Per the IFH-01.3 (Settings UI editor) follow-up:
   // the shared clamp helper + the IFH-01.2 min/max
   // bounds + the clamp pattern from bookingOccupancy
@@ -31,6 +36,9 @@ import {
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
+  // Per SR-01..05 (2026-10-12): `ListChecks` icon for the
+  // new Booking Preferences tab.
+  ListChecks,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
   Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw,
   ChevronDown, ChevronUp, FlaskConical, Tag, Percent, Database,
@@ -53,7 +61,7 @@ import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
+type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "preferences" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
 type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts" | "holds";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -930,6 +938,540 @@ function emptyPaymentMethod(): PaymentMethodConfig {
   return { method: "", label: "", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true, showInStore: true, showInCorporate: true, requireReferenceNumber: true };
 }
 
+// Per SR-01..05 (2026-10-12): the Booking Preferences tab
+// body. Two sub-sections — the bed set-ups catalog (drives
+// the guest Step 2 bed-set-up radio group) + the
+// additional preferences catalog (drives the Step 2
+// checkbox grid). Each row is editable via its own modal,
+// and deletes go through the same
+// "click-twice-within-3-seconds" confirmation pattern
+// used by `BookingSourcesTabBody` above.
+//
+// Both lists persist as a single full-replace write to
+// `settings/hotelConfig.bedSetups` +
+// `settings/hotelConfig.bookingPreferences` via the
+// `updateBedSetups` + `updateBookingPreferences` callbacks
+// passed in from `useAdmin()`.
+interface BookingPreferencesTabBodyProps {
+  bedSetups: BedSetupOption[];
+  bookingPreferences: BookingPreferenceOption[];
+  onUpdateBedSetups: (next: BedSetupOption[]) => Promise<void>;
+  onUpdateBookingPreferences: (next: BookingPreferenceOption[]) => Promise<void>;
+}
+
+type BedSetupModalState =
+  | { open: false }
+  | { open: true; isNew: boolean; entry: BedSetupOption };
+
+type BookingPreferenceModalState =
+  | { open: false }
+  | { open: true; isNew: boolean; entry: BookingPreferenceOption };
+
+function slugifyCatalogValue(raw: string): string {
+  // Per the Zod schemas in `shared/schemas/bookingPreferences.ts`:
+  // kebab-case (lowercase letters, digits, '-' or '_'), max
+  // 64 chars. We trim, lowercase, replace whitespace + any
+  // non-conforming char with `-`, then collapse runs.
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+function CatalogEditor<T extends { value: string; label: string }>({
+  title,
+  subtitle,
+  rows,
+  isPending,
+  pendingValue,
+  onAdd,
+  onEdit,
+  onDelete,
+  renderRow,
+  renderModal,
+  beginLabel
+}: {
+  title: string;
+  subtitle: string;
+  rows: T[];
+  isPending: (value: string) => boolean;
+  pendingValue: string | null;
+  onAdd: () => void;
+  onEdit: (entry: T) => void;
+  onDelete: (entry: T) => Promise<void> | void;
+  renderRow: (entry: T, idx: number) => React.ReactNode;
+  renderModal: () => React.ReactNode;
+  beginLabel: string;
+}) {
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!pendingValue) return;
+    const timer = setTimeout(() => {
+      // Parent listens on `pendingValue` to arm/disarm.
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [pendingValue]);
+
+  return (
+    <div className="rounded-card border border-gray-200 bg-white p-5 shadow-sm">
+      <header className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-900">{title}</h4>
+          <p className="mt-1 text-[11px] text-gray-500">{subtitle}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex min-h-[44px] items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          <Plus size={14} />
+          {beginLabel}
+        </button>
+      </header>
+
+      {rows.length === 0 ? (
+        <div className="rounded-card border border-dashed border-gray-300 bg-gray-50 p-6 text-center text-xs text-gray-500">
+          No entries yet — click <strong>{beginLabel}</strong> to add the first one.
+        </div>
+      ) : (
+        <ul className="divide-y divide-gray-100 rounded-card border border-gray-200">
+          {rows.map((entry, idx) => (
+            <li key={entry.value} className="flex items-start justify-between gap-3 p-3">
+              <div className="min-w-0 flex-1">
+                {renderRow(entry, idx)}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onEdit(entry)}
+                  className="inline-flex min-h-[44px] items-center gap-1 rounded border border-gray-200 px-2 text-[11px] font-bold text-gray-700 hover:border-primary hover:text-primary"
+                  aria-label={`Edit ${entry.label}`}
+                >
+                  <Pencil size={12} />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!isPending(entry.value)) {
+                      toast.info("Confirm delete", "Click the delete button again within 3 seconds to confirm.");
+                      // Surface the arm via a custom event so the
+                      // parent can lift state into the prop-driven
+                      // pending state without prop drilling here.
+                      // We dispatch a synthetic event the parent
+                      // listens on. Alternative: parent passes a
+                        // callback. We do that below in
+                        // `handleArmDelete`.
+                      window.dispatchEvent(
+                        new CustomEvent("booking-preferences-arm-delete", { detail: { value: entry.value } })
+                      );
+                      return;
+                    }
+                    try {
+                      await onDelete(entry);
+                    } catch (err) {
+                      toast.error("Could not delete", err instanceof Error ? err.message : "Unknown error");
+                    }
+                  }}
+                  className={`min-h-[44px] px-2 text-[11px] font-bold ${
+                    isPending(entry.value)
+                      ? "text-red-700 hover:underline"
+                      : "text-red-650 hover:text-red-700 hover:underline"
+                  }`}
+                  aria-label={`Delete ${entry.label}`}
+                >
+                  {isPending(entry.value) ? "Click again to confirm" : "Delete"}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {renderModal()}
+    </div>
+  );
+}
+
+function BookingPreferencesTabBody({
+  bedSetups,
+  bookingPreferences,
+  onUpdateBedSetups,
+  onUpdateBookingPreferences
+}: BookingPreferencesTabBodyProps) {
+  const toast = useToast();
+  const [bedSetupsPendingDelete, setBedSetupsPendingDelete] = useState<string | null>(null);
+  const [prefsPendingDelete, setPrefsPendingDelete] = useState<string | null>(null);
+  const [bedSetupModal, setBedSetupModal] = useState<BedSetupModalState>({ open: false });
+  const [prefsModal, setPrefsModal] = useState<BookingPreferenceModalState>({ open: false });
+
+  // The CatalogEditor above is generic; we use a single
+  // shared "arm" timer per catalog. The custom-event
+  // dispatch is the simplest way to keep the editor
+  // component prop-light while still letting the parent own
+  // the pending state. (Alternative would be prop drilling
+  // two more callbacks — not for two screens.)
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ value: string }>).detail;
+      if (!detail) return;
+      // Route to whichever catalog owns the value.
+      if (bedSetups.some((b) => b.value === detail.value)) {
+        setBedSetupsPendingDelete(detail.value);
+      } else if (bookingPreferences.some((p) => p.value === detail.value)) {
+        setPrefsPendingDelete(detail.value);
+      }
+    };
+    window.addEventListener("booking-preferences-arm-delete", handler as EventListener);
+    return () => {
+      window.removeEventListener("booking-preferences-arm-delete", handler as EventListener);
+    };
+  }, [bedSetups, bookingPreferences]);
+
+  // Auto-disarm after 3 seconds (the existing "click
+  // twice" pattern).
+  useEffect(() => {
+    if (!bedSetupsPendingDelete) return;
+    const timer = setTimeout(() => setBedSetupsPendingDelete(null), 3000);
+    return () => clearTimeout(timer);
+  }, [bedSetupsPendingDelete]);
+  useEffect(() => {
+    if (!prefsPendingDelete) return;
+    const timer = setTimeout(() => setPrefsPendingDelete(null), 3000);
+    return () => clearTimeout(timer);
+  }, [prefsPendingDelete]);
+
+  // ── Bed Set-ups ────────────────────────────────────────
+  const handleBedSetupSave = async (entry: BedSetupOption, isNew: boolean) => {
+    const slug = slugifyCatalogValue(entry.value);
+    if (!slug) {
+      toast.error("Invalid identifier", "Use letters, digits, '-' or '_'.");
+      return false;
+    }
+    if (!entry.label.trim()) {
+      toast.error("Label required", "Add a display label for the option.");
+      return false;
+    }
+    const collides = bedSetups.some((b) => b.value === slug && (isNew || b.value !== entry.value));
+    if (collides) {
+      toast.error("Duplicate identifier", `"${slug}" is already in the catalog.`);
+      return false;
+    }
+    const next: BedSetupOption[] = isNew
+      ? [...bedSetups, { value: slug, label: entry.label.trim(), icon: entry.icon?.trim() || undefined }]
+      : bedSetups.map((b) =>
+          b.value === entry.value
+            ? { value: slug, label: entry.label.trim(), icon: entry.icon?.trim() || undefined }
+            : b
+        );
+    try {
+      await onUpdateBedSetups(next);
+      toast.success("Bed set-ups saved", `${entry.label} ${isNew ? "added" : "updated"}.`);
+      return true;
+    } catch (err) {
+      toast.error("Could not save", err instanceof Error ? err.message : "Unknown error");
+      return false;
+    }
+  };
+
+  const handleBedSetupDelete = async (entry: BedSetupOption) => {
+    if (bedSetupsPendingDelete !== entry.value) {
+      setBedSetupsPendingDelete(entry.value);
+      toast.info("Confirm delete", "Click delete again within 3 seconds to confirm.");
+      return;
+    }
+    setBedSetupsPendingDelete(null);
+    try {
+      await onUpdateBedSetups(bedSetups.filter((b) => b.value !== entry.value));
+      toast.success("Bed set-up removed", `${entry.label} was removed from the catalog.`);
+    } catch (err) {
+      toast.error("Could not delete", err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
+  // ── Booking Preferences ─────────────────────────────────
+  const handlePreferenceSave = async (entry: BookingPreferenceOption, isNew: boolean) => {
+    const slug = slugifyCatalogValue(entry.value);
+    if (!slug) {
+      toast.error("Invalid identifier", "Use letters, digits, '-' or '_'.");
+      return false;
+    }
+    if (!entry.label.trim()) {
+      toast.error("Label required", "Add a display label for the preference.");
+      return false;
+    }
+    const collides = bookingPreferences.some(
+      (p) => p.value === slug && (isNew || p.value !== entry.value)
+    );
+    if (collides) {
+      toast.error("Duplicate identifier", `"${slug}" is already in the catalog.`);
+      return false;
+    }
+    const normalized: BookingPreferenceOption = {
+      value: slug,
+      label: entry.label.trim(),
+      icon: entry.icon?.trim() || undefined,
+      surchargeNote: entry.surchargeNote?.trim() || undefined
+    };
+    const next: BookingPreferenceOption[] = isNew
+      ? [...bookingPreferences, normalized]
+      : bookingPreferences.map((p) => (p.value === entry.value ? normalized : p));
+    try {
+      await onUpdateBookingPreferences(next);
+      toast.success("Preference saved", `${entry.label} ${isNew ? "added" : "updated"}.`);
+      return true;
+    } catch (err) {
+      toast.error("Could not save", err instanceof Error ? err.message : "Unknown error");
+      return false;
+    }
+  };
+
+  const handlePreferenceDelete = async (entry: BookingPreferenceOption) => {
+    if (prefsPendingDelete !== entry.value) {
+      setPrefsPendingDelete(entry.value);
+      toast.info("Confirm delete", "Click delete again within 3 seconds to confirm.");
+      return;
+    }
+    setPrefsPendingDelete(null);
+    try {
+      await onUpdateBookingPreferences(bookingPreferences.filter((p) => p.value !== entry.value));
+      toast.success("Preference removed", `${entry.label} was removed from the catalog.`);
+    } catch (err) {
+      toast.error("Could not delete", err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
+  return (
+    <div className="space-y-6 text-xs font-body">
+      <div>
+        <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">
+          Booking Preferences
+        </h3>
+        <p className="mt-1 text-[11px] text-gray-500">
+          Two catalogs the guest sees on the public booking Step 2. Bed set-ups appear as
+          a radio group when the picked room type offers a choice; additional preferences
+          are the checkbox grid in the "Show additional preferences" accordion.
+        </p>
+      </div>
+
+      <CatalogEditor<BedSetupOption>
+        title="Bed set-ups"
+        subtitle="Per-room-type subset of these options appears on the public booking Step 2. Empty subset = no set-up choice for that type."
+        rows={bedSetups}
+        isPending={(v) => bedSetupsPendingDelete === v}
+        pendingValue={bedSetupsPendingDelete}
+        onAdd={() =>
+          setBedSetupModal({ open: true, isNew: true, entry: { value: "", label: "" } })
+        }
+        onEdit={(entry) => setBedSetupModal({ open: true, isNew: false, entry: { ...entry } })}
+        onDelete={handleBedSetupDelete}
+        beginLabel="Add bed set-up"
+        renderRow={(entry) => (
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold text-gray-900">{entry.label}</p>
+            <p className="font-mono text-[11px] text-gray-500">{entry.value}</p>
+          </div>
+        )}
+        renderModal={() => (
+          <Modal
+            open={bedSetupModal.open}
+            onClose={() => setBedSetupModal({ open: false })}
+            title={
+              bedSetupModal.open && bedSetupModal.isNew
+                ? "Add bed set-up"
+                : `Edit “${bedSetupModal.open ? bedSetupModal.entry.label : ""}”`
+            }
+            footer={null}
+          >
+            {bedSetupModal.open ? (
+              <form
+                onSubmit={async (ev) => {
+                  ev.preventDefault();
+                  const ok = await handleBedSetupSave(bedSetupModal.entry, bedSetupModal.isNew);
+                  if (ok) setBedSetupModal({ open: false });
+                }}
+                className="space-y-4 text-sm"
+              >
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Display label
+                  <input
+                    required
+                    type="text"
+                    value={bedSetupModal.entry.label}
+                    onChange={(e) =>
+                      setBedSetupModal({
+                        ...bedSetupModal,
+                        entry: { ...bedSetupModal.entry, label: e.target.value }
+                      })
+                    }
+                    placeholder="I'd like a large bed"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Identifier key (kebab-case slug)
+                  <input
+                    required
+                    type="text"
+                    value={bedSetupModal.entry.value}
+                    onChange={(e) =>
+                      setBedSetupModal({
+                        ...bedSetupModal,
+                        entry: { ...bedSetupModal.entry, value: e.target.value }
+                      })
+                    }
+                    placeholder="large-bed"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 font-mono text-sm font-medium"
+                  />
+                  <span className="text-[10px] font-normal leading-relaxed text-gray-500">
+                    Lowercase letters, digits, '-' or '_'. Used by the room type's
+                    `bedSetupValues` subset.
+                  </span>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBedSetupModal({ open: false })}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 sm:min-h-[40px]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 sm:min-h-[40px]"
+                  >
+                    <Save size={14} />
+                    {bedSetupModal.isNew ? "Add" : "Save changes"}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </Modal>
+        )}
+      />
+
+      <CatalogEditor<BookingPreferenceOption>
+        title="Additional preferences"
+        subtitle="The checkbox grid in the public booking Step 2 “Show additional preferences” accordion. The `surchargeNote` renders next to the label (informational only)."
+        rows={bookingPreferences}
+        isPending={(v) => prefsPendingDelete === v}
+        pendingValue={prefsPendingDelete}
+        onAdd={() =>
+          setPrefsModal({ open: true, isNew: true, entry: { value: "", label: "" } })
+        }
+        onEdit={(entry) => setPrefsModal({ open: true, isNew: false, entry: { ...entry } })}
+        onDelete={handlePreferenceDelete}
+        beginLabel="Add preference"
+        renderRow={(entry) => (
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold text-gray-900">
+              {entry.label}
+              {entry.surchargeNote ? (
+                <span className="ml-1 font-normal text-gray-500">{entry.surchargeNote}</span>
+              ) : null}
+            </p>
+            <p className="font-mono text-[11px] text-gray-500">{entry.value}</p>
+          </div>
+        )}
+        renderModal={() => (
+          <Modal
+            open={prefsModal.open}
+            onClose={() => setPrefsModal({ open: false })}
+            title={
+              prefsModal.open && prefsModal.isNew
+                ? "Add preference"
+                : `Edit “${prefsModal.open ? prefsModal.entry.label : ""}”`
+            }
+            footer={null}
+          >
+            {prefsModal.open ? (
+              <form
+                onSubmit={async (ev) => {
+                  ev.preventDefault();
+                  const ok = await handlePreferenceSave(prefsModal.entry, prefsModal.isNew);
+                  if (ok) setPrefsModal({ open: false });
+                }}
+                className="space-y-4 text-sm"
+              >
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Display label
+                  <input
+                    required
+                    type="text"
+                    value={prefsModal.entry.label}
+                    onChange={(e) =>
+                      setPrefsModal({
+                        ...prefsModal,
+                        entry: { ...prefsModal.entry, label: e.target.value }
+                      })
+                    }
+                    placeholder="I'd like a quiet room"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Identifier key (kebab-case slug)
+                  <input
+                    required
+                    type="text"
+                    value={prefsModal.entry.value}
+                    onChange={(e) =>
+                      setPrefsModal({
+                        ...prefsModal,
+                        entry: { ...prefsModal.entry, value: e.target.value }
+                      })
+                    }
+                    placeholder="quiet-room"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 font-mono text-sm font-medium"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Surcharge note (optional)
+                  <input
+                    type="text"
+                    value={prefsModal.entry.surchargeNote ?? ""}
+                    onChange={(e) =>
+                      setPrefsModal({
+                        ...prefsModal,
+                        entry: { ...prefsModal.entry, surchargeNote: e.target.value }
+                      })
+                    }
+                    placeholder="(additional charges may apply)"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium"
+                  />
+                  <span className="text-[10px] font-normal leading-relaxed text-gray-500">
+                    Renders next to the label on the guest form. Informational only —
+                    no surcharge is wired to the booking total.
+                  </span>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPrefsModal({ open: false })}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 sm:min-h-[40px]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 sm:min-h-[40px]"
+                  >
+                    <Save size={14} />
+                    {prefsModal.isNew ? "Add" : "Save changes"}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </Modal>
+        )}
+      />
+    </div>
+  );
+}
+
 function PaymentMethodsTabBody({
   paymentMethods,
   onAdd,
@@ -1615,6 +2157,14 @@ export function SettingsPage() {
     uploadRoomTypePhoto,
     removeRoomTypePhoto,
     reorderRoomTypePhotos,
+    // Per SR-01..05 (2026-10-12): the Booking Preferences
+    // tab pulls the live catalogs + update helpers from
+    // `useAdmin()` so the writes go through the same
+    // `settings/hotelConfig` channel as everything else.
+    bedSetupsCatalog,
+    bookingPreferencesCatalog,
+    updateBedSetups,
+    updateBookingPreferences,
     uploadBrandingAsset,
     resetBrandingAsset,
     storeItems,
@@ -3290,6 +3840,9 @@ export function SettingsPage() {
     { id: "payment" as const, label: "Payment Methods", icon: CreditCard },
     { id: "sources" as const, label: "Booking Sources", icon: Tag },
     { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
+    // Per SR-01..05 (2026-10-12): the Booking Preferences
+    // tab (bed set-ups + additional preferences catalogs).
+    { id: "preferences" as const, label: "Booking Preferences", icon: ListChecks },
     { id: "branding" as const, label: "Branding", icon: Palette },
     { id: "website" as const, label: "Website Content", icon: Globe },
     { id: "seo" as const, label: seoSettings.sourceChangesPending ? "SEO & Search •" : "SEO & Search", icon: Eye },
@@ -5383,7 +5936,15 @@ export function SettingsPage() {
                       corporateRate,
                       // Per EXB-01 (2026-07-31).
                       maxExtraBeds,
-                      extraBedRate
+                      extraBedRate,
+                      // Per SR-01..05 (2026-10-12): a new
+                      // room type starts with an empty
+                      // `bedSetupValues` subset. The admin
+                      // picks the subset in the Edit modal
+                      // after creation (the Add form
+                      // intentionally omits the picker to
+                      // keep the form tidy).
+                      bedSetupValues: []
                     });
                     form.reset();
                     toast.success(
@@ -5570,6 +6131,22 @@ export function SettingsPage() {
             </div>
           )}
 
+          {/* Per SR-01..05 (2026-10-12): the Booking
+              Preferences tab. Self-contained tab body
+              (see `BookingPreferencesTabBody` above). The
+              tab body owns the edit / delete modals +
+              the "click-twice-to-confirm" delete pattern;
+              SettingsPage just hands it the live
+              catalogs + the two update callbacks. */}
+          {activeTab === "preferences" && (
+            <BookingPreferencesTabBody
+              bedSetups={bedSetupsCatalog}
+              bookingPreferences={bookingPreferencesCatalog}
+              onUpdateBedSetups={updateBedSetups}
+              onUpdateBookingPreferences={updateBookingPreferences}
+            />
+          )}
+
           {/* ROOM TYPE EDIT MODAL (per W3.7 / `plan/features/SETTINGS.md §Room Types`) */}
           <Modal
             title={editType ? `Edit · ${editType.label}` : "Edit room type"}
@@ -5630,6 +6207,17 @@ export function SettingsPage() {
                   // Per EXB-01 (2026-07-31): extra-bed allowance + rate.
                   const maxExtraBeds = parseInt(get("maxExtraBeds"), 10) || 0;
                   const extraBedRate = parseFloat(get("extraBedRate")) || 0;
+                  // Per SR-01..05 (2026-10-12): read every
+                  // checked `bedSetupValues` checkbox. The
+                  // `intersectBedSetupValues` helper inside
+                  // `updateRoomType` further dedupes +
+                  // filters against the live catalog (so a
+                  // stale reference is removed at the write).
+                  const bedSetupValues = Array.from(
+                    form.querySelectorAll<HTMLInputElement>(
+                      'input[name="bedSetupValues"]:checked'
+                    )
+                  ).map((input) => input.value);
 
                   if (!label || !shortLabel || !bedDefinition) {
                     toast.error("Missing required fields", "Label, short label, and bed description are required.");
@@ -5651,7 +6239,12 @@ export function SettingsPage() {
                       corporateRate,
                       // Per EXB-01 (2026-07-31).
                       maxExtraBeds,
-                      extraBedRate
+                      extraBedRate,
+                      // Per SR-01..05 (2026-10-12): the
+                      // per-type bed-set-up subset. Already
+                      // deduped + filtered against the live
+                      // catalog inside `updateRoomType`.
+                      bedSetupValues
                     });
                     toast.success(
                       "Room type updated",
@@ -5814,6 +6407,54 @@ export function SettingsPage() {
                     />
                   </label>
                 </div>
+
+                {/* Per SR-01..05 (2026-10-12): the per-type
+                    bed-set-up subset. Each option in the
+                    admin-configured `bedSetups` catalog
+                    shows as a row; the saved subset is sent
+                    through `updateRoomType(...,
+                    { bedSetupValues })`. Empty = the guest
+                    booking Step 2 selector is hidden for
+                    this type. Hidden entirely when the
+                    global catalog is empty (defensive —
+                    don't render a section that's always
+                    empty). */}
+                {bedSetupsCatalog.length > 0 ? (
+                  <fieldset className="space-y-2">
+                    <legend className="text-xs font-semibold text-gray-700">
+                      Bed set-up options offered for this type
+                    </legend>
+                    <p className="text-[10px] font-normal leading-relaxed text-gray-500">
+                      Tick the options to offer the guest on the booking Step 2. Leave
+                      unticked to hide the set-up selector entirely for this type.
+                    </p>
+                    <div className="grid gap-1.5 sm:grid-cols-2">
+                      {bedSetupsCatalog.map((option) => {
+                        const checked =
+                          Array.isArray(editType.bedSetupValues) &&
+                          editType.bedSetupValues.includes(option.value);
+                        return (
+                          <label
+                            key={option.value}
+                            className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:border-primary"
+                          >
+                            <input
+                              type="checkbox"
+                              name="bedSetupValues"
+                              value={option.value}
+                              defaultChecked={checked}
+                              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            />
+                            <span className="flex-1">{option.label}</span>
+                            <span className="font-mono text-[10px] text-gray-400">
+                              {option.value}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                ) : null}
               </form>
             ) : null}
           </Modal>

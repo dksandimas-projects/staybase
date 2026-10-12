@@ -152,7 +152,15 @@ export function applyRoomTypeDefaults(raw: unknown): RoomTypeEntry {
     weekendRate: Number(r.weekendRate) || 0,
     corporateRate: Number(r.corporateRate) || 0,
     maxExtraBeds: Number(r.maxExtraBeds) || 0,
-    extraBedRate: Number(r.extraBedRate) || 0
+    extraBedRate: Number(r.extraBedRate) || 0,
+    // Per SR-01..05 (2026-10-12): the per-type bed-set-up
+    // subset. Same permissive "absent → empty" pattern
+    // used for the EXB-01 + CHD-02 surface flags above.
+    bedSetupValues: Array.isArray(r.bedSetupValues)
+      ? (r.bedSetupValues as unknown[])
+          .filter((v): v is string => typeof v === "string")
+          .slice()
+      : []
   };
 }
 
