@@ -868,6 +868,14 @@ export interface AdminContextType {
       // boolean per the spec). Absent fields normalize to 0.
       maxExtraBeds?: number;
       extraBedRate?: number;
+      // Per SR-01..05 (2026-10-12): the per-type subset of
+      // `HotelConfig.bedSetups[].value` offered to the guest on
+      // the booking Step 2 bed-set-up selector. Empty array means
+      // "no set-up choice for this type" (the Step 2 selector is
+      // hidden entirely). The runtime implementation intersects
+      // this against the live catalog before write — see
+      // `intersectBedSetupValues` below.
+      bedSetupValues?: string[];
     }
   ) => Promise<void>;
   updateRoomType: (
@@ -888,6 +896,7 @@ export interface AdminContextType {
         | "corporateRate"
         | "maxExtraBeds"
         | "extraBedRate"
+        | "bedSetupValues"
       >
     >
   ) => Promise<void>;
