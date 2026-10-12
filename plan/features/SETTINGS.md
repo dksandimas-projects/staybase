@@ -9,6 +9,28 @@ Admin-only configuration hub at `/settings`. Organized into tabs covering hotel 
 
 ## Tabs & Configuration Areas
 
+### 0. Sidebar grouping (SET-SBG-01, 2026-10-12)
+
+The settings hub grew to **18 tabs** by v1.9.0 (Hotel Info + Payment Methods + Booking Sources + Discounts + Staff Accounts + Email & Notifications + Intercom + Website Content & Room Types + Loyalty Rewards + Breakfast & Dining + In-Room Store + SEO & Search + Legal Content + Environment Testing + Booking Preferences + Branding + Booking & Holds). The 18 flat tabs exceed the scan-without-thinking threshold, so the desktop sidebar collapses them into **5 stakeholder-oriented groups**:
+
+| Group | Tabs | Why |
+|---|---|---|
+| **Property** | Hotel Settings, Room Types, Branding | Identity & inventory. "What you are" + "what you sell." Branding sits here because it's tied to the hotel identity, not marketing. |
+| **Bookings & Revenue** | Booking Preferences, Booking Sources, Booking & Holds, Payment Methods, Discounts | The booking engine end-to-end — rules → sources → holds → money in → discounts. The section hotel staff touch daily. |
+| **Guest Experience** | Loyalty Rewards, Breakfast & Dining, In-Room Store, Intercom | What a guest *uses during their stay*. Distinct from "how they got here." |
+| **Marketing & Reach** | Website Content, SEO & Search, Email Config | What brings them in pre-stay — website copy, discoverability, transactional emails. |
+| **Admin** | Staff Accounts, Legal Content, Environment Testing | Back-of-house — who works here, compliance text, the staging/QA tool. |
+
+**UI behavior (desktop `lg+`):** each group renders as a **collapsible section header** with chevron + `[N]` count badge. Click toggles expand/collapse. Persisted choice lives in `localStorage["settings.sidebar.collapsedGroups.v1"]`. The active group is always force-expanded — visibility of "where you are in the app" wins over the user's collapsing choice. The active group's collapse toggle is a no-op so the operator can't lose their place.
+
+**UI behavior (mobile `< lg`):** the existing horizontally scrollable pill bar keeps the flat 18-pill row but inserts a vertical divider between each group's pills (visual continuity with the desktop groups). The active pill is auto-scrolled into view by the existing `tabBarRef` `useEffect`.
+
+**Why stakeholder-oriented, not frequency-oriented:** the groups answer "who is this for" rather than "settings I touch daily." That scales as more tabs get added — each new tab has an obvious home instead of relitigating whether it's weekly or monthly.
+
+**Environment Testing placement:** kept under `Admin` for now. Long-term, it should move out of `/settings` entirely to a separate `Admin → Tools → Test Runner` path gated behind a "show developer tools" env flag (decision pending).
+
+**Contract enforcement:** `admin-app/src/__tests__/set-sbg-01-settings-sidebar-grouping.test.ts` (source-text guards per `CONTRIBUTING.md §Testing`) pins the group inventory, the union-of-tabs invariant (every `TabId` covered exactly once), the localStorage key, the active-group auto-expand, the `aria-expanded` + `role="group"` desktop wiring, and the mobile pill divider shape.
+
 ### 1. Hotel Info
 - Address, support email, front-desk phone, DPO email, and social media URLs (Facebook, Instagram, X).
 - Check-in and check-out times.
