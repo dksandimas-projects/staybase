@@ -533,6 +533,18 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
       }
     }
     if (bd && Array.isArray(bd.addOns)) {
+      // Per BR-03 (2026-10-12, decision #232): the
+      // per-date breakfast lines are stored as
+      // `BookingRateAdjustmentLine` entries in the
+      // child doc's `rateBreakdown.addOns[]`. The
+      // reservation-level breakdown writes the
+      // per-date lines to the FIRST child (only) so
+      // the email view's `addOns.concat(...)` loop
+      // below doesn't duplicate them N times for
+      // an N-room booking. Legacy per-stay "Breakfast
+      // add-on" lines are still concatenated (one
+      // per room) for the walk-in modal + older
+      // bookings.
       aggregateAddOns = aggregateAddOns.concat(bd.addOns);
     }
     if (bd && Array.isArray(bd.deductions)) {

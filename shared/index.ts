@@ -54,3 +54,11 @@ export * from "./utils/bookingPreferences";
 export * from "./utils/breakfastCutoff";
 export * from "./utils/breakfastTotal";
 
+// Per BR-03 (Phase 13 — Breakfast Redesign, decision
+// #232, 2026-10-12): the public breakfast-config
+// normalizer (`normalizeBreakfastConfig`) used by
+// `GET /api/bookings/breakfast/config` to strip
+// admin-only fields before serving the config to the
+// guest app's Step 2 UI.
+export * from "./utils/breakfastConfig";
+

@@ -1309,17 +1309,17 @@ export function CorporateBookingPage() {
           numAdults: stay.numAdults,
           numChildren: stay.numChildren,
           extraBedCount: stay.extraBedCount,
-          hasBreakfast,
-          // Per CHD-10 (2026-07-31, per CVQ-01):
-          // the per-booking override for "include
-          // children in the breakfast charge".
-          // Shared across the whole corporate
-          // reservation (every stay uses the same
-          // breakfast config) — the server
-          // snapshots the value per-booking-doc
-          // for back-compat with the existing
-          // schema.
-          breakfastIncludesChildren: false
+          // Per BR-03 (2026-10-12, decision #232): the
+          // legacy per-stay `hasBreakfast` +
+          // `breakfastIncludesChildren` fields are
+          // GONE from the corporate create payload.
+          // The new `breakfastSelections` rich shape
+          // (sent below at the create body root)
+          // replaces them. The server still accepts
+          // the legacy fields for back-compat (older
+          // clients) but the create-path cleanup
+          // pins the new shape as the canonical
+          // way to express breakfast intent.
         })),
         checkIn,
         checkOut,
@@ -1337,7 +1337,19 @@ export function CorporateBookingPage() {
         numAdults: firstStay.numAdults,
         numChildren: firstStay.numChildren,
         extraBedCount: firstStay.extraBedCount,
-        hasBreakfast: hasBreakfast,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // legacy top-level `hasBreakfast` field is
+        // GONE from the corporate create payload.
+        // The new `breakfastSelections` rich shape
+        // (empty `{}` for the corporate flow's
+        // "no per-guest grid yet" state) replaces
+        // it. A follow-up ticket adds the per-guest
+        // grid to the corporate Step 2; until then
+        // the corporate flow ships with an empty
+        // map (no breakfast add-on) and the server
+        // writes the legacy `hasBreakfast: false`
+        // field for the walk-in/older-clients path.
+        breakfastSelections: {},
         // Per SR-01..05 (2026-10-12): the corporate
         // booking carries the same special-requests
         // fields as the public `/book` flow. The
@@ -2092,8 +2104,25 @@ export function CorporateBookingPage() {
                         )}
                       </div>
 
-                      {/* Select Toggle */}
-                      <div className="mt-5 grid grid-cols-2 gap-2">
+                      {/* Select Toggle — Per BR-03
+                          (2026-10-12, decision #232): the
+                          legacy "Room + Breakfast" toggle
+                          is GONE on the corporate flow too.
+                          The flat-rate breakfast model is
+                          replaced by the per-guest × per-date
+                          `breakfastSelections` rich shape —
+                          guests pick their meals (or skip)
+                          on a per-day grid in Step 2 instead
+                          of an all-or-nothing toggle here.
+                          The corporate flow currently
+                          defaults `breakfastSelections` to
+                          an empty `{}`; a follow-up ticket
+                          will add the per-guest grid (the
+                          corporate Step 2 reuses the same
+                          `BookingReviewAside` shell, so the
+                          Step 1 cleanup is the only
+                          breaking-shape change here). */}
+                      <div className="mt-5 grid grid-cols-1 gap-2">
                         <button
                           type="button"
                           className={cn(
@@ -2105,18 +2134,6 @@ export function CorporateBookingPage() {
                           onClick={() => selectRoomType(type.value, "room-only")}
                         >
                           Room Only
-                        </button>
-                        <button
-                          type="button"
-                          className={cn(
-                            "h-10 rounded-lg text-xs font-semibold border transition flex items-center justify-center",
-                            rateChoice === "room-breakfast" && isSelected
-                              ? "bg-primary-light border-primary text-primary"
-                              : "border-gray-200 hover:border-gray-300 text-gray-700"
-                          )}
-                          onClick={() => selectRoomType(type.value, "room-breakfast")}
-                        >
-                          Room + Breakfast
                         </button>
                       </div>
                     </div>

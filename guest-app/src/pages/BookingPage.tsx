@@ -59,7 +59,7 @@ import {
 // in a separate block to keep the CHD-05 import-ordering guard
 // (which requires `calculateExtraBedAddOn` + `requiredExtraBedsFor`
 // to be adjacent in the same import) intact.
-import { deriveRoomTypeCapacityFit } from "@spark-inn/shared";
+import { deriveRoomTypeCapacityFit, computeBreakfastCutoffState, recomputeBreakfastTotal, buildBreakfastRateBreakdownLines, type BreakfastSelectionEntry } from "@spark-inn/shared";
 // Per MRB-02 (2026-08-02, per decision #164): the
 // reservation-level idempotency key, imported separately to
 // keep the CHD-05 import-ordering guard (which requires
@@ -180,6 +180,72 @@ function formatStayDate(value: string) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
+// Per BR-03 (2026-10-12, decision #232): the
+// breakfast-date list for the Step 2 section. N dates
+// for N nights (open item #1: a 3-night stay has 3
+// breakfasts, on the check-in + middle + check-out-1
+// dates). Defensive: returns an empty array when the
+// input is malformed (e.g. checkout <= checkin) so
+// the Step 2 section renders nothing rather than a
+// crash. The `+ 'T00:00:00'` keeps the parse
+// timezone-stable for the hotel-local date string.
+function enumerateBreakfastDates(checkIn: string, checkOut: string): string[] {
+  if (!checkIn || !checkOut) return [];
+  const start = new Date(`${checkIn}T00:00:00`);
+  const end = new Date(`${checkOut}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+  if (end <= start) return [];
+  const dates: string[] = [];
+  const cursor = new Date(start);
+  while (cursor < end) {
+    const iso = cursor.toISOString().slice(0, 10);
+    dates.push(iso);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+// Per BR-03: the per-guest slot list for the
+// breakfast grid. One slot per guest
+// (`Guest 1 (Adult)`, `Guest 2 (Adult)`, `Child 1
+// (age 7)`, ...). Sourced from the per-room
+// `numAdults` + `numChildren` from the cart (per
+// MRB-07). The slot id (`guest-0`, `guest-1`, ...)
+// is the key suffix for the
+// `${date}-${slotId}` selection entry; the server
+// uses the same id when it renders the email view
+// + receipt PDF.
+function enumerateGuestSlots(roomCart: Array<{ numAdults: number; numChildren?: number }>): Array<{ id: string; label: string }> {
+  const slots: Array<{ id: string; label: string }> = [];
+  let counter = 0;
+  for (const room of roomCart) {
+    const adults = Math.max(0, Number(room.numAdults) || 0);
+    for (let i = 0; i < adults; i += 1) {
+      slots.push({ id: `guest-${counter}`, label: `Guest ${counter + 1} (Adult)` });
+      counter += 1;
+    }
+    const children = Math.max(0, Number(room.numChildren) || 0);
+    for (let i = 0; i < children; i += 1) {
+      slots.push({ id: `guest-${counter}`, label: `Child ${i + 1}` });
+      counter += 1;
+    }
+  }
+  return slots;
+}
+
+// Per BR-03: the human-readable date label for the
+// Step 2 grid ("Oct 14 (Tue) — Order by Oct 13, 8:00 PM").
+// The day-of-week is the hotel's locale-configured
+// weekday; the formatter is shared with the existing
+// `formatStayDate` helper above.
+function formatBreakfastDateLabel(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  const weekday = new Intl.DateTimeFormat(config.locale, { weekday: "short", timeZone: "UTC" }).format(parsed);
+  const monthDay = new Intl.DateTimeFormat(config.locale, { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);
+  return `${monthDay} (${weekday})`;
+}
+
 function createPrivateUploadFileName(fileName: string) {
   const extension = fileName.match(/\.[a-z0-9]+$/i)?.[0].toLowerCase() ?? "";
   return `${crypto.randomUUID()}${extension}`;
@@ -235,14 +301,40 @@ export function BookingPage() {
   const [holdId] = useState(() => generateHoldId());
 
   // Dynamic config states loaded from Firestore
-  const [breakfastConfig, setBreakfastConfig] = useState({
+  // Per BR-03 (2026-10-12, decision #232): the
+  // local `breakfastConfig` state now carries the new
+  // rich shape (isEnabled + cutoffTime + cutoffTimezone
+  // + defaultMealInstructions + meals[]). The legacy
+  // `ratePerPersonPerNight` +
+  // `breakfastIncludesChildrenDefault` fields are
+  // preserved for the walk-in modal / older
+  // booking-doc reads. Loaded from
+  // `settings/breakfastConfig` via the Firestore doc
+  // (the same path the public
+  // `GET /api/bookings/breakfast/config` route
+  // returns). Defaults are the "breakfast is off"
+  // shape so the Step 2 section renders nothing
+  // before the config loads.
+  const [breakfastConfig, setBreakfastConfig] = useState<{
+    isEnabled: boolean;
+    ratePerPersonPerNight?: number;
+    breakfastIncludesChildrenDefault?: boolean;
+    cutoffTime?: string;
+    cutoffTimezone?: string;
+    defaultMealInstructions?: string;
+    meals?: Array<{ id: string; name: string; description?: string; price: number; displayOrder?: number; isActive?: boolean }>;
+  }>({
     isEnabled: false,
     ratePerPersonPerNight: 250,
     // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
     // "include children in the breakfast charge". The booking-page
     // toggle inherits this on first paint; the guest can override
     // for the current booking. `true` is the historical default.
-    breakfastIncludesChildrenDefault: true
+    breakfastIncludesChildrenDefault: true,
+    cutoffTime: "20:00",
+    cutoffTimezone: "Asia/Manila",
+    defaultMealInstructions: "",
+    meals: []
   });
   const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
@@ -332,7 +424,7 @@ export function BookingPage() {
     // re-book flow pins first/last/phone via the URL) so the member
     // cannot accidentally have a different value pinned by an old
     // link. The name fields are then rendered as readOnly below —
-    // see the first/last <TextField>s for the matching render-time
+    // see the first/last name inputs for the matching render-time
     // gate. Email is handled by the existing email-only block below;
     // phone stays editable (members may travel on a secondary phone
     // — per the autofill+lock UX decision 2026-08-20).
@@ -479,6 +571,18 @@ export function BookingPage() {
   const [paymentProofError, setPaymentProofError] = useState("");
 
   const [termsConsent, setTermsConsent] = useState(false);
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date `breakfastSelections` rich
+  // shape. Keyed by `${date}-${guestSlot}` (e.g.
+  // `2026-10-14-guest-0`). The Step 2 breakfast section
+  // populates this map; an empty `{}` means the guest
+  // skipped breakfast entirely. The server validates
+  // each entry (mealId exists, serviceDate not locked,
+  // price non-negative) and recomputes `breakfastTotal`
+  // from `recomputeBreakfastTotal(breakfastSelections)`.
+  // The create payload sends the map verbatim (the
+  // `BreakfastSelectionsEntry` shape is locked per BR-01).
+  const [breakfastSelections, setBreakfastSelections] = useState<Record<string, BreakfastSelectionEntry>>({});
   // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
   // rendered through the shared `useTurnstileToken` hook, gated on
   // the review step (the only step whose JSX contains the
@@ -1354,7 +1458,7 @@ export function BookingPage() {
     // Per feature/booking-autofill-member-email + member-name:
     // when the guest is signed in as a Spark Rewards member the
     // identity-anchored fields (email + first/last name) are locked
-    // to the member's account. The <TextField>s render `readOnly`
+    // to the member's account. The name inputs render `readOnly`
     // below so the standard UI can't change them; this no-op guards
     // the programmatic path (a paste, a dev-tools edit, or any
     // future caller of `updateGuestDetail(...)`) so the server-side
@@ -1633,15 +1737,16 @@ export function BookingPage() {
             // the invariant `extraBedBreakfast implies
             // extraBedCount > 0`.
             extraBedBreakfast: room.extraBedBreakfast === true,
-            hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
-            breakfastIncludesChildren,
-            // Per SR-01..05 (2026-10-12): the
-            // per-room bed-set-up choice. Empty
-            // string means "no preference" (the
-            // guest left the radios untouched).
-            // The server validates the value
-            // against the room type's
-            // `bedSetupValues` subset.
+            // Per BR-03 (2026-10-12, decision #232): the
+            // legacy `hasBreakfast` + `breakfastIncludesChildren`
+            // per-room fields are NOT sent — the new
+            // `breakfastSelections` rich shape (sent
+            // below at the create body root) replaces
+            // them. The server still accepts the legacy
+            // fields for back-compat (the walkin modal
+            // + older clients) but the create-path
+            // cleanup pins the new shape as the canonical
+            // way to express breakfast intent.
             bedSetup: bedSelections[index] ?? ""
           })),
           // Per SR-01..05 (2026-10-12): the
@@ -1670,14 +1775,28 @@ export function BookingPage() {
           // (split). We send the total from the Step 2 field
           // (or the derived `guests = adults + numChildren`).
           guests: Number(guestDetails.guestCount) || guests,
-          hasBreakfast: breakfastConfig.isEnabled && firstRoomSelection.rateChoice === "room-breakfast",
-          // Per CHD-10 (2026-07-31, per CVQ-01): the per-booking
-          // override for "include children in the breakfast
-          // charge". The server snapshots this onto the booking
-          // doc; when undefined (older clients), the admin default
-          // from `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-          // applies.
-          breakfastIncludesChildren,
+          // Per BR-03 (2026-10-12, decision #232): the
+          // legacy top-level `hasBreakfast` +
+          // `breakfastIncludesChildren` fields are NOT
+          // sent. The new `breakfastSelections` rich
+          // shape (sent below) replaces them. The
+          // server still accepts the legacy fields
+          // for back-compat (the walkin modal +
+          // older clients) but the create-path
+          // cleanup pins the new shape as the
+          // canonical way to express breakfast
+          // intent.
+          // Per BR-03 (2026-10-12, decision #232): the
+          // new per-guest × per-date `breakfastSelections`
+          // rich shape. The Step 2 breakfast section
+          // populates this map (one entry per
+          // guest × per-date slot, empty string for
+          // "skip"). The server validates each entry
+          // (mealId exists in the live catalog,
+          // serviceDate not locked, price non-negative)
+          // and recomputes `breakfastTotal` from
+          // `recomputeBreakfastTotal(breakfastSelections)`.
+          breakfastSelections,
           // Per CHD-10: the adult/child split. `numAdults` is
           // derived from `guests - numChildren` in the client.
           // The server uses these to compute the breakfast total
@@ -1936,6 +2055,120 @@ export function BookingPage() {
             initial={shouldReduceMotion ? false : "hidden"}
             variants={staggerContainer}
           >
+            {/* Per BR-03 (2026-10-12, decision #232): the
+                new "Breakfast" section. Renders ONLY when
+                `breakfastConfig.isEnabled === true`. For
+                each breakfast date in the stay (N dates for
+                N nights) × each guest slot (lead +
+                companions + per-room occupancy), shows a
+                `<select>` of active meals. Selecting a
+                meal populates `breakfastSelections[key]`
+                via `recomputeBreakfastTotal`. Locked
+                dates render a disabled dropdown +
+                "Ordering closed" label. The server is
+                authoritative — a clock-mismatched client
+                is still rejected at create time (per open
+                item #7). */}
+            {breakfastConfig.isEnabled ? (() => {
+              const dates = enumerateBreakfastDates(checkIn, checkOut);
+              const slots = enumerateGuestSlots(distributedRoomCart);
+              if (dates.length === 0 || slots.length === 0) return null;
+              return (
+                <motion.div className="mb-6 rounded-card border border-primary/20 bg-primary/5 p-5" variants={staggerChild}>
+                  <h2 className="font-heading text-xl text-gray-950">Breakfast</h2>
+                  <p className="mt-1 text-sm text-gray-600">
+                    {breakfastConfig.defaultMealInstructions || "Pick a meal for each guest on each day, or skip the day entirely."}
+                  </p>
+                  <div className="mt-4 space-y-4">
+                    {dates.map((date) => {
+                      const cutoff = computeBreakfastCutoffState({
+                        serviceDate: date,
+                        now: new Date(),
+                        cutoffTime: breakfastConfig.cutoffTime || "20:00",
+                        timezone: breakfastConfig.cutoffTimezone || "Asia/Manila"
+                      });
+                      return (
+                        <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
+                          <div className="flex items-center justify-between">
+                            <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
+                            <p className="text-xs text-gray-600">
+                              {cutoff.isLocked
+                                ? "Ordering closed"
+                                : `Order by ${formatStayDate(date)}`}
+                            </p>
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {slots.map((slot) => {
+                              const key = `${date}-${slot.id}`;
+                              const selected = breakfastSelections[key]?.mealId || "";
+                              return (
+                                <div key={key} className="flex items-center gap-3">
+                                  <label className="min-w-[160px] text-sm text-gray-700" htmlFor={`bf-${key}`}>
+                                    {slot.label}
+                                  </label>
+                                  <select
+                                    id={`bf-${key}`}
+                                    data-testid={`breakfast-select-${key}`}
+                                    className="h-11 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                                    value={selected}
+                                    disabled={cutoff.isLocked}
+                                    onChange={(event) => {
+                                      const mealId = event.target.value;
+                                      setBreakfastSelections((prev) => {
+                                        const next = { ...prev };
+                                        if (!mealId) {
+                                          delete next[key];
+                                        } else {
+                                          const meal = (breakfastConfig.meals || []).find((m) => m.id === mealId);
+                                          if (!meal) return prev;
+                                          // Per BR-01 (2026-10-12, decision
+                                          // #231): the `serviceDate` and
+                                          // `guestSlot` live in the
+                                          // composite KEY (`${date}-${slot.id}`),
+                                          // NOT in the entry. The entry
+                                          // carries the snapshot
+                                          // (`mealId` + `mealName` +
+                                          // `price`) + the audit fields.
+                                          // The server parses the date +
+                                          // slot from the key when it
+                                          // validates / recomputes.
+                                          const nowIso = new Date().toISOString();
+                                          next[key] = {
+                                            mealId: meal.id,
+                                            mealName: meal.name,
+                                            price: meal.price,
+                                            addedBy: "guest",
+                                            addedAt: nowIso,
+                                            lastModifiedAt: nowIso,
+                                            lastModifiedBy: "guest",
+                                            removedAt: null,
+                                            removedBy: null,
+                                            overrideCutoff: false,
+                                            overrideReason: null
+                                          };
+                                        }
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    <option value="">No meal — skip breakfast for this guest on this day</option>
+                                    {(breakfastConfig.meals || []).map((meal) => (
+                                      <option key={meal.id} value={meal.id}>
+                                        {meal.name} — {formatPrice(meal.price)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              );
+            })() : null}
             <motion.div className="grid gap-5 sm:grid-cols-2" variants={staggerChild}>
               <TextField
                 error={touchedFields.firstName ? guestErrors.firstName : ""}
@@ -2138,6 +2371,15 @@ export function BookingPage() {
             memberDiscountPct={memberDiscountPct}
             isMember={!!memberProfile}
             rateBreakdown={rateBreakdown}
+            // Per BR-03 (2026-10-12, decision #232):
+            // thread the new `breakfastSelections` rich
+            // shape into the Step 2 sidebar so the
+            // per-date breakfast breakdown renders
+            // alongside the room subtotal + extra-bed
+            // line. The Step 3 page reads the same
+            // cart state (separate call site below),
+            // so both sidebars render the same shape.
+            breakfastSelections={breakfastSelections}
           />
         </section>
 
@@ -2721,6 +2963,14 @@ export function BookingPage() {
             seasonalRateOverrides={seasonalRateOverrides}
             isMember={!!memberProfile}
             rateBreakdown={rateBreakdown}
+            // Per BR-03 (2026-10-12, decision #232):
+            // thread the new `breakfastSelections` rich
+            // shape into the Step 3 review sidebar
+            // (same pattern as the Step 2 sidebar
+            // above). The Step 3 page reads the same
+            // cart state, so the per-date breakdown
+            // is identical.
+            breakfastSelections={breakfastSelections}
           />
         </section>
 
@@ -3194,23 +3444,19 @@ export function BookingPage() {
                             totalLabel={`${formatPrice(roomOnlyTotal)} total`}
                             onSelect={() => selectRoomType(type.value, "room-only")}
                           />
-                          {breakfastConfig.isEnabled ? (
-                            <RateOption
-                              active={isSelected && selectedTypeRateChoice === "room-breakfast"}
-                              label="Room + Breakfast"
-                              helper={
-                                numChildren > 0 && !breakfastIncludesChildren
-                                  ? `Includes daily local breakfast for ${numAdults} adult${numAdults === 1 ? "" : "s"} (children excluded)`
-                                  : "Includes daily local breakfast for selected guests"
-                              }
-                              // Per BF-26: live rate + (per-CHD-10) the
-                              // effective breakfast occupancy. Per WRV-02:
-                              // option price tracks the selected stay.
-                              priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate + liveBreakfastRate * previewBreakfastOccupancy)} / night`}
-                              totalLabel={`${formatPrice(breakfastOptionTotal)} per room`}
-                              onSelect={() => selectRoomType(type.value, "room-breakfast")}
-                            />
-                          ) : null}
+                          {/* Per BR-03 (2026-10-12, decision
+                              #232): the legacy "Room + Breakfast"
+                              toggle is GONE. The flat-rate
+                              breakfast model is replaced by the
+                              per-guest × per-date `breakfastSelections`
+                              rich shape — guests pick their meals
+                              (or skip) on a per-day grid in Step 2
+                              instead of an all-or-nothing toggle
+                              here. The Step 2 section also shows
+                              the live meal catalog from
+                              `usePublicSiteContent().breakfastConfig`
+                              so the guest sees the per-meal prices
+                              before they get to Step 2. */}
                         </div>
                         {hasNonRegularRate ? (
                           <div className="mt-4 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
@@ -3866,6 +4112,16 @@ interface BookingReviewAsideProps {
   seasonalRateOverrides?: ReturnType<typeof useRoomTypes>["seasonalRateOverrides"];
   isMember?: boolean;
   rateBreakdown?: BookingRateBreakdown | null;
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date `breakfastSelections` rich
+  // shape. When non-null, the aside renders the
+  // per-date breakdown (one line per date) and
+  // recomputes the total via `recomputeBreakfastTotal`.
+  // When null/empty, the legacy single-line path
+  // renders the "Breakfast add-on" line (the walk-in
+  // modal still uses the legacy shape per the BR-03
+  // plan).
+  breakfastSelections?: Record<string, BreakfastSelectionEntry> | null;
 }
 
 function BookingReviewAside({
@@ -3897,7 +4153,11 @@ function BookingReviewAside({
   setBreakfastIncludesChildren,
   // Per EXB-01 (2026-07-31).
   extraBedCount,
-  extraBedRate
+  extraBedRate,
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date `breakfastSelections` rich
+  // shape (see `BookingReviewAsideProps`).
+  breakfastSelections = null
 }: BookingReviewAsideProps) {
   const roomTotal = useMemo(() => {
     if (!typeRates || !typeValue) return 0;
@@ -3914,22 +4174,30 @@ function BookingReviewAside({
   if (!typeLabel) return null;
 
   const activeBreakfastRate = breakfastRate ?? 350;
-  // Per CHD-10 (2026-07-31, per CVQ-01): the inline
-  // `activeBreakfastRate * guests * nights` pattern now routes
-  // through the shared `calculateBreakfastAddOn` helper. When
-  // children are present and the toggle is off, the helper uses
-  // `numAdults` (the cheaper line). When the toggle is on or
-  // there are no children, it falls back to `numGuests` —
-  // byte-equivalent to the historical shape.
-  const breakfastTotal = calculateBreakfastAddOn({
-    hasBreakfast,
-    breakfastRate: activeBreakfastRate,
-    numGuests: guests,
-    numAdults,
-    numChildren,
-    numNights: nights,
-    breakfastIncludesChildren
-  });
+  // Per BR-03 (2026-10-12, decision #232): the
+  // sidebar's breakfast math now reads the new
+  // `breakfastSelections` rich shape (when present)
+  // and recomputes the total via the shared
+  // `recomputeBreakfastTotal` helper. When the new
+  // shape is absent, falls back to the legacy
+  // `calculateBreakfastAddOn` path so the walk-in
+  // modal + older clients still render the single
+  // "Breakfast add-on" line.
+  const useNewBreakfastShape = breakfastSelections !== null && breakfastSelections !== undefined;
+  const perDateBreakfastLines = useNewBreakfastShape
+    ? buildBreakfastRateBreakdownLines(breakfastSelections)
+    : [];
+  const breakfastTotal = useNewBreakfastShape
+    ? recomputeBreakfastTotal(breakfastSelections)
+    : calculateBreakfastAddOn({
+        hasBreakfast,
+        breakfastRate: activeBreakfastRate,
+        numGuests: guests,
+        numAdults,
+        numChildren,
+        numNights: nights,
+        breakfastIncludesChildren
+      });
   // Per EXB-01 (2026-07-31): the extra-bed add-on term in the
   // summary panel. Reads the rate from the type entry; nullish
   // / 0 inputs short-circuit to 0 via the helper.
@@ -4000,12 +4268,35 @@ function BookingReviewAside({
                   <span>Room rate</span>
                   <span>{formatPrice(roomTotal)}</span>
                 </div>
-                {hasBreakfast ? (
+                {hasBreakfast || perDateBreakfastLines.length > 0 ? (
                   <>
-                    <div className="flex justify-between">
-                      <span>Breakfast add-on</span>
-                      <span>{formatPrice(breakfastTotal)}</span>
-                    </div>
+                    {/* Per BR-03 (2026-10-12, decision
+                        #232): the per-date breakfast
+                        breakdown. When the new
+                        `breakfastSelections` shape is
+                        in use, render one line per
+                        breakfast date (open item #5:
+                        aggregate by date, not by
+                        guest) so the sidebar reads
+                        naturally for a 3-night stay
+                        (3 lines, not N×guest lines).
+                        Otherwise fall back to the
+                        single "Breakfast add-on"
+                        line for the walk-in / older
+                        clients. */}
+                    {perDateBreakfastLines.length > 0 ? (
+                      perDateBreakfastLines.map((line, index) => (
+                        <div key={`bf-${index}`} className="flex justify-between">
+                          <span>{line.label}</span>
+                          <span>{formatPrice(line.amount)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex justify-between">
+                        <span>Breakfast add-on</span>
+                        <span>{formatPrice(breakfastTotal)}</span>
+                      </div>
+                    )}
                     {/* Per CHD-10 (2026-07-31, per CVQ-01): the
                         "include children" toggle. Only shown when
                         the guest has at least one child (otherwise

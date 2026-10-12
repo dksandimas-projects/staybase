@@ -74,3 +74,77 @@ export function recomputeBreakfastTotal(
   // `roundToTwoDecimals` in `shared/utils/bookingFolio.ts`.
   return Math.round(total * 100) / 100;
 }
+
+// Per BR-03 (2026-10-12, decision #232): the
+// per-date breakfast-line aggregator used by the
+// receipt PDF, the email view, the Step 2/3/4
+// sidebar, and the `rateBreakdown.addOns[]` write.
+// Pure function: takes a `breakfastSelections` map
+// (or `null`) and returns one line per date in
+// chronological order. Each line is
+// `{ label: "Breakfast (Oct 14, 2 meals)", amount }`.
+//
+// Per BR-01 (2026-10-12, decision #231): the
+// `serviceDate` lives in the composite KEY
+// (`${date}-${slotId}`), NOT in the entry. The
+// helper parses the date prefix from the key
+// (defensive — invalid prefixes are skipped). Lines
+// aggregate BY DATE (not by guest) per open item
+// #5: the receipt reads naturally for a 3-night
+// stay (3 lines, not N×guest lines). The sum of
+// the returned `amount` values equals
+// `recomputeBreakfastTotal(selections)` by
+// construction (same skip rules). The date
+// parsing is locale-stable via the
+// `+ 'T00:00:00Z'` UTC anchor — the brand uses
+// en-US for the date format.
+export interface BreakfastRateLine {
+  label: string;
+  amount: number;
+}
+
+export function buildBreakfastRateBreakdownLines(
+  selections: Record<string, BreakfastSelectionEntry> | null | undefined
+): BreakfastRateLine[] {
+  if (!selections) return [];
+  const byDate = new Map<string, { count: number; total: number }>();
+  for (const key of Object.keys(selections)) {
+    const entry = selections[key];
+    if (!entry) continue;
+    if (entry.removedAt !== null && entry.removedAt !== undefined) continue;
+    if (typeof entry.price !== "number" || !Number.isFinite(entry.price) || entry.price < 0) continue;
+    // Parse the date prefix from the key. The
+    // schema enforces `yyyy-mm-dd-slotId`; a
+    // malformed key is skipped (defensive — the
+    // strict server schema would have rejected it
+    // at create time, but a stale doc from a
+    // pre-BR-01 booking could have a different
+    // shape).
+    const match = /^(\d{4}-\d{2}-\d{2})-/.exec(key);
+    if (!match) continue;
+    const date = match[1];
+    const existing = byDate.get(date) ?? { count: 0, total: 0 };
+    existing.count += 1;
+    existing.total = Math.round((existing.total + entry.price) * 100) / 100;
+    byDate.set(date, existing);
+  }
+  const sortedDates = Array.from(byDate.keys()).sort();
+  return sortedDates.map((date) => {
+    const { count, total } = byDate.get(date)!;
+    let dateLabel = date;
+    try {
+      const parsed = new Date(`${date}T00:00:00Z`);
+      if (!Number.isNaN(parsed.getTime())) {
+        const month = parsed.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+        const day = parsed.getUTCDate();
+        dateLabel = `${month} ${day}`;
+      }
+    } catch {
+      dateLabel = date;
+    }
+    return {
+      label: `Breakfast (${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
+      amount: total
+    };
+  });
+}

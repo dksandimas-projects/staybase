@@ -17,6 +17,7 @@ import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
+import { handleGetBreakfastConfig } from "./handlers/breakfast-config";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
@@ -984,6 +985,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     
     return await handleRoomAvailability(req, res);
+  }
+
+  // Per BR-03 (2026-10-12, decision #232): the public
+  // breakfast-config endpoint. Returns the meal catalog
+  // + cutoff + instructions for the guest Step 2 UI +
+  // the future Manage Breakfast page. No auth required
+  // (the meal catalog is non-sensitive public site
+  // content). Cached 60s via the `Cache-Control` header
+  // set inside the handler. Rate-limited at 60/min/IP
+  // — the same window the existing per-IP mutation
+  // limits use, generous enough for a multi-render page.
+  // The third URL segment (`config`) is dropped by the
+  // `[domain, action] = pathSegments` destructuring
+  // above; the route is fully identified by
+  // `domain === "bookings" && action === "breakfast"`.
+  if (domain === "bookings" && action === "breakfast" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
+    }
+    return await handleGetBreakfastConfig(req, res);
   }
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {

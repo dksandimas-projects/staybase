@@ -124,19 +124,28 @@ describe("EXB-11.5 — per-type rate-option toggle on /book Step 1", () => {
     );
   });
 
-  it("the `selectRoomType` function is still exported / wired to the rate-option `onSelect` handlers", () => {
+  it("the `selectRoomType` function is still exported / wired to the rate-option `onSelect` handler", () => {
     // Sanity check: the function still exists with the
-    // same signature, and the two rate-option `onSelect`
-    // handlers in the room-type card still call it with
-    // the correct rate choice.
+    // same signature, and the rate-option `onSelect`
+    // handler in the room-type card still calls it with
+    // the `room-only` rate choice.
+    //
+    // Per BR-03 (2026-10-12, decision #232): the
+    // "room-breakfast" rate option is GONE. The
+    // flat-rate breakfast toggle was replaced by
+    // the per-guest × per-date `breakfastSelections`
+    // rich shape in Step 2. The `selectRoomType`
+    // signature still accepts the `RateChoice`
+    // union (back-compat for the type alias) but
+    // only `"room-only"` is wired — the new
+    // `breakfastSelections` map is the canonical
+    // way to express breakfast intent on the
+    // create payload.
     expect(bookingPageSrc).toMatch(
       /function selectRoomType\(typeValue: string, nextRateChoice: RateChoice\)/
     );
     expect(bookingPageSrc).toMatch(
       /onSelect=\{\(\) => selectRoomType\(type\.value, "room-only"\)\}/
-    );
-    expect(bookingPageSrc).toMatch(
-      /onSelect=\{\(\) => selectRoomType\(type\.value, "room-breakfast"\)\}/
     );
   });
 });

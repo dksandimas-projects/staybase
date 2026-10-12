@@ -125,9 +125,15 @@ describe("EXB-08 — server rate breakdown writes the extra bed add-on line", ()
     // The historical order is preserved: breakfast
     // first, then extra bed. The filter strips nulls
     // so a 0 breakfast + 1 extra bed renders as just
-    // the extra bed line.
+    // the extra bed line. Per BR-03
+    // (2026-10-12, decision #232): the breakfast
+    // term is now an array (the per-date lines or
+    // the legacy single line); the array-spread
+    // pattern (`...breakfastAddOns, extraBedAddOn`)
+    // preserves the historical order — every per-date
+    // line precedes the extra-bed line.
     expect(rateBreakdownSrc).toMatch(
-      /addOns:\s*\[breakfastAddOn,\s*extraBedAddOn\]\.filter/
+      /addOns:\s*\[\.\.\.breakfastAddOns,\s*extraBedAddOn\]\.filter/
     );
   });
 

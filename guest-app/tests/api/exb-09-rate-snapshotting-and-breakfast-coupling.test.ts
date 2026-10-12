@@ -2,6 +2,24 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// @deprecated since BR-03 (2026-10-12, decision #232):
+// the legacy `hasBreakfast` flat-rate model is replaced
+// by the per-guest × per-date `breakfastSelections` rich
+// shape. The rate-snapshotting pin is still load-bearing
+// (`extraBedRate` snapshotting is unaffected by BR-03);
+// the EXB-04 breakfast-coupling pin is now a
+// back-compat safety net for the legacy call sites
+// (the walk-in modal + the reschedule flow still use
+// `calculateBreakfastAddOn`). The new behavior —
+// per-meal selection snapshotted onto the booking doc
+// + server-recomputed `breakfastTotal` — is pinned by
+// the new test file:
+//   `guest-app/tests/api/br-03-breakfast-selections-snapshotting.test.ts`
+// The file is retained as the EXB-09 audit trail (the
+// EXB-09 ticket is closed; deleting the file would
+// erase the history). BR-03 updated the failing
+// `const stayBreakfastTotal = calculateBreakfastAddOn(...)`
+// assertion to match the new BR-03 ternary pattern.
 // Per EXB-09 (2026-08-01, per decision #145): source-text
 // regression tests for the leftover EXB items — rate
 // snapshotting + the EXB-04 breakfast-coupling guard.
@@ -172,7 +190,19 @@ describe("EXB-09 — EXB-04 breakfast-coupling guard (extra bed is a separate ad
     expect(bookingsHandlerSrc).toMatch(
       /calculateBreakfastAddOn\(\{[\s\S]{0,400}numGuests:\s*assigned\.numAdults \+ assigned\.numChildren,[\s\S]{0,400}\}\)/m
     );
-    expect(bookingsHandlerSrc).toMatch(/const stayBreakfastTotal = calculateBreakfastAddOn\(\{/);
+    // Per BR-03 (2026-10-12, decision #232): the
+    // per-stay breakfast total is now the
+    // selections-driven ternary (per-stay 0 for
+    // selections-active reservations; the
+    // per-reservation `breakfastTotal` carries the
+    // recomputed total). The legacy `calculateBreakfastAddOn`
+    // call site is still the source of truth when
+    // `breakfastSelections` is absent, so the pin
+    // matches either the new ternary or the legacy
+    // direct call.
+    expect(bookingsHandlerSrc).toMatch(
+      /const stayBreakfastTotal = (?:\w+\s*\?\s*0\s*:\s*)?calculateBreakfastAddOn\(\{/
+    );
     // Per EXB-12 (2026-08-06, per decision #199): every call site
     // that passes `extraBedCount` to the breakfast helper must
     // ALSO pass `extraBedBreakfast` (the opt-in toggle). The

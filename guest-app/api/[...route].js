@@ -221219,7 +221219,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "1.10.0";
+    VERSION2 = "1.11.0";
   }
 });
 
@@ -222469,6 +222469,42 @@ function recomputeBreakfastTotal(selections) {
     total += price;
   }
   return Math.round(total * 100) / 100;
+}
+function buildBreakfastRateBreakdownLines(selections) {
+  if (!selections) return [];
+  const byDate = /* @__PURE__ */ new Map();
+  for (const key of Object.keys(selections)) {
+    const entry = selections[key];
+    if (!entry) continue;
+    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+    if (typeof entry.price !== "number" || !Number.isFinite(entry.price) || entry.price < 0) continue;
+    const match = /^(\d{4}-\d{2}-\d{2})-/.exec(key);
+    if (!match) continue;
+    const date = match[1];
+    const existing = byDate.get(date) ?? { count: 0, total: 0 };
+    existing.count += 1;
+    existing.total = Math.round((existing.total + entry.price) * 100) / 100;
+    byDate.set(date, existing);
+  }
+  const sortedDates = Array.from(byDate.keys()).sort();
+  return sortedDates.map((date) => {
+    const { count, total } = byDate.get(date);
+    let dateLabel = date;
+    try {
+      const parsed2 = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
+      if (!Number.isNaN(parsed2.getTime())) {
+        const month = parsed2.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+        const day = parsed2.getUTCDate();
+        dateLabel = `${month} ${day}`;
+      }
+    } catch {
+      dateLabel = date;
+    }
+    return {
+      label: `Breakfast (${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
+      amount: total
+    };
+  });
 }
 var init_breakfastTotal = __esm({
   "../shared/utils/breakfastTotal.ts"() {
@@ -224271,6 +224307,51 @@ var init_breakfastCutoff = __esm({
   }
 });
 
+// ../shared/utils/breakfastConfig.ts
+function nonNegativeFinite(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
+}
+function safeString(value, fallback) {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+function safeBool(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function safeMeals(meals) {
+  if (!Array.isArray(meals)) return [];
+  return meals.filter((entry) => Boolean(entry) && typeof entry === "object").filter((entry) => entry.isActive === true).map((entry) => ({
+    id: safeString(entry.id, ""),
+    name: safeString(entry.name, "Unnamed meal"),
+    description: safeString(entry.description, ""),
+    price: nonNegativeFinite(entry.price),
+    displayOrder: nonNegativeFinite(entry.displayOrder)
+  })).filter((entry) => entry.id.length > 0).sort((a, b3) => a.displayOrder - b3.displayOrder || a.name.localeCompare(b3.name));
+}
+function normalizeBreakfastConfig(source) {
+  const raw = source && typeof source === "object" ? source : {};
+  void ADMIN_ONLY_FIELDS;
+  return {
+    isEnabled: safeBool(raw.isEnabled, false),
+    cutoffTime: safeString(raw.cutoffTime, "20:00"),
+    cutoffTimezone: safeString(raw.cutoffTimezone, "Asia/Manila"),
+    defaultMealInstructions: safeString(raw.defaultMealInstructions, ""),
+    meals: safeMeals(raw.meals)
+  };
+}
+var ADMIN_ONLY_FIELDS;
+var init_breakfastConfig = __esm({
+  "../shared/utils/breakfastConfig.ts"() {
+    "use strict";
+    ADMIN_ONLY_FIELDS = /* @__PURE__ */ new Set([
+      "frontDeskOverrideEnabled",
+      "servedGraceMinutes",
+      "updatedBy",
+      "updatedAt"
+    ]);
+  }
+});
+
 // ../shared/index.ts
 var shared_exports = {};
 __export(shared_exports, {
@@ -224371,6 +224452,7 @@ __export(shared_exports, {
   assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
   buildArrivalTimeOptions: () => buildArrivalTimeOptions,
+  buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
@@ -224448,6 +224530,7 @@ __export(shared_exports, {
   isWeekendNight: () => isWeekendNight,
   mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
   nextSequence: () => nextSequence,
+  normalizeBreakfastConfig: () => normalizeBreakfastConfig,
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
   normalizeMaxChildren: () => normalizeMaxChildren,
@@ -224527,6 +224610,7 @@ var init_shared = __esm({
     init_bookingPreferences();
     init_breakfastCutoff();
     init_breakfastTotal();
+    init_breakfastConfig();
   }
 });
 
@@ -228717,25 +228801,25 @@ init_hotel_config();
 
 // server/lib/rate-breakdown.ts
 init_shared();
-function nonNegativeFinite(value) {
+function nonNegativeFinite2(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
 }
 function composeRateBreakdown(input) {
-  const roomSubtotal = nonNegativeFinite(input.roomSubtotal);
+  const roomSubtotal = nonNegativeFinite2(input.roomSubtotal);
   const addOns = input.addOns.map((line) => ({
     ...line,
-    amount: nonNegativeFinite(line.amount)
+    amount: nonNegativeFinite2(line.amount)
   }));
   const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
-  const discountPct = nonNegativeFinite(input.discountPct);
+  const discountPct = nonNegativeFinite2(input.discountPct);
   const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
   const afterSeniorPwd = calculateVoucherBase(subtotal, seniorPwdDiscount);
-  const voucherDiscount = nonNegativeFinite(input.voucherDiscount);
+  const voucherDiscount = nonNegativeFinite2(input.voucherDiscount);
   const afterVoucher = calculateVoucherBase(afterSeniorPwd, voucherDiscount);
-  const memberDiscountPct = nonNegativeFinite(input.memberDiscountPct);
+  const memberDiscountPct = nonNegativeFinite2(input.memberDiscountPct);
   const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
-  const pointsRedeemedValue = nonNegativeFinite(input.pointsRedeemedValue);
+  const pointsRedeemedValue = nonNegativeFinite2(input.pointsRedeemedValue);
   const deductions = [
     ...seniorPwdDiscount > 0 ? [{
       label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${discountPct}%)`,
@@ -228750,11 +228834,11 @@ function composeRateBreakdown(input) {
     roomLines: input.roomLines,
     addOns,
     deductions,
-    finalTotal: nonNegativeFinite(input.finalTotal)
+    finalTotal: nonNegativeFinite2(input.finalTotal)
   };
 }
 function buildRateBreakdown(input) {
-  const breakfastAddOn = input.breakfastTotal > 0 ? { label: "Breakfast add-on", amount: input.breakfastTotal } : null;
+  const breakfastAddOns = input.breakfastLines ? input.breakfastLines.filter((line) => Number(line.amount) > 0) : input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [];
   const extraBedAddOn = (input.extraBedTotal ?? 0) > 0 ? {
     label: (() => {
       const count = Number(input.extraBedCount) || 0;
@@ -228772,7 +228856,7 @@ function buildRateBreakdown(input) {
   } : null;
   return composeRateBreakdown({
     ...input,
-    addOns: [breakfastAddOn, extraBedAddOn].filter(
+    addOns: [...breakfastAddOns, extraBedAddOn].filter(
       (line) => line !== null
     ),
     pointsRedeemedValue: input.pointsRedeemedValue || 0
@@ -228781,16 +228865,16 @@ function buildRateBreakdown(input) {
 function rebuildRateBreakdown(booking, overrides = {}) {
   const existing = booking.rateBreakdown;
   if (!existing) return void 0;
-  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite(booking.pointsRedeemedValue) : nonNegativeFinite(overrides.pointsRedeemedValue);
-  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite(booking.totalPrice) : nonNegativeFinite(overrides.finalTotal);
+  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite2(booking.pointsRedeemedValue) : nonNegativeFinite2(overrides.pointsRedeemedValue);
+  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite2(booking.totalPrice) : nonNegativeFinite2(overrides.finalTotal);
   return composeRateBreakdown({
     roomLines: existing.roomLines || [],
     roomSubtotal: existing.roomSubtotal,
     addOns: existing.addOns || [],
     discountType: String(booking.discountType || ""),
-    discountPct: nonNegativeFinite(booking.discountPct),
-    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
-    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
+    discountPct: nonNegativeFinite2(booking.discountPct),
+    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
     pointsRedeemedValue,
     finalTotal
   });
@@ -228805,14 +228889,14 @@ function dateKeyFromUnknown(value) {
   return Number.isNaN(date.getTime()) ? "1970-01-01" : date.toISOString().slice(0, 10);
 }
 function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
-  const nights = Math.max(Math.floor(nonNegativeFinite(newNights)), 1);
-  const originalNights = Math.max(Math.floor(nonNegativeFinite(booking.numNights)), nights);
-  const finalTotal = nonNegativeFinite(booking.totalPrice);
+  const nights = Math.max(Math.floor(nonNegativeFinite2(newNights)), 1);
+  const originalNights = Math.max(Math.floor(nonNegativeFinite2(booking.numNights)), nights);
+  const finalTotal = nonNegativeFinite2(booking.totalPrice);
   const existing = booking.rateBreakdown;
   let remainingNights = nights;
   const roomLines = (existing?.roomLines || []).flatMap((line) => {
     if (remainingNights <= 0) return [];
-    const lineNights = Math.max(Math.floor(nonNegativeFinite(line.nights)), 0);
+    const lineNights = Math.max(Math.floor(nonNegativeFinite2(line.nights)), 0);
     const consumedNights = Math.min(lineNights, remainingNights);
     if (consumedNights <= 0) return [];
     remainingNights -= consumedNights;
@@ -228820,12 +228904,12 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
       ...line,
       endDate: shiftDateKey(line.startDate, consumedNights),
       nights: consumedNights,
-      subtotal: nonNegativeFinite(line.nightlyRate) * consumedNights
+      subtotal: nonNegativeFinite2(line.nightlyRate) * consumedNights
     }];
   });
   if (roomLines.length === 0) {
     const startDate = dateKeyFromUnknown(booking.checkIn);
-    const nightlyRate = nonNegativeFinite(booking.ratePerNight);
+    const nightlyRate = nonNegativeFinite2(booking.ratePerNight);
     roomLines.push({
       source: "manual",
       label: "Locked room rate",
@@ -228838,7 +228922,7 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
   }
   const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
   const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
-  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 })) : booking.hasBreakfast ? [{
+  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite2(line.amount) * addOnRatio * 100) / 100 })) : booking.hasBreakfast ? [{
     label: "Breakfast add-on",
     amount: calculateBreakfastAddOn({
       hasBreakfast: booking.hasBreakfast,
@@ -228854,7 +228938,7 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
       extraBedBreakfast: booking.extraBedBreakfast === true
     })
   }] : [];
-  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
+  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite2(booking.ratePerNight) * originalNights;
   const originalAddOns = existing?.addOns ?? (booking.hasBreakfast ? [{
     label: "Breakfast add-on",
     amount: calculateBreakfastAddOn({
@@ -228872,10 +228956,10 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
     roomSubtotal: originalRoomSubtotal,
     addOns: originalAddOns,
     discountType: String(booking.discountType || ""),
-    discountPct: nonNegativeFinite(booking.discountPct),
-    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
-    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
-    pointsRedeemedValue: nonNegativeFinite(booking.pointsRedeemedValue),
+    discountPct: nonNegativeFinite2(booking.discountPct),
+    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
+    pointsRedeemedValue: nonNegativeFinite2(booking.pointsRedeemedValue),
     finalTotal
   });
   const deductionTotal = originalPricing.deductions.reduce((sum, line) => sum + line.amount, 0);
@@ -228888,6 +228972,104 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
     deductions: originalPricing.deductions,
     finalTotal
   };
+}
+
+// server/lib/breakfast-selections.ts
+init_zod();
+init_shared();
+init_shared();
+var entryShape = external_exports.object({
+  mealId: external_exports.string().trim().min(1).max(120),
+  mealName: external_exports.string().trim().min(1).max(200),
+  price: external_exports.number().finite().min(0),
+  addedBy: external_exports.string().trim().max(120).optional().default(""),
+  addedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedBy: external_exports.string().trim().max(120).optional().default(""),
+  removedAt: external_exports.string().trim().max(64).nullable().optional().default(null),
+  removedBy: external_exports.string().trim().max(120).nullable().optional().default(null),
+  overrideCutoff: external_exports.boolean().optional().default(false),
+  overrideReason: external_exports.string().trim().max(500).nullable().optional().default(null)
+});
+var breakfastSelectionsSchema = external_exports.record(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\s\S]{1,80}$/), entryShape);
+var BreakfastSelectionValidationError = class extends Error {
+  status;
+  constructor(message, status = 400) {
+    super(message);
+    this.name = "BreakfastSelectionValidationError";
+    this.status = status;
+  }
+};
+function buildMealLookup(meals) {
+  const lookup = /* @__PURE__ */ new Map();
+  if (!Array.isArray(meals)) return lookup;
+  for (const meal of meals) {
+    if (!meal || typeof meal !== "object") continue;
+    const id = typeof meal.id === "string" ? meal.id : "";
+    if (!id) continue;
+    lookup.set(id, meal);
+  }
+  return lookup;
+}
+function validateBreakfastSelections(input) {
+  const { selections, breakfastConfig, now } = input;
+  if (selections === null || selections === void 0) return null;
+  const parsed2 = breakfastSelectionsSchema.safeParse(selections);
+  if (!parsed2.success) {
+    throw new BreakfastSelectionValidationError(
+      "Invalid breakfast selection. Please refresh and try again."
+    );
+  }
+  const entries = parsed2.data;
+  const mealLookup = buildMealLookup(breakfastConfig.meals);
+  const validatedEntries = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    const match = /^(\d{4}-\d{2}-\d{2})-/.exec(key);
+    if (!match) {
+      throw new BreakfastSelectionValidationError(
+        "Invalid breakfast selection. Please refresh and try again."
+      );
+    }
+    const serviceDate = match[1];
+    const cutoffState = computeBreakfastCutoffState({
+      serviceDate,
+      now,
+      cutoffTime: breakfastConfig.cutoffTime,
+      timezone: breakfastConfig.cutoffTimezone
+    });
+    if (cutoffState.isLocked) {
+      throw new BreakfastSelectionValidationError(
+        `Ordering closed for breakfast on ${serviceDate}. Please remove the selection or contact the hotel.`
+      );
+    }
+    if (!mealLookup.has(entry.mealId)) {
+      throw new BreakfastSelectionValidationError(
+        `One of the selected meals is no longer available. Please refresh and try again.`
+      );
+    }
+    const price = Number(entry.price);
+    if (!Number.isFinite(price) || price < 0) {
+      throw new BreakfastSelectionValidationError(
+        `Invalid breakfast price. Please refresh and try again.`
+      );
+    }
+    validatedEntries[key] = {
+      mealId: entry.mealId,
+      mealName: entry.mealName,
+      price,
+      addedBy: entry.addedBy || "guest",
+      addedAt: entry.addedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      lastModifiedAt: entry.lastModifiedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      lastModifiedBy: entry.lastModifiedBy || "guest",
+      removedAt: entry.removedAt ?? null,
+      removedBy: entry.removedBy ?? null,
+      overrideCutoff: entry.overrideCutoff === true,
+      overrideReason: entry.overrideReason ?? null
+    };
+  }
+  const total = recomputeBreakfastTotal(validatedEntries);
+  const hasAny = Object.keys(validatedEntries).length > 0;
+  return { entries: validatedEntries, total, hasAny };
 }
 
 // server/handlers/bookings.ts
@@ -229557,6 +229739,25 @@ var createBookingSchema = external_exports.object({
   // missing value matches the "LOU not yet received"
   // state.
   louReceived: external_exports.boolean().optional().default(false),
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date breakfast selections rich
+  // shape. Optional — when absent, the create handler
+  // falls back to the legacy `hasBreakfast` flat-rate
+  // model (per-room + per-occupancy), preserving back-
+  // compat for the walkin modal + older clients. When
+  // present (even as an empty `{}`), the handler
+  // switches to the new path: the `breakfastTotal` is
+  // recomputed from the selections, the legacy
+  // `hasBreakfast` / `breakfastRate` /
+  // `breakfastIncludesChildren` / `extraBedBreakfast`
+  // fields are NOT written to the booking doc, and the
+  // new `breakfastSelections` map is snapshotted onto
+  // the doc. The strict schema validates the entry
+  // shape (the per-class fields + the date key); the
+  // server-side `validateBreakfastSelections` helper
+  // applies the meal-catalog + cutoff gates and throws
+  // a 400 with a human message on violation.
+  breakfastSelections: breakfastSelectionsSchema.optional(),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
 async function handleCreateBooking(req, res) {
@@ -230054,6 +230255,11 @@ async function handleCreateBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
       const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== void 0 ? requestedBreakfastIncludesChildren : breakfastIncludesChildrenDefault;
+      const validatedBreakfastSelections = validateBreakfastSelections({
+        selections: body.breakfastSelections,
+        breakfastConfig,
+        now
+      });
       const validatedRoomStays = assignedRooms.map((assignedRoom, index) => {
         const selection = assignedRoom.selection;
         const selectionType = selection.typeEntry;
@@ -230219,8 +230425,9 @@ async function handleCreateBooking(req, res) {
           weekendRate: Number(stayType.weekendRate) || 0,
           seasonalRateOverrides
         });
-        const stayHasBreakfast = breakfastConfig.isEnabled && stay.selection.hasBreakfast;
-        const stayBreakfastTotal = calculateBreakfastAddOn({
+        const breakfastSelectionsActive = validatedBreakfastSelections !== null;
+        const stayHasBreakfast = breakfastSelectionsActive ? validatedBreakfastSelections.hasAny : breakfastConfig.isEnabled && stay.selection.hasBreakfast;
+        const stayBreakfastTotal = breakfastSelectionsActive ? 0 : calculateBreakfastAddOn({
           hasBreakfast: stayHasBreakfast,
           breakfastRate: actualBreakfastRate,
           numGuests: stay.numGuests,
@@ -230266,10 +230473,10 @@ async function handleCreateBooking(req, res) {
         )
       };
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastTotal = roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
+      const breakfastTotal = validatedBreakfastSelections !== null ? validatedBreakfastSelections.total : roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
       const extraBedTotal = roomStayPricing.reduce((sum, stay) => sum + stay.extraBedTotal, 0);
       const subtotal = roomTotal + breakfastTotal + extraBedTotal;
-      const finalHasBreakfast = roomStayPricing[0].finalHasBreakfast;
+      const finalHasBreakfast = validatedBreakfastSelections !== null ? validatedBreakfastSelections.hasAny : roomStayPricing[0].finalHasBreakfast;
       let discountPct = 0;
       if (discountType === "senior" || discountType === "pwd") {
         discountPct = 20;
@@ -230356,10 +230563,12 @@ async function handleCreateBooking(req, res) {
         throw new Error("Invalid booking total.");
       }
       const originalTotalPrice = subtotal;
+      const breakfastRateBreakdownLines = validatedBreakfastSelections !== null ? buildBreakfastRateBreakdownLines(validatedBreakfastSelections.entries) : void 0;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        breakfastLines: breakfastRateBreakdownLines,
         // Per EXB-08 (2026-08-01, per decision #156):
         // the extra-bed add-on term. The `addOns[]`
         // now includes both the breakfast line and
@@ -230391,8 +230600,23 @@ async function handleCreateBooking(req, res) {
         rateBreakdown: {
           roomSubtotal: stay.roomTotal,
           roomLines: stay.roomBreakdown.roomLines,
+          // Per BR-03 (2026-10-12, decision #232): when
+          // the new `breakfastSelections` shape is
+          // active, the per-room breakfast lines are
+          // attributed to the FIRST stay only (the
+          // reservation-level breakfast is not
+          // per-room, per open item #1 in the spec).
+          // The email view's `addOns.concat(...)`
+          // would otherwise duplicate the per-date
+          // lines N times for an N-room booking; this
+          // single-source attribution keeps the
+          // per-date lines on the reservation
+          // breakdown (which the email view reads
+          // first). Legacy path: each stay carries
+          // its own "Breakfast add-on" line (the
+          // historical EXB-08 behavior).
           addOns: [
-            ...stay.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }] : [],
+            ...breakfastRateBreakdownLines && breakfastRateBreakdownLines.length > 0 ? index === 0 ? breakfastRateBreakdownLines : [] : stay.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }] : [],
             ...stay.extraBedTotal > 0 ? [{
               label: stay.extraBedCount > 1 ? `Extra bed add-on (${stay.extraBedCount} beds \xD7 ${numNights} ${numNights === 1 ? "night" : "nights"})` : "Extra bed add-on",
               amount: stay.extraBedTotal
@@ -230461,6 +230685,18 @@ async function handleCreateBooking(req, res) {
         // without leaking the raw `guestEmail` in URLs.
         lookupToken: generateLookupToken(),
         totalPrice,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // denormalized `breakfastTotal` field. The
+        // existing `computeServerFolioTotals` reads
+        // `totalPrice` (which already includes the new
+        // breakfast total via the discount chain), so
+        // this field is the future-proof snapshot for
+        // the BR-04 Manage Breakfast page +
+        // downstream readers (kitchen list per BR-05,
+        // reports per BR-08). Always written so a
+        // legacy reader can detect the absence of
+        // breakfast (`0`) without a special-case.
+        breakfastTotal,
         rateBreakdown,
         originalTotalPrice,
         discountType: discountType || "",
@@ -230545,14 +230781,47 @@ async function handleCreateBooking(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
-        // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
-        // "include children in breakfast" flag. Written to the
-        // booking doc so a later policy change never rewrites an
-        // existing bill. Math consumers (the helper, the receipt
-        // PDF, the rate breakdown) read this field.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // breakfast-doc fields. Two shapes coexist during
+        // the rollout:
+        //
+        //   - Legacy shape: `hasBreakfast: bool`,
+        //     `breakfastRate: number`,
+        //     `breakfastIncludesChildren: bool`,
+        //     `extraBedBreakfast: bool`. Written for
+        //     pre-BR-03 callers (the walkin modal per the
+        //     BR-03 plan) and any client that omits
+        //     `breakfastSelections`.
+        //
+        //   - New shape: `breakfastSelections: Record<key,
+        //     BreakfastSelectionEntry>` + a single
+        //     `hasAnyBreakfast: bool` flag (the
+        //     `breakfastTotal` is denormalized separately
+        //     below for the folio math). The new shape
+        //     REPLACES the legacy fields — the BR-03 spec
+        //     pins the create-path cleanup so a future
+        //     read site can switch on `breakfastSelections`
+        //     being a non-null object. The legacy fields
+        //     are NOT written when the new shape is used.
+        ...validatedBreakfastSelections !== null ? {
+          breakfastSelections: validatedBreakfastSelections.entries,
+          hasAnyBreakfast: validatedBreakfastSelections.hasAny,
+          // The folio math reads `breakfastTotal`
+          // (denormalized); expose the same value the
+          // chain saw.
+          breakfastTotal: validatedBreakfastSelections.total
+        } : {
+          hasBreakfast: finalHasBreakfast,
+          breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+          // Per CHD-10 (2026-07-31, per CVQ-01): the
+          // snapshotted "include children in breakfast"
+          // flag. Written to the booking doc so a
+          // later policy change never rewrites an
+          // existing bill. Math consumers (the helper,
+          // the receipt PDF, the rate breakdown) read
+          // this field.
+          breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false
+        },
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
         // snapshotted at booking time so a later rate change never
@@ -230570,7 +230839,15 @@ async function handleCreateBooking(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per BR-03 (2026-10-12, decision #232): the
+        // `breakfastSelections` field is now written
+        // conditionally above (the legacy flat-rate
+        // path writes the legacy fields; the new
+        // selections-driven path writes the rich
+        // `breakfastSelections` map + `hasAnyBreakfast`).
+        // The hard-coded `breakfastSelections: {}`
+        // placeholder was removed — leaving it would
+        // double-write the field.
         // Per LCE-01 (decision #137, 2026-07-25): stamp the
         // Terms of Service version that was live at
         // booking-create time. The admin's
@@ -231148,7 +231425,9 @@ async function handleCreateBooking(req, res) {
     const code = error?.code || "";
     const isInfraError = typeof code === "string" && (code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED") || code.includes("INTERNAL"));
     let status;
-    if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
+    if (error.name === "BreakfastSelectionValidationError") {
+      status = typeof error.status === "number" && error.status > 0 ? error.status : 400;
+    } else if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
@@ -239427,6 +239706,30 @@ async function handleH2BackfillStatus(req, res) {
   });
 }
 
+// server/handlers/breakfast-config.ts
+init_shared();
+init_firebase_admin();
+var CACHE_TTL_SECONDS = 60;
+async function handleGetBreakfastConfig(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  try {
+    const snapshot = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snapshot.exists ? snapshot.data() : null;
+    const normalized = normalizeBreakfastConfig(source);
+    res.setHeader("Cache-Control", `public, max-age=${CACHE_TTL_SECONDS}, s-maxage=${CACHE_TTL_SECONDS}`);
+    return res.status(200).json({ success: true, data: normalized });
+  } catch (error) {
+    const code = String(error?.code || "");
+    const isInfra = code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED");
+    return res.status(isInfra ? 503 : 500).json({
+      success: false,
+      error: "Failed to load breakfast config."
+    });
+  }
+}
+
 // server/handlers/seo.ts
 init_firestore();
 init_shared();
@@ -240303,6 +240606,12 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many availability requests. Please try again in a minute." });
     }
     return await handleRoomAvailability(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
+    }
+    return await handleGetBreakfastConfig(req, res);
   }
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-voucher:${ip}`, 20, 6e4)) {

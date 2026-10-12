@@ -9,6 +9,19 @@ type BuildRateBreakdownInput = {
   roomLines: BookingRateLine[];
   roomSubtotal: number;
   breakfastTotal: number;
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-date breakfast lines. When provided, the helper
+  // writes the per-date lines (one per breakfast date)
+  // into `addOns[]` instead of the single
+  // "Breakfast add-on" line. The sum of
+  // `breakfastLines[].amount` should equal `breakfastTotal`
+  // (caller invariant — the helper does NOT re-sum; the
+  // chain math reads `breakfastTotal` and the per-date
+  // lines are the receipt/PDF/email rendering). Optional
+  // — when absent, the helper falls back to the
+  // historical single-line behavior (back-compat with
+  // every existing call site).
+  breakfastLines?: BookingRateAdjustmentLine[];
   // Per EXB-08 (2026-08-01, per decision #156): the
   // extra-bed add-on term. The helper now writes the
   // "Extra bed add-on" line into `addOns[]` so the
@@ -147,10 +160,23 @@ export function buildRateBreakdown(input: BuildRateBreakdownInput): BookingRateB
   // multi-bed stays ("Extra bed add-on (2 beds × rate ×
   // nights)"); the count-agnostic label is the fallback
   // when either count or rate is missing.
-  const breakfastAddOn: BookingRateAdjustmentLine | null =
-    input.breakfastTotal > 0
-      ? { label: "Breakfast add-on", amount: input.breakfastTotal }
-      : null;
+  //
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-date breakfast lines (`breakfastLines`) REPLACE
+  // the single "Breakfast add-on" entry when the caller
+  // passes them in. The caller is the create handler
+  // (via `buildBreakfastRateBreakdownLines`); legacy
+  // callers (the walkin modal per the BR-03 plan) keep
+  // the single-line behavior. The per-date lines are
+  // already defensive-coerced by the helper, so this
+  // function trusts them as-is and only filters out
+  // empty (`amount <= 0`) entries for parity with the
+  // legacy single-line path.
+  const breakfastAddOns: BookingRateAdjustmentLine[] = input.breakfastLines
+    ? input.breakfastLines.filter((line) => Number(line.amount) > 0)
+    : input.breakfastTotal > 0
+      ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
+      : [];
   const extraBedAddOn: BookingRateAdjustmentLine | null =
     (input.extraBedTotal ?? 0) > 0
       ? {
@@ -171,7 +197,7 @@ export function buildRateBreakdown(input: BuildRateBreakdownInput): BookingRateB
       : null;
   return composeRateBreakdown({
     ...input,
-    addOns: [breakfastAddOn, extraBedAddOn].filter(
+    addOns: [...breakfastAddOns, extraBedAddOn].filter(
       (line): line is BookingRateAdjustmentLine => line !== null
     ),
     pointsRedeemedValue: input.pointsRedeemedValue || 0

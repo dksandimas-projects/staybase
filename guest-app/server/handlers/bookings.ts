@@ -227,10 +227,16 @@ import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/bookin
 // by the create / confirm-with-balance / post-checkout transactions)
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
-import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange, generateBookingRef } from "@spark-inn/shared";
+import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange, generateBookingRef, recomputeBreakfastTotal } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
+import {
+  breakfastSelectionsSchema,
+  buildBreakfastRateBreakdownLines,
+  validateBreakfastSelections,
+  type ValidatedBreakfastSelections
+} from "../lib/breakfast-selections";
 
 export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
@@ -1379,6 +1385,25 @@ export const createBookingSchema = z.object({
   // missing value matches the "LOU not yet received"
   // state.
   louReceived: z.boolean().optional().default(false),
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date breakfast selections rich
+  // shape. Optional — when absent, the create handler
+  // falls back to the legacy `hasBreakfast` flat-rate
+  // model (per-room + per-occupancy), preserving back-
+  // compat for the walkin modal + older clients. When
+  // present (even as an empty `{}`), the handler
+  // switches to the new path: the `breakfastTotal` is
+  // recomputed from the selections, the legacy
+  // `hasBreakfast` / `breakfastRate` /
+  // `breakfastIncludesChildren` / `extraBedBreakfast`
+  // fields are NOT written to the booking doc, and the
+  // new `breakfastSelections` map is snapshotted onto
+  // the doc. The strict schema validates the entry
+  // shape (the per-class fields + the date key); the
+  // server-side `validateBreakfastSelections` helper
+  // applies the meal-catalog + cutoff gates and throws
+  // a 400 with a human message on violation.
+  breakfastSelections: breakfastSelectionsSchema.optional(),
   _hp: z.string().max(200).optional().default("")
 }).strict();
 
@@ -2286,6 +2311,28 @@ export async function handleCreateBooking(req: any, res: any) {
         ? requestedBreakfastIncludesChildren
         : breakfastIncludesChildrenDefault;
 
+      // Per BR-03 (2026-10-12, decision #232): validate the
+      // new `breakfastSelections` rich shape (when provided).
+      // Returns `null` for legacy callers (no field sent),
+      // the validated entries + recomputed total for new
+      // callers, or throws a `BreakfastSelectionValidationError`
+      // (400 with a human message) for a locked date /
+      // missing meal / malformed entry. The validation
+      // runs INSIDE the same Firestore transaction as the
+      // booking write so the catalog + cutoff state are
+      // read once and the result is atomic with the
+      // snapshot. Per open item #6 (BR-01 / spec): the
+      // mealId must exist in the live catalog; per open
+      // item #7: the server is authoritative on the
+      // cutoff clock (a back-dated client is still
+      // rejected).
+      const validatedBreakfastSelections: ValidatedBreakfastSelections | null =
+        validateBreakfastSelections({
+          selections: (body as any).breakfastSelections,
+          breakfastConfig: breakfastConfig as any,
+          now
+        });
+
       // Per CHD-01 + CHD-04 (2026-08-01, per decision #144):
       // validate the adults/children split against the room
       // type's `maxCapacity` (adults) + `maxChildren` (children).
@@ -2630,8 +2677,25 @@ export async function handleCreateBooking(req: any, res: any) {
               weekendRate: Number(stayType.weekendRate) || 0,
               seasonalRateOverrides
             });
-        const stayHasBreakfast = breakfastConfig.isEnabled && stay.selection.hasBreakfast;
-        const stayBreakfastTotal = calculateBreakfastAddOn({
+        // Per BR-03 (2026-10-12, decision #232): when the
+        // guest submitted the new `breakfastSelections` rich
+        // shape (any non-`null` value — empty `{}` is the
+        // "explicit opt-out" signal), the per-stay breakfast
+        // math flips to the selections-driven path. The
+        // per-stay total is 0 for every stay except the
+        // first (which absorbs the full selections total) so
+        // the per-reservation `breakfastTotal` (the sum of
+        // per-stay totals, computed below) lands on the
+        // selections total. The single-stay case is
+        // byte-equivalent to the historical "first stay
+        // gets everything" attribution.
+        const breakfastSelectionsActive = validatedBreakfastSelections !== null;
+        const stayHasBreakfast = breakfastSelectionsActive
+          ? validatedBreakfastSelections.hasAny
+          : (breakfastConfig.isEnabled && stay.selection.hasBreakfast);
+        const stayBreakfastTotal = breakfastSelectionsActive
+          ? 0
+          : calculateBreakfastAddOn({
           hasBreakfast: stayHasBreakfast,
           breakfastRate: actualBreakfastRate,
           numGuests: stay.numGuests,
@@ -2679,10 +2743,29 @@ export async function handleCreateBooking(req: any, res: any) {
         )
       };
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastTotal = roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
+      // Per BR-03 (2026-10-12, decision #232): when the
+      // new `breakfastSelections` shape is active, the
+      // per-reservation `breakfastTotal` is the
+      // server-recomputed selections total (the sum of
+      // every non-cancelled entry's snapshot price, per
+      // the BR-01 `recomputeBreakfastTotal` helper). The
+      // per-stay totals above are 0 in that case (the
+      // override above absorbs the per-stay legacy
+      // math), so the per-reservation `reduce` lands at
+      // 0; the `breakfastSelectionsActive` ternary here
+      // swaps in the validated total. The single-stay
+      // case is byte-equivalent; the multi-stay case
+      // attributes the full selections total to the
+      // reservation (no per-stay split — see open item
+      // #1 in the spec).
+      const breakfastTotal = validatedBreakfastSelections !== null
+        ? validatedBreakfastSelections.total
+        : roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
       const extraBedTotal = roomStayPricing.reduce((sum, stay) => sum + stay.extraBedTotal, 0);
       const subtotal = roomTotal + breakfastTotal + extraBedTotal;
-      const finalHasBreakfast = roomStayPricing[0].finalHasBreakfast;
+      const finalHasBreakfast = validatedBreakfastSelections !== null
+        ? validatedBreakfastSelections.hasAny
+        : roomStayPricing[0].finalHasBreakfast;
 
       // 7a. Government Discount Validation
       // Per X-01 (E2E audit 2026-07-17): anonymous guest uploads must
@@ -2877,10 +2960,24 @@ export async function handleCreateBooking(req: any, res: any) {
       // handler now uses `originalTotalPrice - voucherDiscount`
       // to apply the voucher if one was also applied.
       const originalTotalPrice = subtotal;
+      // Per BR-03 (2026-10-12, decision #232): the
+      // per-date breakfast lines, when the new shape
+      // is active. The sum of the per-date lines equals
+      // the recomputed `breakfastTotal` (caller
+      // invariant — `recomputeBreakfastTotal` ran
+      // inside the validator above). The single-line
+      // `breakfastTotal` value is still passed so the
+      // `addOns[]` builder keeps its existing semantics
+      // and the legacy discount-chain math reads the
+      // single value.
+      const breakfastRateBreakdownLines = validatedBreakfastSelections !== null
+        ? buildBreakfastRateBreakdownLines(validatedBreakfastSelections.entries)
+        : undefined;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        breakfastLines: breakfastRateBreakdownLines,
         // Per EXB-08 (2026-08-01, per decision #156):
         // the extra-bed add-on term. The `addOns[]`
         // now includes both the breakfast line and
@@ -2912,10 +3009,27 @@ export async function handleCreateBooking(req: any, res: any) {
         rateBreakdown: {
           roomSubtotal: stay.roomTotal,
           roomLines: stay.roomBreakdown.roomLines,
+          // Per BR-03 (2026-10-12, decision #232): when
+          // the new `breakfastSelections` shape is
+          // active, the per-room breakfast lines are
+          // attributed to the FIRST stay only (the
+          // reservation-level breakfast is not
+          // per-room, per open item #1 in the spec).
+          // The email view's `addOns.concat(...)`
+          // would otherwise duplicate the per-date
+          // lines N times for an N-room booking; this
+          // single-source attribution keeps the
+          // per-date lines on the reservation
+          // breakdown (which the email view reads
+          // first). Legacy path: each stay carries
+          // its own "Breakfast add-on" line (the
+          // historical EXB-08 behavior).
           addOns: [
-            ...(stay.breakfastTotal > 0
-              ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }]
-              : []),
+            ...(breakfastRateBreakdownLines && breakfastRateBreakdownLines.length > 0
+              ? (index === 0 ? breakfastRateBreakdownLines : [])
+              : (stay.breakfastTotal > 0
+                ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }]
+                : [])),
             ...(stay.extraBedTotal > 0
               ? [{
                   label: stay.extraBedCount > 1
@@ -3036,6 +3150,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // without leaking the raw `guestEmail` in URLs.
         lookupToken: generateLookupToken(),
         totalPrice,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // denormalized `breakfastTotal` field. The
+        // existing `computeServerFolioTotals` reads
+        // `totalPrice` (which already includes the new
+        // breakfast total via the discount chain), so
+        // this field is the future-proof snapshot for
+        // the BR-04 Manage Breakfast page +
+        // downstream readers (kitchen list per BR-05,
+        // reports per BR-08). Always written so a
+        // legacy reader can detect the absence of
+        // breakfast (`0`) without a special-case.
+        breakfastTotal: breakfastTotal,
         rateBreakdown,
         originalTotalPrice,
         discountType: discountType || "",
@@ -3124,14 +3250,49 @@ export async function handleCreateBooking(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
-        // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
-        // "include children in breakfast" flag. Written to the
-        // booking doc so a later policy change never rewrites an
-        // existing bill. Math consumers (the helper, the receipt
-        // PDF, the rate breakdown) read this field.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // breakfast-doc fields. Two shapes coexist during
+        // the rollout:
+        //
+        //   - Legacy shape: `hasBreakfast: bool`,
+        //     `breakfastRate: number`,
+        //     `breakfastIncludesChildren: bool`,
+        //     `extraBedBreakfast: bool`. Written for
+        //     pre-BR-03 callers (the walkin modal per the
+        //     BR-03 plan) and any client that omits
+        //     `breakfastSelections`.
+        //
+        //   - New shape: `breakfastSelections: Record<key,
+        //     BreakfastSelectionEntry>` + a single
+        //     `hasAnyBreakfast: bool` flag (the
+        //     `breakfastTotal` is denormalized separately
+        //     below for the folio math). The new shape
+        //     REPLACES the legacy fields — the BR-03 spec
+        //     pins the create-path cleanup so a future
+        //     read site can switch on `breakfastSelections`
+        //     being a non-null object. The legacy fields
+        //     are NOT written when the new shape is used.
+        ...(validatedBreakfastSelections !== null
+          ? {
+              breakfastSelections: validatedBreakfastSelections.entries,
+              hasAnyBreakfast: validatedBreakfastSelections.hasAny,
+              // The folio math reads `breakfastTotal`
+              // (denormalized); expose the same value the
+              // chain saw.
+              breakfastTotal: validatedBreakfastSelections.total
+            }
+          : {
+              hasBreakfast: finalHasBreakfast,
+              breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+              // Per CHD-10 (2026-07-31, per CVQ-01): the
+              // snapshotted "include children in breakfast"
+              // flag. Written to the booking doc so a
+              // later policy change never rewrites an
+              // existing bill. Math consumers (the helper,
+              // the receipt PDF, the rate breakdown) read
+              // this field.
+              breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false
+            }),
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
         // snapshotted at booking time so a later rate change never
@@ -3149,7 +3310,15 @@ export async function handleCreateBooking(req: any, res: any) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per BR-03 (2026-10-12, decision #232): the
+        // `breakfastSelections` field is now written
+        // conditionally above (the legacy flat-rate
+        // path writes the legacy fields; the new
+        // selections-driven path writes the rich
+        // `breakfastSelections` map + `hasAnyBreakfast`).
+        // The hard-coded `breakfastSelections: {}`
+        // placeholder was removed — leaving it would
+        // double-write the field.
         // Per LCE-01 (decision #137, 2026-07-25): stamp the
         // Terms of Service version that was live at
         // booking-create time. The admin's
@@ -3893,7 +4062,15 @@ export async function handleCreateBooking(req: any, res: any) {
       || code.includes("INTERNAL")
     );
     let status: number;
-    if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
+    if (error.name === "BreakfastSelectionValidationError") {
+      // Per BR-03 (2026-10-12, decision #232): the new
+      // `breakfastSelections` shape's validation errors
+      // (locked date / non-existent meal / malformed
+      // entry) are 400s with a human message the Step 2
+      // UI surfaces inline. The catch block keeps the
+      // status + message intact (no re-mapping).
+      status = (typeof error.status === "number" && error.status > 0) ? error.status : 400;
+    } else if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;

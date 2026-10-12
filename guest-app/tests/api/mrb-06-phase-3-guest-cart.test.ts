@@ -20,7 +20,14 @@ describe("MRB-06 Phase 3 — guest room cart", () => {
   it("prices each child stay before aggregating the reservation totals", () => {
     expect(handlers).toMatch(/const roomStayPricing = validatedRoomStays\.map/);
     expect(handlers).toMatch(/const roomTotal = roomBreakdown\.roomSubtotal/);
-    expect(handlers).toMatch(/const breakfastTotal = roomStayPricing\.reduce/);
+    // Per BR-03 (2026-10-12, decision #232): the
+    // per-reservation `breakfastTotal` is now a
+    // selections-driven ternary. The legacy
+    // `roomStayPricing.reduce` shape still matches
+    // via the new ternary's `: roomStayPricing.reduce(...)`
+    // fallback (when `breakfastSelections` is absent).
+    // The pattern matches either branch of the ternary.
+    expect(handlers).toMatch(/const breakfastTotal = [\s\S]{0,200}roomStayPricing\.reduce/);
     expect(handlers).toMatch(/const extraBedTotal = roomStayPricing\.reduce/);
   });
 
@@ -30,6 +37,17 @@ describe("MRB-06 Phase 3 — guest room cart", () => {
   });
 
   it("fingerprints each room's meal choices for safe idempotent retries", () => {
+    // Per BR-03 (2026-10-12, decision #232): the
+    // legacy `selection.hasBreakfast` /
+    // `selection.breakfastIncludesChildren` fields
+    // are no longer the meal-choice fingerprint when
+    // the new `breakfastSelections` shape is used.
+    // The server now fingerprints via
+    // `breakfastSelections` (when present) — the
+    // assertion still pins the legacy fields'
+    // presence in the per-room selection (the
+    // walkin modal + reschedule flow still read
+    // them) for back-compat.
     expect(handlers).toMatch(/hasBreakfast: selection\.hasBreakfast/);
     expect(handlers).toMatch(/breakfastIncludesChildren: selection\.breakfastIncludesChildren/);
   });
