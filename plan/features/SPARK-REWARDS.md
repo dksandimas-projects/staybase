@@ -165,6 +165,36 @@ These are documented here for awareness. Define before starting Phase 2:
 
 > Points earning and member discount are already configurable from Settings in Phase 1 — Phase 2 extends with tiers and redemption only.
 
+### Phase 2 schema & types (2026-10-12, partial — schema only)
+
+> The data model is in place; the UI + behavior wiring rolls out across multiple follow-up PRs. Nothing changes at runtime in this PR — backward-compat: all new fields default to "off / no-op" when absent.
+
+- [x] **`settings/rewardsConfig`** — Zod-validated payload extended with the five new scalars + `levels[]`. Canonical schema: `shared/schemas/rewardsConfig.ts` (`RewardsConfigSchema`). Canonical TypeScript type: `RewardsConfig` in `shared/types/index.ts`. Seed defaults match the Settings → Rewards tab screenshot: 3 tiers (Member / Silver / Gold) with `discountPct` 5/7/10, `pointsMultiplier` 1/1.25/1.5, and the matching perks blurbs. All four new scalars seeded to `0` so a fresh deploy matches pre-Phase-2 behavior exactly.
+- [x] **`members/{memberId}`** — added `completedStays: number` (counter, default `0`) and `currentLevel: LevelDef | null` (cache, default `null`). Both optional — legacy member docs are valid as-is.
+- [x] **`pointsHistory` ledger** — `PointsHistoryType` union extended with `"welcome"` (Phase 6 wires it on `POST /api/members/register`) and `"free-night"` (Phase 5 wires it on the free-night voucher trigger). Live writers come in those phases; the type union is honest now so consumers don't need a TS cast.
+- [x] **Shared helpers** — `resolveCurrentLevel(levels, completedStays)` returns the tier with the highest `fromStays ≤ completedStays` (null on empty / no match / non-finite stays; defensive sort). `calculatePointsWithMultiplier(basePoints, multiplier)` rounds to nearest integer (matches `pointsHistory.points` convention); multiplier ≤ 0 / null / undefined coerced to 1 (defense-in-depth).
+- [x] **Tests** — `shared/__tests__/rewards-config-schema.test.ts` (NEW) pins the Zod validation surface + both helpers (24 source-text + runtime assertions).
+- [x] **MD sync** — `plan/docs/BACKEND.md` (settings/rewardsConfig + members/{memberId} field tables), `plan/docs/TYPES.md` (Phase 2 types section), and this spec doc all updated.
+
+### Phase 2 rollout sequence (next PRs)
+
+Each phase below is a standalone PR (multi-PR split, 2026-10-12). The numbers reference the PR sequence in `plan/project/ROADMAP.md §Spark Rewards Tier System (Phase 2)`.
+
+1. **PR #1 — Schema & types** — **THIS PR**. Adds the data model + Zod + helpers + tests + MD sync. No behavior change.
+2. **PR #2 — Settings UI** — Rewrites the Settings → Rewards tab to match the screenshot (5-column levels table editor with Add/Delete + welcome-points + min-redeem + bill-cap + free-night-every inputs + Save). Validation feedback inline; one atomic save via existing `updateSettings("rewardsConfig", …)`.
+3. **PR #3 — Member-side counters** — Adds `members.{uid}.completedStays++` at checkout (same transaction as the points earn step, with cancellation clawback per the existing MRB-05 / CRL-02 pattern). Adds `currentLevel` cache field, refreshed at checkout + on settings save (lazy derivation: read-time if missing, write-back via checkout + admin "Recompute all member tiers" button).
+4. **PR #4 — Booking engine** — Wires tier discount + points multiplier at booking time. `tierDiscount = currentLevel?.discountPct ?? rewardsConfig.memberDiscountPct`. `finalEarned = baseEarned × currentLevel?.pointsMultiplier`. Same max-of rule with promos as today. Adds `minPointsToRedeem` guard + `pointsCanPayUpToBillPct` cap on `/api/members/redeem-points`.
+5. **PR #5 — Free-night voucher** — Extends `vouchers/{id}` schema with `kind: "reward"` + `valueType: "free-night"`. At checkout, after `completedStays++`, if `completedStays % freeNightEvery === 0` write a voucher (`expiresAt: +90d`). Reuses the existing apply-at-checkout path (100% discount) + admin voucher list (filterable by `kind`).
+6. **PR #6 — Welcome points** — `registerCurrentMember` → idempotent credit (once-per-member via `pointsHistory` `type: "welcome"` row check). Writes the row inside the same transaction as the member doc creation.
+7. **PR #7 — Member portal display** — `/account/rewards` shows tier badge + progress-to-next + free-night voucher status. `/account/profile` Spark Rewards card shows tier name.
+8. **PR #8 — Audit + final tests** — End-to-end QA scenarios for each phase, audit checks for the derivation rules + clawback paths.
+
+### Out of scope (Phase 2 explicitly)
+
+- Terms-on-the-website textarea — admin uses the global Legal tab instead; per-program override is deferred (Spark Inn has no per-program terms in scope).
+- Tier re-ordering UI (drag-drop) — admin edits the `fromStays` value directly; UI auto-sorts ascending. Drag-drop is a future polish, not a requirement.
+- Tier icon / color — the screenshot uses a text-only tier badge. Decorative per-tier assets are deferred.
+
 ---
 
 ## Phase 12 — Early Check-In Approval Workflow

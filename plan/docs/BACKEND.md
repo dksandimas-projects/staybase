@@ -250,7 +250,7 @@ Single-document collections holding dynamic configuration:
 - `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`.
 - `settings/websiteContent`: Editable homepage, about, corporate, and legal page copy.
 - `settings/breakfastConfig`: Silog menu items & daily prep settings.
-- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage.
+- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage, **Phase 2 (2026-10-12)**: `welcomePoints`, `minPointsToRedeem`, `pointsCanPayUpToBillPct`, `freeNightEvery`, `levels[]` (tier program — name, fromStays, discountPct, pointsMultiplier, perks). See `shared/schemas/rewardsConfig.ts` for the validation contract and `plan/features/SPARK-REWARDS.md §Phase 2` for the rollout sequence.
 
 ---
 
@@ -350,6 +350,8 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `email` / `firstName` / `lastName` / `phone` | string | Member profile data |
 | `rewardsPoints` | number | Current points balance |
 | `status` | string | `"active"` \| `"suspended"` |
+| `completedStays` | number | **Phase 2 (2026-10-12)**: counter incremented at checkout; the stay-completion signal the tier system derives `currentLevel` from. Cancelled-before-checkout bookings do NOT increment (matches the existing points clawback pattern). Absent = 0. |
+| `currentLevel` | object \| null | **Phase 2 (2026-10-12)**: cached `LevelDef` snapshot — refreshed at checkout + on settings save. Null for members below the lowest configured tier's threshold. |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
 Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points.
