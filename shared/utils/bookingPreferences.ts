@@ -103,12 +103,23 @@ function format12hLabel(
   // instead of writing a custom formatter. The date part
   // is intentionally stable so callers don't see
   // locale-specific date fragments.
+  //
+  // The formatter MUST be pinned to `timeZone: "UTC"` so
+  // the rendered hour matches the wire-format hour
+  // (`"14:00"` formats as "2:00 PM" everywhere, not as
+  // "10:00 PM" in UTC+8). Without this, a guest booking
+  // from the Philippines sees a list of arrival times
+  // shifted by their local timezone — `14:00` (2 PM UTC)
+  // shows up as "10:00 PM" Asia/Manila and the dropdown
+  // order looks completely off. Per `feat/special-requests-bed-setup`
+  // bug catch on 2026-10-12 (decision #SR-01 follow-up).
   const safeHours = ((hours % 24) + 24) % 24;
   const safeMinutes = Math.max(0, Math.min(59, minutes));
   const reference = new Date(Date.UTC(1970, 0, 1, safeHours, safeMinutes, 0));
   return new Intl.DateTimeFormat(locale, {
     hour: "numeric",
     minute: "2-digit",
-    hour12: true
+    hour12: true,
+    timeZone: "UTC"
   }).format(reference);
 }
