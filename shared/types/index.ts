@@ -175,6 +175,22 @@ export interface RoomBlock {
   updatedAt: string;
   cancelledAt: string | null;
   cancelledBy: string | null;
+  batchId?: string | null;
+}
+
+export interface StaffInventoryHold {
+  id: string;
+  roomIds: string[];
+  roomNumbers: string[];
+  startDate: string;
+  endDate: string;
+  status: "active" | "consumed" | "released" | "expired";
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  releasedAt: string | null;
 }
 
 // Per MRB-01 (2026-08-02, per decision #159): the reservation

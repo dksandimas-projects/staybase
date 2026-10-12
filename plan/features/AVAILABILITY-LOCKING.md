@@ -44,6 +44,18 @@ Per the `feature/booking-by-room-type` refactor: the booking flow's Step 1 shows
 
 Staff-created walk-in bookings use the authenticated `/api/bookings/create-walkin` route, but the safety rule is the same: it must run the same conflict checks and reference counter write inside a Firestore transaction before creating the booking. This route exists only for front-desk/admin workflows that need staff auth, immediate check-in, onsite payment handling, and optional staff price override.
 
+## Staff Inventory Hold (hard lock)
+
+CAL-01 adds a separate `staffInventoryHolds/{id}` lifecycle for the Calendar's **Hold & book** action. Unlike the public `bookingHolds` countdown below, this is a hard inventory lock:
+
+- Acquisition is staff-authenticated and transactional across the complete room/date set. A conflict with any occupying booking, active room block, or other unexpired staff hold aborts the entire request.
+- Public `/api/rooms/availability`, public booking creation, reschedule, walk-in creation without the matching hold, and room-block creation all treat the held range as unavailable.
+- The hold lasts 15 minutes and can be extended by its creating staff member. Read-time checks always compare `expiresAt`, so an expired hold stops blocking immediately; the daily `/api/holds/sweep` only normalizes stale stored statuses.
+- The Calendar handoff passes the hold id into `/api/bookings/create-walkin`. The transaction validates the same owner, exact room set, and exact dates; it then creates all room stays and changes the hold to `consumed` atomically.
+- Closing the New Booking modal releases an active hold. The UI does not release while a booking submit is in progress.
+
+Never reuse `bookingHolds` for this purpose: guest in-flow holds are intentionally soft and may overlap; staff inventory holds must participate in every authoritative conflict path.
+
 ---
 
 ## UI Checklist

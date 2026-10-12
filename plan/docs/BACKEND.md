@@ -51,6 +51,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | Field | Type | Notes |
 |---|---|---|
 | `roomId` / `roomNumber` / `roomType` | string | Room identification |
+| `batchId` | string \| null | Shared id for blocks created by one bulk Calendar confirmation; absent on legacy/single blocks |
 | `startDate` / `endDate` | timestamp | Inclusive start / exclusive end date |
 | `reason` / `notes` | string | Reason and optional staff note |
 | `status` | string | `"active"` \| `"cancelled"` |
@@ -73,8 +74,27 @@ Ephemeral hold stamp that powers the public booking flow's Steps 2 + 3 countdown
 | `holdMinutes` | number | Snapshot of `settings/hotelConfig.inFlowHoldMinutes` (per IFH-01.2) at start time. Falls back to `IN_FLOW_HOLD_MINUTES = 15` for legacy settings (no field) + hand-edited Firestore docs outside the 5..30 range. Future reports can attribute expired holds to a specific window even if the per-hotel setting changes. |
 | `createdAt` / `updatedAt` | timestamp | Audit timestamps. |
 
-> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. The hourly Janitor sweep (`/api/holds/sweep`, registered in `vercel.json §crons` as `0 * * * *`) transitions `"active" → "expired"` for holds past their `expiresAt` using a per-doc Firestore transaction with a recheck (a hold consumed by a booking between the coarse query and the per-doc write is NOT re-marked `"expired"`). Idempotent — a re-fire of the same cron tick finds zero matches.
+> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. The daily Janitor sweep (`/api/holds/sweep`, registered in `vercel.json §crons` as `0 2 * * *`) transitions stale guest and staff holds from `"active" → "expired"` using a per-doc Firestore transaction with a recheck. Idempotent — a re-fire of the same cron tick finds zero matches.
 > **Firestore rules:** `bookingHolds/{id}` is denied for guest reads + writes (the guest client never touches this collection directly — the `useInFlowHold` hook uses the `/api/holds/read` + `/api/holds/start` Vercel routes). Admin reads are open for debugging.
+
+---
+
+### `staffInventoryHolds/{holdId}` *(front-desk hard inventory hold)*
+
+Short-lived, staff-created lock used by Calendar **Hold & book**. It is authoritative for inventory until consumed, released, or expired; it is separate from the public soft `bookingHolds` lifecycle.
+
+| Field | Type | Notes |
+|---|---|---|
+| `roomIds` / `roomNumbers` | string[] | Exact physical room set protected by the hold |
+| `startDate` / `endDate` | timestamp | Inclusive start / exclusive end |
+| `status` | string | `"active"` \| `"consumed"` \| `"released"` \| `"expired"` |
+| `createdBy` | string | Firebase Auth UID; only this staff member may extend, release, or consume it |
+| `expiresAt` | timestamp | 15-minute deadline; read-time checks ignore the hold after this instant |
+| `reservationId` | string \| null | Added when the walk-in transaction consumes the hold |
+| `createdAt` / `updatedAt` | timestamp | Audit timestamps |
+| `consumedAt` / `releasedAt` | timestamp \| null | Terminal lifecycle timestamps |
+
+Clients may read this collection only when authenticated as staff. All writes go through staff-authenticated API routes. Required composite indexes cover active range reads, room membership conflict checks, and expiry cleanup.
 
 ---
 

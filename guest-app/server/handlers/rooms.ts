@@ -10,6 +10,7 @@ import { adminDb } from "../lib/firebase-admin";
 // the create / walkin / reschedule transactions retire it
 // atomically when the next guest tries to take the room).
 import { BOOKING_OCCUPYING_STATUSES, isBookingOccupyingRoom } from "@spark-inn/shared";
+import { isActiveStaffInventoryHold } from "./staff-inventory-holds";
 
 // Per W4.7 / `plan/features/AVAILABILITY-LOCKING.md`: this endpoint is the
 // guest-side replacement for the previous client-side `bookings` subscription.
@@ -101,6 +102,12 @@ export async function handleRoomAvailability(req: any, res: any) {
       .where("startDate", "<", reqEnd)
       .get();
 
+    const staffHoldsSnapshot = await adminDb
+      .collection("staffInventoryHolds")
+      .where("status", "==", "active")
+      .where("startDate", "<", reqEnd)
+      .get();
+
     const bookedRanges: Array<{ roomId: string; checkIn: string; checkOut: string; status: string }> = [];
 
     overlapSnapshot.forEach((docSnap: any) => {
@@ -142,6 +149,21 @@ export async function handleRoomAvailability(req: any, res: any) {
       // Overlap test: requested range intersects the block range
       if (bStart < reqEnd && bEnd > reqStart) {
         bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "blocked" });
+      }
+    });
+
+    staffHoldsSnapshot.forEach((docSnap: any) => {
+      const data = docSnap.data();
+      if (!isActiveStaffInventoryHold(data)) return;
+      const startIso = toIsoDate(data.startDate);
+      const endIso = toIsoDate(data.endDate);
+      const roomIds = Array.isArray(data.roomIds) ? data.roomIds.map(String) : [];
+      if (!startIso || !endIso || roomIds.length === 0) return;
+      const holdStart = new Date(`${startIso}T00:00:00Z`);
+      const holdEnd = new Date(`${endIso}T00:00:00Z`);
+      if (!(holdStart < reqEnd && holdEnd > reqStart)) return;
+      for (const roomId of roomIds) {
+        bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "staff-hold" });
       }
     });
 

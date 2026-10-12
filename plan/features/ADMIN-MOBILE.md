@@ -191,6 +191,8 @@ Same as Drawer: full-screen sheet on mobile, centered modal on tablet+. Use `sli
 
 The walk-in booking modal (`BookingsPage.tsx`) is the only current modal — verify it becomes a full-screen sheet on mobile so the long form (guest name, phone, email, room type, room, dates, guests, payment method, breakfast, price override) is easy to fill on a phone.
 
+CAL-01 reuses this same modal after Calendar **Hold & book**. Its hold countdown and Extend action appear at the top of the sheet; held room/date controls remain disabled while guest and occupancy fields stay editable. The preceding bulk-action confirmation also uses `Modal`, so room/date/room-night scope is reviewed in the same full-screen mobile pattern before any block or hold is created.
+
 ### `DataTable` (P0)
 
 The current `DataTable.tsx` renders a `<table>` inside `overflow-x-auto` — on a 375px viewport, the 7-column booking table is unreadable. Add a **mobile card view**.

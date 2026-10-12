@@ -167,6 +167,7 @@ export const WalkinBookingSchema = z.object({
   // so a future walk-in client that does preallocate can
   // ride the same idempotency contract.
   reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+  staffHoldId: z.string().trim().regex(/^[A-Za-z0-9]{10,32}$/).optional(),
   // Per MRB-11 (2026-08-03, per decision #177): the
   // optional revenue allocation. Per the 2026-08-03
   // design call, the server always computes this before
