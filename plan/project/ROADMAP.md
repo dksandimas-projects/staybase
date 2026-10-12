@@ -64,6 +64,8 @@
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
 | 12 — Enhancements, Multi-Room & CRL | ✅ Active (MRB-01..15, CRL-01..09 shipped) | Phase 12 fully shipped; follow-ups in ETR-R + BDUX (§Phase 12 below) |
 | BAR — Booking Architecture Refactor | ✅ BAR-02 + BAR-03 shipped · BAR-01 ⏸ deferred | 2026-08-08: BAR-02 + BAR-03 both shipped (5 counter fields + `paymentStatus` mirror now derived on read; FOL-05 sibling-flip extracted to a shared helper). BAR-01 remains gated on availability moving off per-room-doc conflict checks (§BAR trigger condition 4). |
+| 13 — Guest Booking Special Requests (SR) | ✅ SR-01..05 shipped 2026-11-12 | Step 2 bed set-up + additional preferences + arrival time, off-roadmap (decision SR-01, `feature/special-requests-bed-setup`) |
+| 14 — Breakfast Redesign (BR) | ⬜ Spec only | 8 tickets proposed (BR-01..BR-08); full brief in `plan/features/BREAKFAST.md` + decision #231; 6–8 week solo-dev estimate |
 | Plan Audits (FIN, FR, FL, PF, QA, NC, AUD, SA, FLR, PC, INC) | ✅ Closed / In Prod | 0 — details in archive |
 
 ---
@@ -561,6 +563,73 @@ The agent's initial direct-read pass had 4 errors. The subagent fan-out caught t
 ### Open SR Tasks (none)
 
 All five SR tasks are shipped on `feature/special-requests-bed-setup`. No remaining items in this block.
+
+---
+
+## Phase 14 — Breakfast Redesign (BR)
+
+> Spec: [`plan/features/BREAKFAST.md`](../features/BREAKFAST.md) · Decision: `plan/docs/DECISIONS-FEATURES.md #231` · Owner-requested 2026-10-12, design conversation closed 2026-10-12.
+> **Status:** ⬜ Spec only — no code yet. Awaiting team review + ticket number assignment (proposed `BR-01..BR-08` below).
+
+### What this phase replaces
+
+The current breakfast model is a flat-rate toggle with a per-date/per-guest `Record<key, string>` of meal names (`Booking.hasBreakfast` + `Booking.breakfastRate` + `Booking.breakfastSelections` + `PublicRoomSelection.hasBreakfast` + `PublicRoomSelection.breakfastIncludesChildren`). The redesign:
+
+- **Removes** `hasBreakfast` (Step 1 toggle) + `breakfastRate` (flat per-guest-per-night) + `breakfastIncludesChildren` (children are now ordinary slots)
+- **Replaces** the `silogItems[]` settings array with a `meals[]` array that carries `price` + `description` + `displayOrder`
+- **Replaces** `breakfastSelections: Record<key, string>` with `Record<key, { mealId, mealName, price, addedAt, addedBy, ... }>` (price snapshot, immutable)
+- **Adds** `breakfastTotal: number` (denormalized from selections, server-recomputed)
+- **Adds** `bookings/{id}/breakfastAudit/{auditId}` subcollection (avoids the GOTCHAS fan-out-array race)
+- **Extends** `OnsitePayment.category: "cancellation" \| "breakfast"` + `breakfastRefundContext` (no new collection; reuse the existing refunds subcollection)
+- **Adds** `settings/breakfastConfig.cutoffTime` (default 20:00) + `cutoffTimezone` (defaults to `hotel.config.ts`) + `frontDeskOverrideEnabled` + `defaultMealInstructions` + `servedGraceMinutes`
+- **No new Vercel function** — all 6 new routes are handlers in the existing catch-all
+
+### Decisions locked (10 client + 5 design)
+
+1. **Migration: none** (production has zero bookings)
+2. **Discounts apply per the scope matrix** (Senior/PWD, voucher, Spark Rewards, corporate); `allowOnlineSeniorPwdClaim` toggle is the gate for online Senior/PWD claims
+3. **One meal per slot, no "No meal" placeholder** — leaving a slot empty means skip
+4. **Children + extra-bed occupants are ordinary meal slots**
+5. **Public + corporate + walk-in parity**
+6. **Always rolls into the running booking balance** (no separate online-payment moment)
+7. **Front-desk + admin can override cut-off with required reason + audit**
+8. **Hotel-wide per-meal pricing** (no per-room-type or per-season)
+9. **Snapshot immutability** — deleted menu items still show on existing bookings, tagged "(no longer offered)"
+10. **Kitchen list v1 = printable admin view** (option c); dedicated real-time display (option a) is a follow-up only if printable is insufficient after a week
+
+**Refunds:** removing a paid meal before cut-off opens a refund liability (staff records the actual refund). No email on breakfast changes. Kitchen needs a finalized list at cut-off with late changes in a separate column. Cutoff applies to add, change, AND remove. Hotel-timezone enforcement on the server.
+
+### Proposed ticket breakdown (BR-01..BR-08)
+
+- ⬜ **BR-01 — Data model + shared types** — `BreakfastConfig` + `BreakfastMeal` + `BreakfastSelectionEntry` + `BreakfastServedEntry` + `BreakfastAuditEntry`; update `Booking.breakfast*`; remove `hasBreakfast` + `breakfastRate`; new Zod schemas; new `computeBreakfastCutoffState` helper; new `recomputeBreakfastTotal` helper; `OnsitePayment.category` extension
+- ⬜ **BR-02 — Admin Settings: extend the existing `breakfast` tab** — `cutoffTime` + `cutoffTimezone` + `frontDeskOverrideEnabled` + `defaultMealInstructions` inputs; extend `meals` table with `price` + `description` + `displayOrder`; delete `ratePerPersonPerNight` + `breakfastIncludesChildrenDefault`; `servedGraceMinutes` input; cutoff-change audit
+- ⬜ **BR-03 — Step 1 cleanup + Step 2 breakfast section** — remove the "Room + Breakfast" toggle from Step 1; new "Breakfast" section in Step 2 with per-date × per-guest meal grid; live sidebar update; discount application; Step 3 review + Step 4 confirmation; server-side `handleCreateBooking` writes the new shape
+- ⬜ **BR-04 — Guest Manage Breakfast page** — new `ManageBreakfastPage.tsx` at `/my-booking/breakfast`; "Manage Breakfast" link on `/my-booking`; cutoff countdown; served badge; batched `POST /api/bookings/breakfast/update`; refund-due banner; new routes
+- ⬜ **BR-05 — Staff booking-drawer breakfast section** — rewrite the existing "Breakfast" tab in `BookingDrawerWorkspace.tsx`; cutoff override modal with required reason; served/un-served actions with grace window; new routes; walk-in modal + calendar-create modal parity
+- ⬜ **BR-06 — Refund liability + refunds subcollection extension** — `OnsitePayment` writes with `category: "breakfast"` + `breakfastRefundContext`; server-side refund liability creation; Refunds page `category` filter chip + pending-refunds badge; Reports → Liability tab counts pending breakfast refunds
+- ⬜ **BR-07 — Kitchen list page** — new `KitchenListPage.tsx` at `/admin/kitchen-list`; date selector + "Finalized" + "Late changes" two-column view; per-meal expand with per-guest detail; acknowledge button; print-friendly route
+- ⬜ **BR-08 — Email / PDF / Receipt / Reports updates** — extend `buildReservationEmailView`; extend `BookingRateBreakdown.breakfast`; update the 8 W4.4 audit-extension email templates; update the print-to-PDF receipt; Reports → Sales → Breakfast tab
+
+### Scope estimate
+
+- ~3,500–4,500 lines of new code + ~2,000 lines of new tests across the shared package, guest app, admin app, and Firebase rules
+- 8 tickets of ~3–5 days each (sequential, shared types + Settings first)
+- Realistic solo-dev timeline: **6–8 weeks** end-to-end, with the printable kitchen list as the v1 cut-off and the dedicated kitchen display as a follow-up
+
+### Open items pending client (non-blocking for spec)
+
+| # | Decision | Default if no answer |
+|---|---|---|
+| 1 | Breakfast date count for a stay | N nights → N dates (Oct 14–16 for an Oct 14–17 stay) |
+| 2 | Per-meal dietary / allergen flags | Free-text `description` field only |
+| 3 | Per-meal special instructions | Use the existing `booking.specialRequests` field |
+| 4 | Per-meal child pricing | Same as adult |
+| 5 | Served-grace window | 15 minutes, configurable |
+| 6 | Editing after checked-out | Read-only |
+| 7 | Balance formula | `totalPrice + breakfastTotal - paidAmount` |
+| 8 | `breakfastTotal` is server-recomputed | Yes, never client-written |
+| 9 | Legacy booking fallback | `{}` / `0` / `false` defaults; no data |
+| 10 | New routes are handlers in the catch-all | Yes, per `VERCEL-FUNCTION-LIMIT.md` |
 
 ---
 
