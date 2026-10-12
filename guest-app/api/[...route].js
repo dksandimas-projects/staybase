@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.9.2";
+    VERSION2 = "1.9.3";
   }
 });
 
@@ -223987,17 +223987,21 @@ function formatHHMM(hours, minutes) {
 function format12hLabel(hours, minutes, locale) {
   const safeHours = (hours % 24 + 24) % 24;
   const safeMinutes = Math.max(0, Math.min(59, minutes));
-  const reference = new Date(Date.UTC(1970, 0, 1, safeHours, safeMinutes, 0));
+  const utcHours = (safeHours - HOTEL_TZ_OFFSET_HOURS + 24) % 24;
+  const reference = new Date(Date.UTC(1970, 0, 1, utcHours, safeMinutes, 0));
   return new Intl.DateTimeFormat(locale, {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone: "UTC"
+    timeZone: HOTEL_TZ_IANA
   }).format(reference);
 }
+var HOTEL_TZ_OFFSET_HOURS, HOTEL_TZ_IANA;
 var init_bookingPreferences = __esm({
   "../shared/utils/bookingPreferences.ts"() {
     init_constants();
+    HOTEL_TZ_OFFSET_HOURS = 8;
+    HOTEL_TZ_IANA = "Asia/Manila";
   }
 });
 
