@@ -1,5 +1,79 @@
 import { describe, expect, it } from "vitest";
-import { calculateVatBreakdown } from "../utils/bookingVat";
+import { calculateVatBreakdown, isVatEnabled, getEffectiveVatRate, DEFAULT_VAT_CONFIG, normalizeVatConfig } from "../utils/bookingVat";
+
+describe("isVatEnabled + getEffectiveVatRate (VAT-01, 2026-10-12)", () => {
+  describe("isVatEnabled — every surface consults this before rendering the breakdown block", () => {
+    it("defaults to ON when the field is absent (legacy settings hydrate byte-equivalent)", () => {
+      expect(isVatEnabled(undefined)).toBe(true);
+      expect(isVatEnabled(null)).toBe(true);
+      expect(isVatEnabled({})).toBe(true);
+    });
+
+    it("respects an explicit enabled: true", () => {
+      expect(isVatEnabled({ enabled: true })).toBe(true);
+    });
+
+    it("respects an explicit enabled: false (the toggle OFF case the owner requested)", () => {
+      expect(isVatEnabled({ enabled: false })).toBe(false);
+    });
+  });
+
+  describe("getEffectiveVatRate — the rate the surface passes to calculateVatBreakdown", () => {
+    it("returns 0 when the toggle is OFF (the math collapses to all-zero lines)", () => {
+      expect(getEffectiveVatRate({ enabled: false })).toBe(0);
+    });
+
+    it("returns 0.12 (12% PH standard) when the toggle is ON", () => {
+      expect(getEffectiveVatRate({ enabled: true })).toBe(0.12);
+    });
+
+    it("returns 0.12 when the field is absent (default for legacy settings)", () => {
+      expect(getEffectiveVatRate(undefined)).toBe(0.12);
+      expect(getEffectiveVatRate(null)).toBe(0.12);
+      expect(getEffectiveVatRate({})).toBe(0.12);
+    });
+
+    it("when the toggle is OFF, calculateVatBreakdown returns zero VAT (all-zero lines)", () => {
+      // Sanity check: the per-booking helper, with the rate forced
+      // to 0 by getEffectiveVatRate, returns a zero VAT amount —
+      // the rendering site still gates on isVatEnabled so the
+      // sub-block is hidden entirely, but the math is consistent.
+      const b = calculateVatBreakdown({
+        totalPrice: 1000,
+        vatRate: getEffectiveVatRate({ enabled: false })
+      });
+      expect(b.vatAmount).toBe(0);
+      expect(b.vatExclusiveSales).toBe(1000);
+    });
+  });
+
+  describe("DEFAULT_VAT_CONFIG — single source of truth for the default", () => {
+    it("is enabled by default (BIR-compliant state)", () => {
+      expect(DEFAULT_VAT_CONFIG.enabled).toBe(true);
+    });
+  });
+
+  describe("normalizeVatConfig — AdminContext hydration guard", () => {
+    it("returns the default (enabled: true) for any non-false input", () => {
+      // Mirrors `normalizeDiscountScope` / `normalizePaymentHoldWindowHours`:
+      // any non-boolean / missing / malformed value falls through to
+      // the BIR-compliant default so legacy settings hydrate safely.
+      expect(normalizeVatConfig(undefined)).toEqual({ enabled: true });
+      expect(normalizeVatConfig(null)).toEqual({ enabled: true });
+      expect(normalizeVatConfig({})).toEqual({ enabled: true });
+      expect(normalizeVatConfig({ enabled: "yes" as any })).toEqual({ enabled: true });
+      expect(normalizeVatConfig(42 as any)).toEqual({ enabled: true });
+    });
+
+    it("returns { enabled: false } when the field is explicitly false", () => {
+      expect(normalizeVatConfig({ enabled: false })).toEqual({ enabled: false });
+    });
+
+    it("returns { enabled: true } when the field is explicitly true (idempotent)", () => {
+      expect(normalizeVatConfig({ enabled: true })).toEqual({ enabled: true });
+    });
+  });
+});
 
 describe("calculateVatBreakdown (DSC-06, 2026-08-01, per CVQ-06/#115)", () => {
   describe("happy path — non-senior booking (full bill is VATable)", () => {

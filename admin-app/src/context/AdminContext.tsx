@@ -64,6 +64,22 @@ import {
   // in-flow hold window.
   normalizeInFlowHoldMinutes,
   normalizeSeasonalRateOverrides,
+  // Per VAT-01 (2026-10-12): the admin toggle for the
+  // hotel's VAT-registration status. Philippine hotels
+  // below the BIR VAT-registration threshold (currently
+  // ₱3M annual gross sales) are not required to charge
+  // 12% VAT — the toggle lets a non-VAT-registered hotel
+  // turn off the 12% VAT breakdown across every surface
+  // (Reports + XLSX, admin booking drawer, admin
+  // print-to-PDF receipt, guest `/book` live preview)
+  // without re-deploying. The default is `enabled: true`
+  // (BIR-compliant state) so existing hotels hydrate to
+  // byte-equivalent behavior.
+  DEFAULT_VAT_CONFIG,
+  isVatEnabled,
+  getEffectiveVatRate,
+  normalizeVatConfig,
+  type VatConfig,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   type BookingRateBreakdown,
   type BookingSourceConfig,
@@ -5317,6 +5333,14 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // Bounded 5..30 via `normalizeInFlowHoldMinutes`.
     // Mirrors the `paymentHoldWindowHours` pattern (PEX-01).
     inFlowHoldMinutes: 15,
+    // Per VAT-01 (2026-10-12): the hotel's VAT-registration
+    // status. `enabled: true` (default) = VAT-registered,
+    // render the 12% breakdown everywhere. `enabled: false`
+    // = below the BIR threshold, hide the breakdown entirely.
+    // Legacy settings without the field hydrate to the
+    // default via `normalizeVatConfig` in the onSnapshot
+    // merge below — byte-equivalent to pre-VAT-01 behavior.
+    vatConfig: { ...DEFAULT_VAT_CONFIG },
     // Per EXB-10 (2026-08-01, per decision #157): the
     // hotel-wide rollaway-bed inventory. The server-side
     // `handleCreateBooking` / `handleCreateWalkin` /
@@ -5694,7 +5718,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));

@@ -198,3 +198,82 @@ export function getBookingVatBreakdown(booking: BookingForVat): VatBreakdown {
     vatRate: booking.vatRate
   });
 }
+
+// Per VAT-01 (2026-10-12, owner request): the admin toggle for
+// the hotel's VAT-registration status. Philippine hotels below
+// the BIR VAT-registration threshold (currently ₱3M annual
+// gross sales) are not required to charge 12% VAT — the toggle
+// lets a non-VAT-registered hotel turn off the 12% VAT
+// breakdown across every surface (Reports + XLSX, admin booking
+// drawer, admin print-to-PDF receipt, guest `/book` live
+// preview) without re-deploying.
+//
+// The toggle is intentionally a single boolean — not a rate
+// override — because the only two real-world states are
+// "VAT-registered" (12%, BIR-compliant) and "below the
+// threshold" (0%). A future non-PH deployment that needs a
+// different rate can extend the type with a numeric `rate`
+// field; the helper signature is forward-compatible.
+//
+// The default is `enabled: true` (BIR-compliant state) so
+// existing hotels hydrate to byte-equivalent behavior — every
+// surface that was already showing the 12% breakdown keeps
+// doing so until the admin opts out. Legacy settings without
+// the field read as `enabled: true` via the `== null` check.
+export interface VatConfig {
+  /** `true` = VAT-registered, render the 12% breakdown. `false` = below threshold, hide the breakdown entirely. Defaults to `true`. */
+  enabled: boolean;
+}
+
+export const DEFAULT_VAT_CONFIG: VatConfig = {
+  enabled: true
+};
+
+/**
+ * Per VAT-01: returns `true` when the hotel's VAT breakdown
+ * should be rendered (the default + `vatConfig.enabled === true`),
+ * `false` when it should be hidden. The single helper every
+ * VAT surface consults so the toggle is enforced consistently
+ * without each surface re-implementing the default.
+ */
+export function isVatEnabled(vatConfig: Partial<VatConfig> | null | undefined): boolean {
+  if (!vatConfig || typeof vatConfig.enabled !== "boolean") return DEFAULT_VAT_CONFIG.enabled;
+  return vatConfig.enabled;
+}
+
+/**
+ * Per VAT-01: the VAT rate a surface should pass to
+ * `calculateVatBreakdown` / `getBookingVatBreakdown`. Returns
+ * `0` when the hotel has the toggle off (so the math collapses
+ * to `vatExclusiveSales = totalPrice, vatAmount = 0` and the
+ * breakdown sub-block renders all-zero lines — the rendering
+ * site should ALSO gate the block on `isVatEnabled(vatConfig)`
+ * to hide the lines entirely). Returns the 12% Philippine
+ * standard when the toggle is on or the field is absent.
+ *
+ * The helper lives alongside `isVatEnabled` so the per-surface
+ * call site is a single `getEffectiveVatRate(hotelConfig.vatConfig)`
+ * rather than a ternery chain.
+ */
+export function getEffectiveVatRate(vatConfig: Partial<VatConfig> | null | undefined): number {
+  if (!isVatEnabled(vatConfig)) return 0;
+  return 0.12;
+}
+
+/**
+ * Per VAT-01: hydrate-safe normalizer for the
+ * `settings/hotelConfig.vatConfig` snapshot. Mirrors the
+ * pattern of `normalizeDiscountScope` /
+ * `normalizePaymentHoldWindowHours` — any non-boolean
+ * `enabled` (missing, null, undefined, a string, the wrong
+ * shape) collapses to the default `enabled: true` so legacy
+ * settings hydrate byte-equivalent to pre-VAT-01 behavior.
+ * Callers in `AdminContext` use this in the onSnapshot merge
+ * to keep the in-memory state aligned with the on-disk doc.
+ */
+export function normalizeVatConfig(raw: unknown): VatConfig {
+  if (raw && typeof raw === "object" && (raw as Record<string, unknown>).enabled === false) {
+    return { enabled: false };
+  }
+  return { ...DEFAULT_VAT_CONFIG };
+}

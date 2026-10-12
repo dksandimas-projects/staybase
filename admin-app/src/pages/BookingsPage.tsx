@@ -30,7 +30,15 @@ import {
   getBookingVatBreakdown,
   isPaymentVerified,
   requiredExtraBedsFor,
-  generateReservationId
+  generateReservationId,
+  // Per VAT-01 (2026-10-12): the admin Tax (VAT) toggle gates
+  // the booking drawer's `AdminPriceBreakdown` VAT sub-block
+  // + the print-to-PDF receipt's VAT section. Both surfaces
+  // read `isVatEnabled(hotelConfig.vatConfig)` so the toggle
+  // is enforced consistently with the Reports page + the
+  // guest live preview.
+  isVatEnabled,
+  getEffectiveVatRate
 } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
@@ -514,7 +522,7 @@ function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | nul
   return "downloaded";
 }
 
-function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountType, discountPct, discountRejected }: { breakdown?: BookingRateBreakdown | null; total: number; originalTotalPrice?: number | null; discountType?: string | null; discountPct?: number | null; discountRejected?: boolean | null }) {
+function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountType, discountPct, discountRejected, vatEnabled = true }: { breakdown?: BookingRateBreakdown | null; total: number; originalTotalPrice?: number | null; discountType?: string | null; discountPct?: number | null; discountRejected?: boolean | null; vatEnabled?: boolean }) {
   if (!breakdown?.roomLines?.length) return null;
   // Per DSC-07 (2026-08-01, per #115): the admin booking
   // drawer now shows the 12% VAT reconciliation the same
@@ -522,6 +530,12 @@ function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountTyp
   // composes the senior discount from the booking's stored
   // `originalTotalPrice` (broad-scope approximation;
   // documented narrow-scope edge case in the helper header).
+  //
+  // Per VAT-01 (2026-10-12): the drawer sub-block is gated
+  // on the admin Tax (VAT) toggle. When the hotel is below
+  // the BIR threshold, the entire sub-block disappears (the
+  // bill is the operator's net amount — there's no VAT to
+  // reconcile on the drawer).
   const vat = getBookingVatBreakdown({
     totalPrice: breakdown.finalTotal || total,
     originalTotalPrice,
@@ -557,7 +571,11 @@ function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountTyp
           breakdown sub-block. Three muted lines for the
           BIR-reconcilable figures; the senior discount
           (RA 9994) is the VAT-exempt portion when the
-          booking carried one. */}
+          booking carried one.
+          Per VAT-01 (2026-10-12): gated on the admin toggle
+          (default ON — BIR-compliant state). When OFF, the
+          block is omitted entirely (no zero lines). */}
+      {vatEnabled && (
       <div className="mt-2 space-y-1 border-t border-dashed border-gray-200 pt-2 text-[11px] text-gray-500">
         <div className="flex justify-between">
           <span>VATable Sales (VAT-exclusive)</span>
@@ -572,6 +590,7 @@ function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountTyp
           <span className="font-mono">{formatPrice(vat.vatAmount)}</span>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -593,7 +612,7 @@ export function BookingsPage() {
     updateBookingStatus, 
     resolveEarlyCheckin,
     grantEarlyCheckin,
-    addOnsitePayment, 
+    addOnsitePayment,
     addWalkinBooking,
     resendBookingEmail,
     storeOrders,
@@ -601,6 +620,12 @@ export function BookingsPage() {
     billStoreOrder,
     roomTypes,
     seasonalRateOverrides,
+    // Per VAT-01 (2026-10-12): the booking drawer's
+    // `AdminPriceBreakdown` VAT sub-block + the print-to-PDF
+    // receipt's VAT section both gate on
+    // `isVatEnabled(hotelConfig.vatConfig)`. When the hotel
+    // is below the BIR threshold, both sub-blocks disappear.
+    hotelConfig,
     breakfastConfig,
     websiteContent,
     rewardsConfig,
@@ -3587,6 +3612,17 @@ export function BookingsPage() {
       // edge case in the helper header). The senior discount
       // is the VAT-exempt portion under RA 9994 (Philippine
       // BIR); the rest of the bill is VATable at 12%.
+      //
+      // Per VAT-01 (2026-10-12): the entire VAT section is
+      // gated on the admin Tax (VAT) toggle. When the hotel
+      // is below the BIR threshold, the operator's published
+      // rate is the guest's net amount — no VAT to reconcile
+      // on the receipt, so the whole block is omitted (no
+      // zero-value lines). The toggle is read at print time
+      // (the admin's current settings, not the booking's
+      // create-time snapshot — the toggle is a presentational
+      // concern, not a billing one).
+      if (isVatEnabled(hotelConfig.vatConfig)) {
       checkNewPage(20);
       drawPdfSectionTitle(pdf, "VAT Breakdown (12% Philippine standard)", marginL, y, brandRgb);
       y += 4.5;
@@ -3616,6 +3652,7 @@ export function BookingsPage() {
         "VAT Amount (12% × VATable)",
         formatAmount(vatBreakdown.vatAmount)
       );
+      }
       y += 1;
 
       if (receiptFolio.storeCharges.length > 0 || receiptFolio.charges.length > 0) {
@@ -5540,6 +5577,10 @@ export function BookingsPage() {
                         discountType={selectedBooking.discountType}
                         discountPct={selectedBooking.discountPct}
                         discountRejected={selectedBooking.discountRejected}
+                        // Per VAT-01 (2026-10-12): the admin Tax
+                        // (VAT) toggle. When OFF, the drawer's
+                        // 12% VAT sub-block is hidden.
+                        vatEnabled={isVatEnabled(hotelConfig.vatConfig)}
                       />
                     </div>
                   </details>
