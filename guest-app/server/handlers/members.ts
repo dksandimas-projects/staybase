@@ -309,6 +309,51 @@ export async function handleRegisterMember(req: any, res: any) {
       const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
       const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
 
+      // Per Phase 6 of the Spark Rewards tier system (2026-10-13,
+      // decision pending): welcome bonus on first registration.
+      // When `rewardsConfig.welcomePoints > 0`, the new member
+      // gets a one-time points credit + an idempotent
+      // `pointsHistory` row with `type: "welcome"`. The doc ID
+      // `welcome` is deterministic so the idempotency check is a
+      // single `.get()` (no query needed) — if the row exists, the
+      // bonus was already credited (this happens when a user
+      // re-runs `/api/members/register` for any reason, e.g.
+      // email verification retry per Spark Rewards audit 2026-07-18
+      // HIGH-1).
+      //
+      // Decision (2026-10-13): the bonus credits ONLY when this
+      // is a brand-new registration (the existingMember.memberNumber
+      // short-circuit branch above does NOT credit). Re-registration
+      // is idempotent on the rest of the fields (`memberNumber`,
+      // `memberSince` are preserved) but the welcome bonus stays
+      // one-shot — same as the booking-engine convention that
+      // "points earned at checkout" is per-booking, not per-render.
+      //
+      // Decision (2026-10-13): the welcome bonus applies
+      // regardless of `authUser.email_verified` status. The
+      // HIGH-1 audit gates `linkBookingsByEmail` (a different
+      // concern) — the welcome credit is unconditional once the
+      // user is signed in. The `pointsHistory` row is the audit
+      // trail; admins can see the credit was issued to an
+      // unverified email if they care.
+      const welcomePoints = Math.max(0, Math.floor(Number(rewardsCfg?.welcomePoints || 0)));
+      let welcomeHistoryRef: any = null;
+      let welcomeAlreadyCredited = false;
+      let welcomeAmount = 0;
+      if (welcomePoints > 0) {
+        // Deterministic doc ID — `welcome` is reserved for the
+        // first-credit event. The transaction reads it BEFORE any
+        // writes (FOL-03) so a retry can't double-credit.
+        welcomeHistoryRef = adminDb.collection(`members/${uid}/pointsHistory`).doc("welcome");
+        const welcomeDocSnap = await transaction.get(welcomeHistoryRef);
+        welcomeAlreadyCredited = welcomeDocSnap.exists;
+        if (!welcomeAlreadyCredited) {
+          welcomeAmount = welcomePoints;
+        }
+      }
+
+      const initialRewardsPoints = (Number(existingMember?.rewardsPoints) || 0) + welcomeAmount;
+
       transaction.set(memberRef, {
         fullName,
         email,
@@ -318,7 +363,7 @@ export async function handleRegisterMember(req: any, res: any) {
         memberNumber,
         isMember: true,
         memberSince: now,
-        rewardsPoints: existingMember?.rewardsPoints || 0,
+        rewardsPoints: initialRewardsPoints,
         // Per Phase 2 (2026-10-12): initialize the stay-counter
         // + tier cache. Absent on legacy pre-Phase-2 docs — readers
         // must coalesce missing values to 0 / null.
@@ -329,6 +374,21 @@ export async function handleRegisterMember(req: any, res: any) {
         createdAt: existingMember?.createdAt || now,
         updatedAt: now
       }, { merge: true });
+
+      // Phase 6 — write the welcome ledger row (idempotent —
+      // the `.get()` above confirmed the row doesn't exist yet).
+      // Both writes (member doc + history row) share the same
+      // `runTransaction` so a retry can't double-credit.
+      if (welcomeAmount > 0 && welcomeHistoryRef) {
+        transaction.set(welcomeHistoryRef, {
+          type: "welcome",
+          points: welcomeAmount,
+          memberId: uid,
+          note: `Welcome bonus (${welcomeAmount} points)`,
+          createdAt: now,
+          createdBy: "system"
+        });
+      }
     });
 
     // Per Spark Rewards audit 2026-07-18 HIGH-1: an unverified

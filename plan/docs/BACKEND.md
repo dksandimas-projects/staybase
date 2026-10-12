@@ -359,7 +359,7 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `currentLevel` | object \| null | **Phase 2 (2026-10-12)**: cached `LevelDef` snapshot — refreshed at checkout (post-`completedStays++`) + at member registration (initial base-tier snapshot via `resolveCurrentLevel(levels, 0)`). Null for members below the lowest configured tier's threshold OR for deployments without tiers configured (legacy / off state). The booking engine falls back to the legacy global `memberDiscountPct` for tier-less members. |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
-Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points.
+Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points. **Phase 6 (2026-10-13)**: a single deterministic doc ID `welcome` is reserved for the member-onboarding credit (one-shot, written by `handleRegisterMember` when `rewardsConfig.welcomePoints > 0`). The deterministic ID enables a single `.get()` idempotency check inside the transaction — no query fan-out.
 
 ---
 

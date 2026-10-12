@@ -235129,213 +235129,8 @@ function applyReservationScopePaymentTransition(transaction, adminDb2, bookingRe
   };
 }
 
-// ../../../../shared/schemas/booking.ts
-init_zod();
-
-// ../../../../shared/utils/references.ts
-var RESERVATION_ID_REGEX2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-// ../../../../shared/utils/bookingInFlowHold.ts
-var HOLD_ID_REGEX2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// ../../../../shared/schemas/booking.ts
-var BookingDatesSchema2 = external_exports.object({
-  checkIn: external_exports.string().min(1, "Choose a check-in date"),
-  checkOut: external_exports.string().min(1, "Choose a check-out date"),
-  numGuests: external_exports.coerce.number().int().min(1, "At least one guest is required"),
-  roomId: external_exports.string().min(1, "Choose a room")
-}).refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
-  message: "Check-out date must be after check-in",
-  path: ["checkOut"]
-});
-var GuestDetailsSchema2 = external_exports.object({
-  guestName: external_exports.string().min(2, "Enter the guest name"),
-  guestEmail: external_exports.string().email("Enter a valid email address"),
-  guestPhone: external_exports.string().min(7, "Enter a valid phone number"),
-  companyName: external_exports.string().optional(),
-  specialRequests: external_exports.string().optional(),
-  privacyConsent: external_exports.literal(true, {
-    errorMap: () => ({ message: "Privacy consent is required" })
-  })
-});
-var PaymentReviewSchema2 = external_exports.object({
-  discountType: external_exports.enum(["", "senior", "pwd"]).default(""),
-  voucherCode: external_exports.string().optional(),
-  paymentMethod: external_exports.string().min(1, "Choose a payment method"),
-  turnstileToken: external_exports.string().optional(),
-  _hp: external_exports.string().optional()
-});
-var WalkinGuestDetailsSchema2 = external_exports.object({
-  firstName: external_exports.string().trim().min(1).max(80),
-  lastName: external_exports.string().trim().min(1).max(80),
-  email: external_exports.string().trim().toLowerCase().email().max(160),
-  phone: external_exports.string().trim().min(2).max(32),
-  requests: external_exports.string().trim().max(1e3).optional().default(""),
-  consent: external_exports.boolean().optional()
-}).strict();
-var BookingRevenueAllocationSchema2 = external_exports.object({
-  roomNet: external_exports.coerce.number().finite().min(0),
-  breakfastNet: external_exports.coerce.number().finite().min(0),
-  addOnNet: external_exports.coerce.number().finite().min(0),
-  deductionNet: external_exports.coerce.number().finite().min(0),
-  totalNet: external_exports.coerce.number().finite().min(0)
-}).strict();
-var WalkinRoomLineSchema2 = external_exports.object({
-  roomId: external_exports.string().trim().min(1).max(64),
-  numAdults: external_exports.coerce.number().int().min(0).max(100),
-  numChildren: external_exports.coerce.number().int().min(0).max(100),
-  extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
-  // Per EXB-12 (2026-08-06, per decision #199): whether the
-  // walk-in guest wants breakfast for the extra-bed occupant(s).
-  // Optional — when absent, the server treats it as `false`.
-  // The server validates the invariant: `extraBedBreakfast`
-  // can only be `true` when `extraBedCount > 0`.
-  extraBedBreakfast: external_exports.boolean().optional()
-}).strict();
-var WalkinBookingSchema2 = external_exports.object({
-  bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
-  roomId: external_exports.string().trim().min(1).max(64),
-  // Per MRB-07 (2026-08-02, per decision #159): the optional N-room
-  // room list. When absent (every pre-MRB-07 caller), the server
-  // derives a single line from the top-level `roomId` + `numAdults` +
-  // `numChildren` + `extraBedCount` — byte-equivalent to the
-  // single-room walk-in. When present, it is the canonical room list;
-  // the server rejects the request unless `roomId === rooms[0].roomId`
-  // and `guests` equals the summed per-line occupancy, so neither the
-  // room nor the guest total is trusted from two disagreeing places.
-  rooms: external_exports.array(WalkinRoomLineSchema2).min(1).max(50).optional(),
-  checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  guests: external_exports.coerce.number().int().min(1).max(100),
-  hasBreakfast: external_exports.boolean(),
-  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-  // the server snapshots the admin default from
-  // `settings/breakfastConfig.breakfastIncludesChildrenDefault` and
-  // writes the result to the booking doc alongside `hasBreakfast`.
-  // `true` is the safe default (matches the historical "children pay
-  // the full rate" math).
-  breakfastIncludesChildren: external_exports.boolean().optional(),
-  // Per CHD-01 (2026-08-01, per decision #144): adults/children
-  // split. Both optional — when absent, the server derives
-  // `numAdults = guests`, `numChildren = 0` (the historical
-  // "all guests are adults" shape). When present, the server
-  // validates `numAdults + numChildren === guests` and rejects
-  // any client-supplied `numGuests` that disagrees (the
-  // spec's "no trusting either value from the client" rule).
-  numAdults: external_exports.coerce.number().int().min(0).max(100).optional(),
-  numChildren: external_exports.coerce.number().int().min(0).max(100).optional(),
-  // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
-  // absent, the server treats it as 0 (the "no extra bed" case).
-  // Bounded server-side by the room type's `maxExtraBeds` (a
-  // booking with `extraBedCount > maxExtraBeds` is rejected). The
-  // server snapshots the room type's `extraBedRate` onto the
-  // booking doc alongside this field.
-  extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): whether the
-  // guest wants breakfast for the extra-bed occupant(s). When
-  // `true`, all `extraBedCount` beds in this room are counted
-  // toward the breakfast total. Optional — when absent, the
-  // server treats it as `false` (no breakfast for extra beds).
-  // The server validates the invariant: `extraBedBreakfast`
-  // can only be `true` when `extraBedCount > 0`.
-  extraBedBreakfast: external_exports.boolean().optional(),
-  guestDetails: WalkinGuestDetailsSchema2,
-  paymentMethod: external_exports.string().trim().min(1).max(80),
-  // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
-  // every existing caller keeps working with no migration. The
-  // server validates the submitted value against the configured list
-  // (`settings/hotelConfig.bookingSources[]`) and derives `notes` from
-  // it — a phone / Agoda / Facebook booking no longer ships with a
-  // note claiming it was created at the desk.
-  source: external_exports.string().trim().min(1).max(80).optional().default("walk-in"),
-  status: external_exports.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
-  totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
-  discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
-  voucherCode: external_exports.string().trim().max(40).optional().default(""),
-  linkedInquiryId: external_exports.string().trim().max(64).nullable().optional(),
-  testRunId: external_exports.string().trim().max(64).nullable().optional(),
-  // Per MRB-02.x (2026-08-02, per decision #164): the
-  // optional client-preallocated `reservationId` (UUIDv4)
-  // for the reservation-level idempotency matrix. When
-  // absent (the current walk-in modal doesn't preallocate),
-  // the server auto-mints a UUIDv4 via `generateReservationId()`
-  // — same pattern as the public `/api/bookings/create` path.
-  // Walk-ins are staff-created, so the staff modal doesn't
-  // need to preallocate for retry-after-uncertain-response
-  // (the staff tab is open; the next submit starts a fresh
-  // form with a new `bookingId`); the optional field is here
-  // so a future walk-in client that does preallocate can
-  // ride the same idempotency contract.
-  reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX2).optional(),
-  staffHoldId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/).optional(),
-  // Per MRB-11 (2026-08-03, per decision #177): the
-  // optional revenue allocation. Per the 2026-08-03
-  // design call, the server always computes this before
-  // the write — the input is accepted but the server
-  // recomputes via the same pricing chain and asserts
-  // the `totalNet === booking.totalPrice` invariant at
-  // the write boundary. Pre-MRB-11 callers omit it; the
-  // server fills it in. A future client preview may
-  // supply it to skip the server recompute, but the
-  // server's value is the only one written to the doc.
-  revenueAllocation: BookingRevenueAllocationSchema2.optional()
-}).strict();
-var RescheduleBookingSchema2 = external_exports.object({
-  bookingId: external_exports.string().trim().min(1).max(64),
-  roomId: external_exports.string().trim().min(1).max(64),
-  checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  reason: external_exports.string().trim().max(500).optional().default(""),
-  // The optional `reservationId` is here so a future
-  // reschedule client that preallocates (e.g. a bulk
-  // reschedule tool that wants the staff to be able to
-  // retry the same reschedule without re-picking dates)
-  // can ride the same idempotency contract. The
-  // current staff modal doesn't preallocate, so the
-  // server derives the id from the existing booking
-  // (or, for legacy null-reservationId bookings, the
-  // server auto-mints one if `body.reservationId` is
-  // explicitly provided — a defensive path for a
-  // future migration tool).
-  reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX2).optional()
-}).strict();
-var SetLouReceivedSchema2 = external_exports.object({
-  bookingId: external_exports.string().trim().min(1).max(64),
-  louReceived: external_exports.boolean()
-}).strict();
-var AddRoomBookingSchema2 = external_exports.object({
-  reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX2),
-  roomId: external_exports.string().trim().min(1).max(64),
-  numAdults: external_exports.coerce.number().int().min(1).max(100),
-  numChildren: external_exports.coerce.number().int().min(0).max(100).optional().default(0),
-  extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
-  discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
-  voucherCode: external_exports.string().trim().max(40).optional().default(""),
-  // The optional `totalPriceOverride` matches the walkin
-  // surface; absent → server-computed.
-  totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
-  // The optional `requestFingerprint` lets a future
-  // client preallocate the idempotency key for a
-  // retry-after-uncertain-response. The current staff
-  // modal doesn't preallocate — the server auto-mints
-  // `add-room-${reservationId}-${roomId}-${now}` and
-  // writes it onto the header (the same pattern the
-  // reschedule handler uses for `rescheduleFingerprint`).
-  requestFingerprint: external_exports.string().trim().min(1).max(256).optional()
-}).strict();
-var StartBookingHoldSchema2 = external_exports.object({
-  holdId: external_exports.string().trim().regex(HOLD_ID_REGEX2, "Invalid hold id format"),
-  reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX2, "Invalid reservation id format"),
-  roomType: external_exports.string().trim().min(1).max(64),
-  checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkIn must be YYYY-MM-DD"),
-  checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkOut must be YYYY-MM-DD"),
-  numNights: external_exports.coerce.number().int().min(1).max(60)
-}).strict().refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
-  message: "Check-out must be after check-in",
-  path: ["checkOut"]
-});
-
 // server/handlers/bookings.ts
+init_booking();
 init_shared();
 init_shared();
 init_zod();
@@ -236168,7 +235963,7 @@ var createBookingSchema = external_exports.object({
   // the `totalNet === booking.totalPrice` invariant at
   // the write boundary. Pre-MRB-11 callers omit it; the
   // server fills it in.
-  revenueAllocation: BookingRevenueAllocationSchema2.optional(),
+  revenueAllocation: BookingRevenueAllocationSchema.optional(),
   // In-flow hold (Steps 2 + 3 countdown banner). Optional
   // for back-compat — when present, the create transaction
   // reads the hold, validates it is still "active" + not
@@ -244162,6 +243957,19 @@ async function handleRegisterMember(req, res) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
       const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
+      const welcomePoints = Math.max(0, Math.floor(Number(rewardsCfg?.welcomePoints || 0)));
+      let welcomeHistoryRef = null;
+      let welcomeAlreadyCredited = false;
+      let welcomeAmount = 0;
+      if (welcomePoints > 0) {
+        welcomeHistoryRef = adminDb.collection(`members/${uid}/pointsHistory`).doc("welcome");
+        const welcomeDocSnap = await transaction.get(welcomeHistoryRef);
+        welcomeAlreadyCredited = welcomeDocSnap.exists;
+        if (!welcomeAlreadyCredited) {
+          welcomeAmount = welcomePoints;
+        }
+      }
+      const initialRewardsPoints = (Number(existingMember?.rewardsPoints) || 0) + welcomeAmount;
       transaction.set(memberRef, {
         fullName,
         email,
@@ -244171,7 +243979,7 @@ async function handleRegisterMember(req, res) {
         memberNumber,
         isMember: true,
         memberSince: now,
-        rewardsPoints: existingMember?.rewardsPoints || 0,
+        rewardsPoints: initialRewardsPoints,
         // Per Phase 2 (2026-10-12): initialize the stay-counter
         // + tier cache. Absent on legacy pre-Phase-2 docs — readers
         // must coalesce missing values to 0 / null.
@@ -244182,6 +243990,16 @@ async function handleRegisterMember(req, res) {
         createdAt: existingMember?.createdAt || now,
         updatedAt: now
       }, { merge: true });
+      if (welcomeAmount > 0 && welcomeHistoryRef) {
+        transaction.set(welcomeHistoryRef, {
+          type: "welcome",
+          points: welcomeAmount,
+          memberId: uid,
+          note: `Welcome bonus (${welcomeAmount} points)`,
+          createdAt: now,
+          createdBy: "system"
+        });
+      }
     });
     const emailIsVerified = authUser.email_verified === true;
     const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed2.data.bookingId || void 0) : 0;
