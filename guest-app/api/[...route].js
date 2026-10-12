@@ -221218,7 +221218,8 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.9.3";
+    "use strict";
+    VERSION2 = "1.10.0";
   }
 });
 
@@ -221226,6 +221227,7 @@ var init_VERSION = __esm({
 var premiumEase, fadeUp, fadeIn, staggerContainer, staggerChild, scaleIn, slideInRight, slideInLeft, slideInBottom;
 var init_animations = __esm({
   "../shared/animations.ts"() {
+    "use strict";
     premiumEase = [0.25, 0.1, 0.25, 1];
     fadeUp = {
       hidden: { opacity: 0, y: 16 },
@@ -221266,9 +221268,10 @@ var init_animations = __esm({
 });
 
 // ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
 var init_constants = __esm({
   "../shared/constants/index.ts"() {
+    "use strict";
     BOOKING_STATUSES = [
       "pending",
       "payment-uploaded",
@@ -221324,6 +221327,10 @@ var init_constants = __esm({
     ARRIVAL_WINDOW_HOURS = 24;
     MAX_ROOM_TYPE_PHOTOS = 10;
     DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
+    DEFAULT_BREAKFAST_CUTOFF_TIME = "20:00";
+    DEFAULT_BREAKFAST_CUTOFF_TIMEZONE = "Asia/Manila";
+    DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES = 15;
+    MIN_BREAKFAST_OVERRIDE_REASON_LENGTH = 5;
     DEFAULT_CORPORATE_PERKS = [
       {
         title: "Negotiated Rates",
@@ -221495,6 +221502,7 @@ function isValidLookupToken(value) {
 var BOOKING_REF_REGEX, RESERVATION_REF_REGEX, RESERVATION_ID_REGEX, LOOKUP_TOKEN_HEX_LENGTH;
 var init_references = __esm({
   "../shared/utils/references.ts"() {
+    "use strict";
     BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/;
     RESERVATION_REF_REGEX = /^R-\d{8}-\d{3,5}$/;
     RESERVATION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -221545,6 +221553,7 @@ function generateHoldId() {
 var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, HOLD_ID_REGEX;
 var init_bookingInFlowHold = __esm({
   "../shared/utils/bookingInFlowHold.ts"() {
+    "use strict";
     IN_FLOW_HOLD_MINUTES = 15;
     MIN_IN_FLOW_HOLD_MINUTES = 5;
     MAX_IN_FLOW_HOLD_MINUTES = 30;
@@ -221555,9 +221564,10 @@ var init_bookingInFlowHold = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
+    "use strict";
     init_zod();
     init_references();
     init_bookingInFlowHold();
@@ -221755,6 +221765,81 @@ var init_booking = __esm({
       message: "Check-out must be after check-in",
       path: ["checkOut"]
     });
+    BreakfastMealSchema = external_exports.object({
+      id: external_exports.string().min(1).max(64),
+      name: external_exports.string().min(1).max(80),
+      description: external_exports.string().max(200).default(""),
+      price: external_exports.number().min(0).max(1e4),
+      isActive: external_exports.boolean(),
+      displayOrder: external_exports.number().int().min(0).max(1e3),
+      createdAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional()
+    });
+    BreakfastConfigSchema = external_exports.object({
+      isEnabled: external_exports.boolean(),
+      cutoffTime: external_exports.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),
+      cutoffTimezone: external_exports.string().min(1),
+      frontDeskOverrideEnabled: external_exports.boolean(),
+      /**
+       * Per decision #231 + open item #5: 0..60 minute window after
+       * `served` during which staff can un-serve without a reason.
+       * Default 15; min 0; max 60.
+       */
+      servedGraceMinutes: external_exports.number().int().min(0).max(60).default(15),
+      defaultMealInstructions: external_exports.string().max(2e3).default(""),
+      meals: external_exports.array(BreakfastMealSchema),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedBy: external_exports.string().default("")
+    });
+    BreakfastSelectionEntrySchema = external_exports.object({
+      mealId: external_exports.string().min(1),
+      mealName: external_exports.string().min(1),
+      price: external_exports.number().min(0),
+      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      addedBy: external_exports.string().min(1),
+      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      lastModifiedBy: external_exports.string().min(1),
+      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      removedBy: external_exports.string().nullable().default(null),
+      overrideCutoff: external_exports.boolean().default(false),
+      overrideReason: external_exports.string().nullable().default(null)
+    });
+    BreakfastServedEntrySchema = external_exports.object({
+      servedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      servedBy: external_exports.string().min(1),
+      unservedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      unservedBy: external_exports.string().nullable().default(null)
+    });
+    BreakfastAuditEntrySchema = external_exports.object({
+      id: external_exports.string().optional(),
+      action: external_exports.enum([
+        "add",
+        "change",
+        "remove",
+        "serve",
+        "unserve",
+        "override-add",
+        "override-change",
+        "override-remove"
+      ]),
+      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/, "serviceDate-guestIndex format"),
+      mealSnapshot: external_exports.object({
+        mealId: external_exports.string(),
+        mealName: external_exports.string(),
+        price: external_exports.number().min(0)
+      }).nullable(),
+      actorUid: external_exports.string().min(1),
+      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
+      reason: external_exports.string().nullable().default(null),
+      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      occurredAfterCutoff: external_exports.boolean()
+    });
+    BreakfastRefundContextSchema = external_exports.object({
+      mealId: external_exports.string().min(1),
+      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/),
+      mealName: external_exports.string().min(1),
+      priceSnapshot: external_exports.number().min(0)
+    });
   }
 });
 
@@ -221762,6 +221847,7 @@ var init_booking = __esm({
 var PaymentMethodConfigSchema, PaymentMethodsArraySchema, LegacyPaymentMethodConfigSchema;
 var init_paymentMethod = __esm({
   "../shared/schemas/paymentMethod.ts"() {
+    "use strict";
     init_zod();
     PaymentMethodConfigSchema = external_exports.object({
       method: external_exports.string().min(1, "Method key is required").max(64),
@@ -221797,6 +221883,7 @@ var init_paymentMethod = __esm({
 var RoomStatusEnum, HousekeepingStatusEnum, CreateRoomSchema, ACTIVE_BOOKING_STATUSES;
 var init_room = __esm({
   "../shared/schemas/room.ts"() {
+    "use strict";
     init_zod();
     RoomStatusEnum = external_exports.enum(["available", "occupied", "blocked"]);
     HousekeepingStatusEnum = external_exports.enum(["clean", "dirty", "in-progress"]);
@@ -221824,6 +221911,7 @@ var init_room = __esm({
 var PublicHeroSchema, HomepageContentSchema, AboutContentSchema, CorporateContentSchema, RewardsContentSchema, BrandingConfigSchema, WebsiteContentSchema;
 var init_websiteContent = __esm({
   "../shared/schemas/websiteContent.ts"() {
+    "use strict";
     init_zod();
     PublicHeroSchema = external_exports.object({
       heroEyebrow: external_exports.string().default(""),
@@ -221946,6 +222034,7 @@ var init_websiteContent = __esm({
 var optionalUrl, SeoPublishSchema;
 var init_seo = __esm({
   "../shared/schemas/seo.ts"() {
+    "use strict";
     init_zod();
     optionalUrl = external_exports.string().trim().max(500).refine(
       (value) => value === "" || /^https:\/\//i.test(value),
@@ -221969,6 +222058,7 @@ var init_seo = __esm({
 // ../shared/types/index.ts
 var init_types3 = __esm({
   "../shared/types/index.ts"() {
+    "use strict";
   }
 });
 
@@ -222034,6 +222124,7 @@ function getDateKeyInTimezone(timezone = "Asia/Manila", offsetDays = 0) {
 }
 var init_bookingDates = __esm({
   "../shared/utils/bookingDates.ts"() {
+    "use strict";
   }
 });
 
@@ -222085,6 +222176,7 @@ function calculateDiscountChain(input) {
 var BROAD_DISCOUNT_SCOPE;
 var init_bookingDiscounts = __esm({
   "../shared/utils/bookingDiscounts.ts"() {
+    "use strict";
     BROAD_DISCOUNT_SCOPE = {
       senior: { room: true, breakfast: true, extraBed: true },
       voucher: { room: true, breakfast: true, extraBed: true },
@@ -222356,7 +222448,31 @@ function computeReservationActualDateRange(headerCheckIn, headerCheckOut, childr
 }
 var init_bookingFolio = __esm({
   "../shared/utils/bookingFolio.ts"() {
+    "use strict";
     init_bookingDiscounts();
+  }
+});
+
+// ../shared/utils/breakfastTotal.ts
+function recomputeBreakfastTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const key in selections) {
+    if (!Object.prototype.hasOwnProperty.call(selections, key)) continue;
+    const entry = selections[key];
+    if (!entry) continue;
+    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+    const price = entry.price;
+    if (typeof price !== "number") continue;
+    if (!Number.isFinite(price)) continue;
+    if (price < 0) continue;
+    total += price;
+  }
+  return Math.round(total * 100) / 100;
+}
+var init_breakfastTotal = __esm({
+  "../shared/utils/breakfastTotal.ts"() {
+    "use strict";
   }
 });
 
@@ -222390,8 +222506,13 @@ function calculateExtraBedAddOn(input) {
   if (count === 0 || rate === 0 || nights === 0) return 0;
   return count * rate * nights;
 }
+function calculateBreakfastMealsTotal(selections) {
+  return recomputeBreakfastTotal(selections);
+}
 var init_bookingAddOns = __esm({
   "../shared/utils/bookingAddOns.ts"() {
+    "use strict";
+    init_breakfastTotal();
   }
 });
 
@@ -222427,6 +222548,7 @@ function normalizePaymentHoldWindowHours(raw) {
 var BOOKING_OCCUPYING_STATUSES, DEFAULT_PAYMENT_HOLD_WINDOW_HOURS, MIN_PAYMENT_HOLD_WINDOW_HOURS, MAX_PAYMENT_HOLD_WINDOW_HOURS, EXPIRED_HOLD_CANCELLATION_REASON, PAYMENT_REJECTED_FRESH_DEADLINE_FROM, CANCELLATION_SOURCES, GUEST_CANCELLABLE_STATUSES, STAFF_CANCELLABLE_STATUSES, TERMINAL_CANCELLATION_STATUSES;
 var init_bookingOccupancy = __esm({
   "../shared/utils/bookingOccupancy.ts"() {
+    "use strict";
     BOOKING_OCCUPYING_STATUSES = [
       "pending",
       "payment-uploaded",
@@ -222494,6 +222616,7 @@ function checkExtraBedInventory(inventory, inUse, requestedCount) {
 }
 var init_extraBedInventory = __esm({
   "../shared/utils/extraBedInventory.ts"() {
+    "use strict";
     init_bookingOccupancy();
   }
 });
@@ -222544,6 +222667,7 @@ function normalizeVatConfig(raw) {
 var DEFAULT_VAT_CONFIG;
 var init_bookingVat = __esm({
   "../shared/utils/bookingVat.ts"() {
+    "use strict";
     init_bookingDiscounts();
     DEFAULT_VAT_CONFIG = {
       enabled: true
@@ -222595,6 +222719,7 @@ function clearCache(key) {
 }
 var init_cache = __esm({
   "../shared/utils/cache.ts"() {
+    "use strict";
   }
 });
 
@@ -222695,6 +222820,7 @@ function downloadIcsFile(filename, content) {
 }
 var init_calendar = __esm({
   "../shared/utils/calendar.ts"() {
+    "use strict";
   }
 });
 
@@ -222730,6 +222856,7 @@ function getCheckInReadiness(input) {
 var CHECK_IN_ELIGIBLE_STATUSES, REQUIRED_REGISTRATION_FIELDS;
 var init_checkin = __esm({
   "../shared/utils/checkin.ts"() {
+    "use strict";
     CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
     REQUIRED_REGISTRATION_FIELDS = [
       { key: "nationality", label: "Nationality" },
@@ -222778,6 +222905,7 @@ function getWeekendNightCount(checkIn, checkOut) {
 }
 var init_dates = __esm({
   "../shared/utils/dates.ts"() {
+    "use strict";
   }
 });
 
@@ -222865,6 +222993,7 @@ async function compressImageFile(file, options = {}) {
 var defaultImageOptions, MIME_TO_EXTENSION;
 var init_images = __esm({
   "../shared/utils/images.ts"() {
+    "use strict";
     defaultImageOptions = {
       maxWidth: 1600,
       maxHeight: 1600,
@@ -222898,6 +223027,7 @@ function validatePointsRedemption(pointsToRedeem, availablePoints, pointsRedempt
 }
 var init_points = __esm({
   "../shared/utils/points.ts"() {
+    "use strict";
   }
 });
 
@@ -222922,6 +223052,7 @@ function resolvePaymentMethodLabel(methodKey, paymentMethods) {
 var LEGACY_PAYMENT_METHOD_LABELS;
 var init_paymentMethodLabel = __esm({
   "../shared/utils/paymentMethodLabel.ts"() {
+    "use strict";
     LEGACY_PAYMENT_METHOD_LABELS = {
       gcash: "Digital Wallet (GCash/Maya)",
       bank: "Bank Transfer (Direct Deposit)",
@@ -222942,6 +223073,7 @@ function getLatestPaymentReference(booking) {
 }
 var init_paymentReference = __esm({
   "../shared/utils/paymentReference.ts"() {
+    "use strict";
   }
 });
 
@@ -222957,6 +223089,7 @@ function isPaymentVerified(booking) {
 }
 var init_paymentVerification = __esm({
   "../shared/utils/paymentVerification.ts"() {
+    "use strict";
   }
 });
 
@@ -222990,6 +223123,7 @@ function getLockedManualNightlyRate(breakdown) {
 }
 var init_pricing = __esm({
   "../shared/utils/pricing.ts"() {
+    "use strict";
     init_bookingAddOns();
     init_bookingDiscounts();
   }
@@ -223028,6 +223162,7 @@ function subscribeToPublicSiteContentBust(onBust) {
 }
 var init_publicSiteCache = __esm({
   "../shared/utils/publicSiteCache.ts"() {
+    "use strict";
     init_constants();
     init_cache();
   }
@@ -223107,6 +223242,7 @@ function computeRequestFingerprint(req, hasher = defaultHasher()) {
 var __test__;
 var init_reservationFingerprint = __esm({
   "../shared/utils/reservationFingerprint.ts"() {
+    "use strict";
     __test__ = { buildCanonicalPayload, normalizeRoomLine, normalizeDiscountScope: normalizeDiscountScope2 };
   }
 });
@@ -223216,6 +223352,7 @@ function deriveRoomTypeCapacityFit(input) {
 var DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY, FALLBACK_MAX_CHILDREN;
 var init_roomTypes = __esm({
   "../shared/utils/roomTypes.ts"() {
+    "use strict";
     DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY = {
       1: 0,
       2: 1,
@@ -223307,6 +223444,7 @@ function calculateSeasonalAwareRoomBreakdown(input) {
 }
 var init_seasonalRates = __esm({
   "../shared/utils/seasonalRates.ts"() {
+    "use strict";
     init_dates();
   }
 });
@@ -223412,6 +223550,7 @@ async function runBackfill(options) {
 var DEFAULT_PREFIX, DEFAULT_MAX_ITEMS, MAX_HISTORY, sweepHistory;
 var init_storageJanitor = __esm({
   "../shared/utils/storageJanitor.ts"() {
+    "use strict";
     DEFAULT_PREFIX = "bookings/";
     DEFAULT_MAX_ITEMS = 500;
     MAX_HISTORY = 50;
@@ -223438,6 +223577,7 @@ function getEffectiveStorePaymentMethods(paymentMethods) {
 }
 var init_storePaymentMethods = __esm({
   "../shared/utils/storePaymentMethods.ts"() {
+    "use strict";
   }
 });
 
@@ -223466,6 +223606,7 @@ function applyVoucherDiscount(voucher, subtotal) {
 }
 var init_vouchers = __esm({
   "../shared/utils/vouchers.ts"() {
+    "use strict";
   }
 });
 
@@ -223502,6 +223643,7 @@ function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options =
 }
 var init_corporate_codes = __esm({
   "../shared/utils/corporate-codes.ts"() {
+    "use strict";
   }
 });
 
@@ -223539,6 +223681,7 @@ function createFailureBackoffState() {
 }
 var init_failureBackoff = __esm({
   "../shared/utils/failureBackoff.ts"() {
+    "use strict";
   }
 });
 
@@ -223609,6 +223752,7 @@ function assertRevenueFinanceInvariant(snapshot) {
 var CENTS_TOLERANCE;
 var init_financeInvariants = __esm({
   "../shared/utils/financeInvariants.ts"() {
+    "use strict";
     CENTS_TOLERANCE = 5e-3;
   }
 });
@@ -223914,6 +224058,7 @@ function buildCancellationLiabilitySnapshot(input) {
 }
 var init_cancellation = __esm({
   "../shared/utils/cancellation.ts"() {
+    "use strict";
   }
 });
 
@@ -223938,6 +224083,7 @@ async function raceUploadWithTimeout(uploadPromise, timeoutMs, label = "Upload")
 var DEFAULT_UPLOAD_TIMEOUT_MS;
 var init_uploads = __esm({
   "../shared/utils/uploads.ts"() {
+    "use strict";
     DEFAULT_UPLOAD_TIMEOUT_MS = 9e4;
   }
 });
@@ -223999,9 +224145,129 @@ function format12hLabel(hours, minutes, locale) {
 var HOTEL_TZ_OFFSET_HOURS, HOTEL_TZ_IANA;
 var init_bookingPreferences = __esm({
   "../shared/utils/bookingPreferences.ts"() {
+    "use strict";
     init_constants();
     HOTEL_TZ_OFFSET_HOURS = 8;
     HOTEL_TZ_IANA = "Asia/Manila";
+  }
+});
+
+// ../shared/utils/breakfastCutoff.ts
+function parseServiceDateUtc(value) {
+  if (typeof value !== "string") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [yearStr, monthStr, dayStr] = value.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) {
+    return null;
+  }
+  return candidate;
+}
+function parseCutoffTime(value) {
+  if (typeof value !== "string") return null;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  if (!match) return null;
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}
+function isValidTimezone(timezone) {
+  if (typeof timezone !== "string" || timezone.length === 0) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function zonedWallClockToUtc(dateUtc, hour, minute, timezone) {
+  const naiveUtcMs = Date.UTC(
+    dateUtc.getUTCFullYear(),
+    dateUtc.getUTCMonth(),
+    dateUtc.getUTCDate(),
+    hour,
+    minute,
+    0,
+    0
+  );
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  const parts = formatter.formatToParts(new Date(naiveUtcMs));
+  const get2 = (type) => {
+    const found = parts.find((p) => p.type === type);
+    if (!found) throw new Error(`Missing Intl part: ${type}`);
+    return Number(found.value);
+  };
+  const tzAsUtcMs = Date.UTC(
+    get2("year"),
+    get2("month") - 1,
+    get2("day"),
+    get2("hour") === 24 ? 0 : get2("hour"),
+    get2("minute"),
+    get2("second")
+  );
+  const offsetMs = tzAsUtcMs - naiveUtcMs;
+  return new Date(naiveUtcMs - offsetMs);
+}
+function computeBreakfastCutoffState(input) {
+  const safeReturn = (reason) => {
+    console.error(
+      `[breakfastCutoff] ${reason}; returning locked state for serviceDate=${input?.serviceDate}`
+    );
+    return {
+      isLocked: true,
+      minutesUntilCutoff: 0,
+      cutoffAt: input?.now instanceof Date ? input.now.toISOString() : (/* @__PURE__ */ new Date(0)).toISOString(),
+      serviceDate: typeof input?.serviceDate === "string" ? input.serviceDate : ""
+    };
+  };
+  if (!input || !(input.now instanceof Date)) {
+    return safeReturn("invalid `now` argument");
+  }
+  const serviceDateUtc = parseServiceDateUtc(input.serviceDate);
+  if (!serviceDateUtc) {
+    return safeReturn(`invalid serviceDate (${input.serviceDate})`);
+  }
+  const cutoff = parseCutoffTime(input.cutoffTime);
+  if (!cutoff) {
+    return safeReturn(`invalid cutoffTime (${input.cutoffTime})`);
+  }
+  if (!isValidTimezone(input.timezone)) {
+    return safeReturn(`invalid timezone (${input.timezone})`);
+  }
+  const previousDayUtc = new Date(serviceDateUtc);
+  previousDayUtc.setUTCDate(previousDayUtc.getUTCDate() - 1);
+  const cutoffAt = zonedWallClockToUtc(
+    previousDayUtc,
+    cutoff.hour,
+    cutoff.minute,
+    input.timezone
+  );
+  const nowMs = input.now.getTime();
+  const cutoffMs = cutoffAt.getTime();
+  const isLocked = nowMs >= cutoffMs;
+  const minutesUntilCutoff = Math.floor((cutoffMs - nowMs) / 6e4);
+  return {
+    isLocked,
+    minutesUntilCutoff,
+    cutoffAt: cutoffAt.toISOString(),
+    serviceDate: input.serviceDate
+  };
+}
+var init_breakfastCutoff = __esm({
+  "../shared/utils/breakfastCutoff.ts"() {
+    "use strict";
   }
 });
 
@@ -224021,6 +224287,12 @@ __export(shared_exports, {
   BookingDatesSchema: () => BookingDatesSchema,
   BookingRevenueAllocationSchema: () => BookingRevenueAllocationSchema,
   BrandingConfigSchema: () => BrandingConfigSchema,
+  BreakfastAuditEntrySchema: () => BreakfastAuditEntrySchema,
+  BreakfastConfigSchema: () => BreakfastConfigSchema,
+  BreakfastMealSchema: () => BreakfastMealSchema,
+  BreakfastRefundContextSchema: () => BreakfastRefundContextSchema,
+  BreakfastSelectionEntrySchema: () => BreakfastSelectionEntrySchema,
+  BreakfastServedEntrySchema: () => BreakfastServedEntrySchema,
   CANCELLATION_SOURCES: () => CANCELLATION_SOURCES,
   CHECK_IN_ELIGIBLE_STATUSES: () => CHECK_IN_ELIGIBLE_STATUSES,
   CorporateContentSchema: () => CorporateContentSchema,
@@ -224028,7 +224300,10 @@ __export(shared_exports, {
   DEFAULT_BED_SETUPS: () => DEFAULT_BED_SETUPS,
   DEFAULT_BOOKING_PREFERENCES: () => DEFAULT_BOOKING_PREFERENCES,
   DEFAULT_BOOKING_SOURCES: () => DEFAULT_BOOKING_SOURCES,
+  DEFAULT_BREAKFAST_CUTOFF_TIME: () => DEFAULT_BREAKFAST_CUTOFF_TIME,
+  DEFAULT_BREAKFAST_CUTOFF_TIMEZONE: () => DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT: () => DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES: () => DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
   DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
   DEFAULT_IN_FLOW_HOLD_MINUTES: () => DEFAULT_IN_FLOW_HOLD_MINUTES,
@@ -224057,6 +224332,7 @@ __export(shared_exports, {
   MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS: () => MAX_ROOM_TYPE_PHOTOS,
   MAX_STAY_NIGHTS: () => MAX_STAY_NIGHTS,
+  MIN_BREAKFAST_OVERRIDE_REASON_LENGTH: () => MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
   MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
   PAYMENT_REJECTED_FRESH_DEADLINE_FROM: () => PAYMENT_REJECTED_FRESH_DEADLINE_FROM,
@@ -224101,6 +224377,7 @@ __export(shared_exports, {
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
   calculateBreakfastAddOn: () => calculateBreakfastAddOn,
+  calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
   calculateDiscountChain: () => calculateDiscountChain,
   calculateExtraBedAddOn: () => calculateExtraBedAddOn,
   calculatePercentDiscount: () => calculatePercentDiscount,
@@ -224117,6 +224394,7 @@ __export(shared_exports, {
   compressImageFile: () => compressImageFile,
   computeBookingFolio: () => computeBookingFolio,
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
+  computeBreakfastCutoffState: () => computeBreakfastCutoffState,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
@@ -224182,6 +224460,7 @@ __export(shared_exports, {
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
+  recomputeBreakfastTotal: () => recomputeBreakfastTotal,
   recordSweepResult: () => recordSweepResult,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
@@ -224204,6 +224483,7 @@ __export(shared_exports, {
 });
 var init_shared = __esm({
   "../shared/index.ts"() {
+    "use strict";
     init_VERSION();
     init_animations();
     init_constants();
@@ -224245,6 +224525,8 @@ var init_shared = __esm({
     init_cancellation();
     init_uploads();
     init_bookingPreferences();
+    init_breakfastCutoff();
+    init_breakfastTotal();
   }
 });
 

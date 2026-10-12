@@ -4,7 +4,15 @@ import { useAdmin, type StoreItem, type StaffMember } from "../context/AdminCont
 import type { TestRun } from "@spark-inn/shared";
 import {
   compressImageFile,
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the Breakfast & Dining tab now seeds the cutoff + served-grace
+  // inputs from the new shared constants (replacing the legacy flat
+  // rate). DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT is still
+  // imported because the AdminContext default state still seeds it;
+  // the Settings tab no longer reads it. BR-03 deletes the constant.
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  DEFAULT_BREAKFAST_CUTOFF_TIME,
+  DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
@@ -30,6 +38,16 @@ import {
   type PaymentMethodConfig,
   type ProtectedPaymentMethod,
   type RoomTypeEntry,
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the Breakfast & Dining tab now hydrates + saves against the
+  // new shared `BreakfastConfig` / `BreakfastMeal` shapes (replacing
+  // the legacy `silogItems` / `ratePerPersonPerNight` fields). The
+  // legacy `breakfastIncludesChildrenDefault` toggle is gone from
+  // the save payload entirely — children are ordinary meal slots
+  // per spec decision #4. BR-03 deletes the `breakfastConfig`
+  // legacy shape from the AdminContext default state.
+  type BreakfastConfig,
+  type BreakfastMeal,
   // Per VAT-01 (2026-10-12): the admin toggle for the
   // hotel's VAT-registration status. The Tax card on
   // the Discounts tab mirrors the existing `isVatEnabled`
@@ -39,6 +57,7 @@ import {
   isVatEnabled,
   type VatConfig
 } from "@spark-inn/shared";
+import { BreakfastConfigSchema } from "@spark-inn/shared/schemas/booking";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
@@ -62,8 +81,9 @@ import {
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { storage } from "../firebase/config";
+import { db, storage } from "../firebase/config";
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { ConfirmForm } from "../components/ConfirmForm";
@@ -2655,18 +2675,67 @@ export function SettingsPage() {
   const [memberDiscountPct, setMemberDiscountPct] = useState(String(rewardsConfig.memberDiscountPct));
 
   // 4. Breakfast Config states
-  const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled);
-  const [breakfastRate, setBreakfastRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
-  // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
-  // "include children in the breakfast charge". The server snapshots
-  // this onto every new booking whose client did not send a
-  // per-booking override. The admin can flip it here as policy
-  // changes; existing bookings are unaffected (the snapshot is
-  // per-booking, not per-policy).
-  const [breakfastIncludesChildrenDefault, setBreakfastIncludesChildrenDefault] = useState(
-    breakfastConfig.breakfastIncludesChildrenDefault !== false
+  // Per BR-02 / decision #231 (2026-10-12, breakfast redesign):
+  // the Breakfast & Dining tab now hydrates against the new shared
+  // `BreakfastConfig` shape (replacing the legacy `silogItems` /
+  // `ratePerPersonPerNight` / `breakfastIncludesChildrenDefault`
+  // fields). The old fields are still on the AdminContext default
+  // state until BR-03 migrates the create path; the form hydrates
+  // defensively when the legacy shape is the only thing available
+  // (e.g. an existing settings doc that hasn't been re-saved yet).
+  const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled ?? false);
+  // Default 8:00 PM per spec §Decisions Locked #5. The hotel
+  // timezone (used by the cut-off rule) is sourced from
+  // `hotel.config.ts` and rendered read-only below — it is NOT a
+  // form input and is NOT a `useState`.
+  const [breakfastCutoffTime, setBreakfastCutoffTime] = useState(
+    breakfastConfig.cutoffTime ?? DEFAULT_BREAKFAST_CUTOFF_TIME
   );
-  const [silogItems, setSilogItems] = useState<{ id: string; name: string; isActive: boolean }[]>(breakfastConfig.silogItems);
+  // Per spec decision #7: defensive default `true` — historical
+  // behavior allowed staff to override the cut-off, so a missing
+  // config field hydrates to the permissive side until the admin
+  // explicitly opts into the strict policy.
+  const [breakfastFrontDeskOverrideEnabled, setBreakfastFrontDeskOverrideEnabled] = useState(
+    breakfastConfig.frontDeskOverrideEnabled ?? true
+  );
+  // Shown in Step 2 + Manage Booking + booking review per spec.
+  // Capped at 2000 chars by `BreakfastConfigSchema`.
+  const [breakfastDefaultMealInstructions, setBreakfastDefaultMealInstructions] = useState(
+    breakfastConfig.defaultMealInstructions ?? ""
+  );
+  // Per Open Item #5 (BR-02): the served-grace window in minutes.
+  // Default 15 per the spec recommendation; 0 disables the grace
+  // window (every un-serve needs an override reason).
+  const [breakfastServedGraceMinutes, setBreakfastServedGraceMinutes] = useState(
+    String(breakfastConfig.servedGraceMinutes ?? DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES)
+  );
+  // The catalog itself. Hydration order (per BR-02 acceptance criteria):
+  //   1. If the new shape's `meals[]` is populated, use it.
+  //   2. Otherwise, if the legacy `silogItems[]` is populated, derive
+  //      a new-shape `meals[]` from it (price/description backfilled
+  //      with safe defaults so the AdminContext's seed catalog doesn't
+  //      lose its rows on first save).
+  //   3. Otherwise, default to `[]` (the AdminContext's empty-state
+  //      branch — the operator must add at least one meal).
+  const [breakfastMeals, setBreakfastMeals] = useState<BreakfastMeal[]>(() => {
+    if (Array.isArray(breakfastConfig.meals) && breakfastConfig.meals.length > 0) {
+      return breakfastConfig.meals;
+    }
+    if (Array.isArray(breakfastConfig.silogItems) && breakfastConfig.silogItems.length > 0) {
+      const now = new Date().toISOString();
+      return breakfastConfig.silogItems.map((item: { id: string; name: string; isActive: boolean }, index: number): BreakfastMeal => ({
+        id: item.id,
+        name: item.name,
+        description: "",
+        price: 0,
+        isActive: item.isActive,
+        displayOrder: index,
+        createdAt: now,
+        updatedAt: now
+      }));
+    }
+    return [];
+  });
 
   // 5. Store Config states
   const [storeEnabled, setStoreEnabled] = useState(storeConfig.isEnabled);
@@ -2725,10 +2794,13 @@ export function SettingsPage() {
   const [destroyConfirmText, setDestroyConfirmText] = useState("");
   const [refreshExportJson, setRefreshExportJson] = useState<string>("");
 
-  // Breakfast item CRUD states
-  const [isBreakfastItemModalOpen, setIsBreakfastItemModalOpen] = useState(false);
-  const [editingSilogItem, setEditingSilogItem] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
-  const [breakfastItemNameInput, setBreakfastItemNameInput] = useState("");
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the legacy `isBreakfastItemModalOpen` / `editingSilogItem` /
+  // `breakfastItemNameInput` CRUD modal was replaced by the inline
+  // meals table on the Breakfast & Dining tab. The modal would
+  // surface as unused-state warnings; deleted as part of the
+  // shape migration. New meal adds now open an inline edit row
+  // (see `handleAddBreakfastMeal` below).
 
   useEffect(() => {
     if (!pendingDeleteStoreItemId) return;
@@ -3529,14 +3601,112 @@ export function SettingsPage() {
     }
   };
 
-  const handleSaveBreakfast = async (e: React.FormEvent) => {
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign): the
+// Per BR-02 (decision #231, 2026-10-12, breakfast redesign): the
+// Breakfast & Dining save handler writes the new
+// `BreakfastConfig` shape only (no legacy `ratePerPersonPerNight` /
+// `breakfastIncludesChildrenDefault` / `silogItems`). The payload
+// is Zod-validated against `BreakfastConfigSchema` from
+// `@spark-inn/shared/schemas/booking` (added in BR-01) so a
+// malformed `cutoffTime` ("25:99") or a meal row that exceeds the
+// 10,000 PHP price cap is rejected client-side with a toast. The
+// server is still the authoritative gate (per Hard Rule — never
+// trust the client); this is a UX hint + early-feedback layer.
+//
+// `cutoffTimezone` is sourced from `hotel.config.ts` (the property
+// timezone — the only authoritative source). It is rendered
+// read-only in the UI and NOT a `useState` (per BR-02 acceptance).
+//
+// `servedGraceMinutes` (per spec §Open Items #5) is included in the
+// payload. BR-01 originally omitted it from the shared schema (gap
+// patched in the BR-01 close-out commit, see `shared/types/index.ts`
+// `BreakfastConfig.servedGraceMinutes` + `BreakfastConfigSchema`).
+// The UI input is wired up + hydrated from
+// `DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES`.
+//
+// After the save commits, a one-shot diff against the previous
+// `breakfastConfig` snapshot writes a
+// `settings/breakfastConfig/breakfastConfigChangeLog/{auditId}`
+// entry for each changed CONFIG field (cutoff time, override flag,
+// instructions). Meal-row changes are content — not config —
+// and are NOT audited (per spec §Admin Settings). The audit
+// subcollection lives under the existing `settings/breakfastConfig`
+// doc, not a new top-level collection, so the BR-02 "no new
+// collections" constraint is honored.
+const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
-    await runSettingsSave("breakfast", "Dining settings saved", () => updateSettings("breakfastConfig", {
+    const payload = {
       isEnabled: breakfastEnabled,
-      ratePerPersonPerNight: parseFloat(breakfastRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
-      breakfastIncludesChildrenDefault,
-      silogItems
-    }));
+      cutoffTime: breakfastCutoffTime,
+      cutoffTimezone: config.timezone,
+      frontDeskOverrideEnabled: breakfastFrontDeskOverrideEnabled,
+      servedGraceMinutes: parseInt(breakfastServedGraceMinutes, 10) || DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
+      defaultMealInstructions: breakfastDefaultMealInstructions,
+      meals: breakfastMeals,
+      updatedBy: currentUser?.uid || currentUser?.email || "staff",
+      updatedAt: new Date().toISOString()
+    };
+    const parsed = BreakfastConfigSchema.safeParse(payload);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      toast.error(
+        "Invalid breakfast config",
+        firstIssue?.message ?? "Review the cutoff time and meal rows, then try again."
+      );
+      return;
+    }
+    await runSettingsSave("breakfast", "Dining settings saved", async () => {
+      const success = await updateSettings("breakfastConfig", parsed.data);
+      if (success) {
+        // Capture the before-state for the audit diff. The audit
+        // log only fires for CONFIG fields — not meal rows (per
+        // spec). The previous snapshot may be undefined on the
+        // first-ever save; in that case every config field is
+        // "new" and a single entry per field is still too noisy,
+        // so we short-circuit when no prior snapshot exists.
+        const previous = (breakfastConfig ?? {}) as Partial<BreakfastConfig>;
+        const previousSnapshot: Record<string, unknown> = {
+          cutoffTime: previous.cutoffTime,
+          frontDeskOverrideEnabled: previous.frontDeskOverrideEnabled,
+          servedGraceMinutes: previous.servedGraceMinutes,
+          defaultMealInstructions: previous.defaultMealInstructions
+        };
+        const nextSnapshot: Record<string, unknown> = {
+          cutoffTime: parsed.data.cutoffTime,
+          frontDeskOverrideEnabled: parsed.data.frontDeskOverrideEnabled,
+          servedGraceMinutes: parsed.data.servedGraceMinutes,
+          defaultMealInstructions: parsed.data.defaultMealInstructions
+        };
+        const auditRef = collection(db, "settings", "breakfastConfig", "breakfastConfigChangeLog");
+        const changedBy = currentUser?.uid || currentUser?.email || "staff";
+        const writes: Promise<unknown>[] = [];
+        for (const field of Object.keys(nextSnapshot)) {
+          if (previousSnapshot[field] !== nextSnapshot[field]) {
+            writes.push(
+              addDoc(auditRef, {
+                field,
+                before: previousSnapshot[field] ?? null,
+                after: nextSnapshot[field] ?? null,
+                changedBy,
+                changedAt: serverTimestamp()
+              }).catch((err) => {
+                // The audit log is a side-effect of the save —
+                // a failed log entry must not roll back the
+                // primary write. Log + swallow so the operator
+                // still sees the success toast.
+                // eslint-disable-next-line no-console
+                console.warn("breakfastConfigChangeLog write failed", err);
+              })
+            );
+          }
+        }
+        // Run all writes in parallel; do not block the success
+        // toast on their resolution (the caller awaits the save
+        // promise, not the audit promise).
+        void Promise.all(writes);
+      }
+      return success;
+    });
   };
 
   // Per DSC-01..05 (2026-08-01, per CVQ-06): save the per-class
@@ -3805,86 +3975,75 @@ export function SettingsPage() {
     );
 
   // Toggle item status in local states
-  const toggleSilogItem = (id: string) => {
-    setSilogItems(prev => prev.map(item => item.id === id ? { ...item, isActive: !item.isActive } : item));
-  };
-
-  const handleAddSilogItemClick = () => {
-    setEditingSilogItem(null);
-    setBreakfastItemNameInput("");
-    setIsBreakfastItemModalOpen(true);
-  };
-
-  const handleEditSilogItem = (item: { id: string; name: string; isActive: boolean }) => {
-    setEditingSilogItem(item);
-    setBreakfastItemNameInput(item.name);
-    setIsBreakfastItemModalOpen(true);
-  };
-
-  const handleDeleteSilogItem = (id: string) => {
-    setSilogItems(prev => prev.filter(item => item.id !== id));
-    toast.success("Breakfast Item Deleted", "The menu item was removed. Save Dining Settings to commit.");
-  };
-
-  const handleSaveSilogItemSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedName = breakfastItemNameInput.trim();
-    if (!trimmedName) {
-      toast.error("Name is required", "Please enter a name for the breakfast menu item.");
-      return;
-    }
-
-    // Generate a URL/ID safe key
-    const generatedId = trimmedName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-
-    if (!generatedId) {
-      toast.error("Invalid name", "Name must contain letters or numbers.");
-      return;
-    }
-
-    if (editingSilogItem) {
-      // Editing
-      // Check for duplicates (excluding the item we're editing)
-      const duplicateExists = silogItems.some(
-        item => item.id !== editingSilogItem.id && item.name.toLowerCase() === trimmedName.toLowerCase()
-      );
-      if (duplicateExists) {
-        toast.error("Duplicate Item", "A breakfast item with this name already exists.");
-        return;
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the legacy `toggleSilogItem` / `handleAddSilogItemClick` /
+  // `handleEditSilogItem` / `handleDeleteSilogItem` /
+  // `handleSaveSilogItemSubmit` helpers are replaced by inline
+  // table-row editing. The table exposes per-row price /
+  // description / display-order / isActive controls; adding a
+  // new meal appends an empty edit row at the bottom. The new
+  // meal id is `meal-{nanoid(8)}` (Math.random + Date.now,
+  // matching the QRManagementPage id pattern at
+  // admin-app/src/pages/QRManagementPage.tsx:368 — no `nanoid`
+  // dependency).
+  //
+  // Meal-row changes are CONTENT (catalog) — not CONFIG — and
+  // are NOT written to `settings/breakfastConfigChangeLog`
+  // (per spec §Admin Settings: the audit subcollection is for
+  // config-shape changes only). The setter mutates
+  // `breakfastMeals` in place; the next Save click writes the
+  // full array to Firestore.
+  const handleAddBreakfastMeal = () => {
+    const maxOrder = breakfastMeals.reduce(
+      (max, meal) => (meal.displayOrder > max ? meal.displayOrder : max),
+      -1
+    );
+    const newId = `meal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const now = new Date().toISOString();
+    setBreakfastMeals((prev) => [
+      ...prev,
+      {
+        id: newId,
+        name: "",
+        description: "",
+        price: 0,
+        isActive: true,
+        displayOrder: maxOrder + 1,
+        createdAt: now,
+        updatedAt: now
       }
+    ]);
+  };
 
-      setSilogItems(prev =>
-        prev.map(item =>
-          item.id === editingSilogItem.id
-            ? { ...item, name: trimmedName }
-            : item
-        )
-      );
-      toast.success("Breakfast Item Renamed", "Click Save Dining Settings to commit changes.");
-    } else {
-      // Adding new
-      // Check for duplicates
-      const duplicateExists = silogItems.some(
-        item => item.name.toLowerCase() === trimmedName.toLowerCase() || item.id === generatedId
-      );
-      if (duplicateExists) {
-        toast.error("Duplicate Item", "A breakfast item with this name or ID already exists.");
-        return;
-      }
+  const handleUpdateBreakfastMeal = (
+    id: string,
+    patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
+  ) => {
+    setBreakfastMeals((prev) =>
+      prev.map((meal) =>
+        meal.id === id
+          ? { ...meal, ...patch, updatedAt: new Date().toISOString() }
+          : meal
+      )
+    );
+  };
 
-      setSilogItems(prev => [
-        ...prev,
-        { id: generatedId, name: trimmedName, isActive: true }
-      ]);
-      toast.success("Breakfast Item Added", "Click Save Dining Settings to commit changes.");
-    }
+  const handleDeleteBreakfastMeal = (id: string) => {
+    setBreakfastMeals((prev) => prev.filter((meal) => meal.id !== id));
+  };
 
-    setIsBreakfastItemModalOpen(false);
-    setEditingSilogItem(null);
-    setBreakfastItemNameInput("");
+  const handleMoveBreakfastMeal = (id: string, direction: -1 | 1) => {
+    setBreakfastMeals((prev) => {
+      const sorted = [...prev].sort((a, b) => a.displayOrder - b.displayOrder);
+      const idx = sorted.findIndex((meal) => meal.id === id);
+      if (idx < 0) return prev;
+      const swapIdx = idx + direction;
+      if (swapIdx < 0 || swapIdx >= sorted.length) return prev;
+      const tmp = sorted[idx].displayOrder;
+      sorted[idx] = { ...sorted[idx], displayOrder: sorted[swapIdx].displayOrder, updatedAt: new Date().toISOString() };
+      sorted[swapIdx] = { ...sorted[swapIdx], displayOrder: tmp, updatedAt: new Date().toISOString() };
+      return sorted;
+    });
   };
 
   const editingStoreItem = storeItems.find(item => item.id === editingStoreItemId) ?? null;
@@ -5509,12 +5668,18 @@ export function SettingsPage() {
           {activeTab === "breakfast" && (
             <form onSubmit={handleSaveBreakfast} className="space-y-6 text-xs">
               <div>
-                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Breakfast Silog Management</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5">Toggle breakfast service rates and configure menu items for walk-ins.</p>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Breakfast &amp; Dining</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Configure the daily cut-off, per-meal pricing, and meal instructions shown
+                  to guests at Step 2, on the booking review, and on the Manage Breakfast page.
+                </p>
               </div>
 
-              {/* Breakfast service toggles */}
-              <div className="space-y-4">
+              {/* Master toggle (per spec §Admin Settings: keeps the
+                  existing isEnabled behavior — when off, the Step 2
+                  section + Manage Booking + the booking-drawer
+                  breakfast tab all hide). */}
+              <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
@@ -5522,6 +5687,8 @@ export function SettingsPage() {
                     className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
                       breakfastEnabled ? "bg-primary" : "bg-gray-200"
                     }`}
+                    aria-pressed={breakfastEnabled}
+                    aria-label="Enable Guest Daily Breakfast Add-on"
                   >
                     <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
                       breakfastEnabled ? "translate-x-5" : "translate-x-0"
@@ -5529,108 +5696,308 @@ export function SettingsPage() {
                   </button>
                   Enable Guest Daily Breakfast Add-on
                 </label>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  When off, the breakfast section disappears from public Step 2, the guest
+                  Manage Breakfast page, and the admin booking drawer. Existing bookings with
+                  ordered meals keep their snapshotted prices (the snapshot is immutable).
+                </p>
+              </div>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 max-w-xs">
-                  Breakfast Tariff Rate (PHP / Person / Night)
-                  <input
-                    type="number"
-                    required
-                    value={breakfastRate}
-                    onChange={(e) => setBreakfastRate(e.target.value)}
-                    disabled={!breakfastEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
-                  />
-                </label>
+              {/* Cutoff &amp; override config (per BR-02). The
+                  cutoff rule is `(serviceDate - 1 calendar day) at
+                  cutoffTime, in hotel timezone`. The cut-off applies
+                  to add, change, AND remove (server-enforced; this
+                  input is the source of truth the server reads). */}
+              <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100 pb-1.5">
+                  Cutoff &amp; Override
+                </h4>
 
-                {/* Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide
-                    default for "include children in the breakfast
-                    charge". The server snapshots this onto every new
-                    booking whose client did not send a per-booking
-                    override. Existing bookings are unaffected (the
-                    snapshot is per-booking, not per-policy). */}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Cutoff time (HH:MM, 24h)
+                    <input
+                      type="time"
+                      data-testid="breakfast-cutoff-time"
+                      value={breakfastCutoffTime}
+                      onChange={(e) => setBreakfastCutoffTime(e.target.value)}
+                      disabled={!breakfastEnabled}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                    />
+                    <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                      Guests must order breakfast for the next day before this time. Default is
+                      8:00 PM. After this time, the date&apos;s meal grid locks and staff must
+                      use the override flow to add/change/remove.
+                    </span>
+                  </label>
+
+                  <div className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    <span>Hotel timezone</span>
+                    <div
+                      data-testid="breakfast-cutoff-timezone"
+                      className="min-h-[44px] inline-flex items-center rounded border border-gray-200 bg-gray-50 px-3 text-sm font-medium text-gray-700"
+                    >
+                      {config.timezone}
+                    </div>
+                    <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                      Cutoffs are enforced in hotel timezone. Contact the developer to change.
+                    </span>
+                  </div>
+                </div>
+
                 <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
                   <button
                     type="button"
-                    onClick={() => setBreakfastIncludesChildrenDefault(!breakfastIncludesChildrenDefault)}
+                    onClick={() => setBreakfastFrontDeskOverrideEnabled(!breakfastFrontDeskOverrideEnabled)}
                     disabled={!breakfastEnabled}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                      breakfastIncludesChildrenDefault ? "bg-primary" : "bg-gray-300"
+                      breakfastFrontDeskOverrideEnabled ? "bg-primary" : "bg-gray-300"
                     }`}
-                    aria-pressed={breakfastIncludesChildrenDefault}
-                    aria-label="Include children in the breakfast charge by default"
+                    aria-pressed={breakfastFrontDeskOverrideEnabled}
+                    aria-label="Allow front desk to override the breakfast cutoff"
                   >
                     <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                      breakfastIncludesChildrenDefault ? "translate-x-5" : "translate-x-0"
+                      breakfastFrontDeskOverrideEnabled ? "translate-x-5" : "translate-x-0"
                     }`} />
                   </button>
-                  Include children in the breakfast charge by default
+                  Front desk can override the cutoff
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  <span className="flex items-center justify-between">
+                    Default meal instructions
+                    <span className="text-[10px] font-normal text-gray-400">
+                      {breakfastDefaultMealInstructions.length} / 2000
+                    </span>
+                  </span>
+                  <textarea
+                    data-testid="breakfast-default-meal-instructions"
+                    value={breakfastDefaultMealInstructions}
+                    onChange={(e) => setBreakfastDefaultMealInstructions(e.target.value.slice(0, 2000))}
+                    disabled={!breakfastEnabled}
+                    maxLength={2000}
+                    rows={3}
+                    placeholder='e.g. "Order by 8:00 PM the evening before your breakfast date. Same-day orders must go through the front desk."'
+                    className="min-h-[88px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 py-2 text-xs font-medium focus:bg-white disabled:cursor-not-allowed"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 max-w-xs">
+                  Served-grace window (minutes)
+                  <input
+                    type="number"
+                    data-testid="breakfast-served-grace-minutes"
+                    min={0}
+                    max={60}
+                    step={1}
+                    value={breakfastServedGraceMinutes}
+                    onChange={(e) => setBreakfastServedGraceMinutes(e.target.value)}
+                    disabled={!breakfastEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                  />
+                  <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                    How long after a meal is marked served can staff un-serve without an
+                    override reason. After this window, un-serving requires a reason. Default
+                    is 15 minutes.
+                  </span>
                 </label>
               </div>
 
-              {/* Menu items toggler checkboxes */}
-              <div className="space-y-3">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">
-                  Available Breakfast Silog Menu Items
-                </h4>
-                
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {silogItems.map(item => (
-                    <div
-                      key={item.id}
-                      className={`min-h-[44px] flex items-center justify-between px-3.5 rounded-lg border text-xs font-semibold transition ${
-                        item.isActive && breakfastEnabled
-                          ? "bg-primary/5 border-primary/30 text-primary-dark" 
-                          : "bg-white border-gray-200 text-gray-550 hover:bg-gray-50"
-                      } ${!breakfastEnabled ? "opacity-50" : ""}`}
-                    >
-                      <button
-                        type="button"
-                        disabled={!breakfastEnabled}
-                        onClick={() => toggleSilogItem(item.id)}
-                        className="flex-1 flex items-center justify-between py-2 text-left disabled:cursor-not-allowed"
-                      >
-                        <span className="truncate">{item.name} Service</span>
-                        <span className="shrink-0 mr-3">
-                          {item.isActive ? (
-                            <CheckSquare size={16} className="text-primary" />
-                          ) : (
-                            <Square size={16} className="text-gray-300" />
-                          )}
-                        </span>
-                      </button>
-
-                      <div className="flex items-center gap-1.5 border-l border-gray-150 pl-3">
-                        <button
-                          type="button"
-                          disabled={!breakfastEnabled}
-                          onClick={() => handleEditSilogItem(item)}
-                          className="p-1.5 text-gray-400 hover:text-primary transition rounded hover:bg-gray-100 disabled:cursor-not-allowed disabled:hover:text-gray-400"
-                          title="Edit Item Name"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!breakfastEnabled}
-                          onClick={() => handleDeleteSilogItem(item.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-600 transition rounded hover:bg-red-50 disabled:cursor-not-allowed disabled:hover:text-gray-400"
-                          title="Delete Item"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
+              {/* Meals table (per BR-02). Replaces the legacy 2-column
+                  `silogItems` grid. Columns: order · name · price ·
+                  description · isActive · delete. Inline edit; the
+                  `id` becomes immutable once a booking references it
+                  (server-enforced; the form never re-keys). Inactive
+                  rows show a red "Inactive" pill per spec. */}
+              <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Breakfast meal catalog
+                  </h4>
                   <button
                     type="button"
+                    onClick={handleAddBreakfastMeal}
                     disabled={!breakfastEnabled}
-                    onClick={handleAddSilogItemClick}
-                    className="min-h-[44px] flex items-center justify-center gap-2 px-3.5 rounded-lg border border-dashed border-gray-300 bg-white hover:bg-gray-50 text-xs font-bold text-gray-500 hover:text-primary transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-gray-500 disabled:hover:bg-white"
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-white px-3 text-[10px] font-bold text-gray-500 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Plus size={14} />
-                    Add Menu Item
+                    <Plus size={12} aria-hidden="true" />
+                    Add meal
                   </button>
+                </div>
+
+                {breakfastMeals.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-[10px] text-gray-500">
+                    No meals yet. Click <strong>Add meal</strong> to create the first one.
+                    The Step 2 + Manage Booking sections are hidden until at least one
+                    active meal exists.
+                  </p>
+                ) : null}
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wider text-gray-400">
+                        <th className="w-12 px-2 py-2 font-bold">Order</th>
+                        <th className="px-2 py-2 font-bold">Name</th>
+                        <th className="w-32 px-2 py-2 font-bold">Price (PHP)</th>
+                        <th className="px-2 py-2 font-bold">Description</th>
+                        <th className="w-20 px-2 py-2 font-bold">Active</th>
+                        <th className="w-10 px-2 py-2 font-bold" aria-label="Row actions"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...breakfastMeals]
+                        .sort((a, b) => a.displayOrder - b.displayOrder)
+                        .map((meal) => {
+                          const descRemaining = 200 - meal.description.length;
+                          const priceValid =
+                            Number.isFinite(meal.price) && meal.price >= 0 && meal.price <= 10000;
+                          return (
+                            <tr
+                              key={meal.id}
+                              data-testid={`breakfast-meal-row-${meal.id}`}
+                              className="border-t border-gray-100 align-top"
+                            >
+                              <td className="px-2 py-2">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="font-mono text-[10px] text-gray-500">
+                                    {meal.displayOrder}
+                                  </span>
+                                  <div className="flex items-center gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveBreakfastMeal(meal.id, -1)}
+                                      disabled={!breakfastEnabled}
+                                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="Move up"
+                                      aria-label={`Move ${meal.name} up`}
+                                    >
+                                      <ArrowUp size={12} aria-hidden="true" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveBreakfastMeal(meal.id, 1)}
+                                      disabled={!breakfastEnabled}
+                                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="Move down"
+                                      aria-label={`Move ${meal.name} down`}
+                                    >
+                                      <ArrowDown size={12} aria-hidden="true" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="text"
+                                  data-testid={`breakfast-meal-name-${meal.id}`}
+                                  value={meal.name}
+                                  maxLength={80}
+                                  onChange={(e) =>
+                                    handleUpdateBreakfastMeal(meal.id, { name: e.target.value })
+                                  }
+                                  disabled={!breakfastEnabled}
+                                  placeholder="e.g. Tapsilog"
+                                  className="min-h-[36px] w-full rounded border border-gray-250 bg-white px-2 text-xs font-semibold focus:bg-white focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                                <span className="mt-1 block font-mono text-[10px] text-gray-400">
+                                  id: {meal.id}
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="number"
+                                  data-testid={`breakfast-meal-price-${meal.id}`}
+                                  value={Number.isFinite(meal.price) ? meal.price : 0}
+                                  min={0}
+                                  max={10000}
+                                  step="0.01"
+                                  onChange={(e) =>
+                                    handleUpdateBreakfastMeal(meal.id, {
+                                      price: parseFloat(e.target.value) || 0
+                                    })
+                                  }
+                                  disabled={!breakfastEnabled}
+                                  className={`min-h-[36px] w-full rounded border bg-white px-2 text-xs font-medium focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    priceValid ? "border-gray-250" : "border-red-300 bg-red-50"
+                                  }`}
+                                />
+                                {!priceValid ? (
+                                  <span className="mt-1 block text-[10px] font-semibold text-red-600">
+                                    Must be 0–10,000 PHP
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="text"
+                                  data-testid={`breakfast-meal-description-${meal.id}`}
+                                  value={meal.description}
+                                  maxLength={200}
+                                  onChange={(e) =>
+                                    handleUpdateBreakfastMeal(meal.id, {
+                                      description: e.target.value
+                                    })
+                                  }
+                                  disabled={!breakfastEnabled}
+                                  placeholder="Optional marketing copy"
+                                  className="min-h-[36px] w-full rounded border border-gray-250 bg-white px-2 text-xs font-medium focus:bg-white focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                                <span
+                                  className={`mt-1 block text-[10px] ${
+                                    descRemaining < 0 ? "text-red-600" : "text-gray-400"
+                                  }`}
+                                >
+                                  {meal.description.length} / 200
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                <div className="flex flex-col items-start gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdateBreakfastMeal(meal.id, {
+                                        isActive: !meal.isActive
+                                      })
+                                    }
+                                    disabled={!breakfastEnabled}
+                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                      meal.isActive ? "bg-primary" : "bg-gray-300"
+                                    }`}
+                                    aria-pressed={meal.isActive}
+                                    aria-label={`Toggle ${meal.name} active`}
+                                  >
+                                    <div className={`h-4 w-4 rounded-full bg-white transition shadow-sm transform ${
+                                      meal.isActive ? "translate-x-4" : "translate-x-0"
+                                    }`} />
+                                  </button>
+                                  {!meal.isActive ? (
+                                    <span
+                                      className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700"
+                                      title="Existing bookings still reference this meal. They will continue to show it on their record (snapshot is immutable)."
+                                    >
+                                      Inactive
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="px-2 py-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBreakfastMeal(meal.id)}
+                                  disabled={!breakfastEnabled}
+                                  className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                  title="Delete meal"
+                                  aria-label={`Delete ${meal.name}`}
+                                >
+                                  <Trash2 size={12} aria-hidden="true" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -8606,50 +8973,14 @@ export function SettingsPage() {
         </div>
       </Modal>
 
-      <Modal
-        title={editingSilogItem ? "Edit Breakfast Menu Item" : "Add Breakfast Menu Item"}
-        open={isBreakfastItemModalOpen}
-        onClose={() => {
-          setIsBreakfastItemModalOpen(false);
-          setEditingSilogItem(null);
-          setBreakfastItemNameInput("");
-        }}
-      >
-        <form onSubmit={handleSaveSilogItemSubmit} className="space-y-4 text-xs">
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Item Name (e.g. Tocilog, Longsilog)
-            <input
-              type="text"
-              required
-              placeholder="e.g. Tocilog"
-              value={breakfastItemNameInput}
-              onChange={(e) => setBreakfastItemNameInput(e.target.value)}
-              className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
-            />
-          </label>
-
-          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
-            <button
-              type="button"
-              onClick={() => {
-                setIsBreakfastItemModalOpen(false);
-                setEditingSilogItem(null);
-                setBreakfastItemNameInput("");
-              }}
-              className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
-            >
-              <Save size={14} />
-              {editingSilogItem ? "Save Changes" : "Add Item"}
-            </button>
-          </div>
-        </form>
-      </Modal>
+      {/* Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+          the legacy "Add/Edit Breakfast Menu Item" Modal is gone.
+          The new meals table on the Breakfast & Dining tab uses
+          inline editing (no modal). The `Modal` block above (the
+          bottom of the previous file) used `editingSilogItem` /
+          `isBreakfastItemModalOpen` / `breakfastItemNameInput` —
+          all three state hooks were removed from the SettingsPage
+          body in this same ticket. */}
 
       {/* Cleanup confirmation modal */}
       <Modal

@@ -386,6 +386,12 @@ export const BreakfastConfigSchema = z.object({
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),
   cutoffTimezone: z.string().min(1),
   frontDeskOverrideEnabled: z.boolean(),
+  /**
+   * Per decision #231 + open item #5: 0..60 minute window after
+   * `served` during which staff can un-serve without a reason.
+   * Default 15; min 0; max 60.
+   */
+  servedGraceMinutes: z.number().int().min(0).max(60).default(15),
   defaultMealInstructions: z.string().max(2000).default(""),
   meals: z.array(BreakfastMealSchema),
   updatedAt: z.union([z.string(), z.any()]).optional(),

@@ -1080,6 +1080,13 @@ export interface BreakfastConfig {
   cutoffTimezone: string;
   /** When `false`, staff cannot override the cutoff for any write. */
   frontDeskOverrideEnabled: boolean;
+  /**
+   * Per decision #231 + open item #5: how long after a meal is
+   * marked `served` can staff un-serve it without an override
+   * reason. After this window, un-serve requires a reason. Configurable
+   * in admin Settings; default 15 minutes. Range 0..60.
+   */
+  servedGraceMinutes: number;
   /** Multi-line text shown to guests in Step 2 + Manage Booking + booking review. */
   defaultMealInstructions: string;
   meals: BreakfastMeal[];
