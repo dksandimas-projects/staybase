@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, type StoreItem, type StaffMember } from "../context/AdminContext";
 import type { TestRun } from "@spark-inn/shared";
@@ -54,7 +54,11 @@ import {
   // the Booking & Holds tab uses Clock4 for the
   // post-Confirm + in-flow hold windows (a clock
   // matches the countdown-banner mental model).
-  Clock4
+  Clock4,
+  // Per SET-SBG-01 (2026-10-12, settings-sidebar-grouping):
+  // `Megaphone` for the "Marketing & Reach" group header and
+  // `Shield` for the back-of-house "Admin" group header.
+  Megaphone, Shield
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -152,6 +156,32 @@ const VALID_TAB_IDS: TabId[] = [
   "discounts",
   "holds"
 ];
+
+// Per SET-SBG-01 (2026-10-12, settings-sidebar-grouping):
+// the 18 settings tabs are clustered into 5 stakeholder-oriented
+// groups. Display order inside each group is the order shown
+// in the sidebar (and the order used to build the deep-link
+// whitelist above is the same, just flattened).
+type SettingsGroup = {
+  id: string;
+  label: string;
+  tabs: readonly TabId[];
+};
+
+const SETTINGS_GROUPS: readonly SettingsGroup[] = [
+  { id: "property",  label: "Property",             tabs: ["hotel", "roomtypes", "branding"] },
+  { id: "bookings",  label: "Bookings & Revenue",   tabs: ["preferences", "sources", "holds", "payment", "discounts"] },
+  { id: "guest",     label: "Guest Experience",     tabs: ["rewards", "breakfast", "store", "intercom"] },
+  { id: "reach",     label: "Marketing & Reach",    tabs: ["website", "seo", "email"] },
+  { id: "admin",     label: "Admin",                tabs: ["staff", "legal", "environment"] }
+];
+
+// LocalStorage key for the user's collapsed/expanded preferences
+// on the desktop sidebar. Each `SettingsGroup.id` may be present
+// (collapsing this group) or absent (expanding this group).
+// The active group is always force-expanded — its id is removed
+// on every render before applying the persisted set.
+const SETTINGS_GROUPS_COLLAPSED_STORAGE_KEY = "settings.sidebar.collapsedGroups.v1";
 
 const DEFAULT_OG_IMAGE_URL = config.ogImage.startsWith("http")
   ? config.ogImage
@@ -2323,6 +2353,89 @@ export function SettingsPage() {
     }
   }, [activeTab, isMobile]);
 
+  // Per SET-SBG-01 (2026-10-12, settings-sidebar-grouping):
+  // the desktop sidebar groups the 18 settings tabs into 5
+  // collapsible sections. The user's collapsed/expanded
+  // preferences persist in `localStorage` so the sidebar
+  // remembers their layout across reloads. The active group
+  // is always force-expanded — visibility of "where you are
+  // in the app" wins over the user's collapsing preference.
+  const validGroupIds = useMemo(
+    () => new Set(SETTINGS_GROUPS.map((group) => group.id)),
+    []
+  );
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(SETTINGS_GROUPS_COLLAPSED_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((value): value is string =>
+        typeof value === "string" && validGroupIds.has(value)
+      );
+    } catch {
+      // Corrupted localStorage JSON or quota error — start fresh.
+      return [];
+    }
+  });
+
+  const persistedCollapsedSet = useMemo(
+    () => new Set(collapsedGroupIds),
+    [collapsedGroupIds]
+  );
+
+  // `groupOfTab` — resolve the active tab to its group id. The
+  // `setCollapsedGroupIds` setter down below wraps persistence.
+  const groupOfTab = useCallback(
+    (tabId: TabId): string => {
+      for (const group of SETTINGS_GROUPS) {
+        if (group.tabs.includes(tabId)) return group.id;
+      }
+      return SETTINGS_GROUPS[0]!.id;
+    },
+    []
+  );
+
+  const toggleGroup = useCallback((groupId: string) => {
+    setCollapsedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      const serialized = JSON.stringify(Array.from(next));
+      try {
+        window.localStorage.setItem(SETTINGS_GROUPS_COLLAPSED_STORAGE_KEY, serialized);
+      } catch {
+        // Quota error or storage disabled — keep in-memory state
+        // but skip persistence. Re-mount will forget the toggle.
+      }
+      return Array.from(next);
+    });
+  }, []);
+
+  // Active group is auto-expanded on every `activeTab` change —
+  // when the operator navigates into a section its visibility
+  // takes priority over their previous collapsing choice.
+  useEffect(() => {
+    const activeGroupId = groupOfTab(activeTab);
+    setCollapsedGroupIds((prev) => {
+      if (!prev.includes(activeGroupId)) return prev;
+      const next = prev.filter((id) => id !== activeGroupId);
+      try {
+        window.localStorage.setItem(
+          SETTINGS_GROUPS_COLLAPSED_STORAGE_KEY,
+          JSON.stringify(next)
+        );
+      } catch {
+        // Ignore persistence failure — in-memory state still wins.
+      }
+      return next;
+    });
+  }, [activeTab, groupOfTab]);
+
   // Local state form mirrors
   // 1. Hotel Config Form States
   const [checkInTime, setCheckInTime] = useState(hotelConfig.checkInTime);
@@ -3913,11 +4026,52 @@ export function SettingsPage() {
           <div className="h-8 w-64 animate-pulse rounded bg-gray-200" />
           <div className="h-4 w-96 max-w-full animate-pulse rounded bg-gray-100" />
         </header>
+        {/* Mobile horizontal tab bar skeleton — matches the grouped
+            pill row (5 groups × ~3-5 pills separated by dividers). */}
+        <div className="lg:hidden -mx-4 overflow-hidden px-4 pb-1">
+          <div className="flex min-w-max items-center gap-1.5">
+            {SETTINGS_GROUPS.flatMap((group, groupIdx) => {
+              const pills = Array.from({ length: group.tabs.length }).map((_, idx) => (
+                <div
+                  key={`${group.id}-${idx}`}
+                  className="h-11 w-28 animate-pulse rounded-full bg-gray-100"
+                />
+              ));
+              const isLastGroup = groupIdx === SETTINGS_GROUPS.length - 1;
+              return [
+                ...pills,
+                ...(isLastGroup
+                  ? []
+                  : [
+                      <span
+                        key={`${group.id}-divider`}
+                        aria-hidden="true"
+                        className="mx-1 h-5 w-px shrink-0 bg-gray-200"
+                      />
+                    ])
+              ];
+            })}
+          </div>
+        </div>
         <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
-          <aside className="hidden space-y-2 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 lg:block">
-            {Array.from({ length: 8 }).map((_, index) => (
-              <div key={index} className="h-11 animate-pulse rounded-lg bg-gray-100" />
-            ))}
+          {/* Desktop sidebar skeleton — mirrors the grouped
+              layout so there's no jump between skeleton and real
+              content. 5 group headers + ~3-5 nested rows each. */}
+          <aside className="hidden lg:block rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
+            <div className="h-3 w-32 animate-pulse rounded bg-gray-100 mb-4" />
+            <div className="space-y-3">
+              {SETTINGS_GROUPS.map((group) => (
+                <div key={group.id} className="space-y-1">
+                  <div className="h-7 w-full animate-pulse rounded-lg bg-gray-100" />
+                  {group.tabs.map((tabId) => (
+                    <div
+                      key={tabId}
+                      className="ml-7 h-10 w-[calc(100%-1.75rem)] animate-pulse rounded-lg bg-gray-100"
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
           </aside>
           <div className="min-h-[400px] rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-7">
             <div className="h-5 w-48 animate-pulse rounded bg-gray-200" />
@@ -3942,54 +4096,133 @@ export function SettingsPage() {
       {/* Mobile horizontal tab bar — single-line, scrolls sideways.
           The active tab is auto-scrolled into view (see the
           useEffect above). On desktop the same tabs render as a
-          vertical 260px left nav (the <aside> below). */}
+          vertical 260px left nav (the <aside> below). The pills
+          are separated by visual dividers that mark the SETTINGS_GROUPS
+          boundaries (the 5 sidebar groups defined below). */}
       <div ref={tabBarRef} className="lg:hidden -mx-4 overflow-x-auto px-4 pb-1">
-        <div className="flex min-w-max gap-1.5">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isTabActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                data-tab-id={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-full px-4 text-xs font-bold transition ${
-                  isTabActive
-                    ? "bg-primary text-white shadow-sm"
-                    : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                <Icon size={14} aria-hidden="true" />
-                {tab.label}
-              </button>
-            );
+        <div className="flex min-w-max items-center gap-1.5">
+          {SETTINGS_GROUPS.flatMap((group, groupIdx) => {
+            const pills = group.tabs.map((tabId) => {
+              const tab = tabs.find((entry) => entry.id === tabId);
+              if (!tab) return null;
+              const Icon = tab.icon;
+              const isTabActive = activeTab === tabId;
+              return (
+                <button
+                  key={tab.id}
+                  data-tab-id={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-full px-4 text-xs font-bold transition ${
+                    isTabActive
+                      ? "bg-primary text-white shadow-sm"
+                      : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <Icon size={14} aria-hidden="true" />
+                  {tab.label}
+                </button>
+              );
+            });
+            const isLastGroup = groupIdx === SETTINGS_GROUPS.length - 1;
+            return [
+              ...pills,
+              ...(isLastGroup
+                ? []
+                : [
+                    <span
+                      key={`divider-${group.id}`}
+                      aria-hidden="true"
+                      className="mx-1 h-5 w-px shrink-0 bg-gray-200"
+                    />
+                  ])
+            ];
           })}
         </div>
       </div>
 
       {/* Split tab view layout */}
       <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
-        {/* Left: Section Selection Navigation — desktop only */}
-        <aside className="hidden lg:block rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 h-fit space-y-1">
+        {/* Left: Section Selection Navigation — desktop only.
+            Per SET-SBG-01 (2026-10-12, settings-sidebar-grouping):
+            the 18 tabs are clustered into 5 collapsible groups
+            (see `SETTINGS_GROUPS`). The active group is always
+            force-expanded so the operator can see where they
+            are; the others respect the persisted user choice. */}
+        <aside className="hidden lg:block rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 h-fit">
           <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-3 mb-3">Settings Categories</h2>
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isTabActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`w-full min-h-[44px] flex items-center gap-3 px-3 rounded-lg text-xs font-bold transition ${
-                  isTabActive
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-gray-650 hover:bg-gray-50 hover:text-gray-900"
-                }`}
-              >
-                <Icon size={16} />
-                {tab.label}
-              </button>
-            );
-          })}
+          <div className="space-y-3">
+            {SETTINGS_GROUPS.map((group) => {
+              const isActiveGroup = group.id === groupOfTab(activeTab);
+              const isCollapsed = !isActiveGroup && persistedCollapsedSet.has(group.id);
+              return (
+                <div key={group.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isActiveGroup) return;
+                      toggleGroup(group.id);
+                    }}
+                    aria-expanded={!isCollapsed}
+                    aria-controls={`settings-group-${group.id}`}
+                    className={`group/header w-full flex min-h-[36px] items-center justify-between gap-2 rounded-lg px-3 text-xs transition ${
+                      isActiveGroup
+                        ? "text-gray-700 cursor-default"
+                        : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                    }`}
+                  >
+                    <span className="font-bold uppercase tracking-wider text-[11px]">{group.label}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className={`inline-flex min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold leading-none ${
+                          isActiveGroup
+                            ? "bg-primary text-white"
+                            : "bg-gray-100 text-gray-600 group-hover/header:bg-gray-200"
+                        }`}
+                      >
+                        {group.tabs.length}
+                      </span>
+                      {isCollapsed ? (
+                        <ChevronDown size={14} aria-hidden="true" />
+                      ) : (
+                        <ChevronUp size={14} aria-hidden="true" />
+                      )}
+                    </span>
+                  </button>
+                  {!isCollapsed && (
+                    <div
+                      id={`settings-group-${group.id}`}
+                      className="mt-1 space-y-0.5"
+                      role="group"
+                      aria-label={group.label}
+                    >
+                      {group.tabs.map((tabId) => {
+                        const tab = tabs.find((entry) => entry.id === tabId);
+                        if (!tab) return null;
+                        const Icon = tab.icon;
+                        const isTabActive = activeTab === tabId;
+                        return (
+                          <button
+                            key={tabId}
+                            type="button"
+                            onClick={() => setActiveTab(tabId)}
+                            aria-current={isTabActive ? "page" : undefined}
+                            className={`w-full min-h-[44px] flex items-center gap-3 pl-9 pr-3 rounded-lg text-xs font-bold transition ${
+                              isTabActive
+                                ? "bg-primary text-white shadow-sm"
+                                : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                            }`}
+                          >
+                            <Icon size={16} aria-hidden="true" />
+                            {tab.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </aside>
 
         {/* Right: Tab content viewports */}
