@@ -350,8 +350,8 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `email` / `firstName` / `lastName` / `phone` | string | Member profile data |
 | `rewardsPoints` | number | Current points balance |
 | `status` | string | `"active"` \| `"suspended"` |
-| `completedStays` | number | **Phase 2 (2026-10-12)**: counter incremented at checkout; the stay-completion signal the tier system derives `currentLevel` from. Cancelled-before-checkout bookings do NOT increment (matches the existing points clawback pattern). Absent = 0. |
-| `currentLevel` | object \| null | **Phase 2 (2026-10-12)**: cached `LevelDef` snapshot — refreshed at checkout + on settings save. Null for members below the lowest configured tier's threshold. |
+| `completedStays` | number | **Phase 2 (2026-10-12)**: counter incremented atomically at checkout (same `runTransaction` as the points credit, per FOL-03 read-before-write). The increment runs on both the immediate-credit and the pending-payment-deferral paths — the stay IS completed either way. Not decremented on post-settlement cancellation (MRB-05 philosophy: "stay happened, financial reversal is separate"). Absent = 0 (legacy / pre-Phase-2). |
+| `currentLevel` | object \| null | **Phase 2 (2026-10-12)**: cached `LevelDef` snapshot — refreshed at checkout (post-`completedStays++`) + at member registration (initial base-tier snapshot via `resolveCurrentLevel(levels, 0)`). Null for members below the lowest configured tier's threshold OR for deployments without tiers configured (legacy / off state). The booking engine falls back to the legacy global `memberDiscountPct` for tier-less members. |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
 Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points.

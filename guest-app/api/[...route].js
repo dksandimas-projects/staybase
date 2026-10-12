@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.10.0";
+    VERSION2 = "1.13.0";
   }
 });
 
@@ -228510,6 +228510,7 @@ function applyReservationScopePaymentTransition(transaction, adminDb2, bookingRe
 // server/handlers/bookings.ts
 init_booking();
 init_shared();
+init_shared();
 init_zod();
 init_hotel_config();
 
@@ -234390,6 +234391,8 @@ async function handleCheckoutBooking(req, res) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
     }
+    const memberCurrentLevelBefore = memberDoc?.exists && resolveCurrentLevel ? resolveCurrentLevel(rewardsConfig?.levels, Number(memberDoc.data()?.completedStays || 0)) : null;
+    const memberTierMultiplier = memberCurrentLevelBefore?.pointsMultiplier ?? 1;
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef);
       if (!freshBookingDoc.exists) {
@@ -234408,7 +234411,8 @@ async function handleCheckoutBooking(req, res) {
       const collectedTotal = folioSnapshot.collectedTotal;
       const checkoutFolioTotal = folioSnapshot.folioTotal;
       checkedOutWithBalance = folioSnapshot.computedBalance;
-      eligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      const baseEligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      eligiblePoints = calculatePointsWithMultiplier(baseEligiblePoints, memberTierMultiplier);
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
         throw new Error("UNPAID_REASON_REQUIRED");
       }
@@ -234495,22 +234499,35 @@ async function handleCheckoutBooking(req, res) {
           updatedAt: now
         });
       }
-      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
-        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
-        transaction.update(memberRef, {
-          rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: now
-        });
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
-        transaction.set(historyRef, {
-          type: "earn",
-          points: pointsAwarded,
-          bookingId,
-          bookingRef: bookingData2.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
-          by: checkedOutBy,
-          createdAt: /* @__PURE__ */ new Date()
-        });
+      if (canAwardPoints && memberId && memberRef && memberDocInTransaction?.exists) {
+        const priorCompletedStays = Number(memberDocInTransaction.data()?.completedStays || 0);
+        const nextCompletedStays = priorCompletedStays + 1;
+        const nextCurrentLevel = resolveCurrentLevel(rewardsConfig?.levels, nextCompletedStays);
+        if (awardNow) {
+          const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData2.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: /* @__PURE__ */ new Date()
+          });
+        } else {
+          transaction.update(memberRef, {
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+        }
       }
     });
     try {
@@ -237153,6 +237170,9 @@ async function handleRegisterMember(req, res) {
       }
       const fullName = parsed2.data.fullName || authUser.name || email.split("@")[0];
       const photoUrl = parsed2.data.photoUrl || authUser.picture || "";
+      const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
+      const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
+      const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
       transaction.set(memberRef, {
         fullName,
         email,
@@ -237163,6 +237183,11 @@ async function handleRegisterMember(req, res) {
         isMember: true,
         memberSince: now,
         rewardsPoints: existingMember?.rewardsPoints || 0,
+        // Per Phase 2 (2026-10-12): initialize the stay-counter
+        // + tier cache. Absent on legacy pre-Phase-2 docs — readers
+        // must coalesce missing values to 0 / null.
+        completedStays: Number(existingMember?.completedStays || 0),
+        currentLevel: existingMember?.currentLevel ?? baseCurrentLevel,
         tier: existingMember?.tier || "standard",
         isActive: existingMember?.isActive !== false,
         createdAt: existingMember?.createdAt || now,

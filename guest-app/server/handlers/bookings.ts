@@ -229,6 +229,13 @@ import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/bookin
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
 import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange, generateBookingRef } from "@spark-inn/shared";
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+// decision pending): `resolveCurrentLevel` + `calculatePointsWithMultiplier`
+// are the canonical tier-derivation + multiplier helpers. Both
+// are defensive (null/undefined inputs return safe defaults) so
+// they don't crash on legacy `rewardsConfig` docs that pre-date
+// the Phase 2 fields.
+import { resolveCurrentLevel, calculatePointsWithMultiplier } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -10199,6 +10206,26 @@ export async function handleCheckoutBooking(req: any, res: any) {
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
     }
 
+    // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+    // decision pending): at checkout, derive the member's current
+    // tier from the live `rewardsConfig.levels[]` + the member's
+    // stored `completedStays`. The tier's `pointsMultiplier` is
+    // applied to the base eligible-points so the credit matches
+    // the tier displayed on the rewards portal. The
+    // `completedStays++` and `currentLevel` cache refresh happen
+    // inside the same transaction as the points credit — the
+    // three writes are atomic so a retry can't double-count.
+    // The multiplier applies to BOTH the `awardNow` and the
+    // `pendingLoyaltyPoints` paths — when the outstanding payment
+    // settles later (the `settlesCheckedOutFolio` branch in
+    // handleAddPayment), the same multiplied value is credited
+    // (the checkout-time `pendingLoyaltyPoints` snapshot is the
+    // source of truth — no recomputation needed at settle time).
+    const memberCurrentLevelBefore = memberDoc?.exists && resolveCurrentLevel
+      ? resolveCurrentLevel(rewardsConfig?.levels, Number(memberDoc.data()?.completedStays || 0))
+      : null;
+    const memberTierMultiplier = memberCurrentLevelBefore?.pointsMultiplier ?? 1;
+
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef);
       if (!freshBookingDoc.exists) {
@@ -10223,9 +10250,19 @@ export async function handleCheckoutBooking(req: any, res: any) {
       const collectedTotal = folioSnapshot.collectedTotal;
       const checkoutFolioTotal = folioSnapshot.folioTotal;
       checkedOutWithBalance = folioSnapshot.computedBalance;
-      eligiblePoints = memberId
+      // Per Phase 2 (2026-10-12): the base `eligiblePoints` is
+      // multiplied by the member's CURRENT tier (read pre-
+      // transaction from `rewardsConfig.levels[]` + member's
+      // pre-checkout `completedStays`). The multiplied value is
+      // what gets credited (or stored as `pendingLoyaltyPoints`
+      // if the guest has an outstanding balance). The multiplier
+      // is applied here once — the settled-credit branch at
+      // line 8109 reads `pendingLoyaltyPoints` as-is so no
+      // double-multiplication occurs.
+      const baseEligiblePoints = memberId
         ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
         : 0;
+      eligiblePoints = calculatePointsWithMultiplier(baseEligiblePoints, memberTierMultiplier);
 
       // UCO-02: require reason for unpaid checkout
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
@@ -10411,23 +10448,61 @@ export async function handleCheckoutBooking(req: any, res: any) {
         });
       }
 
-      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
-        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
-        transaction.update(memberRef, {
-          rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: now
-        });
+      if (canAwardPoints && memberId && memberRef && memberDocInTransaction?.exists) {
+        // Per Phase 2 (2026-10-12): atomic increment of the
+        // member's stay-completion counter + refresh of the
+        // `currentLevel` cache to the new tier (post-increment).
+        // Both writes share the same `transaction.update` so a
+        // transaction retry can't double-count or leave the
+        // cache out of sync. The tier is re-derived using the
+        // post-increment `completedStays` so the cached snapshot
+        // reflects what the next booking will see.
+        //
+        // The increment runs on BOTH paths (immediate credit
+        // AND pending-payment deferral) — the stay IS completed
+        // either way, and the tier progress should be visible
+        // to the member immediately even if the points lag
+        // behind. The settle-payment branch (line 8109+) only
+        // touches `rewardsPoints` + writes the `pointsHistory`
+        // entry; it does NOT touch `completedStays` or
+        // `currentLevel` so no double-increment.
+        const priorCompletedStays = Number(memberDocInTransaction.data()?.completedStays || 0);
+        const nextCompletedStays = priorCompletedStays + 1;
+        const nextCurrentLevel = resolveCurrentLevel(rewardsConfig?.levels, nextCompletedStays);
 
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
-        transaction.set(historyRef, {
-          type: "earn",
-          points: pointsAwarded,
-          bookingId,
-          bookingRef: bookingData.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
-          by: checkedOutBy,
-          createdAt: new Date()
-        });
+        if (awardNow) {
+          // Immediate-credit path: increment rewardsPoints +
+          // write the pointsHistory entry.
+          const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: new Date()
+          });
+        } else {
+          // Deferred-credit path (guest has an outstanding
+          // balance): only bump the stay counter + refresh the
+          // tier cache. The `pendingLoyaltyPoints` snapshot on
+          // the booking + the settle-payment branch handle the
+          // actual credit when the balance clears.
+          transaction.update(memberRef, {
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+        }
       }
     });
 

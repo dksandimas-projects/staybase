@@ -3,7 +3,15 @@ import {
   BOOKING_REF_REGEX,
   RESERVATION_REF_REGEX,
   generateMemberNumber,
-  validatePointsRedemption
+  validatePointsRedemption,
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+  // decision pending): `resolveCurrentLevel` is the canonical
+  // tier-derivation helper — used here at member registration to
+  // snapshot the base tier (fromStays=0) onto the new member's
+  // `currentLevel` cache field. Defensive on missing/empty
+  // `rewardsConfig.levels[]` (returns null — pre-Phase-2
+  // deployments keep working unchanged).
+  resolveCurrentLevel
 } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 import { adminAuth, adminDb } from "../lib/firebase-admin";
@@ -281,6 +289,26 @@ export async function handleRegisterMember(req: any, res: any) {
       const fullName = parsed.data.fullName || authUser.name || email.split("@")[0];
       const photoUrl = parsed.data.photoUrl || authUser.picture || "";
 
+      // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+      // decision pending): new members start at `completedStays: 0`
+      // and the base tier (the level with `fromStays === 0`) — or
+      // `null` when no tiers are configured. Both fields are
+      // optional on the schema (back-compat) — initializing them
+      // here means the member portal doesn't need to special-case
+      // "this member hasn't been snapshotted yet" on every read.
+      //
+      // The `rewardsConfig` read happens pre-transaction
+      // (consistent with the checkout handler pattern). The
+      // `resolveCurrentLevel` helper is defensive (returns null
+      // for empty levels / non-finite stays) so pre-Phase-2
+      // deployments that haven't configured tiers yet just get
+      // `currentLevel: null` — the booking engine + member portal
+      // both fall back to the legacy global `memberDiscountPct`
+      // when `currentLevel` is null.
+      const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
+      const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
+      const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
+
       transaction.set(memberRef, {
         fullName,
         email,
@@ -291,6 +319,11 @@ export async function handleRegisterMember(req: any, res: any) {
         isMember: true,
         memberSince: now,
         rewardsPoints: existingMember?.rewardsPoints || 0,
+        // Per Phase 2 (2026-10-12): initialize the stay-counter
+        // + tier cache. Absent on legacy pre-Phase-2 docs — readers
+        // must coalesce missing values to 0 / null.
+        completedStays: Number(existingMember?.completedStays || 0),
+        currentLevel: existingMember?.currentLevel ?? baseCurrentLevel,
         tier: existingMember?.tier || "standard",
         isActive: existingMember?.isActive !== false,
         createdAt: existingMember?.createdAt || now,
