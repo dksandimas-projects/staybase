@@ -37,7 +37,13 @@ import {
   // across every product surface (Reports, admin drawer,
   // admin receipt PDF, guest live preview).
   isVatEnabled,
-  type VatConfig
+  type VatConfig,
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
+  // Zod schema + inferred types for the settings/rewardsConfig
+  // payload — used for client-side validation before save (the
+  // API also re-validates as defense-in-depth).
+  RewardsConfigSchema,
+  type LevelDef
 } from "@spark-inn/shared";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
@@ -2653,6 +2659,16 @@ export function SettingsPage() {
   const [pointsRedemptionRate, setPointsRedemptionRate] = useState(String(rewardsConfig.pointsRedemptionRate));
   const [memberDiscountEnabled, setMemberDiscountEnabled] = useState(rewardsConfig.memberDiscountEnabled);
   const [memberDiscountPct, setMemberDiscountPct] = useState(String(rewardsConfig.memberDiscountPct));
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
+  // six new scalars + the levels array. All read from
+  // `rewardsConfig` with safe defaults so a fresh deploy
+  // (or a pre-Phase-2 doc with the fields absent) renders
+  // identically to the legacy single-toggle UI.
+  const [welcomePoints, setWelcomePoints] = useState(String(rewardsConfig.welcomePoints ?? 0));
+  const [minPointsToRedeem, setMinPointsToRedeem] = useState(String(rewardsConfig.minPointsToRedeem ?? 0));
+  const [pointsCanPayUpToBillPct, setPointsCanPayUpToBillPct] = useState(String(rewardsConfig.pointsCanPayUpToBillPct ?? 100));
+  const [freeNightEvery, setFreeNightEvery] = useState(String(rewardsConfig.freeNightEvery ?? 0));
+  const [levels, setLevels] = useState<LevelDef[]>(Array.isArray(rewardsConfig.levels) ? rewardsConfig.levels : []);
 
   // 4. Breakfast Config states
   const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled);
@@ -2858,6 +2874,15 @@ export function SettingsPage() {
     // true when absent so pre-EC-02 deployments keep the perk
     // on until the admin explicitly turns it off.
     setEarlyCheckInEnabled(rewardsConfig.earlyCheckInEnabled !== false);
+    // Phase 2 rehydrate — match the initial-state defaults above
+    // (welcomePoints=0, minPointsToRedeem=0, pointsCanPayUpToBillPct=100,
+    // freeNightEvery=0, levels=[]) so the form never renders
+    // stale or undefined values when the snapshot updates mid-edit.
+    setWelcomePoints(String(rewardsConfig.welcomePoints ?? 0));
+    setMinPointsToRedeem(String(rewardsConfig.minPointsToRedeem ?? 0));
+    setPointsCanPayUpToBillPct(String(rewardsConfig.pointsCanPayUpToBillPct ?? 100));
+    setFreeNightEvery(String(rewardsConfig.freeNightEvery ?? 0));
+    setLevels(Array.isArray(rewardsConfig.levels) ? rewardsConfig.levels : []);
     setHomepageHeroEyebrow(websiteContent.homepage?.heroEyebrow || "");
     setHomepageHeroHeading(websiteContent.homepage?.heroHeading || "");
     setHomepageHeroSubtext(websiteContent.homepage?.heroSubtext || "");
@@ -3475,6 +3500,53 @@ export function SettingsPage() {
     }));
   };
 
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
+// helpers for the Levels table editor. The `+ Add a level`
+// button appends a sensible default tier (id from
+// `crypto.randomUUID()` or a timestamp fallback, name
+// "New tier", threshold one above the current max, 5% off,
+// 1× points, empty perks blurb). The row-delete handler is a
+// straight filter — the snap-down member migration that the
+// spec describes happens at Phase 3 (member-side counters)
+// and Phase 5 (free-night voucher), not in the UI handler.
+const handleAddLevel = () => {
+    setLevels((prev) => {
+      const maxFromStays = prev.length > 0 ? Math.max(...prev.map((l) => l.fromStays)) : 0;
+      const newLevel: LevelDef = {
+        id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `tier_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: "New tier",
+        fromStays: maxFromStays + 1,
+        discountPct: 5,
+        pointsMultiplier: 1,
+        perks: "",
+      };
+      return [...prev, newLevel];
+    });
+  };
+
+  const handleRemoveLevel = (id: string) => {
+    setLevels((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  const handleUpdateLevelField = (
+    id: string,
+    field: "name" | "fromStays" | "discountPct" | "pointsMultiplier" | "perks",
+    raw: string
+  ) => {
+    setLevels((prev) => prev.map((l) => {
+      if (l.id !== id) return l;
+      if (field === "name" || field === "perks") {
+        return { ...l, [field]: raw };
+      }
+      // Numeric fields — empty string becomes 0 (matches the
+      // sibling scalar inputs' `parseFloat(...) || 0` pattern).
+      const parsed = field === "pointsMultiplier" ? parseFloat(raw) : parseInt(raw, 10);
+      return { ...l, [field]: Number.isFinite(parsed) ? parsed : 0 };
+    }));
+  };
+
   const handleSaveRewards = async (e: React.FormEvent) => {
     e.preventDefault();
     // Per EC-02 (2026-08-21): the early-check-in toggle rides
@@ -3484,16 +3556,40 @@ export function SettingsPage() {
     // partial update. The flag defaults to true server-side
     // (via `rewardsConfig.earlyCheckInEnabled !== false`) so a
     // missing field on the legacy doc is treated as enabled.
-    await runSettingsSave("rewards", "Rewards settings saved", () => updateSettings("rewardsConfig", {
+    //
+    // Per Phase 2 (2026-10-12): the payload now also carries
+    // the six new scalars + the levels array. Client-side
+    // Zod validation runs first as a UX guard (the API also
+    // re-validates as defense-in-depth — Hard Rule #1).
+    const candidate = {
       pointsEnabled,
       earningMode,
       pointsPerBooking: parseFloat(pointsPerBooking) || 0,
       pointsPerHundred: parseFloat(pointsPerHundred) || 0,
-      pointsRedemptionRate: parseFloat(pointsRedemptionRate) || 0,
       memberDiscountEnabled,
       memberDiscountPct: parseFloat(memberDiscountPct) || 0,
-      earlyCheckInEnabled
-    }));
+      pointsRedemptionRate: parseFloat(pointsRedemptionRate) || 0,
+      earlyCheckInEnabled,
+      welcomePoints: parseInt(welcomePoints, 10) || 0,
+      minPointsToRedeem: parseInt(minPointsToRedeem, 10) || 0,
+      pointsCanPayUpToBillPct: parseFloat(pointsCanPayUpToBillPct) || 100,
+      freeNightEvery: parseInt(freeNightEvery, 10) || 0,
+      // Sort ascending by `fromStays` before save so the
+      // canonical Firestore shape matches the UI's display
+      // order — defends against an admin who edits values
+      // out of order (the resolveCurrentLevel helper is
+      // defensive too, but a sorted write is friendlier to
+      // anyone reading the doc raw).
+      levels: [...levels].sort((a, b) => a.fromStays - b.fromStays),
+    };
+    const validation = RewardsConfigSchema.safeParse(candidate);
+    if (!validation.success) {
+      const first = validation.error.issues[0];
+      const where = first.path.length > 0 ? first.path.join(".") : "settings";
+      toast.error(`Cannot save: ${where} — ${first.message}`);
+      return;
+    }
+    await runSettingsSave("rewards", "Rewards settings saved", () => updateSettings("rewardsConfig", validation.data));
   };
 
   const handleOpenPreview = async (action: string, label: string) => {
@@ -5333,15 +5429,22 @@ export function SettingsPage() {
             <form onSubmit={handleSaveRewards} className="space-y-6 text-xs">
               <div>
                 <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">{config.rewardsName} Modifiers</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5">Fine-tune loyalty point distributions, redemption rate, and member discount rules.</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Configure earning rate, redemption value, welcome bonus, redemption thresholds, and the member tier program.
+                </p>
               </div>
 
-              {/* Toggles */}
-              <div className="space-y-3.5 bg-gray-50 p-5 rounded-xl border border-gray-150">
+              {/* Master toggle — matches the screenshot's "Spark Rewards
+                  is on" line. When off, all guest-app surfaces hide and
+                  the booking-engine points earn step becomes a no-op
+                  (per the existing `pointsEnabled` branch in
+                  `guest-app/server/handlers/bookings.ts`). */}
+              <div className="rounded-xl border border-gray-150 bg-gray-50 p-4">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
                     onClick={() => setPointsEnabled(!pointsEnabled)}
+                    aria-label="Toggle Spark Rewards program"
                     className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
                       pointsEnabled ? "bg-primary" : "bg-gray-200"
                     }`}
@@ -5350,152 +5453,343 @@ export function SettingsPage() {
                       pointsEnabled ? "translate-x-5" : "translate-x-0"
                     }`} />
                   </button>
-                  Activate Loyalty Points Earning System
-                </label>
-
-                <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
-                  <button
-                    type="button"
-                    onClick={() => setMemberDiscountEnabled(!memberDiscountEnabled)}
-                    className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                      memberDiscountEnabled ? "bg-primary" : "bg-gray-200"
-                    }`}
-                  >
-                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                      memberDiscountEnabled ? "translate-x-5" : "translate-x-0"
-                    }`} />
-                  </button>
-                  Enable Member Base Room Discount
-                </label>
-
-                {/* Per EC-02 (2026-08-21): the early-check-in
-                    perk toggle. Sits alongside the existing
-                    points + member-discount toggles so the
-                    admin sees all loyalty perks in one block.
-                    The label copy spells out the side-effect
-                    (hides the guest button + rejects the API)
-                    so the admin understands the toggle's scope
-                    before flipping it. */}
-                <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
-                  <button
-                    type="button"
-                    onClick={() => setEarlyCheckInEnabled(!earlyCheckInEnabled)}
-                    aria-label="Toggle Spark Rewards early check-in requests"
-                    className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                      earlyCheckInEnabled ? "bg-primary" : "bg-gray-200"
-                    }`}
-                  >
-                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                      earlyCheckInEnabled ? "translate-x-5" : "translate-x-0"
-                    }`} />
-                  </button>
                   <span>
-                    Allow Spark Rewards Early Check-In Requests
-                    <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
-                      When off, the button disappears from the booking confirmation page and the server rejects new requests with 403. Pending + historical requests on existing bookings stay visible until resolved.
+                    {config.rewardsName} is on
+                    <span className="block mt-0.5 text-[10px] font-medium text-gray-500">
+                      Shown on the website, members can join and earn.
                     </span>
                   </span>
                 </label>
               </div>
 
-              {/* Earning Mode */}
-              <div className="space-y-3">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Earning Mode</h4>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
-                    earningMode === "per-spend"
-                      ? "border-primary bg-primary/5"
-                      : "border-gray-200 bg-white hover:border-gray-300"
-                  }`}>
-                    <input
-                      type="radio"
-                      name="earningMode"
-                      value="per-spend"
-                      checked={earningMode === "per-spend"}
-                      onChange={() => setEarningMode("per-spend")}
-                      disabled={!pointsEnabled}
-                      className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
-                    />
-                    <div>
-                      <p className="text-xs font-bold text-gray-800">Per ₱100 spent</p>
-                      <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards points based on booking subtotal. Best for properties with wide price ranges.</p>
-                    </div>
-                  </label>
-
-                  <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
-                    earningMode === "per-booking"
-                      ? "border-primary bg-primary/5"
-                      : "border-gray-200 bg-white hover:border-gray-300"
-                  }`}>
-                    <input
-                      type="radio"
-                      name="earningMode"
-                      value="per-booking"
-                      checked={earningMode === "per-booking"}
-                      onChange={() => setEarningMode("per-booking")}
-                      disabled={!pointsEnabled}
-                      className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
-                    />
-                    <div>
-                      <p className="text-xs font-bold text-gray-800">Flat per completed stay</p>
-                      <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards a fixed number of points per stay regardless of total. Simpler for members to predict.</p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
+              {/* Phase 2 scalar inputs — 6 in a 3-column grid
+                  (2 rows), matching the Settings → Rewards tab
+                  screenshot. The first two fields are RELABELED
+                  reciprocals of the existing per-spend inputs so
+                  the admin thinks in "1 point = N peso" terms
+                  (cleaner mental model). The underlying values
+                  stay the same — `pointsPerHundred` and
+                  `pointsRedemptionRate` — so no behavior change. */}
               <div className="grid gap-4 sm:grid-cols-3">
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  {earningMode === "per-booking" ? "Points per Completed Stay" : "Points Granted per ₱100 Spent"}
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  ₱ Spent for 1 Point
                   <input
                     type="number"
-                    required
-                    min="0"
-                    value={earningMode === "per-booking" ? pointsPerBooking : pointsPerHundred}
-                    onChange={(e) =>
-                      earningMode === "per-booking"
-                        ? setPointsPerBooking(e.target.value)
-                        : setPointsPerHundred(e.target.value)
-                    }
-                    disabled={!pointsEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Points per ₱1 Redemption Rate
-                  <input
-                    type="number"
-                    required
                     min="1"
-                    value={pointsRedemptionRate}
-                    onChange={(e) => setPointsRedemptionRate(e.target.value)}
+                    value={Math.max(1, Math.round(100 / (parseFloat(pointsPerHundred) || 10)))}
+                    onChange={(e) => {
+                      const php = Math.max(1, parseInt(e.target.value, 10) || 100);
+                      setPointsPerHundred(String(Math.max(1, Math.round(100 / php))));
+                    }}
                     disabled={!pointsEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </label>
-
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Member Discount Percentage (%)
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  1 Point is Worth ₱
                   <input
                     type="number"
-                    required
+                    min="0.01"
+                    step="0.01"
+                    value={(parseFloat(pointsRedemptionRate) || 100) / 100}
+                    onChange={(e) => {
+                      const val = Math.max(0.01, parseFloat(e.target.value) || 1);
+                      setPointsRedemptionRate(String(Math.max(1, Math.round(val * 100))));
+                    }}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Welcome Points
+                  <input
+                    type="number"
+                    min="0"
+                    value={welcomePoints}
+                    onChange={(e) => setWelcomePoints(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Use at Least (Points)
+                  <input
+                    type="number"
+                    min="0"
+                    value={minPointsToRedeem}
+                    onChange={(e) => setMinPointsToRedeem(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Points Can Pay Up To (% of Bill)
+                  <input
+                    type="number"
                     min="0"
                     max="100"
-                    value={memberDiscountPct}
-                    onChange={(e) => setMemberDiscountPct(e.target.value)}
-                    disabled={!memberDiscountEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    value={pointsCanPayUpToBillPct}
+                    onChange={(e) => setPointsCanPayUpToBillPct(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Free Night Every (Stays, 0 = Off)
+                  <input
+                    type="number"
+                    min="0"
+                    value={freeNightEvery}
+                    onChange={(e) => setFreeNightEvery(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </label>
               </div>
 
-              <p className="text-[10px] leading-relaxed text-gray-500">
-                Redemption rate is the number of points required to redeem ₱1 at booking checkout (server reads <code>settings/rewardsConfig.pointsRedemptionRate</code>).
-                Earning mode is the server-side branch in <code>handleCreateBooking</code> that decides whether to award by subtotal or by flat count.
-              </p>
+              {/* Levels table editor — matches the screenshot's
+                  5-column grid. Each row is a controllable LevelDef.
+                  The "+ Add a level" button appends a sensible
+                  default. The UI auto-sorts rows ascending by
+                  `fromStays` on render so the admin sees the
+                  canonical order even if they edited values out
+                  of sequence. (The save handler also re-sorts
+                  defensively before writing — see handleSaveRewards.) */}
+              <div className="space-y-3">
+                <div>
+                  <h4 className="text-sm font-heading text-gray-900">Levels</h4>
+                  <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
+                    Level depends on the number of completed stays as a member. The member discount is never added on top of a promo; the bigger one is used.
+                  </p>
+                </div>
 
-              <SaveActionFooter label="Save Rewards Matrix" status={getSaveStatus("rewards")} />
+                {/* Table header — only visible when there's at least
+                    one row to label (an empty array hides the whole
+                    table header to keep the empty state clean). */}
+                {levels.length > 0 && (
+                  <div className="hidden gap-2 sm:grid sm:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_2.2fr_auto] text-[10px] font-bold uppercase tracking-wider text-gray-500 px-1">
+                    <span>Level Name</span>
+                    <span>From Stays</span>
+                    <span>Discount %</span>
+                    <span>Points ×</span>
+                    <span>Perks</span>
+                    <span className="sr-only">Remove</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {[...levels]
+                    .sort((a, b) => a.fromStays - b.fromStays)
+                    .map((level) => (
+                      <div
+                        key={level.id}
+                        className="grid items-center gap-2 sm:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_2.2fr_auto]"
+                      >
+                        <input
+                          type="text"
+                          value={level.name}
+                          maxLength={24}
+                          onChange={(e) => handleUpdateLevelField(level.id, "name", e.target.value)}
+                          placeholder="Tier name"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Level name"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          value={level.fromStays}
+                          onChange={(e) => handleUpdateLevelField(level.id, "fromStays", e.target.value)}
+                          placeholder="0"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Stays required"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={level.discountPct}
+                          onChange={(e) => handleUpdateLevelField(level.id, "discountPct", e.target.value)}
+                          placeholder="0"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Discount percentage"
+                        />
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={level.pointsMultiplier}
+                          onChange={(e) => handleUpdateLevelField(level.id, "pointsMultiplier", e.target.value)}
+                          placeholder="1"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Points multiplier"
+                        />
+                        <input
+                          type="text"
+                          value={level.perks}
+                          maxLength={280}
+                          onChange={(e) => handleUpdateLevelField(level.id, "perks", e.target.value)}
+                          placeholder="Member-facing perks blurb (≤ 280 chars)"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                          aria-label="Perks"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLevel(level.id)}
+                          aria-label={`Remove ${level.name} tier`}
+                          className="flex h-10 w-10 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 transition hover:bg-red-50 active:scale-95"
+                        >
+                          <X size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddLevel}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-primary bg-primary/5 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-primary transition hover:bg-primary/10 active:scale-95"
+                >
+                  <Plus size={14} aria-hidden="true" />
+                  Add a Level
+                </button>
+
+                {levels.length === 0 && (
+                  <p className="text-[11px] leading-relaxed text-gray-500">
+                    No tiers configured. The booking engine falls back to the legacy member discount percentage below for tier-less members.
+                  </p>
+                )}
+              </div>
+
+              {/* Advanced / legacy controls — the per-booking /
+                  per-spend branch + the EC-02 early check-in toggle
+                  + the legacy member-discount toggle + the global
+                  `memberDiscountPct` fallback. Kept accessible so
+                  no existing functionality regresses; the primary
+                  tier-editing surface is the Levels table above. */}
+              <details className="rounded-xl border border-gray-150 bg-gray-50 p-4">
+                <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-gray-700">
+                  Advanced / legacy controls
+                </summary>
+                <div className="mt-4 space-y-5">
+
+                  <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => setMemberDiscountEnabled(!memberDiscountEnabled)}
+                      aria-label="Toggle global member discount"
+                      className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                        memberDiscountEnabled ? "bg-primary" : "bg-gray-200"
+                      }`}
+                    >
+                      <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                        memberDiscountEnabled ? "translate-x-5" : "translate-x-0"
+                      }`} />
+                    </button>
+                    <span>
+                      Enable Global Member Discount Fallback
+                      <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
+                        When on, the Member Discount % below applies to tier-less members. When your Levels table has a 0-stay base tier, that tier's discount takes precedence and this fallback is dormant.
+                      </span>
+                    </span>
+                  </label>
+
+                  <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => setEarlyCheckInEnabled(!earlyCheckInEnabled)}
+                      aria-label="Toggle Spark Rewards early check-in requests"
+                      className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                        earlyCheckInEnabled ? "bg-primary" : "bg-gray-200"
+                      }`}
+                    >
+                      <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                        earlyCheckInEnabled ? "translate-x-5" : "translate-x-0"
+                      }`} />
+                    </button>
+                    <span>
+                      Allow Spark Rewards Early Check-In Requests
+                      <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
+                        When off, the button disappears from the booking confirmation page and the server rejects new requests with 403. Pending + historical requests on existing bookings stay visible until resolved.
+                      </span>
+                    </span>
+                  </label>
+
+                  <div className="space-y-3">
+                    <h5 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Earning Mode</h5>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
+                        earningMode === "per-spend"
+                          ? "border-primary bg-primary/5"
+                          : "border-gray-200 bg-white hover:border-gray-300"
+                      }`}>
+                        <input
+                          type="radio"
+                          name="earningMode"
+                          value="per-spend"
+                          checked={earningMode === "per-spend"}
+                          onChange={() => setEarningMode("per-spend")}
+                          disabled={!pointsEnabled}
+                          className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-gray-800">Per ₱100 spent</p>
+                          <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards points based on booking subtotal. Best for properties with wide price ranges.</p>
+                        </div>
+                      </label>
+                      <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
+                        earningMode === "per-booking"
+                          ? "border-primary bg-primary/5"
+                          : "border-gray-200 bg-white hover:border-gray-300"
+                      }`}>
+                        <input
+                          type="radio"
+                          name="earningMode"
+                          value="per-booking"
+                          checked={earningMode === "per-booking"}
+                          onChange={() => setEarningMode("per-booking")}
+                          disabled={!pointsEnabled}
+                          className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-gray-800">Flat per completed stay</p>
+                          <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards a fixed number of points per stay regardless of total. Simpler for members to predict.</p>
+                        </div>
+                      </label>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        {earningMode === "per-booking" ? "Points per Completed Stay" : "Points Granted per ₱100 Spent"}
+                        <input
+                          type="number"
+                          min="0"
+                          value={earningMode === "per-booking" ? pointsPerBooking : pointsPerHundred}
+                          onChange={(e) =>
+                            earningMode === "per-booking"
+                              ? setPointsPerBooking(e.target.value)
+                              : setPointsPerHundred(e.target.value)
+                          }
+                          disabled={!pointsEnabled}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Member Discount Percentage (%)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={memberDiscountPct}
+                          onChange={(e) => setMemberDiscountPct(e.target.value)}
+                          disabled={!memberDiscountEnabled}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <SaveActionFooter label="Save Settings" status={getSaveStatus("rewards")} />
             </form>
             ) : (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
