@@ -308,7 +308,8 @@ export async function handleConsumeInFlowHold(
 // `status`, not a UX-critical path). This handler is
 // the dedicated sweep:
 //
-//   1. Query `bookingHolds` for `status == "active"` + `expiresAt < now`.
+//   1. Query `bookingHolds` and `staffInventoryHolds` for
+//      `status == "active"` + `expiresAt < now`.
 //   2. Mark each match `"expired"` (no delete — the
 //      audit trail is more useful when the doc is
 //      preserved with a tombstone status).
@@ -331,11 +332,10 @@ export async function handleConsumeInFlowHold(
 // hours before this sweep runs. The read-time
 // evaluation already reports it as `"expired"` to the
 // banner — the sweep is purely an on-disk cleanup so
-// future reports + the `bookingHolds` collection size
-// stay bounded. The daily cadence is acceptable for
-// the soft-UX-signal use case; a hard inventory lock
-// would need a sub-daily sweep (Pro plan required) or
-// a different cleanup strategy.
+// future reports and active query sets stay bounded.
+// Staff inventory holds are hard locks, but every
+// availability/conflict read ignores them after
+// `expiresAt`, so safety never depends on cron cadence.
 
 const SWEEP_BATCH_SIZE = 200;
 
@@ -388,45 +388,41 @@ export async function handleSweepInFlowHolds(
     // authoritative gate — a hold may have been
     // consumed by a booking between the coarse query
     // and the per-doc write.
-    const expiredSnapshot = await adminDb
-      .collection(HOLDS_COLLECTION)
-      .where("status", "==", "active")
-      .where("expiresAt", "<", Timestamp.fromDate(now))
-      .orderBy("expiresAt", "asc")
-      .limit(SWEEP_BATCH_SIZE)
-      .get();
+    for (const collectionName of [HOLDS_COLLECTION, "staffInventoryHolds"]) {
+      const expiredSnapshot = await adminDb
+        .collection(collectionName)
+        .where("status", "==", "active")
+        .where("expiresAt", "<", Timestamp.fromDate(now))
+        .orderBy("expiresAt", "asc")
+        .limit(SWEEP_BATCH_SIZE)
+        .get();
 
-    scanned = expiredSnapshot.size;
+      scanned += expiredSnapshot.size;
 
-    for (const doc of expiredSnapshot.docs) {
-      try {
-        await adminDb.runTransaction(async (transaction) => {
-          const freshDoc = await transaction.get(doc.ref);
-          if (!freshDoc.exists) return;
-          const freshData = freshDoc.data() ?? {};
-          // Recheck eligibility — a booking
-          // transaction may have consumed this hold
-          // between the coarse query and the per-doc
-          // write.
-          if (freshData.status === "consumed") return;
-          if (freshData.status === "expired") return;
-          const expiresAt = toIsoOrNull(freshData.expiresAt);
-          if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
-            return;
-          }
-          transaction.update(doc.ref, {
-            status: "expired",
-            updatedAt: Timestamp.fromDate(now)
+      for (const doc of expiredSnapshot.docs) {
+        try {
+          await adminDb.runTransaction(async (transaction) => {
+            const freshDoc = await transaction.get(doc.ref);
+            if (!freshDoc.exists) return;
+            const freshData = freshDoc.data() ?? {};
+            // Recheck eligibility — a booking transaction may have
+            // consumed this hold between the query and the write.
+            if (freshData.status === "consumed") return;
+            if (freshData.status === "expired") return;
+            const expiresAt = toIsoOrNull(freshData.expiresAt);
+            if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
+              return;
+            }
+            transaction.update(doc.ref, {
+              status: "expired",
+              updatedAt: Timestamp.fromDate(now)
+            });
           });
-        });
-        swept += 1;
-      } catch (err) {
-        // A single bad doc must not stop the
-        // sweep. Log + continue.
-        console.error(
-          `In-flow hold sweep failed for ${doc.id}:`,
-          err
-        );
+          swept += 1;
+        } catch (err) {
+          // A single bad doc must not stop the sweep.
+          console.error(`Hold sweep failed for ${collectionName}/${doc.id}:`, err);
+        }
       }
     }
 

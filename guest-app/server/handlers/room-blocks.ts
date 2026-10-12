@@ -2,6 +2,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { adminDb } from "../lib/firebase-admin";
 import { toDateOrNull, BOOKING_OCCUPYING_STATUSES, isBookingOccupyingRoom } from "@spark-inn/shared";
+import { hasActiveStaffInventoryHoldConflict } from "./staff-inventory-holds";
 
 // Per PEX-02 (2026-08-01, per decision #147): the room-blocks
 // check uses the shared occupancy rule on top of the coarse
@@ -29,6 +30,14 @@ const updateBlockSchema = blockSchema.extend({
 const cancelBlockSchema = z.object({
   blockId: z.string().trim().min(1).max(80)
 });
+
+const bulkBlockSchema = z.object({
+  roomIds: z.array(z.string().trim().min(1).max(80)).min(1).max(50),
+  startDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().trim().min(1).max(120),
+  notes: z.string().trim().max(500).optional().default("")
+}).strict();
 
 function parseStayRange(startDate: string, endDate: string) {
   const start = new Date(`${startDate}T00:00:00Z`);
@@ -83,6 +92,68 @@ async function assertRoomIsFreeForBlock(
   });
   if (blockConflict) {
     throw new Error("These dates already overlap another active block.");
+  }
+
+  if (await hasActiveStaffInventoryHoldConflict(transaction, roomId, start, end)) {
+    throw new Error("These dates are temporarily held for a front-desk booking.");
+  }
+}
+
+export async function handleCreateBulkRoomBlocks(req: any, res: any) {
+  const parsed = bulkBlockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Please choose rooms, valid dates, and a reason." });
+  }
+  const roomIds = Array.from(new Set(parsed.data.roomIds));
+  if (roomIds.length !== parsed.data.roomIds.length) {
+    return res.status(400).json({ success: false, error: "Each room can only be selected once." });
+  }
+
+  try {
+    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
+    const batchId = adminDb.collection("roomBlockBatches").doc().id;
+    const blockIds: string[] = [];
+
+    await adminDb.runTransaction(async (transaction) => {
+      const resolvedRooms: Array<{ id: string; data: any }> = [];
+      for (const roomId of roomIds) {
+        const roomDoc = await transaction.get(adminDb.collection("rooms").doc(roomId));
+        if (!roomDoc.exists) throw new Error("One of the selected rooms was not found.");
+        const room = roomDoc.data() || {};
+        if (room.isActive === false) throw new Error(`Room ${room.roomNumber || roomId} is inactive.`);
+        resolvedRooms.push({ id: roomId, data: room });
+      }
+
+      for (const room of resolvedRooms) {
+        await assertRoomIsFreeForBlock(transaction, room.id, start, end);
+      }
+
+      const now = new Date();
+      for (const room of resolvedRooms) {
+        const blockRef = adminDb.collection("roomBlocks").doc();
+        blockIds.push(blockRef.id);
+        transaction.set(blockRef, {
+          batchId,
+          roomId: room.id,
+          roomNumber: String(room.data.roomNumber || ""),
+          roomType: String(room.data.type || ""),
+          startDate: Timestamp.fromDate(start),
+          endDate: Timestamp.fromDate(end),
+          reason: parsed.data.reason,
+          notes: parsed.data.notes || "",
+          status: "active",
+          createdBy: req.staff?.uid || req.staff?.email || "staff",
+          createdAt: now,
+          updatedAt: now,
+          cancelledAt: null,
+          cancelledBy: null
+        });
+      }
+    });
+
+    return res.status(200).json({ success: true, batchId, blockIds });
+  } catch (error: any) {
+    return res.status(409).json({ success: false, error: error.message || "Failed to block dates." });
   }
 }
 

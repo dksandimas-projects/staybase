@@ -7,6 +7,7 @@ import { hashToken } from "./test-runs";
 // See `server/handlers/in-flow-hold.ts` for the full
 // lifecycle + the start / read public endpoints.
 import { handleConsumeInFlowHold } from "./in-flow-hold";
+import { hasActiveStaffInventoryHoldConflict, isActiveStaffInventoryHold } from "./staff-inventory-holds";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger, buildReservationEmailView } from "./email";
 import { writeNotification } from "../lib/notifications";
@@ -900,18 +901,27 @@ async function hasActiveRoomBlockConflict(
   transaction: FirebaseFirestore.Transaction,
   roomId: string,
   checkInDate: Date,
-  checkOutDate: Date
+  checkOutDate: Date,
+  allowedStaffHoldId?: string
 ) {
   const blocksQuery = adminDb.collection("roomBlocks")
     .where("roomId", "==", roomId)
     .where("status", "==", "active");
   const blocksSnapshot = await transaction.get(blocksQuery);
-  return blocksSnapshot.docs.some((doc) => {
+  const hasRoomBlock = blocksSnapshot.docs.some((doc) => {
     const data = doc.data();
     const start = toDateOrNull(data.startDate);
     const end = toDateOrNull(data.endDate);
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
+  if (hasRoomBlock) return true;
+  return hasActiveStaffInventoryHoldConflict(
+    transaction,
+    roomId,
+    checkInDate,
+    checkOutDate,
+    allowedStaffHoldId
+  );
 }
 
 // Per BF-21 (booking-flow audit 2026-06-26): the public
@@ -4000,7 +4010,8 @@ export async function handleCreateWalkin(req: any, res: any) {
     // the same pattern as the public `/api/bookings/create`
     // path. When present, the server uses it as the
     // canonical idempotency key for the create transaction.
-    reservationId: requestedReservationId
+    reservationId: requestedReservationId,
+    staffHoldId: requestedStaffHoldId
   } = parsedWalkin.data;
 
   // Per MRB-07 (2026-08-02, per decision #159): resolve the canonical
@@ -4219,6 +4230,33 @@ export async function handleCreateWalkin(req: any, res: any) {
       // confirmation email) keeps reading the first room.
       const roomRef = walkinAssignedRooms[0].ref;
       const roomData = walkinAssignedRooms[0].data;
+      let staffHoldRef: FirebaseFirestore.DocumentReference | null = null;
+      if (requestedStaffHoldId) {
+        staffHoldRef = adminDb.collection("staffInventoryHolds").doc(requestedStaffHoldId);
+        const staffHoldSnap = await transaction.get(staffHoldRef);
+        if (!staffHoldSnap.exists) throw new Error("Front-desk room hold was not found.");
+        const staffHold = staffHoldSnap.data() || {};
+        if (String(staffHold.createdBy || "") !== String(req.staff?.uid || "")) {
+          throw new Error("This front-desk room hold belongs to another staff member.");
+        }
+        const consumedBySameReservation = staffHold.status === "consumed"
+          && String(staffHold.reservationId || "") === effectiveReservationId;
+        if (!isActiveStaffInventoryHold(staffHold) && !consumedBySameReservation) {
+          throw new Error("Front-desk room hold has expired. Return to the calendar and hold the rooms again.");
+        }
+        const heldStart = toDateOrNull(staffHold.startDate);
+        const heldEnd = toDateOrNull(staffHold.endDate);
+        if (!heldStart || !heldEnd || heldStart.getTime() !== checkInDate.getTime() || heldEnd.getTime() !== checkOutDate.getTime()) {
+          throw new Error("Booking dates no longer match the front-desk room hold.");
+        }
+        const heldRoomIds = Array.isArray(staffHold.roomIds)
+          ? staffHold.roomIds.map(String).sort()
+          : [];
+        const requestedRoomIds = walkinAssignedRooms.map((room) => room.roomId).sort();
+        if (heldRoomIds.length !== requestedRoomIds.length || heldRoomIds.some((id, index) => id !== requestedRoomIds[index])) {
+          throw new Error("Selected rooms no longer match the front-desk room hold.");
+        }
+      }
       // 2. Per MRB-02.x (2026-08-02, per decision #164):
       // the reservation-level idempotency check runs
       // after the room read (so the fingerprint has the
@@ -4492,7 +4530,13 @@ export async function handleCreateWalkin(req: any, res: any) {
         if (sawConflict) {
           throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, assigned.roomId, checkInDate, checkOutDate);
+        const hasBlockConflict = await hasActiveRoomBlockConflict(
+          transaction,
+          assigned.roomId,
+          checkInDate,
+          checkOutDate,
+          requestedStaffHoldId
+        );
         if (hasBlockConflict) {
           throw new Error("Room no longer available");
         }
@@ -5197,6 +5241,14 @@ export async function handleCreateWalkin(req: any, res: any) {
         transaction.set(counterRef, { count: walkinRoomCount });
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      if (staffHoldRef) {
+        transaction.update(staffHoldRef, {
+          status: "consumed",
+          consumedAt: now,
+          updatedAt: now,
+          reservationId: effectiveReservationId
+        });
+      }
       // Per MRB-07 (2026-08-02, per decision #159): write one
       // `bookings/{id}` doc per room stay. The first room uses the
       // client's preallocated `bookingId` (the historical contract);

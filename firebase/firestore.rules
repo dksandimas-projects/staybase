@@ -33,6 +33,11 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    match /staffInventoryHolds/{holdId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
     match /roomDeletionAudit/{auditId} {
       allow read: if isStaff();
       allow create: if isAdmin();

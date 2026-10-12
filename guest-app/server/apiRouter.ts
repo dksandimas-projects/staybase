@@ -4,7 +4,8 @@ import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
 import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
-import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
+import { handleCancelRoomBlock, handleCreateBulkRoomBlocks, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
+import { handleAcquireStaffInventoryHold, handleExtendStaffInventoryHold, handleReleaseStaffInventoryHold } from "./handlers/staff-inventory-holds";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
@@ -825,7 +826,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleAddRoomToReservation(req, res);
   }
 
-  if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
+  if (domain === "room-blocks" && ["create", "create-bulk", "update", "cancel"].includes(action) && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`room-blocks-${action}:${ip}`, 60, 60000)) {
       return res.status(429).json({ success: false, error: "Too many room block requests. Please try again in a minute." });
     }
@@ -837,8 +838,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
 
     if (action === "create") return await handleCreateRoomBlock(req, res);
+    if (action === "create-bulk") return await handleCreateBulkRoomBlocks(req, res);
     if (action === "update") return await handleUpdateRoomBlock(req, res);
     return await handleCancelRoomBlock(req, res);
+  }
+
+  if (domain === "staff-inventory-holds" && ["acquire", "extend", "release"].includes(action) && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staff-inventory-holds-${action}:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many room hold requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    if (action === "acquire") return await handleAcquireStaffInventoryHold(req, res);
+    if (action === "extend") return await handleExtendStaffInventoryHold(req, res);
+    return await handleReleaseStaffInventoryHold(req, res);
   }
 
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {

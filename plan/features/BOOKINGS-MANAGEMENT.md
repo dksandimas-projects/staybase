@@ -7,6 +7,19 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 
 ---
 
+## Calendar Bulk Selection & Hold-to-Book (CAL-01)
+
+The booking calendar supports one contiguous date range across one or more physical rooms. Staff can add rooms by clicking open cells or using the room-row checkboxes; the toolbar shows the room list, number of nights, and total room-nights.
+
+- **Block dates:** requires a reason and opens a confirmation modal listing every room, the date range, and room-night total. Confirm creates one active `roomBlocks` document per room in a single transaction with a shared `batchId`. Any booking, block, or staff-hold conflict aborts the whole batch.
+- **Hold & book:** opens the same summary confirmation before creating a 15-minute hard inventory hold. Public availability and every ordinary booking/block transaction treat an unexpired staff hold as unavailable.
+- **Booking handoff:** after acquisition, the existing New Booking modal opens with the held rooms and dates locked. Guest, occupancy, payment, and other reservation details remain editable. A countdown and Extend action stay visible.
+- **Terminal behavior:** successful creation consumes the hold in the same transaction as the multi-room reservation. Cancelling the modal releases it. Expired holds are ignored immediately at read time even before the daily cleanup sweep updates their stored status.
+
+The confirmation and hold are group-scoped: the operation is all-or-nothing and never leaves a partially blocked or partially booked room set.
+
+---
+
 ## Workspace Layout & BDUX Contract
 
 The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
