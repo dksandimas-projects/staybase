@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -198,6 +198,12 @@ export function ReportsPage() {
     members,
     staff,
     corporateInquiries,
+    // Per VAT-01 (2026-10-12): the VAT Breakdown section +
+    // XLSX VAT block + per-booking VAT columns all gate on
+    // `isVatEnabled(hotelConfig.vatConfig)`. When the toggle
+    // is off, the entire breakdown + the per-booking VAT
+    // columns disappear (the operator's bill stays as-is).
+    hotelConfig,
     // Per RPT-07 (2026-08-19): the AdminContext
     // `subscribeToReservations` listener (per MRB-12) is the
     // canonical source for reservation headers — its
@@ -1026,6 +1032,15 @@ export function ReportsPage() {
   // + discountPct, so a narrow senior scope flows through
   // correctly: the exempt portion is exactly the senior's scoped
   // share, no more.
+  //
+  // Per VAT-01 (2026-10-12): when the admin toggle is OFF,
+  // `getEffectiveVatRate` returns 0 and the per-booking
+  // helper collapses `vatExclusiveSales` to the bill total
+  // and `vatAmount` to 0 — the rendering + XLSX sites still
+  // gate on `isVatEnabled(hotelConfig.vatConfig)` to hide
+  // the entire block. The math stays consistent so the
+  // toggled-off path can't accidentally show stale VAT.
+  const vatEffectiveRate = getEffectiveVatRate(hotelConfig.vatConfig);
   const vatSummary = useMemo(() => {
     let vatExclusiveSales = 0;
     let vatExemptSales = 0;
@@ -1050,7 +1065,8 @@ export function ReportsPage() {
 
       const { vatExclusiveSales: vxs, vatExemptSales: ves, vatAmount: va } = calculateVatBreakdown({
         totalPrice: b.totalPrice,
-        seniorDiscountAmount: seniorDiscount
+        seniorDiscountAmount: seniorDiscount,
+        vatRate: vatEffectiveRate
       });
       vatExclusiveSales += vxs;
       vatExemptSales += ves;
@@ -1059,13 +1075,21 @@ export function ReportsPage() {
     });
 
     return {
-      vatRate: 0.12,
+      vatRate: vatEffectiveRate,
       vatExclusiveSales,
       vatExemptSales,
       vatAmount,
       seniorBookingsCount
     };
-  }, [rangeBookings]);
+  }, [rangeBookings, vatEffectiveRate]);
+
+  // Per VAT-01 (2026-10-12): single boolean consulted by
+  // every Reports VAT surface (the on-screen breakdown
+  // section, the XLSX Summary-sheet block, the XLSX
+  // per-booking columns). Centralized here so a future
+  // schema change (e.g. adding a `rate` field) is a
+  // one-line update.
+  const vatEnabled = isVatEnabled(hotelConfig.vatConfig);
 
   const loyaltyLiability = useMemo(() => {
     const totalPoints = members.reduce((sum, m) => sum + (m.rewardsPoints || 0), 0);
@@ -1846,10 +1870,24 @@ export function ReportsPage() {
       // VAT-Exempt figure is the senior/PWD discount portion
       // (RA 9994) summed across the range; the rest of the
       // bill is VATable at 12%.
-      ["VAT Breakdown (12% Philippine standard)", `Value (${config.currencySymbol})`],
-      ["VATable Sales (VAT-exclusive)", vatSummary.vatExclusiveSales],
-      ["VAT-Exempt Sales (RA 9994 Senior/PWD)", vatSummary.vatExemptSales],
-      ["VAT Amount (12% × VATable)", vatSummary.vatAmount],
+      //
+      // Per VAT-01 (2026-10-12): when the admin Tax (VAT) toggle is
+      // OFF, the Summary sheet omits the entire VAT breakdown block.
+      // The operator's published rate is the guest's net amount;
+      // reporting a zero VAT block would mislead the accountant.
+      ...(vatEnabled
+        ? [
+            ["VAT Breakdown (12% Philippine standard)", `Value (${config.currencySymbol})`],
+            ["VATable Sales (VAT-exclusive)", vatSummary.vatExclusiveSales],
+            ["VAT-Exempt Sales (RA 9994 Senior/PWD)", vatSummary.vatExemptSales],
+            ["VAT Amount (12% × VATable)", vatSummary.vatAmount]
+          ]
+        : [
+            // Empty placeholder row keeps the Summary sheet's
+            // "Discounts & Adjustments → Loyalty" section flow
+            // intact without leaving a dangling empty block.
+            ["VAT Breakdown (disabled — see Settings → Discounts → Tax (VAT))", "—"]
+          ]),
       [],
       ["Loyalty Program Liability", "Metric / Value"],
       ["Total Outstanding Points", loyaltyLiability.totalPoints],
@@ -1860,6 +1898,19 @@ export function ReportsPage() {
     ];
 
     const currSymbol = config.currencySymbol;
+    // Per VAT-01 (2026-10-12): the per-booking VAT columns are
+    // appended conditionally. When the admin toggle is OFF,
+    // the columns disappear from the XLSX Bookings sheet —
+    // the per-booking split is what the accountant uses to
+    // reconcile monthly figures, and emitting zero rows when
+    // VAT is disabled would just bloat the sheet.
+    const vatColumnHeaders = vatEnabled
+      ? [
+          `VATable Sales (VAT-exclusive) (${currSymbol})`,
+          `VAT-Exempt Sales (${currSymbol})`,
+          `VAT Amount 12% (${currSymbol})`
+        ]
+      : [];
     const bookingsHeaders = [
       "Booking Ref", "Guest Name", "Room Number", "Check-In", "Check-Out", "Nights",
       "Guests", "Adults", "Children", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
@@ -1872,7 +1923,7 @@ export function ReportsPage() {
       // Same numbers as the on-screen VAT Breakdown section;
       // the per-booking split is what the accountant needs to
       // reconcile monthly figures back to individual receipts.
-      `VATable Sales (VAT-exclusive) (${currSymbol})`, `VAT-Exempt Sales (${currSymbol})`, `VAT Amount 12% (${currSymbol})`,
+      ...vatColumnHeaders,
       `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference (latest ledger entry)", "Source", "Status"
     ];
     const bookingsRows = filteredBookings.map(b => {
@@ -1919,10 +1970,21 @@ export function ReportsPage() {
       // VAT-exempt portion under RA 9994) and the bill
       // (totalPrice, VAT-inclusive); returns the three VAT
       // numbers the BIR form needs.
+      //
+      // Per VAT-01 (2026-10-12): `vatEffectiveRate` is the
+      // admin's effective rate (0.12 when ON, 0 when OFF) so
+      // the per-booking values stay consistent with the
+      // on-screen section + the Summary sheet block. When the
+      // toggle is OFF, the row omits the three values entirely
+      // (see `vatEnabled` check below) — the helper still
+      // computes the numbers so the column-count math stays
+      // trivial.
       const { vatExclusiveSales, vatExemptSales, vatAmount } = calculateVatBreakdown({
         totalPrice: b.totalPrice,
-        seniorDiscountAmount: seniorDiscount
+        seniorDiscountAmount: seniorDiscount,
+        vatRate: vatEffectiveRate
       });
+      const vatValues = vatEnabled ? [vatExclusiveSales, vatExemptSales, vatAmount] : [];
 
       const collected = payments.filter(p => p.bookingId === b.id).reduce((sum, p) => sum + p.amount, 0);
       const bookingCharges = charges.filter((c) => c.bookingId === b.id).reduce((sum, c) => sum + c.amount, 0);
@@ -1941,7 +2003,7 @@ export function ReportsPage() {
         b.discountType || "None", discountPct, seniorDiscount,
         b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
         subtotal, b.totalPrice,
-        vatExclusiveSales, vatExemptSales, vatAmount,
+        ...vatValues,
         collected, outstanding,
         PAYMENT_LABELS[b.paymentMethod] || b.paymentMethod,
         getLatestPaymentReference(b) || "",
@@ -2443,6 +2505,12 @@ export function ReportsPage() {
           vatSummary={vatSummary}
           loyaltyLiability={loyaltyLiability}
           rewardsConfig={rewardsConfig}
+          // Per VAT-01 (2026-10-12): the Tax (VAT) toggle
+          // plumbed through to the Sales sub-component so
+          // the on-screen VAT Breakdown section + the
+          // disabled-state callout gate on the same
+          // boolean the XLSX + per-booking columns use.
+          vatEnabled={vatEnabled}
           staffNameMap={staffNameMap}
         />
       )}
@@ -2859,6 +2927,13 @@ function SalesTab(props: {
     liability: number;
   };
   rewardsConfig?: any;
+  // Per VAT-01 (2026-10-12): the admin Tax (VAT) toggle
+  // plumbed through from `ReportsPage` (which already
+  // computes `vatEnabled` from `hotelConfig.vatConfig`).
+  // The Sales tab renders both the on-screen VAT Breakdown
+  // section + the disabled-state callout — the gate is
+  // applied inside this sub-component's JSX.
+  vatEnabled: boolean;
   // Per RPT-03 (2026-08-07): the Sales bookings table now
   // resolves the staff display name via the same map the
   // Daily Close ledger uses, so staff show up as their
@@ -2882,6 +2957,7 @@ function SalesTab(props: {
     toDate, chartColors, isMobile,
     discountsSummary, vatSummary, loyaltyLiability,
     rewardsConfig,
+    vatEnabled,
     staffNameMap
   } = props;
 
@@ -3249,7 +3325,11 @@ function SalesTab(props: {
         </div>
       </section>
 
-      {/* Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT breakdown for the selected date range. */}
+      {/* Per DSC-06 (2026-08-01, per decision 115 (the VAT spec)): the VAT breakdown for the selected date range.
+          Per VAT-01 (2026-10-12): gated on the admin Tax (VAT) toggle. When the hotel is below the BIR threshold
+          and the operator turns VAT off, the entire block disappears — the operator's published rate is the
+          guest's net amount and there is no VAT to reconcile. */}
+      {vatEnabled && (
       <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
         <div>
           <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">VAT Breakdown</h2>
@@ -3293,6 +3373,23 @@ function SalesTab(props: {
           included in the VATable base.
         </div>
       </section>
+      )}
+
+      {/* Per VAT-01 (2026-10-12): the hotel is below the BIR VAT-registration threshold. The
+          operator's published rate is the guest's net amount; no VAT is reported for this
+          range. The Sales / Refunds / Daily Close / Loyalty sections below still render
+          (none of them depend on VAT). */}
+      {!vatEnabled && (
+        <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">VAT Breakdown</h2>
+          <p className="mt-1 text-[10px] text-gray-500">
+            VAT breakdown is disabled for this property (Settings → Discounts → Tax (VAT) toggle).
+            The hotel is below the BIR VAT-registration threshold; no output VAT is reported for the
+            selected range. Turn the toggle on to restore the 12% reconciliation block + the XLSX VAT
+            columns.
+          </p>
+        </section>
+      )}
 
       {/* Charts Row */}
       <div className="grid gap-6 lg:grid-cols-2">

@@ -11,7 +11,14 @@ import {
   readCacheWithTtl,
   writeCache,
   subscribeToPublicSiteContentBust,
-  type ContentItem
+  type ContentItem,
+  // Per VAT-01 (2026-10-12): the guest `/book` live preview
+  // reads `vatConfig` from the hotel config to decide whether
+  // to render the 12% VAT sub-block. Surfaced here alongside
+  // the rest of the public hotelConfig read so the live
+  // preview is consistent with the admin drawer + Reports.
+  DEFAULT_VAT_CONFIG,
+  type VatConfig
 } from "@spark-inn/shared";
 import {
   homepageHeroImage,
@@ -146,6 +153,14 @@ export interface PublicSiteContent {
   // yet (the helper handles the fallback to "2:00 PM"
   // at the call site).
   hotelCheckInTime: string | null;
+  // Per VAT-01 (2026-10-12): the admin Tax (VAT) toggle,
+  // surfaced to the guest `/book` live preview. The
+  // `PriceBreakdown` component reads `isVatEnabled(vatConfig)`
+  // to decide whether to render the 12% VAT sub-block.
+  // Defaults to the BIR-compliant `{ enabled: true }` so
+  // legacy settings hydrate byte-equivalent (the same
+  // default every other VAT-01 surface uses).
+  vatConfig: VatConfig;
 }
 
 const FALLBACK_HERO_HEADING = "Your sanctuary in Bohol";
@@ -337,7 +352,12 @@ function buildFallback(): PublicSiteContent {
     // default the admin Settings → Hotel Info uses, so
     // the dropdown options never collapse to a single
     // entry before the Firestore snapshot lands.
-    hotelCheckInTime: "2:00 PM"
+    hotelCheckInTime: "2:00 PM",
+    // Per VAT-01 (2026-10-12): the live preview default
+    // for the VAT toggle is the BIR-compliant state. The
+    // `applyFirestoreData` merge below overrides this with
+    // the admin's actual setting once the snapshot lands.
+    vatConfig: { ...DEFAULT_VAT_CONFIG }
   };
 }
 
@@ -441,7 +461,15 @@ function buildEmptyState(): PublicSiteContent {
       heroSubtext: "",
       heroPhotoUrl: ""
     },
-    hotelCheckInTime: null
+    hotelCheckInTime: null,
+    // Per VAT-01 (2026-10-12): the empty-state default
+    // for the VAT toggle is the BIR-compliant state. The
+    // hook stays optimistic (default ON) so the live
+    // preview shows the 12% breakdown during the brief
+    // cold-load window before Firestore resolves — the
+    // hook never shows a guest "VAT is off" based on
+    // stale data.
+    vatConfig: { ...DEFAULT_VAT_CONFIG }
   };
 }
 
@@ -486,7 +514,16 @@ export function usePublicSiteContent(): PublicSiteContent {
       PUBLIC_SITE_CONTENT_CACHE_TTL_MS
     );
     if (cached) {
-      return { ...cached, loading: false };
+      // Per VAT-01 (2026-10-12): cached values from
+      // pre-VAT-01 visits won't have the `vatConfig`
+      // field. Backfill the BIR-compliant default so
+      // a stale cache (5-minute TTL) never crashes the
+      // live preview.
+      return {
+        ...cached,
+        loading: false,
+        vatConfig: cached.vatConfig ?? { ...DEFAULT_VAT_CONFIG }
+      };
     }
     return buildEmptyState();
   });
@@ -700,7 +737,22 @@ export function usePublicSiteContent(): PublicSiteContent {
         // back to the deploy-time `hotel.config.ts`
         // value when the Firestore override is empty
         // (same pattern as the contact section).
-        hotelCheckInTime: pickString(hc, "checkInTime", "2:00 PM")
+        hotelCheckInTime: pickString(hc, "checkInTime", "2:00 PM"),
+        // Per VAT-01 (2026-10-12): read the admin's
+        // Tax (VAT) toggle from `settings/hotelConfig`.
+        // Same defensive shape as the rest of the
+        // hotelConfig read: missing / malformed falls
+        // back to the BIR-compliant default. The
+        // `PriceBreakdown` component consults
+        // `isVatEnabled(vatConfig)` to decide whether
+        // to render the 12% sub-block.
+        vatConfig: (() => {
+          const raw = hc?.vatConfig;
+          if (raw && typeof raw === "object" && (raw as Record<string, unknown>).enabled === false) {
+            return { enabled: false };
+          }
+          return { ...DEFAULT_VAT_CONFIG };
+        })()
       };
 
       setContent(next);

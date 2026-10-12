@@ -29,7 +29,15 @@ import {
   type DiscountScope,
   type PaymentMethodConfig,
   type ProtectedPaymentMethod,
-  type RoomTypeEntry
+  type RoomTypeEntry,
+  // Per VAT-01 (2026-10-12): the admin toggle for the
+  // hotel's VAT-registration status. The Tax card on
+  // the Discounts tab mirrors the existing `isVatEnabled`
+  // helper so the toggle hides the 12% VAT breakdown
+  // across every product surface (Reports, admin drawer,
+  // admin receipt PDF, guest live preview).
+  isVatEnabled,
+  type VatConfig
 } from "@spark-inn/shared";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
@@ -62,7 +70,7 @@ import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
 type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "preferences" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
-type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts" | "holds";
+type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts" | "holds" | "vat";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface EmailTriggerCatalogItem {
@@ -2344,6 +2352,19 @@ export function SettingsPage() {
   // `AdminContext`.
   const [discountScope, setDiscountScope] = useState<DiscountScope>(hotelConfig.discountScope);
 
+  // Per VAT-01 (2026-10-12): the Tax card on the Discounts
+  // tab. The single boolean — `vatEnabled` — drives the
+  // `settings/hotelConfig.vatConfig.enabled` field; every
+  // product surface that renders the 12% VAT breakdown
+  // (Reports + XLSX, admin booking drawer, admin print-to-PDF
+  // receipt, guest `/book` live preview) consults
+  // `isVatEnabled(hotelConfig.vatConfig)` to decide whether
+  // to show the block. Default ON — BIR-compliant state —
+  // so existing hotels hydrate byte-equivalent. The owner's
+  // toggle is a one-click flip; the only other real-world
+  // state is "below the BIR threshold" (0%).
+  const [vatEnabled, setVatEnabled] = useState<boolean>(isVatEnabled(hotelConfig.vatConfig));
+
   // Per the IFH-01.3 (Settings UI editor) follow-up: the
   // Booking & Holds tab. Two number inputs (post-Confirm
   // hold window in hours + in-flow hold window in
@@ -2817,6 +2838,11 @@ export function SettingsPage() {
     // discount scope from the latest snapshot (already
     // normalized in AdminContext).
     setDiscountScope(hotelConfig.discountScope);
+
+    // Per VAT-01 (2026-10-12): sync the local toggle from the
+    // latest hotelConfig snapshot (already normalized to
+    // `{ enabled: boolean }` by AdminContext).
+    setVatEnabled(isVatEnabled(hotelConfig.vatConfig));
 
     // Safely format address: if it's a seeded object, convert to single-line string.
     let addrStr = "";
@@ -3411,6 +3437,20 @@ export function SettingsPage() {
     e.preventDefault();
     await runSettingsSave("discounts", "Discount scope saved", () => updateSettings("hotelConfig", {
       discountScope
+    }));
+  };
+
+  // Per VAT-01 (2026-10-12): save the Tax (VAT) toggle to
+  // `settings/hotelConfig.vatConfig.enabled`. The Settings tab
+  // is the only editor; the source of truth is the Firestore
+  // doc. Every product surface reads through the shared
+  // `isVatEnabled` helper so a future schema change (e.g.
+  // adding a `rate` field) is a one-line helper update, not
+  // a per-surface rewrite.
+  const handleSaveVat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runSettingsSave("vat", "Tax settings saved", () => updateSettings("hotelConfig", {
+      vatConfig: { enabled: vatEnabled }
     }));
   };
 
@@ -7847,6 +7887,92 @@ export function SettingsPage() {
                   statutorily bounded under RA 9994 / RA 10754 — the senior row is gated
                   to admins even when this surface is reached. Ask a hotel owner to make
                   discount-scope changes.
+                </p>
+              </div>
+            )
+          )}
+
+          {/* Per VAT-01 (2026-10-12): the Tax (VAT) card on the
+              Discounts tab. Single toggle: when ON (default,
+              BIR-compliant) the 12% VAT breakdown renders on
+              every product surface — Reports + XLSX, admin
+              booking drawer, admin print-to-PDF receipt, and
+              the guest `/book` live preview. When OFF, every
+              one of those sub-blocks is hidden entirely. The
+              toggle is intentionally a single boolean — the
+              only two real-world states are "VAT-registered"
+              (12%) and "below the BIR threshold" (0%).
+
+              Lives on the same Discounts tab as the discount-
+              scope editor because both controls touch the BIR-
+              reconcilable figures on the receipt. Admin-only —
+              the same RA 9994-style guardrail as the discount-
+              scope row. */}
+          {activeTab === "discounts" && (
+            isAdmin ? (
+              <form onSubmit={handleSaveVat} className="space-y-6 text-xs">
+                <div>
+                  <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Tax (VAT)</h3>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Turn the 12% VAT breakdown on or off across every surface. Leave ON for
+                    VAT-registered hotels. Turn OFF when the hotel is below the BIR
+                    VAT-registration threshold (currently ₱3M annual gross sales) — the
+                    guest bill stays the same; the breakdown lines are hidden everywhere.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                  <div className="p-5">
+                    <label className="flex items-start gap-3 cursor-pointer text-xs text-gray-700">
+                      <button
+                        type="button"
+                        onClick={() => setVatEnabled((prev) => !prev)}
+                        aria-label={vatEnabled ? "Turn VAT off" : "Turn VAT on"}
+                        aria-pressed={vatEnabled}
+                        data-testid="vat-toggle"
+                        className={`mt-0.5 h-6 w-11 shrink-0 rounded-full p-0.5 transition ${
+                          vatEnabled ? "bg-primary" : "bg-gray-200"
+                        }`}
+                      >
+                        <div
+                          className={`h-5 w-5 rounded-full bg-white shadow-sm transition transform ${
+                            vatEnabled ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                      <span className="flex-1">
+                        <span className="block font-bold text-gray-800">
+                          {vatEnabled ? "Show 12% VAT breakdown" : "Hide 12% VAT breakdown"}
+                        </span>
+                        <span className="block text-[10px] text-gray-500 mt-0.5 leading-relaxed">
+                          {vatEnabled
+                            ? "Every receipt, the booking drawer, Reports, the XLSX export, and the guest live preview show the VATable Sales / VAT-Exempt Sales / VAT Amount lines (12% Philippine standard)."
+                            : "VAT-exempt property. The receipt, booking drawer, Reports, XLSX export, and guest live preview omit the breakdown entirely. The bill total is unchanged."}
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-blue-900 text-[11px] leading-relaxed">
+                  <p className="font-bold">BIR notes</p>
+                  <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                    <li>Philippine VAT-registration threshold: ₱3,000,000 annual gross sales (BIR Form 1903/2551Q).</li>
+                    <li>When the toggle is ON, the system computes the VAT breakdown client-side (12% PH standard) on every surface that shows a bill.</li>
+                    <li>When the toggle is OFF, no VAT is added to the bill — the operator's published rate is the guest's net amount.</li>
+                    <li>This control only affects what the system shows. It does NOT register or de-register the hotel with the BIR — file Form 1903 / 1904 to change registration status.</li>
+                  </ul>
+                </div>
+
+                <SaveActionFooter label="Save Tax Settings" status={getSaveStatus("vat")} />
+              </form>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+                <p className="font-semibold">Admin-only section</p>
+                <p className="mt-1 leading-relaxed">
+                  The Tax (VAT) toggle is restricted to admin accounts. Changing the
+                  hotel's VAT-registration status is a BIR-facing decision — ask the
+                  hotel owner to make the change.
                 </p>
               </div>
             )
