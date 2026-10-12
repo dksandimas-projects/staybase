@@ -122,6 +122,14 @@ const VALID_TAB_IDS: TabId[] = [
   "payment",
   "sources",
   "roomtypes",
+  // Per SR-01..05 (2026-10-12): the Booking
+  // Preferences tab (bed set-ups + additional
+  // preferences catalogs). Without this whitelist
+  // entry, the deep-link `?tab=preferences` falls
+  // back to "hotel" (the default) and the
+  // BookingPreferencesTabBody never renders —
+  // clicks on the sidebar tab silently do nothing.
+  "preferences",
   "branding",
   "website",
   "seo",
