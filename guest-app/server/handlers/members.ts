@@ -493,6 +493,44 @@ export async function handleRedeemMemberPoints(req: any, res: any) {
         throw new Error("Points redemption is not configured.");
       }
 
+      // Per Phase 4 of the Spark Rewards tier system
+      // (2026-10-12): two new redemption guards, both sourced
+      // from `settings/rewardsConfig`:
+      //   1. `minPointsToRedeem` — minimum points required for
+      //      any redemption. 0 (the default) = no minimum.
+      //      Rejects with a 400 if the requested amount is below
+      //      the floor (clear error message for the staff).
+      //   2. `pointsCanPayUpToBillPct` — cap on how much of the
+      //      booking's subtotal can be paid with points. Stored
+      //      as a percentage (0..100, default 100 = no cap).
+      //      Computes `maxRedeemablePoints = floor(subtotal ×
+      //      pct/100) / pointsRedemptionRate` and rejects when
+      //      `pointsToRedeem > maxRedeemablePoints`.
+      // Both guards are AFTER the existing balance check
+      // (`validatePointsRedemption` below) so the staff sees the
+      // most actionable error first.
+      const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
+      const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
+      const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
+      if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+        throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+      }
+      // Bill-cap check uses the booking's current totalPrice as the
+      // basis (the post-discount subtotal — the actual amount the
+      // guest owes). `Math.floor` rounds DOWN so the cap is a
+      // hard ceiling: any fraction-of-a-point that would exceed
+      // the cap is rejected. 100% (or 100) means no cap.
+      if (Number.isFinite(billPct) && billPct < 100) {
+        const bookingSubtotal = Number(booking.totalPrice || 0);
+        const maxRedeemableCurrency = Math.floor((bookingSubtotal * Math.max(0, billPct)) / 100);
+        const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
+        if (pointsToRedeem > maxRedeemablePoints) {
+          throw new Error(
+            `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+          );
+        }
+      }
+
       const validation = validatePointsRedemption(pointsToRedeem, Number(member.rewardsPoints || 0), pointsRedemptionRate);
       if (!validation.valid) {
         throw new Error(validation.error);

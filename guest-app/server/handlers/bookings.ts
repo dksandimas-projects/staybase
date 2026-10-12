@@ -2844,11 +2844,42 @@ export async function handleCreateBooking(req: any, res: any) {
       // distinct from the in-scope variable.
       let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): the tier discount takes precedence over
+        // the global `memberDiscountPct` for tier-aware members.
+        // The tier comes from the member's `currentLevel` cache
+        // (refreshed at checkout + register by the handler in
+        // Phase 3 PR). The global fallback is the existing legacy
+        // path — tier-less members still get the configured
+        // `memberDiscountPct`. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        //
+        // Decision (2026-10-12): a tier with `discountPct: 0` does
+        // NOT fall back to the global — the admin set 0
+        // deliberately. The "tier takes precedence" rule is
+        // honored even when the tier's discount is 0 (which means
+        // "no member discount for this tier", e.g. a future
+        // "Points-only" tier).
+        const memberRef = adminDb.doc(`members/${detectedMemberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            // Tier-aware member: tier discount wins (even when
+            // tier says 0 — admin's deliberate choice).
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
+            // Tier-less member: fall back to the global.
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -11826,11 +11857,30 @@ export async function handleRescheduleBooking(req: any, res: any) {
 
       let appliedMemberDiscountPct = 0;
       if (booking.memberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): same tier-precedence rule as
+        // `handleCreateBooking` — the tier's `discountPct` wins
+        // over the global `memberDiscountPct` for tier-aware
+        // members. See the comment in handleCreateBooking for the
+        // decision rationale. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        const memberRef = adminDb.doc(`members/${booking.memberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }

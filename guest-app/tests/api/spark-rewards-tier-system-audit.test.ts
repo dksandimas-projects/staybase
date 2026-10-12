@@ -484,33 +484,34 @@ describe("Phase 8 — documentation cross-reference audit", () => {
   });
 });
 
-describe("Phase 8 — Phase 4 dependency note", () => {
-  it("tier discount precedence is NOT in this worktree's bookings handler (Phase 4 ships separately)", () => {
-    // Phase 4 lives on `feature/spark-rewards-phase4-clean`
-    // (commit `aaf2303`) and has NOT been merged to dev. This
-    // audit verifies that the tier-discount-precedence code is
-    // NOT yet in this worktree's bookings handler — so the
-    // reader knows the audit's scope is Phases 1, 2, 3, 5, 6, 7
-    // only.
+describe("Phase 8 — Phase 4 dependency note (Phase 4 cherry-picked onto this branch)", () => {
+  it("tier discount precedence IS in this worktree's bookings handler (Phase 4 cherry-picked)", () => {
+    // Phase 4 (`aaf2303`) was cherry-picked onto this branch so
+    // the entire 8-phase rollout lands in one merge. The
+    // tier-discount-precedence code is now present in BOTH
+    // `handleCreateBooking` + `handleRescheduleBooking`.
     //
-    // Phase 4's marker patterns (per the phase4-clean worktree):
+    // Phase 4's marker patterns (now present in this worktree):
     //   - `memberTier && Number.isFinite(Number(memberTier.discountPct))`
-    //   - `tierPct !== null` + `if (tierPct !== null) { ... } else if`
+    //   - `tierPct !== null` + `if (tierPct !== null) { ... }`
     //   - `memberDocInTx.data()?.currentLevel` (read from cache)
-    //
-    // None should be present in this worktree. When Phase 4
-    // merges, a sibling audit at `feature/spark-rewards-phase4-clean`
-    // pins the `tierPct` derivation. That audit ships with
-    // Phase 4's PR — see the SPARK-REWARDS.md Phase 8 section
-    // for the cross-reference.
-    //
-    // NOTE: `appliedMemberDiscountPct` IS present (pre-Phase-4
-    // legacy rename per BF-20, 2026-06-26) — it is NOT a Phase 4
-    // marker. The variable holds the LEGACY global
-    // `rc.memberDiscountPct` value, not the tier discount.
-    expect(bookingsSrc).not.toMatch(/memberTier\s*&&\s*Number\.isFinite\(Number\(memberTier\.discountPct\)\)/);
-    expect(bookingsSrc).not.toMatch(/tierPct\s*!==\s*null/);
-    expect(bookingsSrc).not.toMatch(/if\s*\(\s*tierPct\s*!==\s*null\s*\)/);
+    expect(bookingsSrc).toMatch(/memberTier\s*&&\s*Number\.isFinite\(Number\(memberTier\.discountPct\)\)/);
+    expect(bookingsSrc).toMatch(/tierPct\s*!==\s*null/);
+    expect(bookingsSrc).toMatch(/if\s*\(\s*tierPct\s*!==\s*null\s*\)/);
+  });
+
+  it("tier discount precedence applies to BOTH handleCreateBooking AND handleRescheduleBooking", () => {
+    // Phase 4's PR description: "both paths now read the member's
+    // `currentLevel` cache field alongside `settings/rewardsConfig`
+    // in a single `get()` block (FOL-03 — all `get()` calls complete
+    // before any `update()`)". The marker pattern should appear at
+    // least twice — once per handler. Per the source, the
+    // patterns live at lines ~2869 (handleCreateBooking) and
+    // ~11873 (handleRescheduleBooking).
+    const matches = bookingsSrc.match(/memberTier\s*&&\s*Number\.isFinite\(Number\(memberTier\.discountPct\)\)/g) || [];
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+    const tierPctMatches = bookingsSrc.match(/tierPct\s*!==\s*null/g) || [];
+    expect(tierPctMatches.length).toBeGreaterThanOrEqual(2);
   });
 
   it("Phase 3's `currentLevel` cache field IS in the bookings handler (Phase 4 reads from this cache)", () => {
@@ -519,7 +520,22 @@ describe("Phase 8 — Phase 4 dependency note", () => {
     // cache field on every checkout + register. The cross-phase
     // contract: Phase 3 must keep writing the cache; Phase 4
     // reads it. Verify the write side is still present so Phase
-    // 4's read side will resolve correctly when it merges.
+    // 4's read side resolves correctly.
     expect(bookingsSrc).toMatch(/currentLevel:\s*nextCurrentLevel/);
+    expect(bookingsSrc).toMatch(/resolveCurrentLevel\(rewardsConfig\?\.levels,\s*nextCompletedStays\)/);
+  });
+
+  it("Phase 4 booking-engine test suite is present in this worktree", () => {
+    // Phase 4's 8 source-text pins live in
+    // `spark-rewards-tier-system-booking-engine.test.ts`. Verify
+    // the file exists so the audit reader can run the full
+    // suite (Phase 1 + 3 + 4 + 5 + 6 + 7 + 8 = 119 tests).
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const testPath = path.join(
+      import.meta.dirname,
+      "spark-rewards-tier-system-booking-engine.test.ts"
+    );
+    expect(fs.existsSync(testPath)).toBe(true);
   });
 });
