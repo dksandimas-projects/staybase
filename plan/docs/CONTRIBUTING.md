@@ -231,7 +231,7 @@ Block specced → items ship (`⬜` → `✅`) → when every item is done, move
 
 ### Block code registry
 
-Keep codes unique. In use as of 2026-07-31 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
+Keep codes unique. In use as of 2026-10-13 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL` `IMT`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
 
 ---
 
