@@ -34,6 +34,58 @@ import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 import { useToast } from "./Toast";
 import { StatusBadge } from "./StatusBadge";
+import { Modal } from "./Modal";
+// Per BR-06 (decision #235, 2026-10-13): the refund
+// category filter chip + the standalone "Mark as paid"
+// modal for the Refunds admin surface. The categories
+// match the BR-01 `OnsitePayment` extension
+// (`category?: "cancellation" | "breakfast" | null`).
+const REFUND_CATEGORY_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "cancellation", label: "Cancellation" },
+  { key: "breakfast", label: "Breakfast" }
+] as const;
+type RefundCategoryFilterKey = (typeof REFUND_CATEGORY_OPTIONS)[number]["key"];
+
+// Per BR-06: the standalone "Mark as paid" modal posts
+// to `/api/refunds/mark-paid` (the new endpoint the
+// BR-06 spec wired into the existing catch-all handler).
+async function postMarkRefundPaid(input: {
+  bookingId: string;
+  refundId: string;
+  method: string;
+  transactionReference?: string | null;
+  note?: string | null;
+}): Promise<{ success: boolean; newBookingPaidAmount?: number; refundEntry?: any; alreadyPaid?: boolean; error?: string }> {
+  // The admin-app posts to the same `apiBaseUrl` the rest
+  // of the staff app uses (mirrors the existing
+  // `markBreakfastRefundPaid` wrapper in AdminContext).
+  const apiBaseUrl = (typeof window !== "undefined" && (window as any).__API_BASE_URL) || "/api";
+  try {
+    const resp = await fetch(`${apiBaseUrl}/refunds/mark-paid`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        bookingId: input.bookingId,
+        refundId: input.refundId,
+        method: input.method,
+        transactionReference: input.transactionReference || null,
+        note: input.note || null
+      })
+    });
+    const payload = await resp.json().catch(() => ({}));
+    return {
+      success: Boolean(resp.ok && payload?.success),
+      newBookingPaidAmount: payload?.newBookingPaidAmount,
+      refundEntry: payload?.refundEntry,
+      alreadyPaid: Boolean(payload?.alreadyPaid),
+      error: payload?.error
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Network error." };
+  }
+}
 
 export type BookingDrawerSection = "overview" | "check-in" | "folio" | "breakfast" | "more";
 
@@ -698,6 +750,18 @@ export function BookingDrawerBreakfastTab({
   const [saving, setSaving] = useState(false);
   const [serveBusySlot, setServeBusySlot] = useState<string | null>(null);
   const [refundBusyId, setRefundBusyId] = useState<string | null>(null);
+  // Per BR-06 (#235, 2026-10-13): the Refunds admin
+  // view's category filter chip + the standalone "Mark
+  // as paid" modal state. Default is "all" — back-compat
+  // with the pre-BR-06 view (which rendered every
+  // refund row regardless of category).
+  const [refundCategoryFilter, setRefundCategoryFilter] =
+    useState<RefundCategoryFilterKey>("all");
+  const [markRefundPaidModal, setMarkRefundPaidModal] = useState<{
+    open: boolean;
+    refundId: string | null;
+    amount: number;
+  }>({ open: false, refundId: null, amount: 0 });
 
   const firstDropdownRef = useRef<HTMLSelectElement | null>(null);
 
@@ -1294,57 +1358,191 @@ export function BookingDrawerBreakfastTab({
         </div>
       )}
 
-      {/* Refund liability panel */}
+      {/* Refund liability panel (BR-05 + BR-06 extension) */}
+      {/* Per BR-06 (#235, 2026-10-13): the BR-05 "Refunds due"
+          panel is now the Refunds admin surface. It renders
+          every refund row for the booking (any category, any
+          status), with a category filter chip at the top
+          ("All" / "Cancellation" / "Breakfast") + a
+          "Breakfast" badge on breakfast-category rows. The
+          legacy one-click "Mark as paid" handler is
+          preserved for breakfast pending rows (the existing
+          BR-05 button) + a new "Mark as paid (advanced)"
+          link opens the modal that posts to the new
+          `/api/refunds/mark-paid` endpoint. */}
       {pendingRefunds.length > 0 && (
         <section
           className="rounded-card border border-amber-200 bg-amber-50/50 p-4"
           data-testid="booking-drawer-breakfast-refunds"
         >
-          <header className="flex items-center gap-2">
-            <Wallet className="h-4 w-4 text-amber-700" aria-hidden="true" />
-            <p className="text-xs font-bold uppercase tracking-wider text-amber-900">
-              Refunds due
-            </p>
+          <header className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-amber-700" aria-hidden="true" />
+              <p className="text-xs font-bold uppercase tracking-wider text-amber-900">
+                Refunds due
+              </p>
+            </div>
+            {/* Category filter chip — per BR-06.
+                Default "All" for back-compat with the
+                pre-BR-06 view. */}
+            <div
+              className="inline-flex rounded-lg border border-amber-300 bg-white p-0.5 text-[10px] font-bold"
+              role="group"
+              aria-label="Filter refunds by category"
+              data-testid="refund-category-filter"
+            >
+              {REFUND_CATEGORY_OPTIONS.map((option) => {
+                const active = option.key === refundCategoryFilter;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setRefundCategoryFilter(option.key)}
+                    aria-pressed={active}
+                    data-testid={`refund-filter-${option.key}`}
+                    className={
+                      "min-h-[32px] rounded-md px-3 py-1 transition " +
+                      (active
+                        ? "bg-amber-700 text-white"
+                        : "text-amber-800 hover:bg-amber-50")
+                    }
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
           </header>
           <ul className="mt-3 space-y-2">
             {pendingRefunds
               .filter((r: any) => !pendingRefundPaid.some((p) => p.refundId === r.id))
-              .map((r: any) => (
-                <li
-                  key={r.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-[11px]"
-                >
-                  <div className="space-y-0.5">
-                    <p className="font-bold text-gray-900">
-                      {formatPrice(Math.abs(Number(r.amount || 0)))} refund due
-                    </p>
-                    <p className="text-[10px] text-gray-500">
-                      Recorded by {r.recordedBy || "staff"} on{" "}
-                      {r.recordedAt
-                        ? (typeof r.recordedAt?.toDate === "function"
-                            ? r.recordedAt.toDate()
-                            : new Date(r.recordedAt)
-                          ).toLocaleDateString()
-                        : "—"}{" "}
-                      · category: breakfast
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleMarkRefundPaid(r.id)}
-                    disabled={refundBusyId === r.id}
-                    className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-amber-300 bg-white px-3 text-[11px] font-bold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+              .filter((r: any) => {
+                if (refundCategoryFilter === "all") return true;
+                const category = String(r.category || "cancellation");
+                return category === refundCategoryFilter;
+              })
+              .map((r: any) => {
+                const category = String(r.category || "cancellation");
+                const isBreakfast = category === "breakfast";
+                const isPending = String(r.status || "pending") === "pending";
+                return (
+                  <li
+                    key={r.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-[11px]"
+                    data-testid={`refund-row-${r.id}`}
                   >
-                    {refundBusyId === r.id ? (
-                      <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-                    ) : (
-                      <CheckCircle2 size={12} aria-hidden="true" />
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-gray-900">
+                          {formatPrice(Math.abs(Number(r.amount || 0)))} refund due
+                        </p>
+                        {/* Category badge — per BR-06.
+                            "Breakfast" badge in primary color
+                            (amber to match the existing card);
+                            "Cancellation" in gray. Legacy
+                            `null` category reads as
+                            "Cancellation" per BR-01. */}
+                        <span
+                          className={
+                            isBreakfast
+                              ? "rounded-full bg-amber-700 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white"
+                              : "rounded-full bg-gray-200 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-700"
+                          }
+                          data-testid={`refund-category-badge-${r.id}`}
+                        >
+                          {isBreakfast ? "Breakfast" : "Cancellation"}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-gray-500">
+                        Recorded by {r.recordedBy || "staff"} on{" "}
+                        {r.recordedAt
+                          ? (typeof r.recordedAt?.toDate === "function"
+                              ? r.recordedAt.toDate()
+                              : new Date(r.recordedAt)
+                            ).toLocaleDateString()
+                          : "—"}{" "}
+                        · category: {category}
+                      </p>
+                    </div>
+                    {/* Mark-as-paid actions. Two flavors:
+                        (a) one-click "Mark as paid" — the
+                        BR-05 prototype, hardcoded cash, posts
+                        to the booking drawer's endpoint.
+                        (b) "Mark as paid (advanced)" — opens
+                        a modal that collects method + ref +
+                        note + posts to the new `/api/refunds/mark-paid`
+                        endpoint via the BR-06 unified
+                        `markRefundPaid` helper. Both flows
+                        exist so back-compat with the existing
+                        BR-05 UI is preserved. */}
+                    {isBreakfast && isPending && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleMarkRefundPaid(r.id)}
+                          disabled={refundBusyId === r.id}
+                          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-amber-300 bg-white px-3 text-[11px] font-bold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {refundBusyId === r.id ? (
+                            <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                          ) : (
+                            <CheckCircle2 size={12} aria-hidden="true" />
+                          )}
+                          Mark as paid
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMarkRefundPaidModal({
+                              open: true,
+                              refundId: r.id,
+                              amount: Math.abs(Number(r.amount || 0))
+                            })
+                          }
+                          data-testid={`refund-mark-paid-advanced-${r.id}`}
+                          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-amber-300 bg-amber-700 px-3 text-[11px] font-bold text-white transition hover:bg-amber-800"
+                        >
+                          Mark as paid (advanced)
+                        </button>
+                      </div>
                     )}
-                    Mark as paid
-                  </button>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
           </ul>
+          {/* Standalone Mark-as-paid modal (BR-06).
+              Posts to `/api/refunds/mark-paid`. On
+              success the row updates in place (the
+              `pendingRefundPaid` optimistic list drops
+              the entry from the visible list). */}
+          <Modal
+            open={markRefundPaidModal.open}
+            onClose={() => setMarkRefundPaidModal({ open: false, refundId: null, amount: 0 })}
+            title="Mark breakfast refund as paid"
+            footer={null}
+          >
+            {markRefundPaidModal.open && markRefundPaidModal.refundId && (
+              <MarkRefundPaidAdvancedForm
+                bookingId={booking.id}
+                refundId={markRefundPaidModal.refundId}
+                amount={markRefundPaidModal.amount}
+                onSuccess={() => {
+                  setMarkRefundPaidModal({ open: false, refundId: null, amount: 0 });
+                  setPendingRefundPaid((p) => [
+                    ...p.filter((x) => x.refundId !== markRefundPaidModal.refundId),
+                    {
+                      refundId: markRefundPaidModal.refundId as string,
+                      method: "cash",
+                      transactionReference: null,
+                      note: null
+                    }
+                  ]);
+                  toast.success("Refund marked paid", "Recorded against the booking's refund ledger.");
+                }}
+                onCancel={() => setMarkRefundPaidModal({ open: false, refundId: null, amount: 0 })}
+              />
+            )}
+          </Modal>
         </section>
       )}
 
@@ -1397,5 +1595,122 @@ export function BookingDrawerBreakfastTab({
         </div>
       </BreakfastTabModal>
     </div>
+  );
+}
+
+// Per BR-06 (decision #235, 2026-10-13): the standalone
+// "Mark as paid" modal body used by the Refunds admin
+// surface. Collects the payment method + transaction
+// reference + note and posts to the unified
+// `/api/refunds/mark-paid` endpoint (which delegates
+// to `markRefundPaid` in `server/lib/refunds.ts`).
+// Mirrors the existing `markBreakfastRefundPaid` context
+// helper's URL contract but routes through the BR-06
+// public route (so the staff drawer doesn't have to
+// reach into the staff-app fetch wrapper).
+//
+// Payment method options are sourced from the same
+// `storePaymentMethods` utility the calendar +
+// settings surface use; the BR-06 spec defers the
+// server-side method validation to the existing
+// per-method catalog at `paymentMethodLabel.ts`.
+const REFUND_PAID_METHODS = ["cash", "gcash", "bank-transfer", "card"] as const;
+
+interface MarkRefundPaidAdvancedFormProps {
+  bookingId: string;
+  refundId: string;
+  amount: number;
+  onSuccess: () => void;
+  onCancel: () => void;
+}
+
+function MarkRefundPaidAdvancedForm({
+  bookingId,
+  refundId,
+  amount,
+  onSuccess,
+  onCancel
+}: MarkRefundPaidAdvancedFormProps) {
+  const toast = useToast();
+  const [method, setMethod] = useState<string>("cash");
+  const [transactionReference, setTransactionReference] = useState<string>("");
+  const [note, setNote] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    const result = await postMarkRefundPaid({
+      bookingId,
+      refundId,
+      method,
+      transactionReference: transactionReference.trim() || null,
+      note: note.trim() || null
+    });
+    setSubmitting(false);
+    if (!result.success) {
+      toast.error("Failed to mark refund paid", result.error || "Please try again.");
+      return;
+    }
+    onSuccess();
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3" data-testid="mark-refund-paid-advanced-form">
+      <p className="text-[11px] text-gray-500">
+        Recording a payment of {formatPrice(amount)} against the breakfast refund liability.
+      </p>
+      <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+        Method
+        <select
+          value={method}
+          onChange={(e) => setMethod(e.target.value)}
+          className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-xs text-gray-900 outline-none"
+          data-testid="mark-refund-paid-method"
+        >
+          {REFUND_PAID_METHODS.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+        Transaction reference (optional)
+        <input
+          value={transactionReference}
+          onChange={(e) => setTransactionReference(e.target.value)}
+          maxLength={200}
+          className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-xs text-gray-900 outline-none"
+          placeholder="e.g. bank slip number"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+        Note (optional)
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          maxLength={500}
+          rows={2}
+          className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 py-2 text-xs text-gray-900 outline-none"
+          placeholder="e.g. refunded via bank transfer"
+        />
+      </label>
+      <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-gray-250 bg-white px-3 text-[11px] font-bold text-gray-700 hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-amber-700 px-4 text-[11px] font-bold text-white hover:bg-amber-800 disabled:opacity-60"
+        >
+          {submitting ? "Submitting..." : "Mark as paid"}
+        </button>
+      </div>
+    </form>
   );
 }

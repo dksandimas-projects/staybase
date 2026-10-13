@@ -5,9 +5,15 @@
 //
 //   POST /api/bookings/breakfast/mark-refund-paid
 //
-// Body: `{ bookingId, refundId, method, transactionReference?, note? }`.
+// Per BR-06 (#235, 2026-10-13): the underlying refund-write
+// logic now lives in `lib/refunds.ts` (`markRefundPaid`),
+// which is the SINGLE source of truth for the
+// `status: "paid"` transition. The breakfast UPDATE path
+// + the cancellation CREATE path (CRL-01) both flow
+// through this helper — see the file header in
+// `lib/refunds.ts` for the unification rationale.
 //
-// Behaviour:
+// Behaviour (mirrors the BR-05 prototype, now delegate):
 //
 //   • STAFF-Token gated (handled in apiRouter via
 //     `authenticateStaff`).
@@ -15,43 +21,29 @@
 //   • Refuses if the refund entry doesn't exist, isn't
 //     a `breakfast` category entry, or is already
 //     marked paid (idempotent re-POST returns the
-//     existing paid entry — same shape as `handleAddRefund`'s
-//     CRL-01 idempotency).
+//     existing paid entry — same shape as CRL-01's
+//     idempotency, normalised via the helper).
 //
 //   • Writes a transactional update that flips
 //     `status: "pending" → "paid"`, stamps `paidAt +
 //     paidBy + method + transactionReference + note`.
-//     Uses the same `refunds/{refundId}` doc shape the
-//     BR-04 guest path creates (the doc ID matches the
-//     pending entry so the staff "Mark as paid" is
-//     idempotent + atomic with the booking mutation
-//     when the entry was created by a remove op).
+//     The helper also updates the booking's
+//     `paidAmount` (the pre-BR-06 prototype skipped
+//     this; the unification fixes the bug).
 //
 //   • Appends a `breakfastAudit/{autoId}` entry with
-//     `action: "serve"` action variant `mark-refund-paid`
-//     (added by BR-05 — the action enum stays inside
-//     the same BR-04 spec so the kitchen list filters
-//     can pick it up later via the `reason` field).
+//     `action: "serve"` (sentinel) + reason
+//     `mark-refund-paid:{refundId}` — the BR-07
+//     kitchen-list filter picks it up via
+//     `reason.startsWith("mark-refund-paid")`.
 //
-//   • Same idempotency rule as CRL-01: a re-POST with
-//     the same `refundId` returns the existing paid
-//     entry's payload unchanged. The
-//     `transactionReference` + `note` + `method` are
-//     captured on FIRST apply; subsequent POSTs don't
-//     mutate the doc.
-//
-// The handler lives in this file (separate from
-// `breakfast-mark-served.ts`) because the kitchen-
-// visibility surface + the refund-liability surface
-// don't share a transaction (separate staff roles
-// may own them) and the per-op validation is
-// sufficiently different.
+//   • Idempotent on re-POST (refundId, BR-04 / CRL-01
+//     contract).
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
-import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
-import { auditBreakfastOp } from "../lib/breakfast-selections";
+import { markRefundPaid, refundPaidErrorToMessage } from "../lib/refunds";
 
 const staffRoles = ["admin", "front-desk"] as const;
 type StaffRole = (typeof staffRoles)[number];
@@ -96,14 +88,10 @@ function readStaff(req: VercelRequest): { uid: string; role: StaffRole } | null 
 }
 
 // Translate the shared per-op error codes into 4xx
-// responses. Mirrors the BR-04 + staff-update translate
-// step so the admin UI's `toast.error` strings stay
-// consistent.
+// responses. Re-exported from the helper so the admin
+// UI's `toast.error` strings stay consistent.
 function refundIdToMessage(code: string): string {
-  if (code === "REFUND_NOT_FOUND") return "Refund liability not found.";
-  if (code === "REFUND_NOT_PENDING") return "This refund is already paid (or has been resolved).";
-  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the breakfast category.";
-  return "We couldn't record the refund payment. Please try again in a moment.";
+  return refundPaidErrorToMessage(code);
 }
 
 // ---------- Handler ----------
@@ -147,93 +135,52 @@ export async function handleMarkRefundPaid(
         .doc(bookingId)
         .collection("refunds")
         .doc(refundId);
-      const snap = await transaction.get(refundRef);
-      if (!snap.exists) {
-        opCode = "REFUND_NOT_FOUND";
-        return;
-      }
-      const data: any = snap.data() || {};
-
-      // Idempotent re-POST: a paid entry already
-      // returns the same payload unchanged.
-      if (data.status === "paid") {
-        resultPayload = {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      // Pre-read both docs (Firestore requires reads before writes)
+      // so the helper can do idempotency + booking paidAmount lookup
+      // synchronously inside the transaction.
+      const [refundSnap, bookingSnap] = await Promise.all([
+        transaction.get(refundRef),
+        transaction.get(bookingRef)
+      ]);
+      let helperResult;
+      try {
+        helperResult = markRefundPaid({
+          category: "breakfast",
+          bookingId,
           refundId,
-          status: data.status,
-          paidAt: data.paidAt,
-          paidBy: data.paidBy,
-          method: data.method,
-          transactionReference: data.transactionReference,
-          note: data.note,
-          amount: data.amount,
-          category: data.category,
-          slotKey: data.slotKey
-        };
-        replayed = true;
+          amount: Math.abs(Number(refundSnap.data()?.amount || 0)),
+          method,
+          transactionReference: trimmedReference,
+          note: trimmedNote,
+          actor: { uid: staff.uid, role: staff.role },
+          transaction,
+          existingDoc: refundSnap,
+          currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
+          slotKey: String(refundSnap.data()?.slotKey || "")
+        });
+      } catch (err: any) {
+        // Map helper-thrown error codes to the BR-05 op-code contract
+        // (the admin test pins REFUND_NOT_FOUND / REFUND_NOT_PENDING /
+        // CATEGORY_MISMATCH; surfacing them via the same `opCode`
+        // variable keeps the wire shape byte-equivalent to the
+        // pre-BR-06 handler).
+        opCode = String(err?.message || "UNKNOWN");
         return;
       }
-
-      if (String(data.category || "") !== "breakfast") {
-        opCode = "CATEGORY_MISMATCH";
-        return;
-      }
-      if (String(data.status || "") !== "pending") {
-        opCode = "REFUND_NOT_PENDING";
-        return;
-      }
-
-      const now = Timestamp.now();
-      const update = {
-        status: "paid",
-        paidAt: now,
-        paidBy: staff.uid,
-        method,
-        transactionReference: trimmedReference,
-        note: trimmedNote || data.note || null,
-        // The "approved by" gets the same staff UID —
-        // a single front-desk click both approves
-        // and records. Admin clearing also flows
-        // through this path; the audit entry's
-        // `actorRole` carries the discriminator.
-        approvedBy: staff.uid,
-        lastModifiedAt: now
-      };
-      transaction.update(refundRef, update);
-
-      // Append the breakfast audit. The action enum
-      // doesn't include "mark-refund-paid" yet (it
-      // stays inside the BR-04 spec surface — the
-      // staff handler picks the variant via the
-      // audit's `reason` field to keep the schema
-      // narrow). The staff audit later surfaces in
-      // the manage page's "Refund activity" feed.
-      auditBreakfastOp({
-        transaction,
-        bookingId,
-        slotKey: String(data.slotKey || ""),
-        action: "serve", // sentinel — see note above
-        mealSnapshot: null,
-        actorUid: staff.uid,
-        actorRole: staff.role,
-        // The `reason` doubles as the audit
-        // discriminator: `mark-refund-paid:{refundId}`.
-        // Kitchen list (BR-07) + kitchen refunder
-        // dashboard can group by `reason.startsWith("mark-refund-paid")`
-        // if they need a dedicated column.
-        reasonOrCutoff: `mark-refund-paid:${refundId}`
-      });
       resultPayload = {
         refundId,
-        status: "paid",
-        paidAt: now,
-        paidBy: staff.uid,
-        method,
-        transactionReference: trimmedReference,
-        note: trimmedNote || data.note || null,
-        amount: data.amount,
-        category: data.category,
-        slotKey: data.slotKey
+        status: helperResult.refundEntry.status || "paid",
+        paidAt: helperResult.refundEntry.paidAt,
+        paidBy: helperResult.refundEntry.paidBy,
+        method: helperResult.refundEntry.method,
+        transactionReference: helperResult.refundEntry.transactionReference,
+        note: helperResult.refundEntry.note,
+        amount: helperResult.refundEntry.amount,
+        category: helperResult.refundEntry.category || "breakfast",
+        slotKey: helperResult.refundEntry.slotKey
       };
+      replayed = helperResult.alreadyPaid;
     });
   } catch (err: any) {
     // eslint-disable-next-line no-console

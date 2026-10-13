@@ -221219,7 +221219,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "1.13.0";
+    VERSION2 = "1.14.0";
   }
 });
 
@@ -228760,6 +228760,171 @@ async function handleSweepInFlowHolds(req, res, options = {}) {
 init_firestore();
 init_email();
 init_notifications();
+
+// server/lib/refunds.ts
+init_firestore();
+function trimOrNull(input, maxLen) {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLen);
+}
+function computeRefundPaidAmountDelta(currentPaidAmount, refundAmountPositive) {
+  const safe = Number.isFinite(currentPaidAmount) ? currentPaidAmount : 0;
+  const safeRefund = Number.isFinite(refundAmountPositive) ? refundAmountPositive : 0;
+  return safe - Math.max(0, safeRefund);
+}
+function resolveRefundDocParent(transaction, bookingId, category, reservationId) {
+  const bookingRef = transaction.firestore.collection("bookings").doc(bookingId);
+  if (category === "breakfast") {
+    return { parent: bookingRef, collection: "refunds" };
+  }
+  if (reservationId && String(reservationId).trim().length > 0) {
+    return {
+      parent: transaction.firestore.collection("reservations").doc(String(reservationId)),
+      collection: "refunds"
+    };
+  }
+  return { parent: bookingRef, collection: "payments" };
+}
+function markRefundPaid(input) {
+  const {
+    bookingId,
+    refundId,
+    amount,
+    method,
+    transactionReference,
+    note,
+    reason,
+    actor,
+    transaction,
+    category,
+    slotKey,
+    mealSnapshot,
+    reservationId,
+    existingDoc,
+    currentPaidAmount
+  } = input;
+  const safeMethod = (typeof method === "string" ? method.trim() : "").slice(0, 80);
+  const safeReference = trimOrNull(transactionReference, 200);
+  const safeNote = trimOrNull(note, 500);
+  const safeReason = trimOrNull(reason, 500);
+  const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+  const currentPaid = Number.isFinite(currentPaidAmount) ? Number(currentPaidAmount) || 0 : 0;
+  const pathParent = resolveRefundDocParent(transaction, bookingId, category, reservationId);
+  const bookingRef = transaction.firestore.collection("bookings").doc(bookingId);
+  const refundRef = pathParent.parent.collection(pathParent.collection).doc(refundId);
+  if (category === "breakfast") {
+    if (!existingDoc || !existingDoc.exists) {
+      throw new Error("REFUND_NOT_FOUND");
+    }
+    const existingData = existingDoc.data() || {};
+    if (String(existingData.status || "") === "paid") {
+      return {
+        alreadyPaid: true,
+        refundEntry: existingData,
+        newBookingPaidAmount: currentPaid
+      };
+    }
+    if (String(existingData.status || "") !== "pending") {
+      throw new Error("REFUND_NOT_PENDING");
+    }
+    if (String(existingData.category || "") !== "breakfast") {
+      throw new Error("CATEGORY_MISMATCH");
+    }
+    const now2 = Timestamp.now();
+    const safeSlotKey = typeof slotKey === "string" && slotKey.length > 0 ? slotKey : String(existingData.slotKey || "");
+    const update = {
+      status: "paid",
+      paidAt: now2,
+      paidBy: actor.uid,
+      method: safeMethod,
+      transactionReference: safeReference,
+      // Preserve the prior note if the new note is empty
+      // (CRL-01 allows appending; the BR-05 prototype overwrote).
+      note: safeNote !== null ? safeNote : existingData.note || null,
+      approvedBy: actor.uid,
+      lastModifiedAt: now2
+    };
+    transaction.update(refundRef, update);
+    const refundMagnitude = Math.abs(Number(existingData.amount || 0));
+    const newBookingPaidAmount2 = computeRefundPaidAmountDelta(currentPaid, refundMagnitude);
+    transaction.update(bookingRef, {
+      paidAmount: newBookingPaidAmount2,
+      lastRefundClearedAt: now2
+    });
+    const auditRef = bookingRef.collection("breakfastAudit").doc();
+    transaction.create(auditRef, {
+      action: "serve",
+      // sentinel — same as BR-05
+      slotKey: safeSlotKey,
+      mealSnapshot: mealSnapshot || null,
+      actorUid: actor.uid,
+      actorRole: actor.role,
+      reason: `mark-refund-paid:${refundId}`,
+      occurredAt: now2,
+      occurredAfterCutoff: false
+    });
+    return {
+      alreadyPaid: false,
+      refundEntry: { ...existingData, ...update },
+      newBookingPaidAmount: newBookingPaidAmount2
+    };
+  }
+  if (existingDoc && existingDoc.exists) {
+    const existingData = existingDoc.data() || {};
+    const sameRequest = Math.abs(Number(existingData.amount || 0)) === safeAmount && String(existingData.method || "") === safeMethod && String(existingData.note || "") === (safeReason || "") && (existingData.transactionReference || null) === safeReference;
+    if (sameRequest) {
+      return {
+        alreadyPaid: true,
+        refundEntry: existingData,
+        newBookingPaidAmount: currentPaid
+      };
+    }
+    return {
+      alreadyPaid: false,
+      refundEntry: existingData,
+      newBookingPaidAmount: currentPaid,
+      conflict: true
+    };
+  }
+  const now = Timestamp.now();
+  const newRecord = {
+    type: "refund",
+    amount: -safeAmount,
+    method: safeMethod,
+    note: safeReason || safeNote || null,
+    reason: safeReason || null,
+    approvedBy: actor.uid,
+    recordedBy: actor.uid,
+    recordedAt: now,
+    category: "cancellation"
+  };
+  if (safeReference) newRecord.transactionReference = safeReference;
+  if (reservationId && String(reservationId).trim().length > 0) {
+    newRecord.reservationId = String(reservationId);
+    newRecord.bookingId = bookingId;
+  }
+  transaction.create(refundRef, newRecord);
+  const newBookingPaidAmount = computeRefundPaidAmountDelta(currentPaid, safeAmount);
+  transaction.update(bookingRef, {
+    paidAmount: newBookingPaidAmount,
+    lastRefundClearedAt: now
+  });
+  return {
+    alreadyPaid: false,
+    refundEntry: newRecord,
+    newBookingPaidAmount
+  };
+}
+function refundPaidErrorToMessage(code) {
+  if (code === "REFUND_NOT_FOUND") return "Refund liability not found.";
+  if (code === "REFUND_NOT_PENDING") return "This refund is already paid (or has been resolved).";
+  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the breakfast category.";
+  return "We couldn't record the refund payment. Please try again in a moment.";
+}
+
+// server/handlers/bookings.ts
 init_shared();
 init_shared();
 init_shared();
@@ -234176,38 +234341,36 @@ async function handleAddRefund(req, res) {
         });
         newStateRef = newProjection.state;
       }
-      const existingRefund = refundsSnapshot.docs.find((docSnap) => docSnap.id === refundId);
-      if (existingRefund) {
-        const existingData = existingRefund.data();
-        const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount && String(existingData.method || "") === safeMethod && String(existingData.note || "") === safeReason && (existingData.transactionReference || null) === safeTransactionReference;
-        if (!sameRequest) {
-          throw new Error("Refund ID has already been used for a different refund.");
-        }
-        refundRecord = existingData;
+      const refundDocRef = refundsRef.doc(refundId);
+      const refundDocSnap = await transaction.get(refundDocRef);
+      const helperResult = markRefundPaid({
+        category: "cancellation",
+        bookingId,
+        refundId,
+        amount: numericAmount,
+        method: safeMethod,
+        transactionReference: safeTransactionReference,
+        reason: safeReason,
+        note: safeReason,
+        actor: { uid: String(req.staff.uid || "admin"), role: "admin" },
+        transaction,
+        existingDoc: refundDocSnap,
+        currentPaidAmount: Number(bookingData2.paidAmount || 0),
+        reservationId: bookingReservationId2.length > 0 ? bookingReservationId2 : null
+      });
+      if (helperResult.conflict) {
+        throw new Error("Refund ID has already been used for a different refund.");
+      }
+      if (helperResult.alreadyPaid) {
+        refundRecord = helperResult.refundEntry;
         idempotentReplay = true;
+        netCollected = netCollected;
         return;
       }
       if (numericAmount > netCollected) {
         throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
       }
-      const approvedBy = req.staff.uid || "admin";
-      const newRecord = {
-        type: "refund",
-        amount: -numericAmount,
-        method: safeMethod,
-        note: safeReason,
-        reason: safeReason,
-        approvedBy,
-        recordedBy: approvedBy,
-        recordedAt: /* @__PURE__ */ new Date()
-      };
-      if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
-      if (bookingReservationId2.length > 0) {
-        newRecord.reservationId = bookingReservationId2;
-        newRecord.bookingId = bookingId;
-      }
-      refundRecord = newRecord;
-      transaction.create(refundsRef.doc(refundId), newRecord);
+      refundRecord = helperResult.refundEntry;
     });
     if (!idempotentReplay && priorStateRef && newStateRef && priorStateRef !== newStateRef && priorLiabilityRef) {
       try {
@@ -241036,7 +241199,6 @@ async function handleMarkServed(req, res) {
 
 // server/handlers/breakfast-refund-paid.ts
 init_zod();
-init_firestore();
 init_firebase_admin();
 var refundIdSchema = external_exports.string().trim().regex(
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -241064,10 +241226,7 @@ function readStaff3(req) {
   return { uid: String(staff.uid), role };
 }
 function refundIdToMessage(code) {
-  if (code === "REFUND_NOT_FOUND") return "Refund liability not found.";
-  if (code === "REFUND_NOT_PENDING") return "This refund is already paid (or has been resolved).";
-  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the breakfast category.";
-  return "We couldn't record the refund payment. Please try again in a moment.";
+  return refundPaidErrorToMessage(code);
 }
 async function handleMarkRefundPaid(req, res) {
   if (req.method !== "POST") {
@@ -241096,81 +241255,44 @@ async function handleMarkRefundPaid(req, res) {
   try {
     await adminDb.runTransaction(async (transaction) => {
       const refundRef = adminDb.collection("bookings").doc(bookingId).collection("refunds").doc(refundId);
-      const snap = await transaction.get(refundRef);
-      if (!snap.exists) {
-        opCode = "REFUND_NOT_FOUND";
-        return;
-      }
-      const data = snap.data() || {};
-      if (data.status === "paid") {
-        resultPayload = {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const [refundSnap, bookingSnap] = await Promise.all([
+        transaction.get(refundRef),
+        transaction.get(bookingRef)
+      ]);
+      let helperResult;
+      try {
+        helperResult = markRefundPaid({
+          category: "breakfast",
+          bookingId,
           refundId,
-          status: data.status,
-          paidAt: data.paidAt,
-          paidBy: data.paidBy,
-          method: data.method,
-          transactionReference: data.transactionReference,
-          note: data.note,
-          amount: data.amount,
-          category: data.category,
-          slotKey: data.slotKey
-        };
-        replayed = true;
+          amount: Math.abs(Number(refundSnap.data()?.amount || 0)),
+          method,
+          transactionReference: trimmedReference,
+          note: trimmedNote,
+          actor: { uid: staff.uid, role: staff.role },
+          transaction,
+          existingDoc: refundSnap,
+          currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
+          slotKey: String(refundSnap.data()?.slotKey || "")
+        });
+      } catch (err) {
+        opCode = String(err?.message || "UNKNOWN");
         return;
       }
-      if (String(data.category || "") !== "breakfast") {
-        opCode = "CATEGORY_MISMATCH";
-        return;
-      }
-      if (String(data.status || "") !== "pending") {
-        opCode = "REFUND_NOT_PENDING";
-        return;
-      }
-      const now = Timestamp.now();
-      const update = {
-        status: "paid",
-        paidAt: now,
-        paidBy: staff.uid,
-        method,
-        transactionReference: trimmedReference,
-        note: trimmedNote || data.note || null,
-        // The "approved by" gets the same staff UID —
-        // a single front-desk click both approves
-        // and records. Admin clearing also flows
-        // through this path; the audit entry's
-        // `actorRole` carries the discriminator.
-        approvedBy: staff.uid,
-        lastModifiedAt: now
-      };
-      transaction.update(refundRef, update);
-      auditBreakfastOp({
-        transaction,
-        bookingId,
-        slotKey: String(data.slotKey || ""),
-        action: "serve",
-        // sentinel — see note above
-        mealSnapshot: null,
-        actorUid: staff.uid,
-        actorRole: staff.role,
-        // The `reason` doubles as the audit
-        // discriminator: `mark-refund-paid:{refundId}`.
-        // Kitchen list (BR-07) + kitchen refunder
-        // dashboard can group by `reason.startsWith("mark-refund-paid")`
-        // if they need a dedicated column.
-        reasonOrCutoff: `mark-refund-paid:${refundId}`
-      });
       resultPayload = {
         refundId,
-        status: "paid",
-        paidAt: now,
-        paidBy: staff.uid,
-        method,
-        transactionReference: trimmedReference,
-        note: trimmedNote || data.note || null,
-        amount: data.amount,
-        category: data.category,
-        slotKey: data.slotKey
+        status: helperResult.refundEntry.status || "paid",
+        paidAt: helperResult.refundEntry.paidAt,
+        paidBy: helperResult.refundEntry.paidBy,
+        method: helperResult.refundEntry.method,
+        transactionReference: helperResult.refundEntry.transactionReference,
+        note: helperResult.refundEntry.note,
+        amount: helperResult.refundEntry.amount,
+        category: helperResult.refundEntry.category || "breakfast",
+        slotKey: helperResult.refundEntry.slotKey
       };
+      replayed = helperResult.alreadyPaid;
     });
   } catch (err) {
     console.error("[breakfast-refund-paid] failed:", err?.message || err);
@@ -241188,6 +241310,123 @@ async function handleMarkRefundPaid(req, res) {
   return res.status(200).json({
     success: true,
     data: { ...resultPayload, replayed }
+  });
+}
+
+// server/handlers/refunds.ts
+init_zod();
+init_firebase_admin();
+var refundIdSchema2 = external_exports.string().trim().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  "Invalid refundId."
+);
+var markRefundPaidBodySchema2 = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  refundId: refundIdSchema2,
+  method: external_exports.string().trim().min(1).max(60),
+  transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
+  note: external_exports.string().trim().max(500).nullable().optional().default(null)
+}).passthrough();
+function readStaff4(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+async function handleMarkRefundPaidStandalone(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff4(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = markRefundPaidBodySchema2.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid mark-refund-paid payload."
+    });
+  }
+  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
+  const trimmedNote = note ? String(note).trim() : null;
+  let resultSummary = null;
+  let opCode = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const refundRef = adminDb.collection("bookings").doc(bookingId).collection("refunds").doc(refundId);
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const [refundSnap, bookingSnap] = await Promise.all([
+        transaction.get(refundRef),
+        transaction.get(bookingRef)
+      ]);
+      try {
+        const helperResult = markRefundPaid({
+          category: "breakfast",
+          bookingId,
+          refundId,
+          amount: Math.abs(Number(refundSnap.data()?.amount || 0)),
+          method,
+          transactionReference: trimmedReference,
+          note: trimmedNote,
+          actor: { uid: staff.uid, role: staff.role },
+          transaction,
+          existingDoc: refundSnap,
+          currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
+          slotKey: String(refundSnap.data()?.slotKey || "")
+        });
+        resultSummary = {
+          refundEntry: {
+            refundId,
+            status: helperResult.refundEntry.status || "paid",
+            paidAt: helperResult.refundEntry.paidAt,
+            paidBy: helperResult.refundEntry.paidBy,
+            method: helperResult.refundEntry.method,
+            transactionReference: helperResult.refundEntry.transactionReference,
+            note: helperResult.refundEntry.note,
+            amount: helperResult.refundEntry.amount,
+            category: helperResult.refundEntry.category || "breakfast",
+            slotKey: helperResult.refundEntry.slotKey
+          },
+          newBookingPaidAmount: helperResult.newBookingPaidAmount,
+          alreadyPaid: helperResult.alreadyPaid
+        };
+      } catch (err) {
+        opCode = String(err?.message || "UNKNOWN");
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  if (opCode) {
+    if (opCode === "REFUND_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: refundPaidErrorToMessage(opCode) });
+    }
+    return res.status(400).json({
+      success: false,
+      error: refundPaidErrorToMessage(opCode)
+    });
+  }
+  if (!resultSummary) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    newBookingPaidAmount: resultSummary.newBookingPaidAmount,
+    refundEntry: resultSummary.refundEntry,
+    alreadyPaid: resultSummary.alreadyPaid
   });
 }
 
@@ -242128,6 +242367,17 @@ async function handler(req, res) {
       return res.status(400).json({ success: false, error: verification.error });
     }
     return await handleMarkRefundPaid(req, res);
+  }
+  if (domain === "refunds" && action === "mark-paid" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`refunds-mark-paid:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleMarkRefundPaidStandalone(req, res);
   }
   if (domain === "bookings" && action === "breakfast" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 6e4)) {

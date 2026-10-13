@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { collection, doc } from "firebase/firestore";
+import { collection, collectionGroup, doc, getDocs } from "firebase/firestore";
 import { getManilaDateInfo, type DiscountType } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
 import {
@@ -21,7 +21,7 @@ import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { ConfirmForm } from "../components/ConfirmForm";
 import { FailedEmailsBanner } from "../components/FailedEmailsBanner";
 import { useToast } from "../components/Toast";
-import { BedDouble, Building2, CalendarDays, CalendarClock, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
+import { BedDouble, Building2, CalendarDays, CalendarClock, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle, Wallet } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -359,6 +359,63 @@ export function DashboardPage() {
     : Math.round((occupiedRoomsCount / totalRoomsCount) * 100);
 
   const monthlyBookingsCount = bookings.filter((b) => b.createdAt?.startsWith(monthKey)).length;
+  // Per BR-06 (#235, 2026-10-13): the dashboard's
+  // "Pending refunds" counter — union of cancellation
+  // pending (CRL-01) + breakfast pending (BR-04). The
+  // collectionGroup read is the same wire
+  // `LiabilityTab` uses; the cancelled-pending count
+  // walks the existing `bookings` snapshot's
+  // `cancellationLiability` field. Both arms filter
+  // on `status === "pending"` / `pending-processing` +
+  // `partially-processed` so the union is the
+  // "money we still owe guests" figure.
+  const [breakfastPendingRefunds, setBreakfastPendingRefunds] = useState<number>(0);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchBreakfastPending = async () => {
+      try {
+        const refundsGroup = await getDocs(collectionGroup(db, "refunds"));
+        if (cancelled) return;
+        let count = 0;
+        for (const refundDoc of refundsGroup.docs) {
+          const data: any = refundDoc.data() || {};
+          if (
+            String(data.category || "") === "breakfast" &&
+            String(data.status || "pending") === "pending"
+          ) {
+            count += 1;
+          }
+        }
+        setBreakfastPendingRefunds(count);
+      } catch {
+        if (!cancelled) setBreakfastPendingRefunds(0);
+      }
+    };
+    fetchBreakfastPending();
+    return () => { cancelled = true; };
+  }, [bookings]);
+  // Cancellation pending refunds. Walks the
+  // `bookings` snapshot's `cancellationLiability`
+  // (the desk's existing field). The "pending"
+  // states are `pending-processing` +
+  // `partially-processed` — the same states the
+  // LiabilityTab metric filters on.
+  const cancellationPendingRefunds = useMemo(() => {
+    let count = 0;
+    for (const b of bookings) {
+      const liability: any = (b as any).cancellationLiability;
+      if (!liability || !liability.policyResult) continue;
+      const processed: number = Number(liability.processedAmount || 0);
+      const policyRefund: number = Number(liability.policyResult?.policyRefund || 0);
+      const outstanding = Math.max(policyRefund - processed, 0);
+      const state: string = String(liability.state || "");
+      if (outstanding > 0 || state === "pending-processing" || state === "partially-processed") {
+        count += 1;
+      }
+    }
+    return count;
+  }, [bookings]);
+  const pendingRefundsTotal = cancellationPendingRefunds + breakfastPendingRefunds;
   const monthlyRevenue = bookings
     .filter((b) => b.checkIn?.startsWith(monthKey) && ["payment-confirmed", "confirmed", "checked-in", "checked-out"].includes(b.status))
     .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
@@ -963,6 +1020,25 @@ export function DashboardPage() {
           context={pendingPayments.length > 0 ? `${pendingPayments.length} proof${pendingPayments.length === 1 ? "" : "s"} queued` : "No payment proofs queued"}
           icon={<CreditCard size={18} />}
           tone={pendingPayments.length > 0 ? "warning" : "neutral"}
+        />
+        {/* Per BR-06 (#235, 2026-10-13): the Pending
+            Refunds aggregate card. Count = union of
+            cancellation pending (CRL-01) + breakfast
+            pending (BR-04). Clicks through to the
+            Reports → Liability tab (the desk's
+            money-to-process surface). */}
+        <StatsCard
+          label="Pending refunds"
+          value={String(pendingRefundsTotal)}
+          context={
+            pendingRefundsTotal > 0
+              ? `${cancellationPendingRefunds} cancellation + ${breakfastPendingRefunds} breakfast`
+              : "No refunds pending"
+          }
+          onClick={() => navigate("/reports?tab=liability")}
+          icon={<Wallet size={18} />}
+          tone={pendingRefundsTotal > 0 ? "warning" : "neutral"}
+          data-testid="dashboard-pending-refunds-card"
         />
         <StatsCard
           label="Unread Messages"

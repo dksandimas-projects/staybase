@@ -83,6 +83,15 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
   const [rows, setRows] = useState<LiabilityRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per BR-06 (#235, 2026-10-13): breakfast refund
+  // pending counter lifted into state so the metrics
+  // useMemo + the rendered MetricCard read it
+  // synchronously without re-fetching. The fetch
+  // effect populates this on every refresh.
+  const [breakfastPendingState, setBreakfastPendingState] = useState<{
+    count: number;
+    amount: number;
+  }>({ count: 0, amount: 0 });
 
   // Fetch every liability + its live `processedAmount`.
   // The fetch is async + per-document; for a 14-room
@@ -114,6 +123,17 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
         // subcollection read.
         const refundsGroup = await getDocs(collectionGroup(db, "refunds"));
         const processedByReservation = new Map<string, number>();
+        // Per BR-06 (#235, 2026-10-13): the breakfast
+        // refund pending counter. Walks the SAME
+        // collectionGroup read (already in budget)
+        // and bumps the counter on each
+        // `category: "breakfast"` + `status: "pending"`
+        // entry. Drives the "Breakfast refunds
+        // pending" headline metric AND the dashboard
+        // pending-refunds badge (the second consumer
+        // re-reads via the same collectionGroup).
+        let breakfastPendingCount = 0;
+        let breakfastPendingAmount = 0;
         for (const refundDoc of refundsGroup.docs) {
           // The collectionGroup path is
           // `reservations/{reservationId}/refunds/{refundId}`
@@ -123,11 +143,44 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
           // `bookings/{id}/payments/{refundId}` —
           // they do NOT match the reservation
           // pattern, so the Map skip is correct.
-          const match = refundDoc.ref.path.match(/^reservations\/([^/]+)\/refunds\//);
-          if (!match) continue;
-          const reservationId = match[1];
-          const amount = Math.abs(Number(refundDoc.data()?.amount || 0));
-          processedByReservation.set(reservationId, (processedByReservation.get(reservationId) || 0) + amount);
+          const reservationMatch = refundDoc.ref.path.match(/^reservations\/([^/]+)\/refunds\//);
+          if (reservationMatch) {
+            const reservationId = reservationMatch[1];
+            const amount = Math.abs(Number(refundDoc.data()?.amount || 0));
+            processedByReservation.set(reservationId, (processedByReservation.get(reservationId) || 0) + amount);
+          }
+          // BR-06: breakfast refund pending counter.
+          // The new breakfast refund path is
+          // `bookings/{id}/refunds/{refundId}` (BR-04
+          // shipped the subcollection). Pending entries
+          // carry `category: "breakfast"` + `status: "pending"`.
+          // The collectionGroup matches ALL `refunds`
+          // subcollections regardless of parent — so
+          // this loop sees both reservation-scope
+          // (CRL-01) + booking-scope (BR-04) refunds.
+          const data = refundDoc.data() || {};
+          if (
+            String(data.category || "") === "breakfast" &&
+            String(data.status || "pending") === "pending"
+          ) {
+            breakfastPendingCount += 1;
+            breakfastPendingAmount += Math.abs(Number(data.amount || 0));
+          }
+        }
+        // Stash for the metrics useMemo below. The
+        // fetch effect exposes the counter via
+        // `setBreakfastPendingState` so the
+        // metrics useMemo + the rendered MetricCard
+        // read it synchronously without re-querying.
+        // The dashboard pending-refunds badge
+        // re-queries the same collectionGroup
+        // (separate concern; the dashboard has its
+        // own refresh cadence).
+        if (!cancelled) {
+          setBreakfastPendingState({
+            count: breakfastPendingCount,
+            amount: breakfastPendingAmount
+          });
         }
         for (const resDoc of reservationsSnap.docs) {
           const data = resDoc.data();
@@ -251,9 +304,16 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
       partials,
       ageBuckets,
       processedTotal,
-      retainedRevenue
+      retainedRevenue,
+      // Per BR-06: the breakfast-refund pending
+      // counter (count + amount). Lives on the
+      // state so a refresh of the collectionGroup
+      // pushes it through to the metric card +
+      // the parent page's dashboard badge.
+      breakfastPendingCount: breakfastPendingState.count,
+      breakfastPendingAmount: breakfastPendingState.amount
     };
-  }, [rows, rangeStart, rangeEnd]);
+  }, [rows, rangeStart, rangeEnd, breakfastPendingState]);
 
   if (error) {
     return (
@@ -279,6 +339,22 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
           label="Pending refunds"
           value={metrics.pendingCount}
           sublabel={formatPrice(metrics.pendingAmount)}
+          accent="amber"
+        />
+        <MetricCard
+          // Per BR-06 (#235, 2026-10-13): the new
+          // "Breakfast refunds pending" line. Reads
+          // the BR-01 `category: "breakfast"` +
+          // `status: "pending"` count collected from
+          // the same collectionGroup read that
+          // builds `processedByReservation`. Sits
+          // next to the cancellation "Pending
+          // refunds" card so the desk sees both
+          // categories at a glance.
+          icon={Wallet}
+          label="Breakfast refunds pending"
+          value={metrics.breakfastPendingCount}
+          sublabel={formatPrice(metrics.breakfastPendingAmount)}
           accent="amber"
         />
         <MetricCard

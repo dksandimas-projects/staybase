@@ -10,6 +10,13 @@ import { handleConsumeInFlowHold } from "./in-flow-hold";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger, buildReservationEmailView } from "./email";
 import { writeNotification } from "../lib/notifications";
+// Per BR-06 (Phase 13 — Breakfast Redesign, decision
+// #235, 2026-10-13): the unified refund-write helper.
+// `handleAddRefund` (CRL-01) routes the actual entry
+// creation through `markRefundPaid` so the cancellation
+// path + the breakfast path + any future refund path
+// share one code path.
+import { markRefundPaid } from "../lib/refunds";
 import {
   calculateSeasonalAwareRoomBreakdown,
   calculateVoucherDiscount,
@@ -8712,67 +8719,77 @@ export async function handleAddRefund(req: any, res: any) {
         newStateRef = newProjection.state;
       }
 
-      // Idempotency check: a refund with this exact refundId
-      // already exists. Same amount/method/reason/reference
-      // (or no-reference on both sides) replays the original
-      // commit. A mismatch on any field is a 409 — the client
-      // reused an ID it had already committed for a different
-      // refund, which would be a staff typo or a
-      // duplicate-form bug we want loud, not silent.
-      //
-      // For new reservations: search the reservation's
-      // `refunds/` subcollection (the canonical source).
-      // For legacy: search the booking's `payments/`
-      // subcollection (the historical source).
-      const existingRefund = refundsSnapshot.docs.find((docSnap: any) => docSnap.id === refundId);
-      if (existingRefund) {
-        const existingData = existingRefund.data();
-        const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount
-          && String(existingData.method || "") === safeMethod
-          && String(existingData.note || "") === safeReason
-          && (existingData.transactionReference || null) === safeTransactionReference;
-        if (!sameRequest) {
-          throw new Error("Refund ID has already been used for a different refund.");
-        }
-        // Idempotent replay: re-read the cumulative net so the response
-        // reflects the post-refund balance (which is unchanged from the
-        // original commit but is the most truthful figure to surface).
-        refundRecord = existingData;
+      // Per BR-06 (#235, 2026-10-13): refund-write
+      // consolidated into `markRefundPaid`. The handler
+      // still owns the validation (net-collected gate,
+      // 409 conflict translation) — the helper owns the
+      // entry creation + the booking `paidAmount`
+      // mutation + idempotency. Pre-read the refund
+      // doc as a `DocumentSnapshot` so the helper can
+      // do idempotency + path resolution synchronously
+      // inside the caller's transaction.
+      const refundDocRef = refundsRef.doc(refundId);
+      const refundDocSnap = await transaction.get(refundDocRef);
+      const helperResult = markRefundPaid({
+        category: "cancellation",
+        bookingId,
+        refundId,
+        amount: numericAmount,
+        method: safeMethod,
+        transactionReference: safeTransactionReference,
+        reason: safeReason,
+        note: safeReason,
+        actor: { uid: String(req.staff.uid || "admin"), role: "admin" },
+        transaction,
+        existingDoc: refundDocSnap,
+        currentPaidAmount: Number((bookingData as any).paidAmount || 0),
+        reservationId: bookingReservationId.length > 0 ? bookingReservationId : null
+      });
+      if (helperResult.conflict) {
+        // CRL-01's contract: a different field shape on
+        // an existing refundId is a 409, not a silent
+        // overwrite. The helper surfaces the conflict
+        // flag; the handler translates it to the same
+        // 409 error the pre-BR-06 code did.
+        throw new Error("Refund ID has already been used for a different refund.");
+      }
+      if (helperResult.alreadyPaid) {
+        // Idempotent replay — re-read the cumulative
+        // net so the response reflects the post-refund
+        // balance (unchanged from the original commit
+        // but the most truthful figure to surface).
+        refundRecord = helperResult.refundEntry;
         idempotentReplay = true;
+        netCollected = netCollected;
         return;
       }
-
+      // Helper wrote the refund entry + decremented
+      // paidAmount. Validate the net-collected gate
+      // AFTER the helper's pre-read — the helper's
+      // idempotency check + 409 conflict check ran
+      // first (the existingRefund lookup is done inside
+      // the helper via the pre-read snapshot).
+      // The pre-BR-06 net-collected check stays in the
+      // handler so the validation message + the 400
+      // status translate identically. The check now
+      // happens AFTER the helper writes (the helper
+      // does its own pre-write internal reads so we
+      // know the entry didn't exist). If the check
+      // fails, the helper's writes roll back when the
+      // transaction throws.
       if (numericAmount > netCollected) {
         throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
       }
-      const approvedBy = req.staff.uid || "admin";
-      const newRecord: Record<string, any> = {
-        type: "refund",
-        amount: -numericAmount,
-        method: safeMethod,
-        note: safeReason,
-        reason: safeReason,
-        approvedBy,
-        recordedBy: approvedBy,
-        recordedAt: new Date()
-      };
-      if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
-      // Per MRB-04 Phase 2.x: for new reservations, stamp
-      // the `reservationId` + `bookingId` on the record so
-      // the new subcollection is self-describing (per-room
-      // attribution possible via `bookingId`; canonical
-      // reservation linkage via `reservationId`).
-      if (bookingReservationId.length > 0) {
-        newRecord.reservationId = bookingReservationId;
-        newRecord.bookingId = bookingId;
-      }
-      refundRecord = newRecord;
-      // transaction.create (not set) so a server-side race that lost the
-      // existingRefund lookup still throws a clean ALREADY_EXISTS rather
-      // than overwriting the original ledger entry. The `refundsRef.doc(refundId)`
-      // resolves to `reservations/{id}/refunds/{refundId}` for new reservations
-      // and `bookings/{id}/payments/{refundId}` for legacy.
-      transaction.create(refundsRef.doc(refundId), newRecord);
+      // Per MRB-04 Phase 2.x: for new reservations,
+      // stamp the `reservationId` + `bookingId` on the
+      // record so the new subcollection is self-
+      // describing (per-room attribution possible via
+      // `bookingId`; canonical reservation linkage via
+      // `reservationId`). The helper already stamps
+      // both fields when `reservationId` is non-null
+      // on the input — see `markRefundPaid` in
+      // `server/lib/refunds.ts`.
+      refundRecord = helperResult.refundEntry;
     });
     // Per CRL-08 (2026-08-03, per decision #174):
     // post-commit side effects. The refund-state

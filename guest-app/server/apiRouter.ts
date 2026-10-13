@@ -22,6 +22,7 @@ import { handleGetBreakfastManage, handleUpdateBreakfast } from "./handlers/brea
 import { handleStaffUpdateBreakfast } from "./handlers/breakfast-staff-update";
 import { handleMarkServed } from "./handlers/breakfast-mark-served";
 import { handleMarkRefundPaid } from "./handlers/breakfast-refund-paid";
+import { handleMarkRefundPaidStandalone } from "./handlers/refunds";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
@@ -1163,6 +1164,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleMarkRefundPaid(req, res);
+  }
+
+  // Per BR-06 (2026-10-13, decision #235): the
+  // standalone "Mark as paid" endpoint for the
+  // admin Refunds view. Distinct URL from the
+  // booking-drawer path (`/api/bookings/breakfast/mark-refund-paid`,
+  // above) because this one is gated separately
+  // (admin staff only — no public inbound) and
+  // posts to the SAME helper via the dedicated
+  // refund-handler. The helper is the single
+  // source of truth for the `status: "paid"`
+  // transition regardless of entrypoint. The
+  // 12-function Vercel cap is unchanged (this is a
+  // handler in the existing catch-all
+  // `api/[...route].js`, NOT a new function).
+  if (
+    domain === "refunds" &&
+    action === "mark-paid" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`refunds-mark-paid:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleMarkRefundPaidStandalone(req, res);
   }
 
   // Per BR-03 (2026-10-12, decision #232): the public
