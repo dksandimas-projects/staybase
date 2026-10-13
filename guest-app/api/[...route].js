@@ -221219,7 +221219,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "1.12.0";
+    VERSION2 = "1.13.0";
   }
 });
 
@@ -228978,6 +228978,8 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
 init_zod();
 init_shared();
 init_shared();
+init_firestore();
+init_firebase_admin();
 var entryShape = external_exports.object({
   mealId: external_exports.string().trim().min(1).max(120),
   mealName: external_exports.string().trim().min(1).max(200),
@@ -229070,6 +229072,142 @@ function validateBreakfastSelections(input) {
   const total = recomputeBreakfastTotal(validatedEntries);
   const hasAny = Object.keys(validatedEntries).length > 0;
   return { entries: validatedEntries, total, hasAny };
+}
+var BREAKFAST_OP_ERROR = {
+  MEAL_NOT_AVAILABLE: "MEAL_NOT_AVAILABLE",
+  LOCKED_DATE_PREFIX: "LOCKED_DATE:",
+  SLOT_SERVED_PREFIX: "SLOT_SERVED:",
+  SLOT_ALREADY_ORDERED: "SLOT_ALREADY_ORDERED",
+  SLOT_NOT_ORDERED: "SLOT_NOT_ORDERED"
+};
+function auditBreakfastOp(input) {
+  const {
+    transaction,
+    bookingId,
+    slotKey,
+    action,
+    mealSnapshot,
+    actorUid,
+    actorRole,
+    reasonOrCutoff
+  } = input;
+  let reason = null;
+  let occurredAfterCutoff = false;
+  if (typeof reasonOrCutoff === "string") {
+    reason = reasonOrCutoff;
+  } else if (typeof reasonOrCutoff === "boolean") {
+    occurredAfterCutoff = reasonOrCutoff;
+  }
+  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("breakfastAudit").doc();
+  transaction.set(auditRef, {
+    action,
+    slotKey,
+    mealSnapshot,
+    actorUid,
+    actorRole,
+    reason,
+    occurredAt: Timestamp.now(),
+    occurredAfterCutoff
+  });
+}
+function assertMealExists(mealById, mealId) {
+  if (!mealById.has(mealId)) {
+    throw new Error(BREAKFAST_OP_ERROR.MEAL_NOT_AVAILABLE);
+  }
+}
+function assertNotLocked(input) {
+  const { slotKey, serverNow, cutoffTime, timezone } = input;
+  const serviceDate = slotKey.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
+    throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${slotKey}`);
+  }
+  const cutoff = computeBreakfastCutoffState({
+    serviceDate,
+    now: serverNow,
+    cutoffTime,
+    timezone
+  });
+  if (cutoff.isLocked) {
+    throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${serviceDate}`);
+  }
+}
+function assertSlotNotServed(existingServed, slotKey) {
+  if (existingServed && existingServed[slotKey]) {
+    throw new Error(`${BREAKFAST_OP_ERROR.SLOT_SERVED_PREFIX}${slotKey}`);
+  }
+}
+function assertSlotForAdd(nextSelections, slotKey) {
+  const prior = nextSelections[slotKey];
+  if (prior && prior.removedAt === null) {
+    throw new Error(BREAKFAST_OP_ERROR.SLOT_ALREADY_ORDERED);
+  }
+}
+function assertSlotForChange(nextSelections, slotKey) {
+  const prior = nextSelections[slotKey];
+  if (!prior || prior.removedAt !== null) {
+    throw new Error(BREAKFAST_OP_ERROR.SLOT_NOT_ORDERED);
+  }
+}
+function generateBreakfastRefundId() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    const id = String(g.crypto.randomUUID());
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    )) {
+      return id;
+    }
+  }
+  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
+  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
+  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
+  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
+  return `${part()}-${part4}-${part4b}-${part4c}-${part().slice(0, 8)}${part().slice(0, 4)}`;
+}
+function createBreakfastRefundLiability(input) {
+  const {
+    transaction,
+    booking,
+    slotKey,
+    mealEntry,
+    amount,
+    reason,
+    recordedBy,
+    recordedByUid
+  } = input;
+  const refundId = generateBreakfastRefundId();
+  const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
+  const refundRecord = {
+    id: refundId,
+    bookingId: booking.id,
+    bookingRef: booking.bookingRef,
+    type: "refund",
+    category: "breakfast",
+    status: "pending",
+    // Refunds are negative-amount entries on the wire
+    // (per CRL-01's contract — `handleAddRefund` and the
+    // folio math both rely on the sign).
+    amount: -Math.abs(Number(amount || 0)),
+    method: "pending",
+    note: "Pending \u2014 staff processes the payout.",
+    transactionReference: null,
+    reason,
+    approvedBy: null,
+    recordedBy,
+    recordedByUid,
+    recordedAt: Timestamp.now(),
+    // Per BR-01 §OnsitePayment extension: the
+    // `breakfastRefundContext` is the immutable
+    // snapshot the staff uses to reconcile the
+    // meal that was removed.
+    breakfastRefundContext: {
+      mealId: mealEntry.mealId,
+      slotKey,
+      mealName: mealEntry.mealName,
+      priceSnapshot: Math.abs(Number(amount || 0))
+    }
+  };
+  transaction.set(refundLiabilityRef, refundRecord);
 }
 
 // server/handlers/bookings.ts
@@ -240027,26 +240165,16 @@ async function handleUpdateBreakfast(req, res) {
       let auditEntriesWritten = 0;
       let refundLiabilityCreated = 0;
       for (const op of add) {
-        const meal = mealById.get(op.mealId);
-        if (!meal) {
-          throw new Error("MEAL_NOT_AVAILABLE");
-        }
-        const serviceDate = op.slotKey.slice(0, 10);
-        const cutoff = computeBreakfastCutoffState({
-          serviceDate,
-          now: serverNow,
+        assertMealExists(mealById, op.mealId);
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
           cutoffTime,
           timezone: tz
         });
-        if (cutoff.isLocked) {
-          throw new Error(`LOCKED_DATE:${serviceDate}`);
-        }
-        if (existingServed[op.slotKey]) {
-          throw new Error(`SLOT_SERVED:${op.slotKey}`);
-        }
-        if (nextSelections[op.slotKey] && nextSelections[op.slotKey].removedAt === null) {
-          throw new Error("SLOT_ALREADY_ORDERED");
-        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForAdd(nextSelections, op.slotKey);
+        const meal = mealById.get(op.mealId);
         const serverPrice = Number(meal.price || 0);
         const priceChanged = Math.abs(serverPrice - Number(op.price)) > 5e-3;
         nextSelections[op.slotKey] = {
@@ -240065,58 +240193,50 @@ async function handleUpdateBreakfast(req, res) {
         };
         opsApplied += 1;
         auditEntriesWritten += 1;
-        writeAudit(
+        auditBreakfastOp({
           transaction,
-          booking.id,
-          op.slotKey,
-          "add",
-          {
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "add",
+          mealSnapshot: {
             mealId: meal.id,
             mealName: meal.name,
             price: serverPrice
           },
-          "guest",
-          false
-        );
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: false
+        });
         if (priceChanged) {
-          writeAudit(
+          auditBreakfastOp({
             transaction,
-            booking.id,
-            op.slotKey,
-            "change",
-            {
+            bookingId: booking.id,
+            slotKey: op.slotKey,
+            action: "change",
+            mealSnapshot: {
               mealId: meal.id,
               mealName: meal.name,
               price: serverPrice
             },
-            "guest",
-            `Price updated from ${Number(op.price).toFixed(2)} to ${serverPrice.toFixed(2)} at write time.`
-          );
+            actorUid: "guest",
+            actorRole: "guest",
+            reasonOrCutoff: `Price updated from ${Number(op.price).toFixed(2)} to ${serverPrice.toFixed(2)} at write time.`
+          });
           auditEntriesWritten += 1;
         }
       }
       for (const op of change) {
-        const meal = mealById.get(op.mealId);
-        if (!meal) {
-          throw new Error("MEAL_NOT_AVAILABLE");
-        }
-        const serviceDate = op.slotKey.slice(0, 10);
-        const cutoff = computeBreakfastCutoffState({
-          serviceDate,
-          now: serverNow,
+        assertMealExists(mealById, op.mealId);
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
           cutoffTime,
           timezone: tz
         });
-        if (cutoff.isLocked) {
-          throw new Error(`LOCKED_DATE:${serviceDate}`);
-        }
-        if (existingServed[op.slotKey]) {
-          throw new Error(`SLOT_SERVED:${op.slotKey}`);
-        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
         const prior = nextSelections[op.slotKey];
-        if (!prior || prior.removedAt !== null) {
-          throw new Error("SLOT_NOT_ORDERED");
-        }
+        const meal = mealById.get(op.mealId);
         const serverPrice = Number(meal.price || 0);
         const priceChanged = Math.abs(serverPrice - Number(prior.price)) > 5e-3;
         nextSelections[op.slotKey] = {
@@ -240130,38 +240250,31 @@ async function handleUpdateBreakfast(req, res) {
         opsApplied += 1;
         auditEntriesWritten += 1;
         const reason = priceChanged ? `Price adjusted from ${Number(prior.price).toFixed(2)} to ${serverPrice.toFixed(2)}.` : false;
-        writeAudit(
+        auditBreakfastOp({
           transaction,
-          booking.id,
-          op.slotKey,
-          "change",
-          {
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "change",
+          mealSnapshot: {
             mealId: meal.id,
             mealName: meal.name,
             price: serverPrice
           },
-          "guest",
-          reason
-        );
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: reason
+        });
       }
       for (const op of remove) {
-        const serviceDate = op.slotKey.slice(0, 10);
-        const cutoff = computeBreakfastCutoffState({
-          serviceDate,
-          now: serverNow,
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
           cutoffTime,
           timezone: tz
         });
-        if (cutoff.isLocked) {
-          throw new Error(`LOCKED_DATE:${serviceDate}`);
-        }
-        if (existingServed[op.slotKey]) {
-          throw new Error(`SLOT_SERVED:${op.slotKey}`);
-        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
         const prior = nextSelections[op.slotKey];
-        if (!prior || prior.removedAt !== null) {
-          throw new Error("SLOT_NOT_ORDERED");
-        }
         nextSelections[op.slotKey] = {
           ...prior,
           removedAt: Timestamp.now(),
@@ -240173,56 +240286,39 @@ async function handleUpdateBreakfast(req, res) {
         const currentPaidAmount = Number(booking.paidAmount || 0);
         const looksPaid = mealPrice > 0 && currentPaidAmount >= mealPrice;
         if (looksPaid) {
-          const refundId = generateRefundIdLikePaymentId();
-          const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
-          const refundRecord = {
-            id: refundId,
-            bookingId: booking.id,
-            bookingRef: booking.bookingRef,
-            type: "refund",
-            category: "breakfast",
-            status: "pending",
-            // Refunds are negative-amount entries on the
-            // wire (per CRL-01's contract — `handleAddRefund`
-            // and the folio math both rely on the sign).
-            amount: -mealPrice,
-            method: "pending",
-            note: "Pending \u2014 recorded by guest cancellation; staff processes the payout.",
-            transactionReference: null,
-            reason: "Guest removed paid breakfast meal via Manage Breakfast.",
-            approvedBy: null,
-            recordedBy: "guest",
-            recordedAt: Timestamp.now(),
-            // Per BR-01 §OnsitePayment extension: the
-            // `breakfastRefundContext` is the immutable
-            // snapshot the staff uses to reconcile the
-            // meal that was removed.
-            breakfastRefundContext: {
+          createBreakfastRefundLiability({
+            transaction,
+            booking,
+            slotKey: op.slotKey,
+            mealEntry: {
               mealId: prior.mealId,
-              slotKey: op.slotKey,
               mealName: prior.mealName,
-              priceSnapshot: mealPrice
-            }
-          };
-          transaction.set(refundLiabilityRef, refundRecord);
+              price: mealPrice
+            },
+            amount: mealPrice,
+            reason: "Guest removed paid breakfast meal via Manage Breakfast.",
+            recordedBy: "guest",
+            recordedByUid: "guest"
+          });
           refundLiabilityCreated += 1;
         }
         opsApplied += 1;
         auditEntriesWritten += 1;
         const reason = `Removed by guest${looksPaid ? " (refund liability opened)" : ""}.`;
-        writeAudit(
+        auditBreakfastOp({
           transaction,
-          booking.id,
-          op.slotKey,
-          "remove",
-          {
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "remove",
+          mealSnapshot: {
             mealId: prior.mealId,
             mealName: prior.mealName,
             price: mealPrice
           },
-          "guest",
-          reason
-        );
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: reason
+        });
       }
       const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
       const totalPriceNum = Number(booking.totalPrice || 0);
@@ -240307,41 +240403,792 @@ async function handleUpdateBreakfast(req, res) {
     data: { ...resultSummary, replayed: false, clientBatchId }
   });
 }
-function writeAudit(transaction, bookingId, slotKey, action, mealSnapshot, actorUid, reasonOrCutoff) {
-  let reason = null;
-  let occurredAfterCutoff = false;
-  if (typeof reasonOrCutoff === "string") {
-    reason = reasonOrCutoff;
-  } else {
-    occurredAfterCutoff = Boolean(reasonOrCutoff);
+
+// server/handlers/breakfast-staff-update.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+var slotKeySchema2 = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
+var addOrChangeSchema2 = external_exports.object({
+  slotKey: slotKeySchema2,
+  mealId: external_exports.string().trim().min(1).max(80),
+  mealName: external_exports.string().trim().min(1).max(120),
+  price: external_exports.number().finite().min(0).max(1e6)
+});
+var removeSchema2 = external_exports.object({
+  slotKey: slotKeySchema2
+});
+var updateBodySchema2 = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  // Optional clientBatchId for the same idempotency-replay
+  // model the BR-04 handler uses. A staff retry after
+  // an uncertain response lands on the same batch slot.
+  clientBatchId: external_exports.string().trim().min(8).max(80).regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    "Invalid clientBatchId."
+  ).optional(),
+  add: external_exports.array(addOrChangeSchema2).max(200).default([]),
+  change: external_exports.array(addOrChangeSchema2).max(200).default([]),
+  remove: external_exports.array(removeSchema2).max(200).default([]),
+  overrideCutoff: external_exports.boolean().optional().default(false),
+  overrideReason: external_exports.string().trim().max(500).nullable().optional().default(null),
+  turnstileToken: external_exports.string().trim().max(2e3).optional()
+}).passthrough();
+async function loadPublicBreakfastConfig() {
+  const mod5 = await Promise.resolve().then(() => (init_shared(), shared_exports));
+  const normalize2 = mod5.normalizeBreakfastConfig;
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    return typeof normalize2 === "function" ? normalize2(source) : source || {};
+  } catch {
+    return typeof normalize2 === "function" ? normalize2(null) : {};
   }
-  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("breakfastAudit").doc();
-  transaction.set(auditRef, {
-    action,
-    slotKey,
-    mealSnapshot,
-    actorUid,
-    actorRole: "guest",
-    reason,
-    occurredAt: Timestamp.now(),
-    occurredAfterCutoff
-  });
 }
-function generateRefundIdLikePaymentId() {
-  const g = globalThis;
-  if (typeof g.crypto?.randomUUID === "function") {
-    const id = String(g.crypto.randomUUID());
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      id
-    )) {
-      return id;
+async function loadFrontDeskOverrideEnabled() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    return Boolean(source && source.frontDeskOverrideEnabled === true);
+  } catch {
+    return false;
+  }
+}
+function readStaff(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+function translateOpError(code) {
+  if (code === "MEAL_NOT_AVAILABLE") {
+    return {
+      status: 400,
+      message: "One of the selected meals is no longer available. Please refresh and try again."
+    };
+  }
+  if (code.startsWith("LOCKED_DATE:")) {
+    const date = code.split(":")[1] || "";
+    return {
+      status: 400,
+      message: `Ordering closed for breakfast on ${date}.`
+    };
+  }
+  if (code.startsWith("SLOT_SERVED:")) {
+    return {
+      status: 400,
+      message: "This meal has already been served and cannot be edited."
+    };
+  }
+  if (code === "SLOT_ALREADY_ORDERED") {
+    return {
+      status: 400,
+      message: "This slot already has a meal selected. Use 'change' to update it."
+    };
+  }
+  if (code === "SLOT_NOT_ORDERED") {
+    return {
+      status: 400,
+      message: "This slot has no meal to change. Use 'add' instead."
+    };
+  }
+  return { status: 500, message: "We couldn't save the changes. Please try again in a moment." };
+}
+async function handleStaffUpdateBreakfast(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = updateBodySchema2.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid breakfast update payload."
+    });
+  }
+  const {
+    bookingId,
+    clientBatchId,
+    add,
+    change,
+    remove,
+    overrideCutoff,
+    overrideReason
+  } = parsed2.data;
+  if (overrideCutoff) {
+    const reason = String(overrideReason || "").trim();
+    if (reason.length < MIN_BREAKFAST_OVERRIDE_REASON_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        error: `Override reason required (min ${MIN_BREAKFAST_OVERRIDE_REASON_LENGTH} characters) when continuing past the cutoff.`
+      });
+    }
+    if (staff.role === "front-desk") {
+      const enabled = await loadFrontDeskOverrideEnabled();
+      if (!enabled) {
+        return res.status(403).json({
+          success: false,
+          error: "Front-desk overrides are disabled in Settings. Ask an admin to perform this change."
+        });
+      }
     }
   }
-  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
-  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
-  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
-  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
-  return `${part()}-${part4}-${part4b}-${part4c}-${part()}${part().slice(0, 4)}`;
+  const publicConfig = await loadPublicBreakfastConfig();
+  const breakfastConfigAny = publicConfig;
+  const cutoffTime = String(
+    breakfastConfigAny.cutoffTime || "20:00"
+  );
+  const tz = String(
+    breakfastConfigAny.cutoffTimezone || breakfastConfigAny.timezone || "Asia/Manila"
+  );
+  const mealById = /* @__PURE__ */ new Map();
+  for (const meal of breakfastConfigAny.meals || []) {
+    if (meal && meal.id) mealById.set(meal.id, meal);
+  }
+  if (!breakfastConfigAny.isEnabled) {
+    return res.status(400).json({
+      success: false,
+      error: "Breakfast is currently not available. Please contact the front desk."
+    });
+  }
+  const serverNow = /* @__PURE__ */ new Date();
+  const resultSummary = {
+    newBalance: 0,
+    refundLiabilityCreated: 0,
+    opsApplied: 0,
+    overrideCount: 0,
+    auditEntriesWritten: 0
+  };
+  let priorResult = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      if (clientBatchId) {
+        const batchDocRef = adminDb.collection("bookings").doc("__breakfastStaffUpdateBatches").collection("batches").doc(clientBatchId);
+        const existingBatch = await transaction.get(batchDocRef);
+        if (existingBatch.exists) {
+          const prior = existingBatch.data() || {};
+          const ageMs = Date.now() - Number(prior.committedAt || 0);
+          if (ageMs < 6e4 && prior.bookingId === bookingId) {
+            priorResult = prior.summary || null;
+            return;
+          }
+        }
+      }
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const booking = { id: bookingSnap.id, ...bookingSnap.data() };
+      const status = String(booking.status || "").trim();
+      if (status === "cancelled" || status === "checked-out") {
+        throw new Error("BOOKING_TERMINAL");
+      }
+      const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
+      const existingServed = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
+      const nextSelections = {
+        ...existingSelections
+      };
+      let opsApplied = 0;
+      let auditEntriesWritten = 0;
+      let refundLiabilityCreated = 0;
+      let overrideCount = 0;
+      const applyAddOrChange = (op, actionKind) => {
+        assertMealExists(mealById, op.mealId);
+        let isOverride = false;
+        try {
+          assertNotLocked({
+            slotKey: op.slotKey,
+            serverNow,
+            cutoffTime,
+            timezone: tz
+          });
+        } catch (err) {
+          if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {
+            isOverride = true;
+          } else {
+            throw err;
+          }
+        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        if (actionKind === "add") {
+          assertSlotForAdd(nextSelections, op.slotKey);
+        } else {
+          assertSlotForChange(nextSelections, op.slotKey);
+        }
+        const meal = mealById.get(op.mealId);
+        const serverPrice = Number(meal.price || 0);
+        const reason = String(overrideReason || "").trim() || null;
+        if (actionKind === "add") {
+          nextSelections[op.slotKey] = {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice,
+            addedAt: Timestamp.now(),
+            addedBy: staff.uid,
+            lastModifiedAt: Timestamp.now(),
+            lastModifiedBy: staff.uid,
+            removedAt: null,
+            removedBy: null,
+            overrideCutoff: isOverride,
+            overrideReason: isOverride ? reason : null
+          };
+        } else {
+          const prior = nextSelections[op.slotKey];
+          nextSelections[op.slotKey] = {
+            ...prior,
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice,
+            lastModifiedAt: Timestamp.now(),
+            lastModifiedBy: staff.uid,
+            overrideCutoff: isOverride ? true : prior.overrideCutoff === true,
+            overrideReason: isOverride ? reason : prior.overrideReason ?? null
+          };
+        }
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        auditBreakfastOp({
+          transaction,
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: isOverride ? actionKind === "add" ? "override-add" : "override-change" : actionKind,
+          mealSnapshot: {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice
+          },
+          actorUid: staff.uid,
+          actorRole: staff.role,
+          // Non-override actions stamp `false` so the
+          // audit's `occurredAfterCutoff` stays false
+          // (it mirrors the BR-04 guest path). Override
+          // actions stamp the staff's free-text reason
+          // + flip `occurredAfterCutoff: true` is
+          // already implied (the override was used
+          // because the lock-state was crossed).
+          reasonOrCutoff: isOverride ? reason : false
+        });
+        if (isOverride) overrideCount += 1;
+      };
+      const applyRemove = (op) => {
+        let isOverride = false;
+        try {
+          assertNotLocked({
+            slotKey: op.slotKey,
+            serverNow,
+            cutoffTime,
+            timezone: tz
+          });
+        } catch (err) {
+          if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {
+            isOverride = true;
+          } else {
+            throw err;
+          }
+        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
+        const prior = nextSelections[op.slotKey];
+        const reason = String(overrideReason || "").trim() || null;
+        nextSelections[op.slotKey] = {
+          ...prior,
+          removedAt: Timestamp.now(),
+          removedBy: staff.uid,
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: staff.uid,
+          overrideCutoff: isOverride ? true : prior.overrideCutoff || false,
+          overrideReason: isOverride ? reason : prior.overrideReason || null
+        };
+        const mealPrice = Number(prior.price || 0);
+        const currentPaidAmount = Number(booking.paidAmount || 0);
+        const looksPaid = mealPrice > 0 && currentPaidAmount >= mealPrice;
+        if (looksPaid) {
+          createBreakfastRefundLiability({
+            transaction,
+            booking,
+            slotKey: op.slotKey,
+            mealEntry: {
+              mealId: prior.mealId,
+              mealName: prior.mealName,
+              price: mealPrice
+            },
+            amount: mealPrice,
+            reason: "Staff removed paid breakfast meal via booking drawer.",
+            recordedBy: staff.role,
+            recordedByUid: staff.uid
+          });
+          refundLiabilityCreated += 1;
+        }
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        auditBreakfastOp({
+          transaction,
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: isOverride ? "override-remove" : "remove",
+          mealSnapshot: {
+            mealId: prior.mealId,
+            mealName: prior.mealName,
+            price: mealPrice
+          },
+          actorUid: staff.uid,
+          actorRole: staff.role,
+          reasonOrCutoff: reason
+        });
+        if (isOverride) overrideCount += 1;
+      };
+      for (const op of add) applyAddOrChange(op, "add");
+      for (const op of change) applyAddOrChange(op, "change");
+      for (const op of remove) applyRemove(op);
+      const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
+      const totalPriceNum = Number(booking.totalPrice || 0);
+      const paidAmountNum = Number(booking.paidAmount || 0);
+      const newBalance = Math.max(
+        0,
+        totalPriceNum + newBreakfastTotal - paidAmountNum
+      );
+      transaction.update(bookingRef, {
+        breakfastSelections: nextSelections,
+        breakfastTotal: newBreakfastTotal,
+        updatedAt: Timestamp.now(),
+        updatedBy: staff.uid
+      });
+      resultSummary.newBalance = Number(newBalance.toFixed(2));
+      resultSummary.refundLiabilityCreated = refundLiabilityCreated;
+      resultSummary.opsApplied = opsApplied;
+      resultSummary.overrideCount = overrideCount;
+      resultSummary.auditEntriesWritten = auditEntriesWritten;
+      if (clientBatchId) {
+        const batchDocRef = adminDb.collection("bookings").doc("__breakfastStaffUpdateBatches").collection("batches").doc(clientBatchId);
+        transaction.set(batchDocRef, {
+          bookingId,
+          clientBatchId,
+          committedAt: Date.now(),
+          summary: resultSummary
+        });
+      }
+    });
+  } catch (err) {
+    const code = String(err && err.message || "");
+    if (code === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (code === "BOOKING_TERMINAL") {
+      return res.status(400).json({
+        success: false,
+        error: "This booking is checked-out or cancelled; breakfast edits are not allowed."
+      });
+    }
+    const translated = translateOpError(code);
+    if (translated.status !== 500) {
+      return res.status(translated.status).json({ success: false, error: translated.message });
+    }
+    console.error("[breakfast-staff-update] update failed:", err?.message || err);
+    return res.status(500).json({ success: false, error: translated.message });
+  }
+  if (priorResult) {
+    return res.status(200).json({
+      success: true,
+      data: { ...priorResult, replayed: true, clientBatchId: clientBatchId || null }
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    data: { ...resultSummary, replayed: false, clientBatchId: clientBatchId || null }
+  });
+}
+
+// server/handlers/breakfast-mark-served.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+var slotKeySchema3 = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
+var markServedBodySchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  slotKey: slotKeySchema3,
+  action: external_exports.enum(["serve", "unserve"]),
+  reason: external_exports.string().trim().max(500).nullable().optional().default(null),
+  turnstileToken: external_exports.string().trim().max(2e3).optional()
+}).passthrough();
+function readStaff2(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+async function loadServedGraceMinutes() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    const raw = Number(source && source.servedGraceMinutes);
+    if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  } catch {
+  }
+  return DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES;
+}
+async function readBookingSlotEntry(bookingId, slotKey) {
+  const ref = adminDb.collection("bookings").doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) return { ok: false, code: "NOT_FOUND" };
+  const data = snap.data() || {};
+  const status = String(data.status || "");
+  if (status === "cancelled" || status === "checked-out") {
+    return { ok: false, code: "TERMINAL" };
+  }
+  return {
+    ok: true,
+    booking: {
+      id: snap.id,
+      status,
+      breakfastSelections: data.breakfastSelections && typeof data.breakfastSelections === "object" ? data.breakfastSelections : {}
+    },
+    breakfastSelections: data.breakfastSelections || {}
+  };
+}
+async function handleMarkServed(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff2(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = markServedBodySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid mark-served payload."
+    });
+  }
+  const { bookingId, slotKey, action, reason } = parsed2.data;
+  const trimmedReason = String(reason || "").trim() || null;
+  const graceMinutes = await loadServedGraceMinutes();
+  const slotLookup = await readBookingSlotEntry(bookingId, slotKey);
+  if (!slotLookup.ok) {
+    if (slotLookup.code === "NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    return res.status(400).json({
+      success: false,
+      error: "This booking is checked-out or cancelled; kitchen visibility is locked."
+    });
+  }
+  const selection = slotLookup.breakfastSelections[slotKey] || null;
+  if (action === "serve") {
+    if (!selection || selection.removedAt) {
+      return res.status(400).json({
+        success: false,
+        error: "This slot has no meal to serve. Add a meal before marking it served."
+      });
+    }
+  } else {
+    const existingServed = {};
+    if (!selection || selection.removedAt) {
+      return res.status(400).json({
+        success: false,
+        error: "This slot has no meal to unserve."
+      });
+    }
+  }
+  let resultPayload = null;
+  let opError = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const freshSnap = await transaction.get(bookingRef);
+      if (!freshSnap.exists) {
+        opError = { status: 404, error: "Booking not found." };
+        return;
+      }
+      const fresh = freshSnap.data() || {};
+      const freshServed = fresh.breakfastServed && typeof fresh.breakfastServed === "object" ? fresh.breakfastServed : {};
+      const now = Timestamp.now();
+      if (action === "serve") {
+        const newEntry = {
+          servedAt: now,
+          servedBy: staff.uid,
+          unservedAt: null,
+          unservedBy: null
+        };
+        const nextServed2 = { ...freshServed, [slotKey]: newEntry };
+        transaction.update(bookingRef, {
+          breakfastServed: nextServed2,
+          updatedAt: now,
+          updatedBy: staff.uid
+        });
+        auditBreakfastOp({
+          transaction,
+          bookingId,
+          slotKey,
+          action: "serve",
+          mealSnapshot: {
+            mealId: String(selection.mealId),
+            mealName: String(selection.mealName),
+            price: Number(selection.price || 0)
+          },
+          actorUid: staff.uid,
+          actorRole: staff.role,
+          reasonOrCutoff: false
+        });
+        resultPayload = {
+          servedAt: now,
+          servedBy: staff.uid,
+          unservedAt: null,
+          unservedBy: null
+        };
+        return;
+      }
+      const existing = freshServed[slotKey];
+      if (!existing || !existing.servedAt) {
+        opError = {
+          status: 400,
+          error: "This slot has not been marked served yet."
+        };
+        return;
+      }
+      const servedAt = typeof existing.servedAt?.toDate === "function" ? existing.servedAt.toDate() : new Date(existing.servedAt);
+      const nowDate = /* @__PURE__ */ new Date();
+      const elapsedMinutes = Math.max(
+        0,
+        Math.floor((nowDate.getTime() - servedAt.getTime()) / 6e4)
+      );
+      if (elapsedMinutes > graceMinutes && !trimmedReason) {
+        opError = {
+          status: 400,
+          error: `Served-grace window passed (${graceMinutes} min). Un-serving requires a reason.`
+        };
+        return;
+      }
+      if (trimmedReason && trimmedReason.length < MIN_BREAKFAST_OVERRIDE_REASON_LENGTH) {
+        opError = {
+          status: 400,
+          error: `Reason must be at least ${MIN_BREAKFAST_OVERRIDE_REASON_LENGTH} characters when un-serving past the grace window.`
+        };
+        return;
+      }
+      const updatedEntry = {
+        ...existing,
+        unservedAt: now,
+        unservedBy: staff.uid
+      };
+      const nextServed = { ...freshServed, [slotKey]: updatedEntry };
+      transaction.update(bookingRef, {
+        breakfastServed: nextServed,
+        updatedAt: now,
+        updatedBy: staff.uid
+      });
+      auditBreakfastOp({
+        transaction,
+        bookingId,
+        slotKey,
+        action: "unserve",
+        mealSnapshot: {
+          mealId: String(selection.mealId),
+          mealName: String(selection.mealName),
+          price: Number(selection.price || 0)
+        },
+        actorUid: staff.uid,
+        actorRole: staff.role,
+        // The grace-window un-serve (no reason) records
+        // `false` so `occurredAfterCutoff` stays false.
+        // The beyond-grace un-serve (with reason) carries
+        // the staff's free-text — the kitchen list's
+        // "Late un-serves" column (BR-07) filters on
+        // either `action: "unserve"` or the reason
+        // presence.
+        reasonOrCutoff: trimmedReason ? trimmedReason : false
+      });
+      resultPayload = {
+        servedAt: existing.servedAt,
+        servedBy: existing.servedBy,
+        unservedAt: now,
+        unservedBy: staff.uid
+      };
+    });
+  } catch (err) {
+    console.error("[breakfast-mark-served] failed:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      error: "We couldn't update the kitchen visibility. Please try again in a moment."
+    });
+  }
+  if (opError) {
+    return res.status(opError.status).json({ success: false, error: opError.error });
+  }
+  return res.status(200).json({ success: true, data: resultPayload });
+}
+
+// server/handlers/breakfast-refund-paid.ts
+init_zod();
+init_firestore();
+init_firebase_admin();
+var refundIdSchema = external_exports.string().trim().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  "Invalid refundId."
+);
+var markRefundPaidBodySchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  refundId: refundIdSchema,
+  // The paid-by method (e.g. "cash", "gcash",
+  // "bank-transfer"). Free-form per the existing
+  // onsite-payment surface — settings-driven list
+  // resolved on the client. Server keeps the value
+  // as-is so the entry is faithful to the receipt.
+  method: external_exports.string().trim().min(1).max(60),
+  transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
+  note: external_exports.string().trim().max(500).nullable().optional().default(null),
+  turnstileToken: external_exports.string().trim().max(2e3).optional()
+}).passthrough();
+function readStaff3(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+function refundIdToMessage(code) {
+  if (code === "REFUND_NOT_FOUND") return "Refund liability not found.";
+  if (code === "REFUND_NOT_PENDING") return "This refund is already paid (or has been resolved).";
+  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the breakfast category.";
+  return "We couldn't record the refund payment. Please try again in a moment.";
+}
+async function handleMarkRefundPaid(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff3(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = markRefundPaidBodySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid mark-refund-paid payload."
+    });
+  }
+  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
+  const trimmedNote = note ? String(note).trim() : null;
+  let resultPayload = null;
+  let opCode = null;
+  let replayed = false;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const refundRef = adminDb.collection("bookings").doc(bookingId).collection("refunds").doc(refundId);
+      const snap = await transaction.get(refundRef);
+      if (!snap.exists) {
+        opCode = "REFUND_NOT_FOUND";
+        return;
+      }
+      const data = snap.data() || {};
+      if (data.status === "paid") {
+        resultPayload = {
+          refundId,
+          status: data.status,
+          paidAt: data.paidAt,
+          paidBy: data.paidBy,
+          method: data.method,
+          transactionReference: data.transactionReference,
+          note: data.note,
+          amount: data.amount,
+          category: data.category,
+          slotKey: data.slotKey
+        };
+        replayed = true;
+        return;
+      }
+      if (String(data.category || "") !== "breakfast") {
+        opCode = "CATEGORY_MISMATCH";
+        return;
+      }
+      if (String(data.status || "") !== "pending") {
+        opCode = "REFUND_NOT_PENDING";
+        return;
+      }
+      const now = Timestamp.now();
+      const update = {
+        status: "paid",
+        paidAt: now,
+        paidBy: staff.uid,
+        method,
+        transactionReference: trimmedReference,
+        note: trimmedNote || data.note || null,
+        // The "approved by" gets the same staff UID —
+        // a single front-desk click both approves
+        // and records. Admin clearing also flows
+        // through this path; the audit entry's
+        // `actorRole` carries the discriminator.
+        approvedBy: staff.uid,
+        lastModifiedAt: now
+      };
+      transaction.update(refundRef, update);
+      auditBreakfastOp({
+        transaction,
+        bookingId,
+        slotKey: String(data.slotKey || ""),
+        action: "serve",
+        // sentinel — see note above
+        mealSnapshot: null,
+        actorUid: staff.uid,
+        actorRole: staff.role,
+        // The `reason` doubles as the audit
+        // discriminator: `mark-refund-paid:{refundId}`.
+        // Kitchen list (BR-07) + kitchen refunder
+        // dashboard can group by `reason.startsWith("mark-refund-paid")`
+        // if they need a dedicated column.
+        reasonOrCutoff: `mark-refund-paid:${refundId}`
+      });
+      resultPayload = {
+        refundId,
+        status: "paid",
+        paidAt: now,
+        paidBy: staff.uid,
+        method,
+        transactionReference: trimmedReference,
+        note: trimmedNote || data.note || null,
+        amount: data.amount,
+        category: data.category,
+        slotKey: data.slotKey
+      };
+    });
+  } catch (err) {
+    console.error("[breakfast-refund-paid] failed:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      error: refundIdToMessage("UNKNOWN")
+    });
+  }
+  if (opCode) {
+    return res.status(400).json({
+      success: false,
+      error: refundIdToMessage(opCode)
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    data: { ...resultPayload, replayed }
+  });
 }
 
 // server/handlers/seo.ts
@@ -241236,6 +242083,51 @@ async function handler(req, res) {
       return res.status(400).json({ success: false, error: verification.error });
     }
     return await handleUpdateBreakfast(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "staff-update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-staff-update:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many staff breakfast-update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleStaffUpdateBreakfast(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-served" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-served:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkServed(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-refund-paid:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkRefundPaid(req, res);
   }
   if (domain === "bookings" && action === "breakfast" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 6e4)) {

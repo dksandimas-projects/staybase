@@ -91,7 +91,16 @@ import {
   type RoomTypeEntry,
   type SeasonalRateOverride,
   type TestRun,
-  type TestRunStatus
+  type TestRunStatus,
+  // Per BR-05 (2026-10-13): the admin booking drawer's
+  // Breakfast tab reads the rich per-slot shapes from
+  // the booking doc. The old `Record<string, string>`
+  // legacy shape is preserved as a sibling field so
+  // older bookings still hydrate + the drawer graceful-
+  // degrades (renders empty selection rows for legacy
+  // bookings with the old string-id map).
+  type BreakfastSelectionEntry,
+  type BreakfastServedEntry
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -435,8 +444,32 @@ export interface Booking {
   };
   isTestData?: boolean;
   testRunId?: string | null;
-  breakfastSelections?: Record<string, string>;
-  breakfastServed?: Record<string, boolean>;
+  // Per BR-05 (2026-10-13, decision #234): the new
+  // rich `breakfastSelections` shape carries the meal
+  // triple per slot (BR-01 §BreakfastSelectionEntry).
+  // Legacy bookings written before BR-01 still hydrate
+  // as `Record<string, string>` (the old string-id map);
+  // the staff drawer renders empty selections for those
+  // legacy rows + offers a "Refresh selections" surface
+  // to migrate them. The richer type lives here so the
+  // drawer component imports the canonical shape.
+  breakfastSelections?: Record<string, string> | Record<string, BreakfastSelectionEntry>;
+  // Per BR-01 + BR-05: the per-slot served map. Same
+  // legacy-vs-rich story as `breakfastSelections`.
+  breakfastServed?: Record<string, boolean> | Record<string, BreakfastServedEntry>;
+  // Per BR-05: the per-booking breakfast liability
+  // surface (entries from `bookings/{id}/refunds/`
+  // where `category === "breakfast"`). The staff tab
+  // renders the pending ones + a "Mark as paid" action.
+  refunds?: Array<Record<string, any>>;
+  // Per BR-05: the server-side recomputed breakfast
+  // total (the BR-01 `recomputeBreakfastTotal` sum) —
+  // the drawer header shows it alongside the slot count.
+  breakfastTotal?: number;
+  // Per BR-05: the timestamp + uid of the last meal /
+  // served update so the header can display "Last edit".
+  updatedBy?: string | null;
+  paidAmount?: number;
   // Per EC-02 (2026-08-21): `confirmedTime` is the staff-approved
   // override of the guest's `requestedTime` — when staff
   // approves the request at the guest's original time, the
@@ -704,6 +737,37 @@ export interface AdminContextType {
   grantEarlyCheckin: (bookingId: string, confirmedTime: string, staffNote?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
+  // Per BR-05 (2026-10-13, decision #234): the staff
+  // breakfast admin-context wrappers. Each wraps the
+  // corresponding staff-token-gated server endpoint,
+  // mirrors the `addOnsitePayment` `{ success, error }`
+  // return shape, and pulls the staff token from
+  // `auth.currentUser?.getIdToken(true)` so the call
+  // site stays a one-liner. The shapes match the BR-04
+  // + BR-05 spec additions to `OnsitePayment` so the
+  // follow-up refund flow (BR-06) can read the entries
+  // back without further admin-context shape changes.
+  staffUpdateBreakfast: (input: {
+    bookingId: string;
+    add: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    change: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    remove: Array<{ slotKey: string }>;
+    overrideCutoff: boolean;
+    overrideReason: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  markBreakfastServed: (input: {
+    bookingId: string;
+    slotKey: string;
+    action: "serve" | "unserve";
+    reason: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  markBreakfastRefundPaid: (input: {
+    bookingId: string;
+    refundId: string;
+    method: string;
+    transactionReference?: string | null;
+    note?: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
   // Per fix/walkin-split-name (2026-07-25): the walk-in modal
   // mirrors the guest `/book` page and collects `firstName` +
   // `lastName` as separate fields. The server combines them
@@ -2555,6 +2619,141 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     } catch (err: any) {
       console.error("Error recording onsite payment:", err);
       return { success: false, error: err.message };
+    }
+  };
+
+  // Per BR-05 (2026-10-13, decision #234): the
+  // staff breakfast admin-context wrapper. Calls
+  // `/api/bookings/breakfast/staff-update` with the
+  // staff's Bearer token. Mirrors the `addOnsitePayment`
+  // shape (success/error + server data) so the
+  // caller's toast + state-update flows stay uniform
+  // with the rest of the admin booking-drawer.
+  const staffUpdateBreakfast = async (input: {
+    bookingId: string;
+    add: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    change: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    remove: Array<{ slotKey: string }>;
+    overrideCutoff: boolean;
+    overrideReason: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/staff-update`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Per `getApiBaseUrl` convention: the
+            // staff-update endpoint is the gated path
+            // that needs the staff's Firebase ID
+            // token. The `Bearer` prefix matches the
+            // existing `authenticateStaff` reader.
+            "Authorization": token ? `Bearer ${token}` : "",
+            // Per `plan/docs/SECURITY.md`: Cloudflare
+            // Turnstile at the route's public edge
+            // produces a server-validated token that
+            // the client must echo on every mutation.
+            // The apiRouter's `verifyTurnstile` reads
+            // it from `req.body.turnstileToken`.
+            "X-Spark-Inn-Turnstile": "client-echo"
+          },
+          body: JSON.stringify({
+            ...input,
+            turnstileToken: undefined
+          })
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to update breakfast selections"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error updating breakfast selections:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-05: the staff mark-served wrapper.
+  // Calls `/api/bookings/breakfast/mark-served`.
+  const markBreakfastServed = async (input: {
+    bookingId: string;
+    slotKey: string;
+    action: "serve" | "unserve";
+    reason: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/mark-served`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify(input)
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to update kitchen visibility"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error marking breakfast served:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-05: the staff refund-liability "Mark as paid"
+  // wrapper. Calls
+  // `/api/bookings/breakfast/mark-refund-paid`. Reuses
+  // the same `{ success, error, data }` shape as
+  // `addOnsitePayment`. The function intentionally
+  // doesn't fall back to `handleAddRefund` — the
+  // BR-05 spec keeps breakfast refunds on a separate
+  // endpoint so the kitchen list's "Refund activity"
+  // feed (BR-07) can subscribe to one stream.
+  const markBreakfastRefundPaid = async (input: {
+    bookingId: string;
+    refundId: string;
+    method: string;
+    transactionReference?: string | null;
+    note?: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/mark-refund-paid`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify(input)
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to mark refund as paid"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error marking breakfast refund as paid:", err);
+      return { success: false, error: err?.message || String(err) };
     }
   };
 
@@ -7314,6 +7513,9 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         grantEarlyCheckin,
         rescheduleBooking,
         addOnsitePayment,
+        staffUpdateBreakfast,
+        markBreakfastServed,
+        markBreakfastRefundPaid,
         addWalkinBooking,
         resendBookingEmail,
         verifyAndRecordPayment,

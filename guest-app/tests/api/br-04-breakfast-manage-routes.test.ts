@@ -49,6 +49,20 @@ const handlerSrc = readFileSync(
   resolve(__dirname, "../../server/handlers/breakfast-manage.ts"),
   "utf8"
 );
+// Per BR-05 (2026-10-13): the per-op validation + refund-
+// liability record + audit-write helpers were extracted to
+// `lib/breakfast-selections.ts` so the staff handler
+// (`breakfast-staff-update.ts`, BR-05) shares the same
+// rules. The tests below load the lib source too so the
+// tripwires still pin the structural invariants the BR-04
+// spec establishes (refund-context shape, `category:
+// "breakfast"` + `status: "pending"` pair, negative
+// refund amount, audit helper signature).
+const libSrc = readFileSync(
+  resolve(__dirname, "../../server/lib/breakfast-selections.ts"),
+  "utf8"
+);
+const combinedHandlerSrc = `${handlerSrc}\n${libSrc}`;
 
 // ---------- Hoisted fixtures for the handler-level tests ----------
 
@@ -317,29 +331,49 @@ describe("BR-04 — Manage Breakfast server handler tripwires", () => {
       // `{ mealId, slotKey, mealName, priceSnapshot }`.
       // The refund record carries it so staff can
       // reconcile the meal that was removed.
-      const refundRecord = handlerSrc.match(
+      //
+      // Per BR-05 (2026-10-13): the refund record
+      // construction was extracted to
+      // `lib/breakfast-selections.ts createBreakfastRefundLiability`
+      // so the staff path shares the same shape.
+      // The tripwire still pins the structural
+      // invariant — the assertion looks in the
+      // lib source (which the handler also
+      // references).
+      const refundRecord = combinedHandlerSrc.match(
         /breakfastRefundContext:\s*\{[\s\S]*?\}/
       );
       expect(refundRecord, "expected refund context block").toBeTruthy();
       expect(refundRecord![0]).toMatch(/mealId:/);
-      expect(refundRecord![0]).toMatch(/slotKey:/);
+      expect(refundRecord![0]).toMatch(/slotKey/);
       expect(refundRecord![0]).toMatch(/mealName:/);
-      expect(refundRecord![0]).toMatch(/priceSnapshot:/);
+      expect(refundRecord![0]).toMatch(/priceSnapshot/);
     });
 
     it("the refund record uses the canonical `category: \"breakfast\"` + `status: \"pending\"` pair", () => {
       // Per BR-01 §OnsitePayment extension, the
       // pending refund entries surface on the manage
       // page's `refunds[]` payload; staff clears them
-      // via the existing handleAddRefund path.
-      expect(handlerSrc).toMatch(/category:\s*["']breakfast["']/);
-      expect(handlerSrc).toMatch(/status:\s*["']pending["']/);
+      // via the staff `mark-refund-paid` endpoint.
+      //
+      // Per BR-05 (2026-10-13): the refund record
+      // construction moved to the lib; the tripwire
+      // checks the combined source.
+      expect(combinedHandlerSrc).toMatch(/category:\s*["']breakfast["']/);
+      expect(combinedHandlerSrc).toMatch(/status:\s*["']pending["']/);
     });
 
     it("the refund amount is negative on the wire (per CRL-01's contract)", () => {
       // Refunds carry a sign — the folio math + the
       // `handleAddRefund` schema both depend on it.
-      expect(handlerSrc).toMatch(/amount:\s*-mealPrice/);
+      //
+      // Per BR-05 (2026-10-13): the actual literal
+      // arithmetic now lives in the lib
+      // (`createBreakfastRefundLiability` uses
+      // `-Math.abs(Number(amount || 0))`). The
+      // tripwire pins the negative-sign invariant
+      // via the lib's source shape.
+      expect(combinedHandlerSrc).toMatch(/-Math\.abs\(/);
     });
 
     it("writes a `breakfastAudit` entry per accepted op inside the same transaction", () => {
@@ -347,8 +381,17 @@ describe("BR-04 — Manage Breakfast server handler tripwires", () => {
       // per `add` / `change` / `remove` op. The
       // `writeAudit` helper signature pins the
       // structural invariant.
+      //
+      // Per BR-05 (2026-10-13): the audit-write
+      // helper was extracted to
+      // `lib/breakfast-selections.ts auditBreakfastOp`.
+      // The local `writeAudit` is a thin wrapper that
+      // delegates to the lib. The tripwire looks
+      // for both the local wrapper (preserved source
+      // signature) and the lib implementation
+      // (shared rule source of truth).
       expect(handlerSrc).toMatch(/function\s+writeAudit\(/);
-      expect(handlerSrc).toMatch(/collection\("breakfastAudit"\)/);
+      expect(combinedHandlerSrc).toMatch(/collection\("breakfastAudit"\)/);
       // The helper sets `actorRole: "guest"` so staff-side
       // entries (BR-05) can be discriminated by role.
       expect(handlerSrc).toMatch(/actorRole:\s*["']guest["']/);

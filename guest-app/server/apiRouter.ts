@@ -19,6 +19,9 @@ import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handleGetBreakfastConfig } from "./handlers/breakfast-config";
 import { handleGetBreakfastManage, handleUpdateBreakfast } from "./handlers/breakfast-manage";
+import { handleStaffUpdateBreakfast } from "./handlers/breakfast-staff-update";
+import { handleMarkServed } from "./handlers/breakfast-mark-served";
+import { handleMarkRefundPaid } from "./handlers/breakfast-refund-paid";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
@@ -1051,6 +1054,115 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleUpdateBreakfast(req, res);
+  }
+
+  // Per BR-05 (2026-10-13, decision #234): the staff
+  // booking-drawer batch save endpoint
+  // (`/api/bookings/breakfast/staff-update`). Mirrors the
+  // BR-04 `/update` path but reads the booking by
+  // `bookingId` and is gated behind `authenticateStaff`
+  // (the staff drawer is admin-app-only, never the
+  // guest Magic-Link token gate). Turnstile-gated per
+  // `plan/docs/SECURITY.md` (same posture as every other
+  // staff mutation endpoint — see `add-refund`,
+  // `add-payment`). Rate-limited at 30/min/IP — front
+  // desk can fan out across many bookings in a shift
+  // but the per-booking context still keeps the limit
+  // generous enough for the multi-booking workflow.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "staff-update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-staff-update:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many staff breakfast-update requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    // Per H1 (hardening batch 2026-06-26): the
+    // mutation is Turnstile-gated like every other
+    // staff write path. Same posture as `add-refund`.
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleStaffUpdateBreakfast(req, res);
+  }
+
+  // Per BR-05: the staff kitchen-visibility endpoint
+  // (`/api/bookings/breakfast/mark-served`). Stamps
+  // `breakfastServed[key]` + `breakfastAudit` for the
+  // BR-07 kitchen list. STAFF-Token gated; Turnstile-
+  // gated per SECURITY.md; rate-limited at 60/min/IP
+  // — kitchen ticks happen frequently during the
+  // breakfast service window (a 12-table morning can
+  // plate 60+ meals in 90 minutes).
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "mark-served" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-served:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleMarkServed(req, res);
+  }
+
+  // Per BR-05: the staff refund-liability "Mark as
+  // paid" endpoint (`/api/bookings/breakfast/mark-refund-paid`).
+  // STAFF-Token gated; Turnstile-gated; rate-limited
+  // at 30/min/IP (this is a manual ops action, not
+  // kitchen-frequency). Idempotent on `refundId` per
+  // CRL-01 — a re-POST returns the existing paid
+  // entry unchanged.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "mark-refund-paid" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-refund-paid:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleMarkRefundPaid(req, res);
   }
 
   // Per BR-03 (2026-10-12, decision #232): the public

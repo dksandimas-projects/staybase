@@ -1330,9 +1330,26 @@ export function ReportsPage() {
         if (!dateMap[dateStr]) dateMap[dateStr] = {};
         for (let g = 1; g <= b.numGuests; g++) {
           const key = `${dateStr}-guest-${g}`;
-          const selection = b.breakfastSelections?.[key];
-          if (selection) {
-            dateMap[dateStr][selection] = (dateMap[dateStr][selection] || 0) + 1;
+          // Per BR-05 (2026-10-13): the booking doc's
+          // `breakfastSelections` may now be either the
+          // legacy `Record<string, string>` shape (meal
+          // name as the value) or the BR-01 rich shape
+          // (`{ mealId, mealName, price, ... }`). The
+          // legacy report counts the meal name (matches
+          // the pre-BR-05 inventory report); the rich
+          // shape needs the `mealName` extraction. The
+          // `key in selection` branch handles both.
+          const rawSelection: any = (b.breakfastSelections as any)?.[key];
+          if (rawSelection) {
+            const mealName =
+              typeof rawSelection === "string"
+                ? rawSelection
+                : typeof rawSelection?.mealName === "string"
+                ? rawSelection.mealName
+                : null;
+            if (mealName) {
+              dateMap[dateStr][mealName] = (dateMap[dateStr][mealName] || 0) + 1;
+            }
           }
         }
       }

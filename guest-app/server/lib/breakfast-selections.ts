@@ -227,3 +227,318 @@ export function validateBreakfastSelections(
 // client-side rendering (same labels, same rounding).
 export { buildBreakfastRateBreakdownLines } from "@spark-inn/shared";
 export type { BreakfastRateLine } from "@spark-inn/shared";
+
+// ============================================================================
+// Per-op validation helpers (BR-04 + BR-05)
+//
+// The guest Manage Breakfast handler (`breakfast-manage.ts`)
+// and the staff booking-drawer handler (`breakfast-staff-update.ts`,
+// BR-05) both apply the same per-op rules — meal exists in
+// the live catalog, per-date cutoff not passed, per-slot
+// `breakfastServed` lock not flipped, per-slot prior entry
+// shape matches the op kind — only the actor + override
+// behaviour differ.
+//
+// To keep the rules in one place, this section exposes
+// the assertion helpers + the audit-write helper +
+// the refund-liability-write helper. Both handlers throw
+// and translate the same error codes so the response body
+// stays in one shape (the staff handler additionally
+// catches `LOCKED_DATE` to allow the `overrideCutoff` path).
+// ============================================================================
+
+import { Timestamp } from "firebase-admin/firestore";
+import { adminDb } from "./firebase-admin";
+
+// String error codes thrown by the assertion helpers below.
+// The translate step (guest AND staff handlers) maps these
+// to the 4xx response shape. Using string-thrown errors
+// keeps the helpers free of HTTP concerns.
+export const BREAKFAST_OP_ERROR = {
+  MEAL_NOT_AVAILABLE: "MEAL_NOT_AVAILABLE",
+  LOCKED_DATE_PREFIX: "LOCKED_DATE:",
+  SLOT_SERVED_PREFIX: "SLOT_SERVED:",
+  SLOT_ALREADY_ORDERED: "SLOT_ALREADY_ORDERED",
+  SLOT_NOT_ORDERED: "SLOT_NOT_ORDERED"
+} as const;
+
+// `auditBreakfastOp` writes one `breakfastAudit/{autoId}`
+// doc inside the caller's transaction. Mirrors the schema in
+// `shared/types/index.ts §BreakfastAuditEntry`. The
+// `reasonOrCutoff` argument is overloaded to accept either
+// a boolean (the cutoff-overrun flag — `true` means
+// `occurredAfterCutoff` is set) or a string (a free-text
+// reason — `occurredAfterCutoff` stays `false`).
+//
+// The action enum covers both the guest Manage Breakfast
+// surface (BR-04) and the staff booking-drawer surface
+// (BR-05). The override-prefixed variants are reserved
+// for staff actions past the cutoff window.
+export type BreakfastAuditAction =
+  | "add"
+  | "change"
+  | "remove"
+  | "serve"
+  | "unserve"
+  | "override-add"
+  | "override-change"
+  | "override-remove";
+
+export interface AuditBreakfastOpInput {
+  transaction: FirebaseFirestore.Transaction;
+  bookingId: string;
+  slotKey: string;
+  action: BreakfastAuditAction;
+  mealSnapshot: { mealId: string; mealName: string; price: number } | null;
+  actorUid: string;
+  // The `actorRole` mirrors the `BreakfastAuditEntry` enum
+  // in `shared/types/index.ts` — `"guest"` for the BR-04
+  // save path, `"front-desk"` or `"admin"` for the BR-05
+  // staff paths. The schema discriminator lets the
+  // kitchen list filter on role later.
+  actorRole: "guest" | "front-desk" | "admin";
+  reasonOrCutoff?: string | boolean;
+}
+
+export function auditBreakfastOp(input: AuditBreakfastOpInput): void {
+  const {
+    transaction,
+    bookingId,
+    slotKey,
+    action,
+    mealSnapshot,
+    actorUid,
+    actorRole,
+    reasonOrCutoff
+  } = input;
+
+  let reason: string | null = null;
+  let occurredAfterCutoff = false;
+  if (typeof reasonOrCutoff === "string") {
+    reason = reasonOrCutoff;
+  } else if (typeof reasonOrCutoff === "boolean") {
+    occurredAfterCutoff = reasonOrCutoff;
+  }
+
+  const auditRef = adminDb
+    .collection("bookings")
+    .doc(bookingId)
+    .collection("breakfastAudit")
+    .doc();
+
+  transaction.set(auditRef, {
+    action,
+    slotKey,
+    mealSnapshot,
+    actorUid,
+    actorRole,
+    reason,
+    occurredAt: Timestamp.now(),
+    occurredAfterCutoff
+  });
+}
+
+// `assertMealExists` ensures `op.mealId` is in the
+// server-side catalog. Throws `MEAL_NOT_AVAILABLE`.
+// Per BR-01 (decision #231): the message intentionally does
+// NOT name the meal so the endpoint isn't a menu-state
+// oracle for an unauthenticated prober.
+export function assertMealExists(
+  mealById: Map<string, BreakfastMeal>,
+  mealId: string
+): void {
+  if (!mealById.has(mealId)) {
+    throw new Error(BREAKFAST_OP_ERROR.MEAL_NOT_AVAILABLE);
+  }
+}
+
+// `assertNotLocked` throws `LOCKED_DATE:{serviceDate}` when
+// the slot's date has already crossed the cutoff. The
+// staff handler catches this to allow the
+// `overrideCutoff + overrideReason` path; the guest handler
+// surfaces 400 directly. The helper accepts the `now: Date`
+// + `cutoffTime` + `timezone` triple so the same source
+// values flow through both handlers.
+export function assertNotLocked(input: {
+  slotKey: string;
+  serverNow: Date;
+  cutoffTime: string;
+  timezone: string;
+}): void {
+  const { slotKey, serverNow, cutoffTime, timezone } = input;
+  const serviceDate = slotKey.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
+    // A malformed slotKey is the caller's fault; surface as
+    // a locked error so the same translate path picks it up.
+    throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${slotKey}`);
+  }
+  const cutoff = computeBreakfastCutoffState({
+    serviceDate,
+    now: serverNow,
+    cutoffTime,
+    timezone
+  });
+  if (cutoff.isLocked) {
+    throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${serviceDate}`);
+  }
+}
+
+// `assertSlotNotServed` throws `SLOT_SERVED:{slotKey}` when
+// the kitchen has already plated the meal for the slot.
+// Adding / changing / removing a served slot is forbidden
+// for both guests and staff (the override path also can't
+// un-serve past the grace window without a reason — that's
+// `breakfast-mark-served.ts` territory).
+export function assertSlotNotServed(
+  existingServed: Record<string, unknown> | null | undefined,
+  slotKey: string
+): void {
+  if (existingServed && existingServed[slotKey]) {
+    throw new Error(`${BREAKFAST_OP_ERROR.SLOT_SERVED_PREFIX}${slotKey}`);
+  }
+}
+
+// `assertSlotForAdd` throws `SLOT_ALREADY_ORDERED` when the
+// slot already has a non-removed entry. An `add` op on an
+// existing slot should be a `change` op instead. Catches the
+// "client sends `add` then `change`" multi-op bug.
+export function assertSlotForAdd(
+  nextSelections: Record<string, { removedAt: unknown } | null | undefined>,
+  slotKey: string
+): void {
+  const prior = nextSelections[slotKey];
+  if (prior && prior.removedAt === null) {
+    throw new Error(BREAKFAST_OP_ERROR.SLOT_ALREADY_ORDERED);
+  }
+}
+
+// `assertSlotForChange` throws `SLOT_NOT_ORDERED` when the
+// slot has no live entry to change. The client should have
+// used `add` instead. Reused for `remove` — a remove
+// requires an existing live entry too.
+export function assertSlotForChange(
+  nextSelections: Record<string, { removedAt: unknown } | null | undefined>,
+  slotKey: string
+): void {
+  const prior = nextSelections[slotKey];
+  if (!prior || prior.removedAt !== null) {
+    throw new Error(BREAKFAST_OP_ERROR.SLOT_NOT_ORDERED);
+  }
+}
+
+// The refund-id shape that `handleAddRefund` validates.
+// The existing `PREALLOCATED_PAYMENT_ID_REGEX` in
+// `bookings.ts` accepts the UUIDv4 form
+// (`{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`) — same shape
+// as the booking-create idempotency. We don't import the
+// regex from `bookings.ts` (no shared export); the
+// hand-rolled UUIDv4 covers it. Used by both the guest
+// (BR-04) and the staff (BR-05) refund-liability paths so
+// the same id-generation policy applies.
+export function generateBreakfastRefundId(): string {
+  const g: any = globalThis as any;
+  if (typeof g.crypto?.randomUUID === "function") {
+    const id = String(g.crypto.randomUUID());
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        id
+      )
+    ) {
+      return id;
+    }
+  }
+  // Deterministic-but-unique-enough fallback (32 hex
+  // chars in the UUIDv4 shape). Server runtime tests
+  // mock `crypto.randomUUID` anyway.
+  const part = () =>
+    Math.floor(Math.random() * 0xffff_ffff).toString(16).padStart(8, "0");
+  const part4 = Math.floor(Math.random() * 0xffff)
+    .toString(16)
+    .padStart(4, "0");
+  const part4b = (Math.floor(Math.random() * 0x0fff) | 0x4000)
+    .toString(16)
+    .padStart(4, "0");
+  const part4c = (Math.floor(Math.random() * 0x3fff) | 0x8000)
+    .toString(16)
+    .padStart(4, "0");
+  return `${part()}-${part4}-${part4b}-${part4c}-${part().slice(0, 8)}${part().slice(0, 4)}`;
+}
+
+// `createBreakfastRefundLiability` writes a
+// `bookings/{id}/refunds/{refundId}` doc with the
+// BR-01 `category: "breakfast"` shape. Used by both the
+// guest Manage Breakfast save path (BR-04) and the staff
+// `staff-update` path (BR-05) when an `remove` op crosses
+// a paid meal. Caller's `transaction` owns the write so the
+// refund entry commits atomically with the booking
+// mutation.
+export interface CreateBreakfastRefundLiabilityInput {
+  transaction: FirebaseFirestore.Transaction;
+  booking: { id: string; bookingRef: string };
+  slotKey: string;
+  mealEntry: { mealId: string; mealName: string; price: number };
+  amount: number;
+  reason: string;
+  // `recordedBy` mirrors the BR-01 refund entry —
+  // `"guest"` for the BR-04 path,
+  // `"front-desk"` / `"admin"` for the BR-05 path.
+  // `recordedByUid` is the staff UID for staff
+  // entries; for guests it's the literal `"guest"`.
+  recordedBy: "guest" | "front-desk" | "admin";
+  recordedByUid: string;
+}
+
+export function createBreakfastRefundLiability(
+  input: CreateBreakfastRefundLiabilityInput
+): void {
+  const {
+    transaction,
+    booking,
+    slotKey,
+    mealEntry,
+    amount,
+    reason,
+    recordedBy,
+    recordedByUid
+  } = input;
+
+  const refundId = generateBreakfastRefundId();
+  const refundLiabilityRef = adminDb
+    .collection("bookings")
+    .doc(booking.id)
+    .collection("refunds")
+    .doc(refundId);
+
+  const refundRecord: Record<string, any> = {
+    id: refundId,
+    bookingId: booking.id,
+    bookingRef: booking.bookingRef,
+    type: "refund",
+    category: "breakfast",
+    status: "pending",
+    // Refunds are negative-amount entries on the wire
+    // (per CRL-01's contract — `handleAddRefund` and the
+    // folio math both rely on the sign).
+    amount: -Math.abs(Number(amount || 0)),
+    method: "pending",
+    note: "Pending — staff processes the payout.",
+    transactionReference: null,
+    reason,
+    approvedBy: null,
+    recordedBy,
+    recordedByUid,
+    recordedAt: Timestamp.now(),
+    // Per BR-01 §OnsitePayment extension: the
+    // `breakfastRefundContext` is the immutable
+    // snapshot the staff uses to reconcile the
+    // meal that was removed.
+    breakfastRefundContext: {
+      mealId: mealEntry.mealId,
+      slotKey,
+      mealName: mealEntry.mealName,
+      priceSnapshot: Math.abs(Number(amount || 0))
+    }
+  };
+
+  transaction.set(refundLiabilityRef, refundRecord);
+}

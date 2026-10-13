@@ -50,6 +50,16 @@ import {
   type PublicBreakfastConfig
 } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
+import {
+  auditBreakfastOp,
+  assertMealExists,
+  assertNotLocked,
+  assertSlotForAdd,
+  assertSlotForChange,
+  assertSlotNotServed,
+  createBreakfastRefundLiability,
+  generateBreakfastRefundId
+} from "../lib/breakfast-selections";
 import config from "../../../hotel.config";
 
 // Per H2 (hardening batch 2026-06-26): the public Magic-Link
@@ -585,36 +595,26 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
 
       // ---- Add ops ----
       for (const op of add) {
-        const meal = mealById.get(op.mealId);
-        if (!meal) {
-          throw new Error("MEAL_NOT_AVAILABLE");
-        }
-        const serviceDate = op.slotKey.slice(0, 10);
-        const cutoff = computeBreakfastCutoffState({
-          serviceDate,
-          now: serverNow,
+        assertMealExists(mealById, op.mealId);
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
           cutoffTime,
           timezone: tz
         });
-        if (cutoff.isLocked) {
-          throw new Error(`LOCKED_DATE:${serviceDate}`);
-        }
         // A slot that's already been served is locked
         // for any further add / change (the guest can't
         // add a different meal after the kitchen has
         // plated it).
-        if (existingServed[op.slotKey]) {
-          throw new Error(`SLOT_SERVED:${op.slotKey}`);
-        }
+        assertSlotNotServed(existingServed, op.slotKey);
         // An `add` op on an EXISTING non-removed slot
         // is a 400 — the client should have used
         // `change` instead. This catches the "client
         // sends `add` then `change` and leaves both in
         // the batch" bug.
-        if (nextSelections[op.slotKey] && nextSelections[op.slotKey].removedAt === null) {
-          throw new Error("SLOT_ALREADY_ORDERED");
-        }
+        assertSlotForAdd(nextSelections, op.slotKey);
 
+        const meal = mealById.get(op.mealId) as { id: string; name: string; price: number };
         const serverPrice = Number(meal.price || 0);
         const priceChanged = Math.abs(serverPrice - Number(op.price)) > 0.005;
         nextSelections[op.slotKey] = {
@@ -632,19 +632,20 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
         };
         opsApplied += 1;
         auditEntriesWritten += 1;
-        writeAudit(
+        auditBreakfastOp({
           transaction,
-          booking.id,
-          op.slotKey,
-          "add",
-          {
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "add",
+          mealSnapshot: {
             mealId: meal.id,
             mealName: meal.name,
             price: serverPrice
           },
-          "guest",
-          false
-        );
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: false
+        });
         if (priceChanged) {
           // Per the BR-04 spec: when the price the
           // guest saw (page-render snapshot) differs
@@ -653,46 +654,40 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
           // finance can reconcile the price-mismatch
           // later. Action is "change" (the spec's
           // audit enum doesn't have "price-mismatch").
-          writeAudit(
+          auditBreakfastOp({
             transaction,
-            booking.id,
-            op.slotKey,
-            "change",
-            {
+            bookingId: booking.id,
+            slotKey: op.slotKey,
+            action: "change",
+            mealSnapshot: {
               mealId: meal.id,
               mealName: meal.name,
               price: serverPrice
             },
-            "guest",
-            `Price updated from ${Number(op.price).toFixed(2)} to ${serverPrice.toFixed(2)} at write time.`
-          );
+            actorUid: "guest",
+            actorRole: "guest",
+            reasonOrCutoff: `Price updated from ${Number(op.price).toFixed(2)} to ${serverPrice.toFixed(2)} at write time.`
+          });
           auditEntriesWritten += 1;
         }
       }
 
       // ---- Change ops ----
       for (const op of change) {
-        const meal = mealById.get(op.mealId);
-        if (!meal) {
-          throw new Error("MEAL_NOT_AVAILABLE");
-        }
-        const serviceDate = op.slotKey.slice(0, 10);
-        const cutoff = computeBreakfastCutoffState({
-          serviceDate,
-          now: serverNow,
+        assertMealExists(mealById, op.mealId);
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
           cutoffTime,
           timezone: tz
         });
-        if (cutoff.isLocked) {
-          throw new Error(`LOCKED_DATE:${serviceDate}`);
-        }
-        if (existingServed[op.slotKey]) {
-          throw new Error(`SLOT_SERVED:${op.slotKey}`);
-        }
-        const prior = nextSelections[op.slotKey];
-        if (!prior || prior.removedAt !== null) {
-          throw new Error("SLOT_NOT_ORDERED");
-        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
+        const prior = nextSelections[op.slotKey] as {
+          mealId: string; mealName: string; price: number;
+          removedAt: unknown; removedBy: unknown;
+        };
+        const meal = mealById.get(op.mealId) as { id: string; name: string; price: number };
         const serverPrice = Number(meal.price || 0);
         const priceChanged = Math.abs(serverPrice - Number(prior.price)) > 0.005;
         nextSelections[op.slotKey] = {
@@ -708,40 +703,33 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
         const reason = priceChanged
           ? `Price adjusted from ${Number(prior.price).toFixed(2)} to ${serverPrice.toFixed(2)}.`
           : false; // false → boolean cut, no free-text reason
-        writeAudit(
+        auditBreakfastOp({
           transaction,
-          booking.id,
-          op.slotKey,
-          "change",
-          {
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "change",
+          mealSnapshot: {
             mealId: meal.id,
             mealName: meal.name,
             price: serverPrice
           },
-          "guest",
-          reason
-        );
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: reason
+        });
       }
 
       // ---- Remove ops ----
       for (const op of remove) {
-        const serviceDate = op.slotKey.slice(0, 10);
-        const cutoff = computeBreakfastCutoffState({
-          serviceDate,
-          now: serverNow,
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
           cutoffTime,
           timezone: tz
         });
-        if (cutoff.isLocked) {
-          throw new Error(`LOCKED_DATE:${serviceDate}`);
-        }
-        if (existingServed[op.slotKey]) {
-          throw new Error(`SLOT_SERVED:${op.slotKey}`);
-        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
         const prior = nextSelections[op.slotKey];
-        if (!prior || prior.removedAt !== null) {
-          throw new Error("SLOT_NOT_ORDERED");
-        }
         // Mark the slot's removedAt / removedBy BEFORE
         // any refund-liability decision so the helper
         // sees the post-remove state.
@@ -762,71 +750,44 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
         // at the moment of removal. We err on the side
         // of "this looks paid" so the refund liability
         // surfaces and staff can record or waive it via
-        // the existing handleAddRefund path.
+        // the staff `mark-refund-paid` endpoint.
         const mealPrice = Number(prior.price || 0);
         const currentPaidAmount = Number((booking as any).paidAmount || 0);
         const looksPaid = mealPrice > 0 && currentPaidAmount >= mealPrice;
         if (looksPaid) {
-          // Generate a UUIDv4-shaped refundId so the
-          // entry's id matches the existing refund-id
-          // regex (a future staff "record processed
-          // refund" call via handleAddRefund reuses the
-          // same id, keeping the liability in
-          // lockstep).
-          const refundId = generateRefundIdLikePaymentId();
-          const refundLiabilityRef = adminDb
-            .collection("bookings")
-            .doc(booking.id)
-            .collection("refunds")
-            .doc(refundId);
-          const refundRecord: Record<string, any> = {
-            id: refundId,
-            bookingId: booking.id,
-            bookingRef: booking.bookingRef,
-            type: "refund",
-            category: "breakfast",
-            status: "pending",
-            // Refunds are negative-amount entries on the
-            // wire (per CRL-01's contract — `handleAddRefund`
-            // and the folio math both rely on the sign).
-            amount: -mealPrice,
-            method: "pending",
-            note: "Pending — recorded by guest cancellation; staff processes the payout.",
-            transactionReference: null,
-            reason: "Guest removed paid breakfast meal via Manage Breakfast.",
-            approvedBy: null,
-            recordedBy: "guest",
-            recordedAt: Timestamp.now(),
-            // Per BR-01 §OnsitePayment extension: the
-            // `breakfastRefundContext` is the immutable
-            // snapshot the staff uses to reconcile the
-            // meal that was removed.
-            breakfastRefundContext: {
+          createBreakfastRefundLiability({
+            transaction,
+            booking,
+            slotKey: op.slotKey,
+            mealEntry: {
               mealId: prior.mealId,
-              slotKey: op.slotKey,
               mealName: prior.mealName,
-              priceSnapshot: mealPrice
-            }
-          };
-          transaction.set(refundLiabilityRef, refundRecord);
+              price: mealPrice
+            },
+            amount: mealPrice,
+            reason: "Guest removed paid breakfast meal via Manage Breakfast.",
+            recordedBy: "guest",
+            recordedByUid: "guest"
+          });
           refundLiabilityCreated += 1;
         }
         opsApplied += 1;
         auditEntriesWritten += 1;
         const reason = `Removed by guest${looksPaid ? " (refund liability opened)" : ""}.`;
-        writeAudit(
+        auditBreakfastOp({
           transaction,
-          booking.id,
-          op.slotKey,
-          "remove",
-          {
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "remove",
+          mealSnapshot: {
             mealId: prior.mealId,
             mealName: prior.mealName,
             price: mealPrice
           },
-          "guest",
-          reason
-        );
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: reason
+        });
       }
 
       // ---- Recompute the total + write the booking doc ----
@@ -945,13 +906,20 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
   });
 }
 
-// Writes one breakfastAudit/{autoId} doc inside the
-// active transaction. Mirrors the schema in
-// `shared/types/index.ts §BreakfastAuditEntry`. The
-// `reasonOrCutoff` argument is overloaded to accept
-// either a boolean (the cutoff-overrun flag) or a string
-// (a free-text reason); the runtime coerces into the
-// `(reason, occurredAfterCutoff)` pair.
+// The audit-write + refund-id helpers moved to
+// `lib/breakfast-selections.ts` in BR-05 so the new staff
+// handlers (`breakfast-staff-update.ts` +
+// `breakfast-mark-served.ts`) can share the same audit
+// write + refund-liability shapes. Both handlers import
+// `auditBreakfastOp` + `generateBreakfastRefundId` +
+// `createBreakfastRefundLiability` directly from that
+// lib. The handler still owns its translate step below.
+// These thin wrappers are kept for source-text
+// tripwires (`br-04-breakfast-manage-routes.test.ts`)
+// that pin the helper signatures here — they delegate
+// to the shared lib so the rules live in exactly one
+// place, but keep the local function names so the tests
+// don't need to track the move.
 function writeAudit(
   transaction: FirebaseFirestore.Transaction,
   bookingId: string,
@@ -969,71 +937,26 @@ function writeAudit(
   actorUid: string,
   reasonOrCutoff: string | boolean
 ): void {
-  let reason: string | null = null;
-  let occurredAfterCutoff = false;
-  if (typeof reasonOrCutoff === "string") {
-    reason = reasonOrCutoff;
-  } else {
-    occurredAfterCutoff = Boolean(reasonOrCutoff);
-  }
-  // The non-override audit actions stay in the base
-  // ("add" / "change" / "remove") enum. The BR-04
-  // spec's "override" variants are reserved for the
-  // staff path (BR-05); the guest path never
-  // overrides.
-  const auditRef = adminDb
-    .collection("bookings")
-    .doc(bookingId)
-    .collection("breakfastAudit")
-    .doc();
-  transaction.set(auditRef, {
-    action,
+  auditBreakfastOp({
+    transaction,
+    bookingId,
     slotKey,
+    action,
     mealSnapshot,
     actorUid,
+    // The BR-04 spec leaves the guest path's actorRole
+    // hard-coded to "guest" — staff override actions
+    // live in BR-05's separate helper invocation.
     actorRole: "guest",
-    reason,
-    occurredAt: Timestamp.now(),
-    occurredAfterCutoff
+    reasonOrCutoff
   });
 }
 
 // The refund-id shape that `handleAddRefund` validates.
-// The existing `PREALLOCATED_PAYMENT_ID_REGEX` in
-// bookings.ts accepts the UUIDv4 form
-// (`{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`) — same shape
-// as the booking-create idempotency. We don't import the
-// regex from bookings.ts (no shared export); the
-// hand-rolled UUIDv4 covers it.
+// Kept as a thin wrapper for the same source-text
+// tripwire reason as `writeAudit` above. Delegates to
+// the lib's `generateBreakfastRefundId` so the
+// UUIDv4-shape rules live in exactly one place.
 function generateRefundIdLikePaymentId(): string {
-  // `globalThis.crypto.randomUUID` is available in Node
-  // 19+, Vercel functions, and modern browsers. The
-  // fallback path covers the rare test/dev runtime that
-  // lacks it.
-  const g: any = globalThis as any;
-  if (typeof g.crypto?.randomUUID === "function") {
-    const id = String(g.crypto.randomUUID());
-    if (
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        id
-      )
-    ) {
-      return id;
-    }
-  }
-  // Deterministic-but-unique-enough fallback (32 hex
-  // chars in the UUIDv4 shape). Server runtime tests
-  // mock `crypto.randomUUID` anyway.
-  const part = () =>
-    Math.floor(Math.random() * 0xffff_ffff).toString(16).padStart(8, "0");
-  const part4 = Math.floor(Math.random() * 0xffff)
-    .toString(16)
-    .padStart(4, "0");
-  const part4b = (Math.floor(Math.random() * 0x0fff) | 0x4000)
-    .toString(16)
-    .padStart(4, "0");
-  const part4c = (Math.floor(Math.random() * 0x3fff) | 0x8000)
-    .toString(16)
-    .padStart(4, "0");
-  return `${part()}-${part4}-${part4b}-${part4c}-${part()}${part().slice(0, 4)}`;
+  return generateBreakfastRefundId();
 }
