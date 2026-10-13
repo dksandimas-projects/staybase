@@ -57,6 +57,7 @@ import {
   BookingDrawerSectionPanel,
   BookingDrawerWorkspaceHeader,
   BookingSpecialRequestsEditor,
+  StayHistory,
   type BookingDrawerSection
 } from "../components/BookingDrawerWorkspace";
 import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
@@ -633,6 +634,7 @@ export function BookingsPage() {
     rewardsConfig,
     members,
     rescheduleBooking,
+    extendStayBooking,
     vouchers,
     corporateCodes,
     paymentMethods,
@@ -1053,6 +1055,12 @@ export function BookingsPage() {
   const [moveCheckOut, setMoveCheckOut] = useState("");
   const [moveReason, setMoveReason] = useState("");
   const [moveIsSubmitting, setMoveIsSubmitting] = useState(false);
+
+  // Extend Stay Form States (EXT-01)
+  const [showExtendForm, setShowExtendForm] = useState(false);
+  const [extendCheckOut, setExtendCheckOut] = useState("");
+  const [extendReason, setExtendReason] = useState("");
+  const [extendIsSubmitting, setExtendIsSubmitting] = useState(false);
 
   // Sync Move states when selectedBooking changes
   useEffect(() => {
@@ -4107,6 +4115,46 @@ export function BookingsPage() {
     }
   };
 
+  // EXT-01: extend stay handler
+  const handleExtendSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || !extendCheckOut) return;
+
+    setExtendIsSubmitting(true);
+    try {
+      const result = await extendStayBooking({
+        bookingId: selectedBooking.id,
+        checkOut: extendCheckOut,
+        reason: extendReason || "Extend stay"
+      });
+      if (result.success) {
+        toast.success("Stay extended", "The guest's check-out date has been updated.");
+        const newCheckOutISO = `${extendCheckOut}T00:00:00Z`;
+        const newNumNights = Math.max(
+          Math.round((new Date(newCheckOutISO).getTime() - new Date(`${selectedBooking.checkIn}T00:00:00Z`).getTime()) / 86400000),
+          1
+        );
+        setSelectedBooking((previous) => previous ? {
+          ...previous,
+          checkOut: extendCheckOut,
+          numNights: newNumNights,
+          totalPrice: result.data?.totalPrice ?? previous.totalPrice,
+          rateBreakdown: result.data?.rateBreakdown ?? previous.rateBreakdown,
+          originalTotalPrice: result.data?.originalTotalPrice ?? previous.originalTotalPrice,
+          voucherDiscount: result.data?.voucherDiscount ?? previous.voucherDiscount
+        } : null);
+        setShowExtendForm(false);
+      } else {
+        toast.error("Failed to extend stay", result.error || "Please try a different check-out date.");
+      }
+    } catch (err: any) {
+      console.error("Extend stay failed:", err);
+      toast.error("Failed to extend stay", err.message || "An unexpected error occurred.");
+    } finally {
+      setExtendIsSubmitting(false);
+    }
+  };
+
   const createSelectedLedgerEntryId = (kind: "payment" | "refund") => {
     if (!selectedBooking) return "";
     if (selectedBooking.reservationId) {
@@ -5534,6 +5582,127 @@ export function BookingsPage() {
                 </form>
               </div>
             )}
+
+            {/* EXT-01: Extend stay form */}
+            {selectedBooking && showExtendForm && (
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <BedDouble size={14} className="text-primary" aria-hidden="true" />
+                  Extend Stay Workstation
+                </h3>
+                <form onSubmit={handleExtendSubmit} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4 text-xs">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {/* Current room (locked) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Current Room
+                      <input
+                        type="text"
+                        value={`Room ${selectedBooking.roomNumber} (${selectedBooking.roomType})`}
+                        readOnly
+                        className="min-h-[38px] rounded border border-gray-100 bg-gray-50 px-2 text-xs text-gray-500 cursor-not-allowed"
+                      />
+                    </label>
+
+                    {/* Current check-in (locked) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Check-In Date
+                      <input
+                        type="date"
+                        value={selectedBooking.checkIn}
+                        readOnly
+                        className="min-h-[38px] rounded border border-gray-100 bg-gray-50 px-2 text-xs text-gray-500 cursor-not-allowed"
+                      />
+                    </label>
+
+                    {/* New check-out (editable) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      New Check-Out Date
+                      <input
+                        type="date"
+                        required
+                        min={(() => {
+                          // min = day after current check-out
+                          const d = new Date(`${selectedBooking.checkOut}T00:00:00Z`);
+                          d.setDate(d.getDate() + 1);
+                          return d.toISOString().slice(0, 10);
+                        })()}
+                        value={extendCheckOut}
+                        onChange={(e) => setExtendCheckOut(e.target.value)}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                    Reason for Extending
+                    <input
+                      type="text"
+                      value={extendReason}
+                      onChange={(e) => setExtendReason(e.target.value)}
+                      placeholder="e.g. Guest requested 1 more night"
+                      className="min-h-[38px] rounded border border-gray-200 px-3 text-xs text-gray-800"
+                    />
+                  </label>
+
+                  {/* Nights delta */}
+                  {extendCheckOut && (() => {
+                    const currentCO = new Date(`${selectedBooking.checkOut}T00:00:00Z`);
+                    const newCO = new Date(`${extendCheckOut}T00:00:00Z`);
+                    const extraNights = Math.round((newCO.getTime() - currentCO.getTime()) / 86400000);
+                    if (extraNights <= 0) return null;
+                    return (
+                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[10px] leading-relaxed text-primary-dark">
+                        <p className="font-bold">Extension adds {extraNights} night{extraNights === 1 ? "" : "s"}</p>
+                        <p className="mt-1 opacity-80">The guest will be charged for the additional night{extraNights === 1 ? "" : "s"} at the current rate. Any rate recalculation happens automatically.</p>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowExtendForm(false)}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg border border-gray-200 px-4 font-semibold text-gray-700 hover:bg-gray-50 active:scale-95"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={extendIsSubmitting || !extendCheckOut}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg bg-primary px-4 font-semibold text-white hover:bg-primary-dark disabled:opacity-50 active:scale-95"
+                    >
+                      {extendIsSubmitting ? "Extending..." : "Confirm Extension"}
+                    </button>
+                  </div>
+
+                  {/* Per EXT-01: if the guest wants to move rooms AND extend,
+                      prefill the move form's check-out with the extend date. */}
+                  {extendCheckOut && (
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowExtendForm(false);
+                          setMoveCheckOut(extendCheckOut);
+                          setMoveReason("Move + extend");
+                          setShowMoveForm(true);
+                        }}
+                        className="text-[10px] text-primary underline hover:text-primary-dark"
+                      >
+                        Need a different room? Move + extend instead
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </div>
+            )}
+
+            {/* Per EXT-01 (2026-01-27): the Stay History timeline
+                renders the booking's `rescheduleHistory[]` inside the
+                "Activity & More" section, after the action forms. */}
+            {selectedBooking && (selectedBooking.rescheduleHistory?.length ?? 0) > 0 && (
+              <StayHistory entries={selectedBooking.rescheduleHistory ?? []} />
+            )}
             </BookingDrawerSectionPanel>
 
             {/* Financial totals */}
@@ -6727,6 +6896,32 @@ export function BookingsPage() {
                 >
                   <Move size={15} className="text-primary" aria-hidden="true" />
                   Move / upgrade room
+                  {renderActionScope("room")}
+                </button>
+              )}
+
+              {/* Per EXT-01 (2026-01-27): the "Extend stay" action.
+                  Only shown for eligible statuses (not pending/payment-uploaded).
+                  The form locks the room + check-in to the booking's current
+                  values and only accepts a new, later check-out date. */}
+              {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showExtendForm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Default extend check-out to the day after current check-out
+                    const currentCO = selectedBooking.checkOut;
+                    if (currentCO) {
+                      const d = new Date(`${currentCO}T00:00:00Z`);
+                      d.setDate(d.getDate() + 1);
+                      setExtendCheckOut(d.toISOString().slice(0, 10));
+                    }
+                    setExtendReason("");
+                    setShowExtendForm(true);
+                  }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                >
+                  <BedDouble size={15} className="text-primary" aria-hidden="true" />
+                  Extend stay
                   {renderActionScope("room")}
                 </button>
               )}

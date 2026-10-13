@@ -222,7 +222,12 @@ export const RescheduleBookingSchema = z.object({
   // server auto-mints one if `body.reservationId` is
   // explicitly provided — a defensive path for a
   // future migration tool).
-  reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional()
+  reservationId: z.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+  // Per EXT-01 (2026-01-27): the `mode: "extend"` discriminator
+  // locks `roomId` and `checkIn` to the booking's current values,
+  // allowing only `checkOut` to be extended. The server enforces
+  // the lock; the client pre-fills both fields as read-only hints.
+  mode: z.enum(["extend"]).optional()
 }).strict();
 
 export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;

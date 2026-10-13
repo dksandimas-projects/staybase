@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.17.0";
+    VERSION2 = "1.17.4";
   }
 });
 
@@ -221719,7 +221719,12 @@ var init_booking = __esm({
       // server auto-mints one if `body.reservationId` is
       // explicitly provided — a defensive path for a
       // future migration tool).
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      // Per EXT-01 (2026-01-27): the `mode: "extend"` discriminator
+      // locks `roomId` and `checkIn` to the booking's current values,
+      // allowing only `checkOut` to be extended. The server enforces
+      // the lock; the client pre-fills both fields as read-only hints.
+      mode: external_exports.enum(["extend"]).optional()
     }).strict();
     SetLouReceivedSchema = external_exports.object({
       bookingId: external_exports.string().trim().min(1).max(64),
@@ -235431,7 +235436,7 @@ async function handleRescheduleBooking(req, res) {
       error: "Booking, room, check-in, and check-out are required."
     });
   }
-  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId, mode } = parsedReschedule.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
@@ -235454,6 +235459,20 @@ async function handleRescheduleBooking(req, res) {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+      if (mode === "extend") {
+        const currentRoomId = String(booking.roomId || "");
+        const currentCheckIn = toDateOrNull(booking.checkIn);
+        if (String(roomId) !== currentRoomId) {
+          throw new Error("Extend stay cannot change the assigned room.");
+        }
+        if (!currentCheckIn || checkInDate.getTime() !== currentCheckIn.getTime()) {
+          throw new Error("Extend stay cannot change the check-in date.");
+        }
+        const currentCheckOut = toDateOrNull(booking.checkOut);
+        if (!currentCheckOut || checkOutDate.getTime() <= currentCheckOut.getTime()) {
+          throw new Error("Extended check-out must be after the current check-out date.");
+        }
+      }
       bookingReservationId2 = (() => {
         const stored = String(booking.reservationId || "").trim();
         if (stored.length > 0) return stored;
@@ -235749,7 +235768,13 @@ async function handleRescheduleBooking(req, res) {
         by: req.staff?.uid || req.staff?.email || "staff",
         at: (/* @__PURE__ */ new Date()).toISOString(),
         pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
-        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0),
+        // Per EXT-01 (2026-01-27): the `kind` field distinguishes
+        // an extend-stay reschedule from a room move. Both write
+        // the same `rescheduleHistory[]` array; clients render
+        // them differently (extend shows a timeline entry with
+        // only the check-out change; move shows room + dates).
+        kind: mode === "extend" ? "extend" : "move"
       };
       updatedBooking = {
         roomId: String(roomId),

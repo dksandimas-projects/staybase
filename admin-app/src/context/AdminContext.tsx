@@ -695,6 +695,8 @@ export interface AdminContextType {
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   grantEarlyCheckin: (bookingId: string, confirmedTime: string, staffNote?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
+  // Per EXT-01 (2026-01-27): the extend-stay path locks roomId + checkIn to the booking's current values.
+  extendStayBooking: (input: { bookingId: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
   // Per fix/walkin-split-name (2026-07-25): the walk-in modal
   // mirrors the guest `/book` page and collects `firstName` +
@@ -2341,6 +2343,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true, data: data.data };
     } catch (err: any) {
       console.error("rescheduleBooking failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  // Per EXT-01 (2026-01-27): the extend-stay path re-uses the
+  // reschedule endpoint with `mode: "extend"`. The room and
+  // check-in are locked to the booking's current values; only
+  // the check-out can be extended. The server enforces the lock.
+  const extendStayBooking = async (input: { bookingId: string; checkOut: string; reason?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/reschedule`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId: input.bookingId,
+          // Locked to current room + check-in by the server (mode: "extend")
+          roomId: "__EXTEND_LOCKED__",
+          checkIn: "__EXTEND_LOCKED__",
+          checkOut: input.checkOut,
+          reason: input.reason || "Extend stay",
+          mode: "extend"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to extend stay." };
+      }
+      return { success: true, data: data.data };
+    } catch (err: any) {
+      console.error("extendStayBooking failed:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -7427,6 +7463,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         resolveEarlyCheckin,
         grantEarlyCheckin,
         rescheduleBooking,
+        extendStayBooking,
         addOnsitePayment,
         addWalkinBooking,
         resendBookingEmail,

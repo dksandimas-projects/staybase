@@ -11552,7 +11552,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       error: "Booking, room, check-in, and check-out are required."
     });
   }
-  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId, mode } = parsedReschedule.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
@@ -11593,6 +11593,27 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+
+      // Per EXT-01 (2026-01-27): when `mode: "extend"` is set,
+      // the room and check-in are locked to the booking's current
+      // values — only check-out can be extended. The server enforces
+      // this invariant so a client cannot bypass it. The new
+      // check-out must also be strictly after the current check-out.
+      if (mode === "extend") {
+        const currentRoomId = String(booking.roomId || "");
+        const currentCheckIn = toDateOrNull(booking.checkIn);
+        if (String(roomId) !== currentRoomId) {
+          throw new Error("Extend stay cannot change the assigned room.");
+        }
+        if (!currentCheckIn || checkInDate.getTime() !== currentCheckIn.getTime()) {
+          throw new Error("Extend stay cannot change the check-in date.");
+        }
+        const currentCheckOut = toDateOrNull(booking.checkOut);
+        if (!currentCheckOut || checkOutDate.getTime() <= currentCheckOut.getTime()) {
+          throw new Error("Extended check-out must be after the current check-out date.");
+        }
+      }
+
       // Per MRB-02.x (2026-08-02, per decision #164): the
       // canonical reservation id for this reschedule. The
       // reschedule re-uses the existing booking's
@@ -12094,7 +12115,13 @@ export async function handleRescheduleBooking(req: any, res: any) {
         by: req.staff?.uid || req.staff?.email || "staff",
         at: new Date().toISOString(),
         pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
-        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0),
+        // Per EXT-01 (2026-01-27): the `kind` field distinguishes
+        // an extend-stay reschedule from a room move. Both write
+        // the same `rescheduleHistory[]` array; clients render
+        // them differently (extend shows a timeline entry with
+        // only the check-out change; move shows room + dates).
+        kind: mode === "extend" ? "extend" : "move"
       };
 
       updatedBooking = {

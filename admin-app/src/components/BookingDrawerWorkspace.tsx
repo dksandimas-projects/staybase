@@ -577,3 +577,167 @@ function getLifecycleIndex(status: Booking["status"]) {
   if (status === "confirmed" || status === "payment-confirmed") return 1;
   return 0;
 }
+
+// Per EXT-01 (2026-01-27): the Stay History panel renders the
+// `rescheduleHistory[]` as a timeline in the "Activity & More"
+// drawer section. Entries with `kind: "extend"` show only the
+// check-out delta and an "Extended" label; entries with
+// `kind: "move"` show room + date changes.
+interface StayHistoryEntry {
+  fromRoomId: string;
+  fromRoomNumber: string;
+  fromCheckIn: string;
+  fromCheckOut: string;
+  toRoomId: string;
+  toRoomNumber: string;
+  toCheckIn: string;
+  toCheckOut: string;
+  reason: string;
+  by: string;
+  at: string;
+  pricingBasis: string;
+  deltaTotalPrice: number;
+  kind?: string;
+}
+
+function formatTimelineDate(isoString: string): string {
+  if (!isoString) return "—";
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatTimelineDateShort(isoString: string): string {
+  if (!isoString) return "—";
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatDelta(value: number): string {
+  if (value === 0) return "No change";
+  return (value > 0 ? "+" : "") + formatPrice(value);
+}
+
+interface StayHistoryProps {
+  entries: StayHistoryEntry[];
+}
+
+export function StayHistory({ entries }: StayHistoryProps) {
+  if (!entries || entries.length === 0) {
+    return (
+      <section className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+        <h4 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          <BedDouble size={13} className="text-primary" aria-hidden="true" />
+          Stay history
+        </h4>
+        <p className="mt-2 text-[11px] text-gray-500">No stay changes recorded for this booking.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+      <h4 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+        <BedDouble size={13} className="text-primary" aria-hidden="true" />
+        Stay history
+      </h4>
+      <ol className="mt-3 space-y-3" aria-label="Stay change timeline">
+        {entries.slice().reverse().map((entry, index) => {
+          const isExtend = entry.kind === "extend";
+          const nightsDelta = (() => {
+            const from = entry.fromCheckOut ? new Date(entry.fromCheckOut) : null;
+            const to = entry.toCheckOut ? new Date(entry.toCheckOut) : null;
+            if (!from || !to || isNaN(from.getTime()) || isNaN(to.getTime())) return null;
+            const diff = Math.round((to.getTime() - from.getTime()) / 86400000);
+            return diff !== 0 ? diff : null;
+          })();
+          const byLabel = entry.by?.includes("@") ? entry.by.split("@")[0] : (entry.by || "staff");
+
+          return (
+            <li key={index} className="relative pl-6">
+              {/* Timeline line */}
+              {index < entries.length - 1 && (
+                <span className="absolute left-[9px] top-6 h-full w-px bg-gray-200" aria-hidden="true" />
+              )}
+              {/* Timeline dot */}
+              <span className={cn(
+                "absolute left-0 top-1.5 h-[18px] w-[18px] rounded-full border-2 flex items-center justify-center",
+                isExtend
+                  ? "border-primary bg-primary-light"
+                  : "border-gray-300 bg-white"
+              )}>
+                {isExtend ? (
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-gray-400" aria-hidden="true" />
+                )}
+              </span>
+
+              <div className="rounded-lg border border-gray-100 bg-white px-3 py-2.5 shadow-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-gray-900">
+                      {isExtend ? "Extended stay" : "Moved / upgraded room"}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-gray-500">
+                      {byLabel} · {formatTimelineDate(entry.at)}
+                    </p>
+                  </div>
+                  <span className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold",
+                    entry.deltaTotalPrice > 0
+                      ? "bg-amber-50 text-amber-700"
+                      : entry.deltaTotalPrice < 0
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-gray-100 text-gray-500"
+                  )}>
+                    {formatDelta(entry.deltaTotalPrice)}
+                  </span>
+                </div>
+
+                {/* Date change summary */}
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-gray-600">
+                  {isExtend ? (
+                    // Extend: show only checkout change
+                    <>
+                      <span>Check-out:</span>
+                      <span className="font-semibold text-gray-400 line-through">{formatTimelineDateShort(entry.fromCheckOut)}</span>
+                      <span className="text-gray-400">→</span>
+                      <span className="font-semibold text-gray-900">{formatTimelineDateShort(entry.toCheckOut)}</span>
+                      {nightsDelta !== null && (
+                        <span className="rounded-full bg-primary-light px-1.5 py-0.5 text-[9px] font-bold text-primary-dark">
+                          {nightsDelta > 0 ? "+" : ""}{nightsDelta} night{nightsDelta === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    // Move: show room + date change
+                    <>
+                      <span>
+                        Room <span className="font-semibold">{entry.fromRoomNumber || "—"}</span>
+                        {entry.fromRoomNumber && entry.toRoomNumber && entry.fromRoomNumber !== entry.toRoomNumber ? (
+                          <span className="text-gray-400"> → <span className="font-semibold text-gray-900">{entry.toRoomNumber}</span></span>
+                        ) : null}
+                      </span>
+                      <span>·</span>
+                      <span>
+                        {formatTimelineDateShort(entry.fromCheckIn)} → {formatTimelineDateShort(entry.toCheckOut)}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {entry.reason && (
+                  <p className="mt-1.5 text-[10px] italic text-gray-500">
+                    {entry.reason}
+                  </p>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}

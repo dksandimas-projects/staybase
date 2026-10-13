@@ -140,6 +140,51 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 
 ---
 
+## Extend Stay (EXT-01)
+
+> Implementation: `feature/extend-stay-staff` (2026-01-27). Staff-side extend-stay in the admin booking drawer. One of three deliverables: EXT-01 (staff), EXT-02 (guest self-service), EXT-03 (unavailable-room handoff).
+
+### What ships in EXT-01
+
+**Server (`handleRescheduleBooking`):**
+- `RescheduleBookingSchema` gains `mode: z.enum(["extend"]).optional()`.
+- When `mode === "extend"`, the server enforces three invariants:
+  1. `roomId` must match the booking's current `roomId` — room cannot change.
+  2. `checkIn` must match the booking's current `checkIn` — check-in cannot change.
+  3. `checkOut` must be strictly after the booking's current `checkOut`.
+- The `rescheduleHistory[]` entry records `kind: "extend"` (vs `"move"` for a room change) so clients can render the timeline differently.
+
+**Client (`AdminContext.tsx`):**
+- `extendStayBooking({ bookingId, checkOut, reason })` — thin wrapper that POSTs to the existing `/api/bookings/reschedule` with `mode: "extend"`, sending `roomId: "__EXTEND_LOCKED__"` and `checkIn: "__EXTEND_LOCKED__"` as sentinel values. The server enforces the actual locking.
+
+**Admin Drawer — "Activity & More" section (`BookingsPage.tsx`):**
+- "Extend stay" button appears in the More-actions area for `RESCHEDULABLE_STATUSES` bookings (eligible: `payment-confirmed`, `confirmed`, `checked-in`; ineligible: `pending`, `payment-uploaded` — guest hasn't paid the original stay yet).
+- The Extend Stay workstation:
+  - Current room and check-in shown as locked read-only fields.
+  - Only the new check-out date is editable, with `min` set to the day after the current check-out.
+  - Optional reason field.
+  - Live nights-delta indicator when a valid future date is selected.
+  - "Need a different room? Move + extend instead" link prefills the Move/Upgrade form's check-out + reason and switches to that form.
+- "Move + extend instead" prefills the Move/Upgrade form's `checkOut` + reason (`"Move + extend"`) so staff can immediately adjust the room picker.
+
+**Stay History panel (`BookingDrawerWorkspace.tsx` → `StayHistory`):**
+- Renders `booking.rescheduleHistory[]` as a chronological timeline in the "Activity & More" section.
+- Each entry shows: who made the change, when, the price delta badge, and either:
+  - `"extend"` entries: check-out change with `+N nights` pill and line-through on the old check-out.
+  - `"move"` entries: room number change + date range.
+- Reason is shown in italic below the change summary.
+
+### Multi-room extend
+
+When a reservation has N rooms and staff extend one room, the extend form operates on the **selected room only**. The `rescheduleHistory[]` entry is per-booking (per-child room). Staff can extend each room independently by opening each room's drawer. This matches the MRB-14 "per-child" design principle.
+
+### What does NOT ship in EXT-01
+
+- **EXT-02** (guest self-service extend): the guest-facing "Extend stay" CTA on `/my-booking`. Guest can only extend if the current room is free for the new dates — no room-picking UI.
+- **EXT-03** (unavailable-room handoff): when the current room is not available for the new dates, the CTA bundle (Call / Chat / Email) routes the guest to staff instead of a room-picker.
+
+---
+
 ## Table Filtering & Search (FSO Contract)
 
 - **Two-Level Controls:** Quick-view chips, search input, result counts (`n of total`), and advanced filter panel.
