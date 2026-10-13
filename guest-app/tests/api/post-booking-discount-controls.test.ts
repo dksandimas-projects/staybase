@@ -22,6 +22,19 @@ describe("discount controls", () => {
   it("hides and clears online claims when disabled", () => {
     expect(bookingPage).toMatch(/seniorPwdOnlineEnabled = hotelConfig\?\.seniorPwdOnlineEnabled !== false/);
     expect(bookingPage).toMatch(/setDiscountType\("none"\)/);
-    expect(bookingPage).toMatch(/Eligible guests may present a valid ID at check-in/);
+    // Per owner request 2026-10-13 (decision #231): when the
+    // online Senior/PWD path is off, the WHOLE "Discount
+    // Options" card is dropped — heading, selector, upload,
+    // and the old "claims unavailable" note. The heading must
+    // therefore render only inside the flag gate.
+    expect(bookingPage).toMatch(
+      /\{seniorPwdOnlineEnabled && <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">\s*<h3 className="text-lg font-semibold text-gray-950">Discount Options<\/h3>/
+    );
+    // Negative guards: the disabled-state note copy must not
+    // come back (it told guests to claim at check-in; the
+    // front-desk path still honors RA 9994, so the guest-facing
+    // flow simply says nothing).
+    expect(bookingPage).not.toMatch(/online claims are currently unavailable/);
+    expect(bookingPage).not.toMatch(/Eligible guests may present a valid ID at check-in/);
   });
 });
