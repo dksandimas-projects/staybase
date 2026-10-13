@@ -11,7 +11,7 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRedeemPointsSelf, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
@@ -1151,8 +1151,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleRedeemMemberPoints(req, res);
+  }
+
+  if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
+    // Per PR #9 (2026-10-13): the member-self-service redemption
+    // endpoint. NOT staff-authenticated — the handler does its own
+    // Firebase ID token verification + the toggle check +
+    // ownership guard (booking.memberId === authUser.uid) inside
+    // `applyPointsRedemption`.
+    return await handleRedeemPointsSelf(req, res);
   }
 
   if (domain === "members" && action === "undo-redemption" && req.method === "POST") {

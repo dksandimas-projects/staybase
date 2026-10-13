@@ -60,6 +60,16 @@ export const RewardsConfigSchema = z
       .optional(),
     freeNightEvery: z.number().int().min(0, "Free-night-every cannot be negative").max(365).optional(),
     levels: z.array(LevelDefSchema).optional(),
+    // Per PR #9 (2026-10-13): admin opt-in toggle for member
+    // self-service points redemption at booking checkout. Defaults
+    // to `false` so existing deployments preserve the front-desk-
+    // mediated redemption model. When `true`, the booking Step 3
+    // panel exposes an "Apply my points" input (member-authenticated
+    // endpoint). The server still owns all 7 redemption guards
+    // (min-redeem, bill cap, balance, one-per-booking, status
+    // pre-checkin, member match, booking exists) — the toggle only
+    // changes WHO clicks Apply, not WHICH guards run.
+    allowMemberPointsRedemption: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
     const levels = value.levels;

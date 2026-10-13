@@ -1418,6 +1418,15 @@ export interface RewardsConfig {
   pointsCanPayUpToBillPct?: number;  // 0..100, default 100 (no cap)
   freeNightEvery?: number;           // integer, 0 = off
   levels?: LevelDef[];               // ordered ascending by fromStays
+  // Per PR #9 (2026-10-13): admin opt-in toggle for member
+  // self-service points redemption at booking Step 3. Default false
+  // (front-desk-mediated). When true, the booking flow exposes an
+  // "Apply my points" input alongside the voucher code, and the
+  // member-authenticated /api/members/redeem-points-self endpoint
+  // is enabled. All 7 guards (min-redeem, bill cap, balance, one-
+  // per-booking, status pre-checkin, member match, booking exists)
+  // still run server-side.
+  allowMemberPointsRedemption?: boolean;
 }
 
 // Canonical `members/{memberId}` document. Same UID as

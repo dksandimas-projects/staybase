@@ -25,6 +25,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes } from "firebase/storage";
+import { getAuth } from "firebase/auth";
 import { db, storage } from "../firebase/config";
 import {
   calculateBookingTotal,
@@ -443,6 +444,20 @@ export function BookingPage() {
   const [voucherDiscountType, setVoucherDiscountType] = useState<"percent" | "flat">("flat");
   const [voucherError, setVoucherError] = useState("");
   const [isValidatingVoucher, setIsValidatingVoucher] = useState(false);
+
+  // Per PR #9 (2026-10-13): member self-service points redemption
+  // at checkout. The control surfaces only when the admin toggle
+  // (`rewardsConfig.allowMemberPointsRedemption`) is ON AND the
+  // signed-in member has a positive points balance. The server's
+  // ownership guard (`booking.memberId === authUser.uid`) inside
+  // `applyPointsRedemption` is the real authorization — these
+  // client-side checks are UX, not security.
+  const [selfPointsInput, setSelfPointsInput] = useState("");
+  const [isApplyingSelfPoints, setIsApplyingSelfPoints] = useState(false);
+  const [selfPointsError, setSelfPointsError] = useState("");
+  const [selfPointsApplied, setSelfPointsApplied] = useState(false);
+  const memberSelfRedeemEnabled = rewardsConfig?.allowMemberPointsRedemption === true;
+  const memberAvailablePoints = Number(memberProfile?.rewardsPoints || 0);
 
   const [discountType, setDiscountType] = useState<"none" | "senior" | "pwd">("none");
   // Per BF-30 (booking-flow audit 2026-06-26): the previous
@@ -2259,6 +2274,126 @@ export function BookingPage() {
                 </div>
               )}
             </div>
+
+            {/* Points Redemption Section (PR #9) — only renders when
+                the admin toggle is on AND the signed-in member has a
+                positive balance. Same 7 guards run server-side via the
+                shared `applyPointsRedemption` helper. */}
+            {memberSelfRedeemEnabled && memberAvailablePoints > 0 && (
+              <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+                <h3 className="text-lg font-semibold text-gray-950">Apply Your Points</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  You have <span className="font-bold text-primary">{memberAvailablePoints.toLocaleString()}</span> points available.
+                  {rewardsConfig?.pointsRedemptionRate ? (
+                    <> Each 100 points = ₱{Number(rewardsConfig.pointsRedemptionRate).toLocaleString()} off your booking total.</>
+                  ) : null}
+                </p>
+
+                {selfPointsApplied ? (
+                  <div className="mt-4 flex items-center justify-between rounded-lg bg-status-green-bg p-3 text-sm font-medium text-status-green-text">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle2 size={16} />
+                      Points applied to this booking.
+                    </span>
+                    <button
+                      type="button"
+                      disabled
+                      className="rounded-lg border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-400"
+                    >
+                      Applied
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Points to apply
+                      <input
+                        type="number"
+                        min={1}
+                        max={memberAvailablePoints}
+                        value={selfPointsInput}
+                        onChange={(e) => {
+                          setSelfPointsInput(e.target.value);
+                          setSelfPointsError("");
+                        }}
+                        disabled={isApplyingSelfPoints}
+                        className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500"
+                      />
+                      {(() => {
+                        const entered = Math.max(0, Math.floor(Number(selfPointsInput) || 0));
+                        const rate = Number(rewardsConfig?.pointsRedemptionRate || 0);
+                        const value = entered > 0 && rate > 0 ? Math.round((entered * rate) / 100) : 0;
+                        if (value <= 0) return null;
+                        return (
+                          <span className="font-normal text-gray-500">
+                            Preview: ₱{value.toLocaleString()} off ·{" "}
+                            {rewardsConfig?.minPointsToRedeem && entered < Number(rewardsConfig.minPointsToRedeem)
+                              ? `below the ${rewardsConfig.minPointsToRedeem}-point minimum`
+                              : `new total ₱${Math.max(0, subtotal - value).toLocaleString()}`}
+                          </span>
+                        );
+                      })()}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={
+                        isApplyingSelfPoints ||
+                        !selfPointsInput.trim() ||
+                        !memberProfile?.uid ||
+                        Number(selfPointsInput) <= 0 ||
+                        Number(selfPointsInput) > memberAvailablePoints
+                      }
+                      onClick={async () => {
+                        if (!memberProfile?.uid) {
+                          setSelfPointsError("Sign in is required to redeem points.");
+                          return;
+                        }
+                        setIsApplyingSelfPoints(true);
+                        setSelfPointsError("");
+                        try {
+                          const auth = getAuth();
+                          const idToken = await auth.currentUser?.getIdToken(true);
+                          if (!idToken) {
+                            throw new Error("Could not get sign-in token. Please try again.");
+                          }
+                          const res = await fetch("/api/members/redeem-points-self", {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${idToken}`
+                            },
+                            body: JSON.stringify({
+                              bookingId,
+                              pointsToRedeem: Math.max(0, Math.floor(Number(selfPointsInput) || 0))
+                            })
+                          });
+                          const data = await res.json();
+                          if (!res.ok || !data?.success) {
+                            throw new Error(data?.error || "Failed to apply points.");
+                          }
+                          setSelfPointsApplied(true);
+                          setSelfPointsInput("");
+                        } catch (err: any) {
+                          setSelfPointsError(err?.message || "Failed to apply points.");
+                        } finally {
+                          setIsApplyingSelfPoints(false);
+                        }
+                      }}
+                      className="min-h-11 rounded-lg bg-primary px-5 text-sm font-semibold text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isApplyingSelfPoints ? "Applying..." : "Apply Points"}
+                    </button>
+                  </div>
+                )}
+
+                {selfPointsError && (
+                  <div className="mt-3 flex gap-2 rounded-lg bg-red-50 p-3 text-sm font-medium text-red-700">
+                    <Info size={16} className="mt-0.5 shrink-0" />
+                    <p>{selfPointsError}</p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Discount Section */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">

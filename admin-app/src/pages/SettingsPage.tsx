@@ -2652,6 +2652,12 @@ export function SettingsPage() {
   const [earlyCheckInEnabled, setEarlyCheckInEnabled] = useState<boolean>(
     rewardsConfig.earlyCheckInEnabled !== false
   );
+  // Per PR #9 (2026-10-13): admin opt-in for member self-service
+  // points redemption at booking Step 3. Default OFF (false) so
+  // existing deployments preserve the front-desk-mediated flow.
+  const [allowMemberPointsRedemption, setAllowMemberPointsRedemption] = useState<boolean>(
+    rewardsConfig.allowMemberPointsRedemption === true
+  );
   const [pointsEnabled, setPointsEnabled] = useState(rewardsConfig.pointsEnabled);
   const [earningMode, setEarningMode] = useState<"per-booking" | "per-spend">(rewardsConfig.earningMode);
   const [pointsPerBooking, setPointsPerBooking] = useState(String(rewardsConfig.pointsPerBooking));
@@ -2874,6 +2880,7 @@ export function SettingsPage() {
     // true when absent so pre-EC-02 deployments keep the perk
     // on until the admin explicitly turns it off.
     setEarlyCheckInEnabled(rewardsConfig.earlyCheckInEnabled !== false);
+    setAllowMemberPointsRedemption(rewardsConfig.allowMemberPointsRedemption === true);
     // Phase 2 rehydrate — match the initial-state defaults above
     // (welcomePoints=0, minPointsToRedeem=0, pointsCanPayUpToBillPct=100,
     // freeNightEvery=0, levels=[]) so the form never renders
@@ -3574,6 +3581,7 @@ const handleAddLevel = () => {
       minPointsToRedeem: parseInt(minPointsToRedeem, 10) || 0,
       pointsCanPayUpToBillPct: parseFloat(pointsCanPayUpToBillPct) || 100,
       freeNightEvery: parseInt(freeNightEvery, 10) || 0,
+      allowMemberPointsRedemption,
       // Sort ascending by `fromStays` before save so the
       // canonical Firestore shape matches the UI's display
       // order — defends against an admin who edits values
@@ -5689,6 +5697,27 @@ const handleAddLevel = () => {
                       Enable Global Member Discount Fallback
                       <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
                         When on, the Member Discount % below applies to tier-less members. When your Levels table has a 0-stay base tier, that tier's discount takes precedence and this fallback is dormant.
+                      </span>
+                    </span>
+                  </label>
+
+                  <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => setAllowMemberPointsRedemption(!allowMemberPointsRedemption)}
+                      aria-label="Toggle member self-service points redemption at checkout"
+                      className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                        allowMemberPointsRedemption ? "bg-primary" : "bg-gray-200"
+                      }`}
+                    >
+                      <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                        allowMemberPointsRedemption ? "translate-x-5" : "translate-x-0"
+                      }`} />
+                    </button>
+                    <span>
+                      Allow Member Self-Redemption at Checkout
+                      <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
+                        When on, signed-in members can apply their own points balance to a booking from the Step 3 review panel. The same min-redeem, bill cap, and balance guards still run server-side — only the actor changes. When off (the default), points redemption remains admin-only via the booking drawer.
                       </span>
                     </span>
                   </label>
