@@ -235,7 +235,7 @@ import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationAc
 // are defensive (null/undefined inputs return safe defaults) so
 // they don't crash on legacy `rewardsConfig` docs that pre-date
 // the Phase 2 fields.
-import { resolveCurrentLevel, calculatePointsWithMultiplier } from "@spark-inn/shared";
+import { resolveCurrentLevel, calculatePointsWithMultiplier, validatePointsRedemption } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -1303,6 +1303,15 @@ export const createBookingSchema = z.object({
   corporateCode: z.string().trim().max(120).optional().default(""),
   corporateFlatRate: z.boolean().optional().default(false),
   linkedInquiryId: z.string().trim().max(160).nullable().optional().default(null),
+  // Per PR #9 fix (2026-10-13): the optional points amount a
+  // signed-in member wants to apply at booking creation time.
+  // The server applies the redemption atomically inside the
+  // create transaction via the shared `applyPointsRedemption`
+  // helper (passes `skipBookingUpdate: true` so the caller writes
+  // the booking with the discounted totalPrice). Default 0 =
+  // no points applied. Max bounded to prevent accidental
+  // underflow (real-world redemptions are < 100,000 points).
+  pointsToRedeem: z.coerce.number().int().min(0).max(1_000_000).optional().default(0),
   // Per MRB-06 (2026-08-02, per decision #159): the N>1
   // generalization. The client requests N rooms of the
   // same `roomType`; the server assigns N DISTINCT
@@ -1493,6 +1502,13 @@ export async function handleCreateBooking(req: any, res: any) {
     // omit the field and stay green.
     holdId
   } = body;
+
+  // Per PR #9 fix (2026-10-13): the member's desired points
+  // amount to apply at booking creation. Default 0. The actual
+  // redemption happens later in the create transaction via the
+  // shared `applyPointsRedemption` helper — this is just the
+  // validated + coerced value.
+  const pointsToRedeem = body.pointsToRedeem || 0;
 
   const guestDetails: GuestDetails = rawGuestDetails;
 
@@ -3051,9 +3067,114 @@ export async function handleCreateBooking(req: any, res: any) {
         transaction.set(counterRef, { count: assignedRooms.length });
       }
 
+      // Per PR #9 fix (2026-10-13): member self-service points
+      // redemption applied at booking creation. Universal across
+      // N=1 and MRB-06 multi-room bookings — the subtraction
+      // applies to the reservation total; per-room subtotals
+      // stay per-room (the discount surfaces on the reservation
+      // header + the FIRST room's `pointsRedeemed*` fields).
+      // The redemption happens atomically inside the create
+      // transaction — booking is written with the already-
+      // discounted totalPrice, so the member pays the lower
+      // amount. No refunds, no credit tracking, no post-payment
+      // reconciliation.
+      //
+      // Why here (before the newReservation + newBooking
+      // builds): the reservation header's `totalPrice` reads
+      // from `finalTotalPrice` (overridden below), and the
+      // per-room writes inherit the redemption metadata via the
+      // `newBooking` spread. Running the redemption here means
+      // `finalTotalPrice` is discounted before ANY booking doc
+      // is constructed — atomic with the existing writes.
+      let selfRedeemedPoints = 0;
+      let selfRedeemedValue = 0;
+      let selfRedeemedBy: string | null = null;
+      let selfRedeemedAt: Date | null = null;
+      if (pointsToRedeem > 0) {
+        if (!detectedMemberId) {
+          throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
+        }
+        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
+        const selfRcSnap = await transaction.get(selfRcRef);
+        const selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
+        if (selfRcData?.allowMemberPointsRedemption !== true) {
+          throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
+        }
+        const selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
+        const selfMemberDoc = await transaction.get(selfMemberRef);
+        if (!selfMemberDoc.exists) {
+          throw new Error("Member not found.");
+        }
+        const selfMemberData = selfMemberDoc.data()!;
+        if (selfMemberData.isActive === false || selfMemberData.isMember === false) {
+          throw new Error("Member account is not active.");
+        }
+        const pointsRedemptionRate = Number(selfRcData?.pointsRedemptionRate || 0);
+        if (pointsRedemptionRate <= 0) {
+          throw new Error("Points redemption is not configured.");
+        }
+        const minPointsToRedeem = Number(selfRcData?.minPointsToRedeem || 0);
+        const billPct = Number(selfRcData?.pointsCanPayUpToBillPct ?? 100);
+        if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+          throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+        }
+        if (Number.isFinite(billPct) && billPct < 100) {
+          const reservationTotal = finalTotalPrice;
+          const maxRedeemableCurrency = Math.floor((reservationTotal * Math.max(0, billPct)) / 100);
+          const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
+          if (pointsToRedeem > maxRedeemablePoints) {
+            throw new Error(
+              `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+            );
+          }
+        }
+        const validation = validatePointsRedemption(
+          pointsToRedeem,
+          Number(selfMemberData.rewardsPoints || 0),
+          pointsRedemptionRate
+        );
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+        const redemptionValue = Math.round(validation.value);
+        if (redemptionValue <= 0 || redemptionValue > finalTotalPrice) {
+          throw new Error("Points redemption value exceeds the booking total.");
+        }
+        // Discount the reservation total. The newReservation
+        // header below reads `finalTotalPrice` (already
+        // overridden), and each per-room booking write carries
+        // the same discounted total via the `newBooking` spread.
+        finalTotalPrice = Math.max(finalTotalPrice - redemptionValue, 0);
+        if (rateBreakdown) {
+          rateBreakdown.finalTotal = finalTotalPrice;
+          (rateBreakdown as any).pointsRedeemedValue = redemptionValue;
+        }
+        selfRedeemedPoints = pointsToRedeem;
+        selfRedeemedValue = redemptionValue;
+        selfRedeemedBy = `self:${detectedMemberId}`;
+        selfRedeemedAt = now;
+        // Update member's `rewardsPoints` + write negative
+        // `pointsHistory` row. Both atomic with the booking
+        // write — a transaction retry replays both safely.
+        transaction.update(selfMemberRef, {
+          rewardsPoints: Number(selfMemberData.rewardsPoints || 0) - pointsToRedeem,
+          updatedAt: now
+        });
+        const historyRef = adminDb.collection(`members/${detectedMemberId}/pointsHistory`).doc();
+        transaction.set(historyRef, {
+          type: "redeem",
+          points: -pointsToRedeem,
+          description: `Redeemed at booking creation ${bookingId}`,
+          reason: "Points redeemed by member at checkout",
+          bookingId,
+          by: selfRedeemedBy,
+          at: now
+        });
+      }
+
       // 10. Prepare Document Fields
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
-      
+
       const newBooking = {
         bookingRef,
         roomId,
@@ -3348,10 +3469,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // room of the same `roomType` + same dates +
         // same guest inputs, so the sum is
         // `roomCount * per-room value`).
+        // Per PR #9 fix (2026-10-13): when points are applied
+        // at booking creation, `totalPrice` carries the post-
+        // redemption amount (the per-room writes below carry
+        // the same discounted total). For non-redemption
+        // bookings this is byte-equivalent to the previous
+        // `totalPrice: totalPrice` reference — `finalTotalPrice`
+        // stays equal to `totalPrice` when the redemption block
+        // doesn't execute.
         originalSubtotal: subtotal,
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal,
-        totalPrice,
+        totalPrice: finalTotalPrice,
         // Per MRB-11 (2026-08-03, per decision #177):
         // the aggregate of every child booking's
         // `revenueAllocation`. Reports reads this for
@@ -3447,6 +3576,19 @@ export async function handleCreateBooking(req: any, res: any) {
           latestCheckOut: checkOutDate,
           isDivergent: false
         },
+        // Per PR #9 fix (2026-10-13): the reservation-level
+        // mirror of the per-room redemption. Both fields are
+        // populated ONLY when the member applied points at
+        // booking creation (pre-Phase-9 reservations stay
+        // byte-equivalent with both fields absent).
+        ...(selfRedeemedPoints > 0
+          ? {
+              pointsRedeemed: selfRedeemedPoints,
+              pointsRedeemedValue: selfRedeemedValue,
+              pointsRedeemedBy: selfRedeemedBy,
+              pointsRedeemedAt: selfRedeemedAt
+            }
+          : {}),
         createdAt: now,
         updatedAt: now,
         createdBy: "guest"
@@ -3597,6 +3739,7 @@ export async function handleCreateBooking(req: any, res: any) {
       for (const { ref: writeRef, data: writeData } of bookingWriteRefs) {
         transaction.set(writeRef, writeData);
       }
+
       finalRooms = bookingWriteRefs.map((write, index) => {
         const assigned = assignedRooms[index];
         const pricing = childPricing[index];
