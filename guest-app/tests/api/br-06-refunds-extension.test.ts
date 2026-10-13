@@ -175,6 +175,28 @@ describe("BR-06 — Refunds extension (source-text + smoke tripwires)", () => {
     expect(computeRefundPaidAmountDelta(1000, -10)).toBe(1000);
   });
 
+  // The bug-scenario regression test (per the layman
+  // explanation in the BR-06 commit): guest pays ₱10,000,
+  // a ₱3,000 cancellation refund gets recorded, and the
+  // booking's `paidAmount` must now read ₱7,000. This is
+  // the exact scenario the CRL-01 pre-BR-06 code missed
+  // (it wrote the refund row but never decremented
+  // `paidAmount`). The unified helper now handles it.
+  it("regression: ₱10,000 paid + ₱3,000 refund → ₱7,000 paidAmount (the CRL-01 bug)", async () => {
+    const { computeRefundPaidAmountDelta } = await import(
+      "../../server/lib/refunds"
+    );
+    // The scenario the BR-06 unified helper fixes.
+    expect(computeRefundPaidAmountDelta(10000, 3000)).toBe(7000);
+    // Same scenario but with the breakfast refund path
+    // (the BR-04 helper stores the refund as -priceSnapshot;
+    // the helper subtracts the magnitude).
+    expect(computeRefundPaidAmountDelta(10000, 350)).toBe(9650);
+    // Multiple refunds stacking (a guest cancels a second
+    // meal after a partial refund has already been recorded).
+    expect(computeRefundPaidAmountDelta(7000, 3000)).toBe(4000);
+  });
+
   // 8. BR-05 `breakfast-refund-paid.ts` is refactored
   //    to call the unified helper.
   it("breakfast-refund-paid.ts (BR-05) delegates to the unified markRefundPaid helper", () => {
