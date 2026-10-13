@@ -25,7 +25,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes } from "firebase/storage";
-import { getAuth } from "firebase/auth";
 import { db, storage } from "../firebase/config";
 import {
   calculateBookingTotal,
@@ -445,15 +444,20 @@ export function BookingPage() {
   const [voucherError, setVoucherError] = useState("");
   const [isValidatingVoucher, setIsValidatingVoucher] = useState(false);
 
-  // Per PR #9 (2026-10-13): member self-service points redemption
-  // at checkout. The control surfaces only when the admin toggle
-  // (`rewardsConfig.allowMemberPointsRedemption`) is ON AND the
-  // signed-in member has a positive points balance. The server's
-  // ownership guard (`booking.memberId === authUser.uid`) inside
-  // `applyPointsRedemption` is the real authorization — these
-  // client-side checks are UX, not security.
+  // Per PR #9 fix (2026-10-13): member self-service points redemption
+  // at booking creation. The Apply button does NOT call the API
+  // — it just stores the desired points amount in local state
+  // and shows the discount in the UI preview. On submit,
+  // `handleConfirmBooking` passes `pointsToRedeem` to the
+  // server's `handleCreateBooking`, which applies the redemption
+  // atomically inside the create transaction. The booking is
+  // written with the already-discounted totalPrice — no refunds,
+  // no credit tracking, no post-payment reconciliation. The
+  // client-side toggle gate (`allowMemberPointsRedemption`) is
+  // UX, not security — the server's ownership guard inside the
+  // create transaction is the real authorization.
   const [selfPointsInput, setSelfPointsInput] = useState("");
-  const [isApplyingSelfPoints, setIsApplyingSelfPoints] = useState(false);
+  const [pendingPointsToRedeem, setPendingPointsToRedeem] = useState(0);
   const [selfPointsError, setSelfPointsError] = useState("");
   const [selfPointsApplied, setSelfPointsApplied] = useState(false);
   const memberSelfRedeemEnabled = rewardsConfig?.allowMemberPointsRedemption === true;
@@ -1672,6 +1676,15 @@ export function BookingPage() {
           additionalPreferences,
           additionalRequest: additionalRequest.trim(),
           expectedArrivalTime,
+          // Per PR #9 fix (2026-10-13): the member's pending
+          // points amount from the Step 3 control. `0` (the
+          // default) preserves pre-PR-9 behavior exactly. The
+          // server's `handleCreateBooking` applies the
+          // redemption atomically inside the create
+          // transaction — the booking is written with the
+          // already-discounted totalPrice so the member pays
+          // the lower amount.
+          pointsToRedeem: pendingPointsToRedeem,
           checkIn,
           checkOut,
           // Per BI-09 (booking-intercom audit 2026-07-06): the
@@ -2293,14 +2306,19 @@ export function BookingPage() {
                   <div className="mt-4 flex items-center justify-between rounded-lg bg-status-green-bg p-3 text-sm font-medium text-status-green-text">
                     <span className="flex items-center gap-1.5">
                       <CheckCircle2 size={16} />
-                      Points applied to this booking.
+                      {pendingPointsToRedeem.toLocaleString()} points will be applied at booking submission.
                     </span>
                     <button
                       type="button"
-                      disabled
-                      className="rounded-lg border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-400"
+                      onClick={() => {
+                        setPendingPointsToRedeem(0);
+                        setSelfPointsInput("");
+                        setSelfPointsApplied(false);
+                        setSelfPointsError("");
+                      }}
+                      className="rounded-lg border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-100"
                     >
-                      Applied
+                      Remove
                     </button>
                   </div>
                 ) : (
@@ -2316,8 +2334,7 @@ export function BookingPage() {
                           setSelfPointsInput(e.target.value);
                           setSelfPointsError("");
                         }}
-                        disabled={isApplyingSelfPoints}
-                        className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500"
+                        className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
                       />
                       {(() => {
                         const entered = Math.max(0, Math.floor(Number(selfPointsInput) || 0));
@@ -2337,51 +2354,27 @@ export function BookingPage() {
                     <button
                       type="button"
                       disabled={
-                        isApplyingSelfPoints ||
                         !selfPointsInput.trim() ||
-                        !memberProfile?.uid ||
                         Number(selfPointsInput) <= 0 ||
                         Number(selfPointsInput) > memberAvailablePoints
                       }
-                      onClick={async () => {
-                        if (!memberProfile?.uid) {
-                          setSelfPointsError("Sign in is required to redeem points.");
+                      onClick={() => {
+                        const entered = Math.max(0, Math.floor(Number(selfPointsInput) || 0));
+                        if (entered <= 0) {
+                          setSelfPointsError("Enter a positive number of points to apply.");
                           return;
                         }
-                        setIsApplyingSelfPoints(true);
-                        setSelfPointsError("");
-                        try {
-                          const auth = getAuth();
-                          const idToken = await auth.currentUser?.getIdToken(true);
-                          if (!idToken) {
-                            throw new Error("Could not get sign-in token. Please try again.");
-                          }
-                          const res = await fetch("/api/members/redeem-points-self", {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                              Authorization: `Bearer ${idToken}`
-                            },
-                            body: JSON.stringify({
-                              bookingId,
-                              pointsToRedeem: Math.max(0, Math.floor(Number(selfPointsInput) || 0))
-                            })
-                          });
-                          const data = await res.json();
-                          if (!res.ok || !data?.success) {
-                            throw new Error(data?.error || "Failed to apply points.");
-                          }
-                          setSelfPointsApplied(true);
-                          setSelfPointsInput("");
-                        } catch (err: any) {
-                          setSelfPointsError(err?.message || "Failed to apply points.");
-                        } finally {
-                          setIsApplyingSelfPoints(false);
+                        if (entered > memberAvailablePoints) {
+                          setSelfPointsError(`You only have ${memberAvailablePoints.toLocaleString()} points available.`);
+                          return;
                         }
+                        setPendingPointsToRedeem(entered);
+                        setSelfPointsApplied(true);
+                        setSelfPointsError("");
                       }}
                       className="min-h-11 rounded-lg bg-primary px-5 text-sm font-semibold text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {isApplyingSelfPoints ? "Applying..." : "Apply Points"}
+                      Apply at Booking
                     </button>
                   </div>
                 )}

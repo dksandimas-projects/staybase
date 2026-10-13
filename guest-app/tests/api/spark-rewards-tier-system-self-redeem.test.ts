@@ -188,79 +188,88 @@ describe("PR #9 — handleRedeemPointsSelf member-auth handler", () => {
   });
 });
 
-describe("PR #9 — BookingPage Step 3 self-redeem control", () => {
-  it("imports getAuth from firebase/auth (member ID token source)", () => {
-    expect(bookingPageSrc).toMatch(/import\s*\{\s*getAuth\s*\}\s*from\s*["']firebase\/auth["']/);
+describe("PR #9 fix — BookingPage Step 3 self-redeem control (apply-at-create)", () => {
+  it("does NOT import getAuth from firebase/auth (no client-side ID token needed)", () => {
+    // Per PR #9 fix (2026-10-13): the apply-at-create flow runs
+    // the redemption atomically inside `handleCreateBooking`'s
+    // transaction. The booking doc carries the Firebase ID token
+    // auth via the existing `decoded = await adminAuth.verifyIdToken(...)`
+    // path at line ~1796 — the BookingPage client never reads
+    // the token for the redemption anymore.
+    expect(bookingPageSrc).not.toMatch(/import\s*\{\s*getAuth\s*\}\s*from\s*["']firebase\/auth["']/);
   });
 
-  it("declares the self-redeem state (input + apply-in-flight + error + applied)", () => {
-    // The four useState hooks are the control's local state shape.
+  it("declares the local-only self-redeem state (input + pending + error + applied)", () => {
+    // The four useState hooks are the control's local state
+    // shape. The Apply button does NOT call the API — it just
+    // stores the desired points amount in `pendingPointsToRedeem`
+    // + flips `selfPointsApplied`. The server applies at submit.
     expect(bookingPageSrc).toMatch(/const \[selfPointsInput, setSelfPointsInput\] = useState\(["']["']\)/);
-    expect(bookingPageSrc).toMatch(/const \[isApplyingSelfPoints, setIsApplyingSelfPoints\] = useState\(false\)/);
+    expect(bookingPageSrc).toMatch(/const \[pendingPointsToRedeem, setPendingPointsToRedeem\] = useState\(0\)/);
     expect(bookingPageSrc).toMatch(/const \[selfPointsError, setSelfPointsError\] = useState\(["']["']\)/);
     expect(bookingPageSrc).toMatch(/const \[selfPointsApplied, setSelfPointsApplied\] = useState\(false\)/);
+    // The `isApplyingSelfPoints` state from PR #9 is gone (no
+    // in-flight API call to track).
+    expect(bookingPageSrc).not.toMatch(/const \[isApplyingSelfPoints, setIsApplyingSelfPoints\] = useState\(false\)/);
   });
 
   it("derives the toggle visibility + available balance from rewardsConfig + memberProfile", () => {
-    // The control only renders when the toggle is ON AND the member
-    // has a positive balance. The conditional in JSX uses these
-    // derived booleans.
     expect(bookingPageSrc).toMatch(/const memberSelfRedeemEnabled = rewardsConfig\?\.allowMemberPointsRedemption === true/);
     expect(bookingPageSrc).toMatch(/const memberAvailablePoints = Number\(memberProfile\?\.rewardsPoints \|\| 0\)/);
   });
 
   it("the control section is gated by memberSelfRedeemEnabled + memberAvailablePoints > 0", () => {
-    // The conditional wraps the entire "Apply Your Points" card.
     expect(bookingPageSrc).toMatch(/\{memberSelfRedeemEnabled && memberAvailablePoints > 0 && \(/);
     expect(bookingPageSrc).toMatch(/<h3[^>]*>Apply Your Points<\/h3>/);
   });
 
-  it("POSTs to /api/members/redeem-points-self with a Bearer ID token", () => {
-    // Member-authenticated endpoint. The token comes from
-    // `auth.currentUser.getIdToken(true)` (force-refresh so a
-    // freshly-revoked session can't accidentally succeed).
-    expect(bookingPageSrc).toMatch(/fetch\(["']\/api\/members\/redeem-points-self["']/);
-    expect(bookingPageSrc).toMatch(/Authorization:\s*`Bearer \$\{idToken\}`/);
-    expect(bookingPageSrc).toMatch(/getIdToken\(true\)/);
+  it("does NOT POST to /api/members/redeem-points-self (apply happens at submit)", () => {
+    // Per PR #9 fix: the redemption is atomic with the booking
+    // creation transaction. The Step 3 Apply button is local
+    // only — no fetch to the self endpoint.
+    expect(bookingPageSrc).not.toMatch(/fetch\(["']\/api\/members\/redeem-points-self["']/);
   });
 
-  it("the request body is { bookingId, pointsToRedeem } — no memberId (server reads from token)", () => {
-    expect(bookingPageSrc).toMatch(/bookingId,/);
-    expect(bookingPageSrc).toMatch(/pointsToRedeem:\s*Math\.max\(0,\s*Math\.floor\(Number\(selfPointsInput\) \|\| 0\)\)/);
-    // Explicit no-leak: the client never sends memberId for the
-    // self path. The auth UID is the server-side source of truth.
-    expect(bookingPageSrc).not.toMatch(/redeem-points-self[\s\S]{0,400}memberId:/);
+  it("passes pointsToRedeem to /api/bookings/create on submit (the apply-at-create flow)", () => {
+    // The submit handler passes the pending points amount as a
+    // request body field. The server's `handleCreateBooking`
+    // applies the redemption atomically inside its existing
+    // transaction.
+    expect(bookingPageSrc).toMatch(/pointsToRedeem:\s*pendingPointsToRedeem/);
   });
 
-  it("disables the Apply button when input is empty / over-balance / not a member", () => {
+  it("Apply button only sets local state (no API call) when clicked", () => {
+    // The onClick handler is a synchronous state setter — no fetch,
+    // no async/await, no try/catch around an HTTP call.
+    expect(bookingPageSrc).toMatch(/setPendingPointsToRedeem\(entered\)/);
+    expect(bookingPageSrc).toMatch(/setSelfPointsApplied\(true\)/);
+    // No async onClick handler (the legacy API-call version was async).
+    expect(bookingPageSrc).not.toMatch(/onClick=\{async \(\) => \{\s*if \(!memberProfile\?\.uid\)/);
+  });
+
+  it("disables the Apply button when input is empty / over-balance", () => {
     // UX guard: the button stays disabled when the input is
-    // empty or exceeds the member's balance — keeps the actor
-    // from clicking an obviously-doomed button.
-    expect(bookingPageSrc).toMatch(/disabled=\{[\s\S]*!memberProfile\?\.uid[\s\S]*\}/);
+    // empty or exceeds the member's balance.
     expect(bookingPageSrc).toMatch(/Number\(selfPointsInput\)\s*>\s*memberAvailablePoints/);
   });
 
   it("shows the redemption preview (value off + new total) below the input", () => {
-    // Inline preview mirrors the admin's preview on the booking
-    // drawer — same `pointsRedemptionRate` math.
     expect(bookingPageSrc).toMatch(/Preview: ₱\{value\.toLocaleString\(\)\} off/);
   });
 
   it("shows a min-redeem warning when input is below the configured floor", () => {
-    // Mirrors the server guard's error message. The actor sees
-    // the floor as a friendly hint before clicking Apply.
     expect(bookingPageSrc).toMatch(/below the \$\{rewardsConfig\.minPointsToRedeem\}-point minimum/);
   });
 
-  it("locks the control to read-only after a successful apply", () => {
-    // One-per-booking enforcement — the server's guard is the
-    // authoritative check, but the UI shouldn't tempt the actor
-    // to try a second time. The branch renders the "Applied"
-    // success card with a disabled Applied button. (The button
-    // text + the closing tag are on separate lines in JSX, so
-    // the regex matches across whitespace.)
-    expect(bookingPageSrc).toMatch(/selfPointsApplied \? \(/);
-    expect(bookingPageSrc).toMatch(/Applied\s*<\/button>/);
+  it("the success card confirms 'will be applied at booking submission'", () => {
+    // The control's success branch displays a confirmation that
+    // the redemption is pending at submit (NOT already applied —
+    // that would be a lie since the redemption happens at
+    // create time, not at Apply click time).
+    expect(bookingPageSrc).toMatch(/will be applied at booking submission/);
+    // The legacy "Points applied to this booking" copy is gone
+    // — that implied the redemption already happened on click.
+    expect(bookingPageSrc).not.toMatch(/Points applied to this booking\./);
   });
 });
 
