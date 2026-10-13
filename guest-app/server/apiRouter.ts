@@ -18,6 +18,7 @@ import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/in
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handleGetBreakfastConfig } from "./handlers/breakfast-config";
+import { handleGetBreakfastManage, handleUpdateBreakfast } from "./handlers/breakfast-manage";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
@@ -987,6 +988,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleRoomAvailability(req, res);
   }
 
+  // Per BR-04 (2026-10-13, decision #233): the
+  // guest Manage Breakfast read endpoint
+  // (`/api/bookings/breakfast/manage`). Lookup-token
+  // gated via the `handleGetBreakfastManage`
+  // dispatcher (mirrors the
+  // `handleLookupBooking` magic-link gate from H2);
+  // the path's third segment is `manage`, which the
+  // `[domain, action]` destructuring above drops. We
+  // discriminate by `pathSegments[2]` because both
+  // routes share `domain === "bookings" && action
+  // === "breakfast"`. Route order matters — the
+  // more-specific `manage` / `update` blocks come
+  // before the catch-all `breakfast-config` block
+  // below so the dispatch lands on the right branch.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "manage" &&
+    req.method === "GET"
+  ) {
+    // Per feat/relax-booking-lookup: the same
+    // ref-alone OR ref+token path lookup applies.
+    // Mirror the `bookings-lookup` budget (10/min/IP)
+    // so a probing bot can't fan out faster than the
+    // existing lookup surface. The 3-failure 1-hour
+    // backoff doesn't apply here — the manage path
+    // always discloses "Booking not found" identically
+    // to lookup, so a sophisticated attacker can't
+    // distinguish, and the rate limit is the
+    // load-bearing defense.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-manage:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many manage-breakfast requests. Please try again in a minute." });
+    }
+
+    return await handleGetBreakfastManage(req, res);
+  }
+
+  // Per BR-04: the guest Manage Breakfast save
+  // endpoint (`/api/bookings/breakfast/update`).
+  // Lookup-token gated via the dispatcher +
+  // Turnstile-gated per `plan/docs/SECURITY.md`
+  // (the same gate the booking-create path uses for
+  // mutations). Rate-limited at 10/min/IP — the same
+  // window as the lookup + cancel-preview surfaces.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-update:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-save requests. Please try again in a minute." });
+    }
+
+    // Per H1 (hardening batch 2026-06-26): the
+    // mutation is Turnstile-gated like every other
+    // write path.
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleUpdateBreakfast(req, res);
+  }
+
   // Per BR-03 (2026-10-12, decision #232): the public
   // breakfast-config endpoint. Returns the meal catalog
   // + cutoff + instructions for the guest Step 2 UI +
@@ -999,8 +1065,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // The third URL segment (`config`) is dropped by the
   // `[domain, action] = pathSegments` destructuring
   // above; the route is fully identified by
-  // `domain === "bookings" && action === "breakfast"`.
-  if (domain === "bookings" && action === "breakfast" && req.method === "GET") {
+  // `domain === "bookings" && action === "breakfast" && req.method === "GET"`.
+  // The block is restricted to the `config` segment (or
+  // no segment, for backward-compat) so the BR-04
+  // `manage` / `update` segments above fall through to
+  // their dedicated blocks instead of being answered
+  // here.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    (pathSegments[2] === undefined || pathSegments[2] === "config") &&
+    req.method === "GET"
+  ) {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 60000)) {
       return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
     }

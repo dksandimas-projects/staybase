@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Utensils, Wallet } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -173,6 +173,49 @@ function formatStayDate(value: string) {
 }
 
 const RESEND_COOLDOWN_MS = 60_000;
+
+// Per BR-04 (2026-10-13, decision #233): the "Manage
+// Breakfast" link card on the booking-detail surface.
+// Renders only for the booking statuses the spec allows
+// edits on (confirmed | payment-confirmed | checked-in);
+// for everything else the link is omitted so the
+// post-check-out and cancelled bookings don't get a
+// dead-end CTA.
+function ManageBreakfastLink({
+  bookingRef,
+  status,
+  token
+}: {
+  bookingRef: string;
+  status: string;
+  token: string;
+}) {
+  // Per the BR-04 manage gate (decision #233): the
+  // guest can edit breakfast only while the booking is
+  // pre-checkout. Post-checkout the page redirects to
+  // read-only.
+  const canManage = ["confirmed", "payment-confirmed", "checked-in"].includes(status);
+  if (!canManage) return null;
+  if (!bookingRef || !token) return null;
+  const target = `/my-booking/breakfast?ref=${encodeURIComponent(bookingRef)}&token=${encodeURIComponent(token)}`;
+  return (
+    <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
+      <Utensils className="text-primary shrink-0 mt-0.5" size={18} aria-hidden="true" />
+      <div className="flex-1">
+        <p className="text-sm font-bold text-primary-dark">Manage Breakfast</p>
+        <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+          Update your per-date breakfast selections — orders close at the cutoff time each evening.
+        </p>
+        <Link
+          to={target}
+          className="mt-3 inline-flex min-h-11 items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+        >
+          Open Manage Breakfast
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 export function BookingLookupPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -1520,6 +1563,32 @@ export function BookingLookupPage() {
                       </p>
                     </div>
                   </div>
+                )}
+
+                {/* Per BR-04 (2026-10-13, decision #233): the
+                    "Manage Breakfast" link. The link routes to
+                    `/my-booking/breakfast?ref=...&token=...`
+                    where `token` is the magic-link
+                    `lookupToken`. The page only renders the
+                    link when:
+                      • the URL still has a `token` param
+                        (the deep-link magic-link flow), AND
+                      • the booking's status is one the
+                        spec allows edits on (`confirmed`,
+                        `payment-confirmed`, `checked-in`).
+                    The token is required because the manage
+                    endpoint is lookup-token gated (per the
+                    spec's H2 inheritance). When the user
+                    instead searched with ref + email, there
+                    is no token — the link is omitted so a
+                    bot probing the route doesn't get an
+                    auth hint back. */}
+                {(searchParams.get("token") || "") && activeBooking && (
+                  <ManageBreakfastLink
+                    bookingRef={activeBooking.bookingRef}
+                    status={String(activeBooking.status || "")}
+                    token={String(searchParams.get("token") || "")}
+                  />
                 )}
 
                 <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">

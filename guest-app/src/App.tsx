@@ -6,6 +6,7 @@ import { PageMeta } from "./components/PageMeta";
 import { AboutPage } from "./pages/AboutPage";
 import { BookingConfirmPage } from "./pages/BookingConfirmPage";
 import { BookingLookupPage } from "./pages/BookingLookupPage";
+import ManageBreakfastPage from "./pages/ManageBreakfastPage";
 import { BookingPage } from "./pages/BookingPage";
 import { ContactPage } from "./pages/ContactPage";
 import { CorporateBookingPage } from "./pages/CorporateBookingPage";
@@ -83,6 +84,19 @@ export function App() {
           element={
             <WithMeta title="My Booking" description={`Look up your ${config.brandName} reservation using your booking reference and email.`} noIndex>
               <BookingLookupPage />
+            </WithMeta>
+          }
+        />
+        {/* Per BR-04 (2026-10-13, decision #233): the guest
+            Manage Breakfast page. The page reuses the same
+            magic-link auth as /my-booking (`ref` + `token`
+            query params). The page is the post-booking edit
+            surface for the new `breakfastSelections` field. */}
+        <Route
+          path="/my-booking/breakfast"
+          element={
+            <WithMeta title="Manage Breakfast" description={`Adjust your per-date breakfast selections at ${config.brandName}.`} noIndex>
+              <ManageBreakfastPage />
             </WithMeta>
           }
         />

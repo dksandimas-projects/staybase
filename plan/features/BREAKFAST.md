@@ -1,7 +1,8 @@
 # Breakfast — Meal-Based Add-On Model
 > Requires: CLAUDE.md, `plan/docs/BACKEND.md`, `plan/docs/TYPES.md`, `plan/docs/API-ROUTES.md`, `plan/docs/FRONTEND.md`, `plan/features/BOOKING-FLOW.md`, `plan/features/BOOKINGS-MANAGEMENT.md`, `plan/features/SETTINGS.md`, `plan/features/EMAIL-PDF-STORAGE.md`
 >
-> **Status:** ⬜ Spec only. No code yet.
+> **Status:** 🚧 BR-04 in progress. BR-01 / BR-02 / BR-03 shipped (commits
+> `5ba61a1`, `c55b2eb`, `5a40d9d` on `feature/breakfast-redesign`).
 >
 > **Spec author:** `feature/breakfast-redesign` — design conversation with the client closed 2026-10-12 (10 numbered decisions, see `§Decisions Locked`). Awaiting team review + ticket number assignment (proposed `BR-01..BR-08` below).
 
@@ -458,16 +459,19 @@ The 8 W4.4 audit-extension email templates (per `plan/features/EMAIL-AUDIT-EXTEN
   - Step 3 review + Step 4 confirmation render the new shape
   - Server-side `handleCreateBooking` writes the new `breakfastSelections` + `breakfastTotal`
 
-- **BR-04** — Guest Manage Breakfast page
+- **BR-04** — Guest Manage Breakfast page ✅ shipped 2026-10-13
   - New `ManageBreakfastPage.tsx` at `/my-booking/breakfast`
-  - "Manage Breakfast" link on the existing `/my-booking` lookup result
+  - "Manage Breakfast" link on the existing `/my-booking` lookup result (gated on `booking.status ∈ {confirmed, payment-confirmed, checked-in}` and a present `?token=` magic-link query param)
   - Per-date × per-guest meal grid (read + edit)
-  - Cutoff countdown per date (locked / countdown / order-by copy)
-  - Served badge for already-served slots
-  - "Save changes" with batched `POST /api/bookings/breakfast/update`
-  - Refund-due banner when removing a paid meal
-  - `GET /api/bookings/breakfast/manage` + `POST /api/bookings/breakfast/update` routes
-  - Rate-limited + idempotent (clientBatchId)
+  - Cutoff countdown per date (locked / countdown / order-by copy), recomputed client-side every 60s
+  - Served badge for already-served slots; "Removed on {date} by {role}" subtext for staff-removed slots
+  - "Save changes" with batched `POST /api/bookings/breakfast/update` (idempotent on `clientBatchId`, 60s replay window)
+  - Refund-due banner when removing a paid meal (preview; permanent panel after save from the `refunds[]` subcollection)
+  - `GET /api/bookings/breakfast/manage?ref=…&token=…` (lookup-token gated, returns booking + `breakfastConfig` + per-date `cutoffStates` + `refunds[]`)
+  - `POST /api/bookings/breakfast/update` (lookup-token gated + Turnstile-gated, runs server-recompute of `breakfastTotal` + writes `breakfastAudit/{autoId}` per op + opens `bookings/{id}/refunds/{refundId}` entries with `category: "breakfast"` for paid removals)
+  - Refunds liability records ride the same `bookings/{id}/refunds/` subcollection the cancellation liability uses (negative amount, `category: "breakfast"`, `status: "pending"`); staff clear them via the BR-05 / BR-06 path using the existing `handleAddRefund` entrypoint
+  - Rate-limited + Turnstile-gated (mutation only)
+  - Looked-up booking is gated on `readOnly: true` when status is `checked-out` / `cancelled` (per open item #6); page renders the "View only" or cancelled-read-only surface
 
 - **BR-05** — Staff booking-drawer breakfast section
   - Rewrite the existing "Breakfast" tab in `BookingDrawerWorkspace.tsx`

@@ -221219,7 +221219,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "1.11.0";
+    VERSION2 = "1.12.0";
   }
 });
 
@@ -239730,6 +239730,620 @@ async function handleGetBreakfastConfig(req, res) {
   }
 }
 
+// server/handlers/breakfast-manage.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+init_hotel_config();
+var manageGetSchema = external_exports.preprocess(
+  (body) => {
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const obj = { ...body };
+      for (const key of ["bookingRef", "token"]) {
+        const v6 = obj[key];
+        if (typeof v6 === "string" && v6.trim() === "") {
+          delete obj[key];
+        }
+      }
+      return obj;
+    }
+    return body;
+  },
+  external_exports.object({
+    bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format.").optional(),
+    token: external_exports.string().trim().max(64).optional()
+  }).strict()
+);
+var slotKeySchema = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
+var addOrChangeSchema = external_exports.object({
+  slotKey: slotKeySchema,
+  mealId: external_exports.string().trim().min(1).max(80),
+  mealName: external_exports.string().trim().min(1).max(120),
+  price: external_exports.number().finite().min(0).max(1e6)
+});
+var removeSchema = external_exports.object({
+  slotKey: slotKeySchema
+});
+var updateBodySchema = external_exports.preprocess(
+  (body) => {
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const obj = { ...body };
+      for (const key of ["bookingRef", "token", "clientBatchId", "turnstileToken"]) {
+        const v6 = obj[key];
+        if (typeof v6 === "string" && v6.trim() === "") {
+          delete obj[key];
+        }
+      }
+      return obj;
+    }
+    return body;
+  },
+  external_exports.object({
+    bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+    token: external_exports.string().trim().max(64),
+    clientBatchId: external_exports.string().trim().min(8).max(80).regex(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      "Invalid clientBatchId."
+    ),
+    add: external_exports.array(addOrChangeSchema).max(200).default([]),
+    change: external_exports.array(addOrChangeSchema).max(200).default([]),
+    remove: external_exports.array(removeSchema).max(200).default([]),
+    turnstileToken: external_exports.string().trim().max(2e3).optional()
+  }).passthrough()
+);
+function enumerateBreakfastDates(checkInIso, checkOutIso) {
+  const dates = [];
+  const startMs = Date.parse(`${checkInIso}T00:00:00Z`);
+  const endMs = Date.parse(`${checkOutIso}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return dates;
+  const maxDays = 60;
+  for (let ms2 = startMs, i2 = 0; ms2 < endMs && i2 < maxDays; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    dates.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return dates;
+}
+function manilaDateKey(value, timezone) {
+  if (!value) return null;
+  let d = null;
+  if (value instanceof Date) d = new Date(value.getTime());
+  else if (typeof value?.toDate === "function") {
+    const x4 = value.toDate();
+    if (x4 instanceof Date) d = new Date(x4.getTime());
+  } else if (typeof value === "string" || typeof value === "number") {
+    d = new Date(value);
+  }
+  if (!d || Number.isNaN(d.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(d);
+    const get2 = (type) => {
+      const found = parts.find((p) => p.type === type);
+      return found ? found.value : "";
+    };
+    return `${get2("year")}-${get2("month")}-${get2("day")}`;
+  } catch {
+    return null;
+  }
+}
+async function loadBreakfastConfigForManage() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    return normalizeBreakfastConfig(source);
+  } catch {
+    return normalizeBreakfastConfig(null);
+  }
+}
+async function fetchBookingByToken(bookingRef, token2) {
+  if (!isValidLookupToken(token2)) return null;
+  const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", bookingRef).where("lookupToken", "==", String(token2).toLowerCase()).limit(1).get();
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...doc.data() };
+}
+async function loadPendingBreakfastRefunds(bookingId) {
+  try {
+    const snap = await adminDb.collection("bookings").doc(bookingId).collection("refunds").where("category", "==", "breakfast").get();
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch {
+    return [];
+  }
+}
+async function handleGetBreakfastManage(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = manageGetSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference and lookup token."
+    });
+  }
+  const { bookingRef, token: token2 } = parsed2.data;
+  if (!bookingRef || !token2) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference and lookup token."
+    });
+  }
+  const booking = await fetchBookingByToken(bookingRef, token2);
+  if (!booking) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const tz = String(
+    booking.timezone || hotel_config_default.timezone || "Asia/Manila"
+  );
+  const checkInDate = manilaDateKey(booking.checkIn, tz);
+  const checkOutDate = manilaDateKey(booking.checkOut, tz);
+  if (!checkInDate || !checkOutDate) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const breakfastConfig = await loadBreakfastConfigForManage();
+  const isEnabled = Boolean(breakfastConfig?.isEnabled);
+  let servedGraceMinutes = 15;
+  try {
+    const rawConfigSnap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    if (rawConfigSnap.exists) {
+      const raw = rawConfigSnap.data() || {};
+      const g = Number(raw.servedGraceMinutes);
+      if (Number.isFinite(g) && g >= 0 && g <= 60) servedGraceMinutes = g;
+    }
+  } catch {
+  }
+  const status = String(booking.status || "").trim();
+  const readOnly = status === "checked-out" || status === "cancelled";
+  const dates = enumerateBreakfastDates(checkInDate, checkOutDate);
+  const now = /* @__PURE__ */ new Date();
+  const cutoffTime = String(breakfastConfig?.cutoffTime || "20:00");
+  const cutoffTz = String(
+    breakfastConfig?.cutoffTimezone || tz
+  );
+  const cutoffStates = dates.map((serviceDate) => {
+    return computeBreakfastCutoffState({
+      serviceDate,
+      now,
+      cutoffTime,
+      timezone: cutoffTz
+    });
+  });
+  const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
+  const recomputedTotal = recomputeBreakfastTotal(existingSelections);
+  const totalPrice = Number(booking.totalPrice || 0);
+  const paidAmount = Number(booking.paidAmount || 0);
+  const balance = Math.max(0, totalPrice + recomputedTotal - paidAmount);
+  const served = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
+  const refunds = await loadPendingBreakfastRefunds(booking.id);
+  return res.status(200).json({
+    success: true,
+    data: {
+      readOnly,
+      // Strip PII: no `guestName`, no `guestEmail`. The
+      // booking ref is the only identifier the page
+      // surfaces (the lookupToken is NOT echoed back, same
+      // as handleLookupBooking).
+      booking: {
+        id: booking.id,
+        bookingRef: booking.bookingRef,
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        numNights: Number(booking.numNights || dates.length),
+        numGuests: Number(booking.numGuests || 0),
+        numAdults: Number(booking.numAdults || booking.numGuests || 0),
+        numChildren: Number(booking.numChildren || 0),
+        totalPrice,
+        // The denormalised field on the doc — also
+        // recomputed client-side for parity (the page
+        // uses the recomputed value to render its own
+        // total; the denormalised value is the
+        // authoritative source).
+        breakfastTotal: Number(booking.breakfastTotal || 0),
+        paidAmount,
+        balance,
+        status
+      },
+      breakfastSelections: existingSelections,
+      breakfastServed: served,
+      refunds,
+      breakfastConfig: isEnabled ? breakfastConfig : { ...breakfastConfig, isEnabled: false },
+      cutoffStates,
+      servedGraceMinutes
+    }
+  });
+}
+async function handleUpdateBreakfast(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = updateBodySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid breakfast update payload."
+    });
+  }
+  const { bookingRef, token: token2, clientBatchId, add, change, remove } = parsed2.data;
+  const breakfastConfig = await loadBreakfastConfigForManage();
+  if (!breakfastConfig.isEnabled) {
+    return res.status(400).json({
+      success: false,
+      error: "Breakfast is currently not available. Please contact the front desk."
+    });
+  }
+  const mealById = /* @__PURE__ */ new Map();
+  for (const meal of breakfastConfig.meals || []) {
+    if (meal?.id) mealById.set(meal.id, meal);
+  }
+  const serverNow = /* @__PURE__ */ new Date();
+  const resultSummary = {
+    newBalance: 0,
+    refundLiabilityCreated: 0,
+    opsApplied: 0,
+    auditEntriesWritten: 0
+  };
+  let priorResult = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const batchDocRef = adminDb.collection("bookings").doc("__breakfastUpdateBatches").collection("batches").doc(clientBatchId);
+      const existingBatch = await transaction.get(batchDocRef);
+      if (existingBatch.exists) {
+        const prior = existingBatch.data() || {};
+        const ageMs = Date.now() - Number(prior.committedAt || 0);
+        if (ageMs < 6e4 && prior.bookingRef === bookingRef) {
+          priorResult = prior.summary || null;
+          return;
+        }
+      }
+      const booking = await fetchBookingByToken(bookingRef, token2);
+      if (!booking) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const status = String(booking.status || "").trim();
+      if (status === "cancelled") {
+        throw new Error("BOOKING_CANCELLED");
+      }
+      if (status === "checked-out") {
+        throw new Error("BOOKING_CHECKED_OUT");
+      }
+      const tz = String(
+        breakfastConfig.cutoffTimezone || booking.timezone || hotel_config_default.timezone || "Asia/Manila"
+      );
+      const cutoffTime = String(
+        breakfastConfig.cutoffTime || "20:00"
+      );
+      const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
+      const existingServed = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
+      const nextSelections = { ...existingSelections };
+      let opsApplied = 0;
+      let auditEntriesWritten = 0;
+      let refundLiabilityCreated = 0;
+      for (const op of add) {
+        const meal = mealById.get(op.mealId);
+        if (!meal) {
+          throw new Error("MEAL_NOT_AVAILABLE");
+        }
+        const serviceDate = op.slotKey.slice(0, 10);
+        const cutoff = computeBreakfastCutoffState({
+          serviceDate,
+          now: serverNow,
+          cutoffTime,
+          timezone: tz
+        });
+        if (cutoff.isLocked) {
+          throw new Error(`LOCKED_DATE:${serviceDate}`);
+        }
+        if (existingServed[op.slotKey]) {
+          throw new Error(`SLOT_SERVED:${op.slotKey}`);
+        }
+        if (nextSelections[op.slotKey] && nextSelections[op.slotKey].removedAt === null) {
+          throw new Error("SLOT_ALREADY_ORDERED");
+        }
+        const serverPrice = Number(meal.price || 0);
+        const priceChanged = Math.abs(serverPrice - Number(op.price)) > 5e-3;
+        nextSelections[op.slotKey] = {
+          mealId: meal.id,
+          mealName: meal.name,
+          price: serverPrice,
+          // server-side price wins
+          addedAt: Timestamp.now(),
+          addedBy: "guest",
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: "guest",
+          removedAt: null,
+          removedBy: null,
+          overrideCutoff: false,
+          overrideReason: null
+        };
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        writeAudit(
+          transaction,
+          booking.id,
+          op.slotKey,
+          "add",
+          {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice
+          },
+          "guest",
+          false
+        );
+        if (priceChanged) {
+          writeAudit(
+            transaction,
+            booking.id,
+            op.slotKey,
+            "change",
+            {
+              mealId: meal.id,
+              mealName: meal.name,
+              price: serverPrice
+            },
+            "guest",
+            `Price updated from ${Number(op.price).toFixed(2)} to ${serverPrice.toFixed(2)} at write time.`
+          );
+          auditEntriesWritten += 1;
+        }
+      }
+      for (const op of change) {
+        const meal = mealById.get(op.mealId);
+        if (!meal) {
+          throw new Error("MEAL_NOT_AVAILABLE");
+        }
+        const serviceDate = op.slotKey.slice(0, 10);
+        const cutoff = computeBreakfastCutoffState({
+          serviceDate,
+          now: serverNow,
+          cutoffTime,
+          timezone: tz
+        });
+        if (cutoff.isLocked) {
+          throw new Error(`LOCKED_DATE:${serviceDate}`);
+        }
+        if (existingServed[op.slotKey]) {
+          throw new Error(`SLOT_SERVED:${op.slotKey}`);
+        }
+        const prior = nextSelections[op.slotKey];
+        if (!prior || prior.removedAt !== null) {
+          throw new Error("SLOT_NOT_ORDERED");
+        }
+        const serverPrice = Number(meal.price || 0);
+        const priceChanged = Math.abs(serverPrice - Number(prior.price)) > 5e-3;
+        nextSelections[op.slotKey] = {
+          ...prior,
+          mealId: meal.id,
+          mealName: meal.name,
+          price: serverPrice,
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: "guest"
+        };
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        const reason = priceChanged ? `Price adjusted from ${Number(prior.price).toFixed(2)} to ${serverPrice.toFixed(2)}.` : false;
+        writeAudit(
+          transaction,
+          booking.id,
+          op.slotKey,
+          "change",
+          {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice
+          },
+          "guest",
+          reason
+        );
+      }
+      for (const op of remove) {
+        const serviceDate = op.slotKey.slice(0, 10);
+        const cutoff = computeBreakfastCutoffState({
+          serviceDate,
+          now: serverNow,
+          cutoffTime,
+          timezone: tz
+        });
+        if (cutoff.isLocked) {
+          throw new Error(`LOCKED_DATE:${serviceDate}`);
+        }
+        if (existingServed[op.slotKey]) {
+          throw new Error(`SLOT_SERVED:${op.slotKey}`);
+        }
+        const prior = nextSelections[op.slotKey];
+        if (!prior || prior.removedAt !== null) {
+          throw new Error("SLOT_NOT_ORDERED");
+        }
+        nextSelections[op.slotKey] = {
+          ...prior,
+          removedAt: Timestamp.now(),
+          removedBy: "guest",
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: "guest"
+        };
+        const mealPrice = Number(prior.price || 0);
+        const currentPaidAmount = Number(booking.paidAmount || 0);
+        const looksPaid = mealPrice > 0 && currentPaidAmount >= mealPrice;
+        if (looksPaid) {
+          const refundId = generateRefundIdLikePaymentId();
+          const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
+          const refundRecord = {
+            id: refundId,
+            bookingId: booking.id,
+            bookingRef: booking.bookingRef,
+            type: "refund",
+            category: "breakfast",
+            status: "pending",
+            // Refunds are negative-amount entries on the
+            // wire (per CRL-01's contract — `handleAddRefund`
+            // and the folio math both rely on the sign).
+            amount: -mealPrice,
+            method: "pending",
+            note: "Pending \u2014 recorded by guest cancellation; staff processes the payout.",
+            transactionReference: null,
+            reason: "Guest removed paid breakfast meal via Manage Breakfast.",
+            approvedBy: null,
+            recordedBy: "guest",
+            recordedAt: Timestamp.now(),
+            // Per BR-01 §OnsitePayment extension: the
+            // `breakfastRefundContext` is the immutable
+            // snapshot the staff uses to reconcile the
+            // meal that was removed.
+            breakfastRefundContext: {
+              mealId: prior.mealId,
+              slotKey: op.slotKey,
+              mealName: prior.mealName,
+              priceSnapshot: mealPrice
+            }
+          };
+          transaction.set(refundLiabilityRef, refundRecord);
+          refundLiabilityCreated += 1;
+        }
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        const reason = `Removed by guest${looksPaid ? " (refund liability opened)" : ""}.`;
+        writeAudit(
+          transaction,
+          booking.id,
+          op.slotKey,
+          "remove",
+          {
+            mealId: prior.mealId,
+            mealName: prior.mealName,
+            price: mealPrice
+          },
+          "guest",
+          reason
+        );
+      }
+      const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
+      const totalPriceNum = Number(booking.totalPrice || 0);
+      const paidAmountNum = Number(booking.paidAmount || 0);
+      const bookingRefDoc = adminDb.collection("bookings").doc(booking.id);
+      transaction.update(bookingRefDoc, {
+        breakfastSelections: nextSelections,
+        breakfastTotal: newBreakfastTotal,
+        updatedAt: Timestamp.now()
+      });
+      const newBalance = Math.max(
+        0,
+        totalPriceNum + newBreakfastTotal - paidAmountNum
+      );
+      resultSummary.newBalance = Number(newBalance.toFixed(2));
+      resultSummary.refundLiabilityCreated = refundLiabilityCreated;
+      resultSummary.opsApplied = opsApplied;
+      resultSummary.auditEntriesWritten = auditEntriesWritten;
+      transaction.set(batchDocRef, {
+        bookingRef,
+        clientBatchId,
+        committedAt: Date.now(),
+        summary: resultSummary
+      });
+    });
+  } catch (err) {
+    const code = String(err && err.message || "");
+    if (code === "BOOKING_NOT_FOUND" || code === "BOOKING_CANCELLED" || code === "BOOKING_CHECKED_OUT") {
+      return res.status(404).json({
+        success: false,
+        error: "Booking not found."
+      });
+    }
+    if (code.startsWith("LOCKED_DATE:")) {
+      const date = code.split(":")[1] || "";
+      return res.status(400).json({
+        success: false,
+        error: `Ordering closed for breakfast on ${date}.`
+      });
+    }
+    if (code.startsWith("SLOT_SERVED:")) {
+      return res.status(400).json({
+        success: false,
+        error: "This meal has already been served and cannot be edited."
+      });
+    }
+    if (code === "MEAL_NOT_AVAILABLE") {
+      return res.status(400).json({
+        success: false,
+        // Per the BR-01 validator's contract: no
+        // specific meal name so the endpoint isn't a
+        // menu-state oracle.
+        error: "One of the selected meals is no longer available. Please refresh and try again."
+      });
+    }
+    if (code === "SLOT_ALREADY_ORDERED") {
+      return res.status(400).json({
+        success: false,
+        error: "This slot already has a meal selected. Use 'change' to update it."
+      });
+    }
+    if (code === "SLOT_NOT_ORDERED") {
+      return res.status(400).json({
+        success: false,
+        error: "This slot has no meal to change. Use 'add' instead."
+      });
+    }
+    console.error("[breakfast-manage] update failed:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      error: "We couldn't save your changes. Please try again in a moment."
+    });
+  }
+  if (priorResult) {
+    return res.status(200).json({
+      success: true,
+      data: { ...priorResult, replayed: true, clientBatchId }
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    data: { ...resultSummary, replayed: false, clientBatchId }
+  });
+}
+function writeAudit(transaction, bookingId, slotKey, action, mealSnapshot, actorUid, reasonOrCutoff) {
+  let reason = null;
+  let occurredAfterCutoff = false;
+  if (typeof reasonOrCutoff === "string") {
+    reason = reasonOrCutoff;
+  } else {
+    occurredAfterCutoff = Boolean(reasonOrCutoff);
+  }
+  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("breakfastAudit").doc();
+  transaction.set(auditRef, {
+    action,
+    slotKey,
+    mealSnapshot,
+    actorUid,
+    actorRole: "guest",
+    reason,
+    occurredAt: Timestamp.now(),
+    occurredAfterCutoff
+  });
+}
+function generateRefundIdLikePaymentId() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    const id = String(g.crypto.randomUUID());
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    )) {
+      return id;
+    }
+  }
+  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
+  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
+  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
+  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
+  return `${part()}-${part4}-${part4b}-${part4c}-${part()}${part().slice(0, 4)}`;
+}
+
 // server/handlers/seo.ts
 init_firestore();
 init_shared();
@@ -240607,7 +241221,23 @@ async function handler(req, res) {
     }
     return await handleRoomAvailability(req, res);
   }
-  if (domain === "bookings" && action === "breakfast" && req.method === "GET") {
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "manage" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-manage:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many manage-breakfast requests. Please try again in a minute." });
+    }
+    return await handleGetBreakfastManage(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-update:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-save requests. Please try again in a minute." });
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleUpdateBreakfast(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
     }
