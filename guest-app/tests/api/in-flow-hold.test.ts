@@ -372,6 +372,105 @@ describe("IFH-01 — Source-text pins", () => {
   });
 });
 
+// Per IMT-01 (2026-10-13, `plan/project/ROADMAP.md §IMT`): an expired
+// in-flow hold was an unrecoverable dead end. `holdId` was minted once
+// per page instance and never re-rolled, `onPickNewRoom` only rewrote
+// `?step=select-room`, Step 1's `continueParams` therefore re-added the
+// SAME dead id, `/api/holds/read` answered HTTP 200 with
+// `status: "expired"` (read-time evaluation), the hook's 404 →
+// `POST /api/holds/start` branch therefore never fired — and the guest
+// landed in a red-banner loop escapable only with a hard reload.
+//
+// The fix is narrow by design: re-roll the id on the EXPLICIT
+// "Pick a new room" action only. Auto-reviving a dead hold on a plain
+// re-entry would silently defeat the countdown (a guest who reloads the
+// expired banner would get a fresh window forever), so the id must NOT
+// be re-rolled from any other call site. The negative pin at the end of
+// this block is what enforces that.
+describe("IMT-01 — Expired-hold dead end fix (`holdId` re-roll)", () => {
+  const statePattern = /const \[holdId, setHoldId\] = useState\(\(\) => generateHoldId\(\)\)/;
+
+  // Pull the `onPickNewRoom` callback body out of a page source so the
+  // ordering assertion can't be satisfied by a match elsewhere in the
+  // file (both pages also call `generateHoldId` in the useState init).
+  function onPickNewRoomBody(src: string): string {
+    const marker = "onPickNewRoom={() => {";
+    const start = src.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    return src.slice(start, start + 700);
+  }
+
+  it("both flows destructure the SETTER alongside `holdId`", () => {
+    expect(bookingPageSrc).toMatch(statePattern);
+    expect(corporatePageSrc).toMatch(statePattern);
+  });
+
+  it("BookingPage.onPickNewRoom re-rolls the id BEFORE rewriting the URL", () => {
+    const body = onPickNewRoomBody(bookingPageSrc);
+    const rollAt = body.indexOf("setHoldId(generateHoldId())");
+    const navAt = body.indexOf("setSearchParams(");
+    expect(rollAt).toBeGreaterThan(-1);
+    expect(navAt).toBeGreaterThan(-1);
+    // Ordering is load-bearing: `continueParams` is rebuilt from the
+    // `holdId` state on the next render, so rolling after the
+    // navigation would still ship the dead id in the URL.
+    expect(rollAt).toBeLessThan(navAt);
+  });
+
+  it("CorporateBookingPage.onPickNewRoom re-rolls the id BEFORE rewriting the URL", () => {
+    const body = onPickNewRoomBody(corporatePageSrc);
+    const rollAt = body.indexOf("setHoldId(generateHoldId())");
+    const navAt = body.indexOf("setSearchParams(");
+    expect(rollAt).toBeGreaterThan(-1);
+    expect(navAt).toBeGreaterThan(-1);
+    expect(rollAt).toBeLessThan(navAt);
+  });
+
+  it("`continueParams` reads `hold: holdId` in both flows, so the re-roll reaches the URL", () => {
+    // Without this the whole fix is inert — the fresh id would never
+    // travel to Step 2, and the hook would keep re-reading the dead doc.
+    expect(bookingPageSrc).toMatch(/hold: holdId/);
+    expect(corporatePageSrc).toMatch(/hold: holdId/);
+  });
+
+  it("`continueParams` is NOT memoized (a memo would strand the re-roll behind a stale closure)", () => {
+    // Both pages build it as a render-body statement. A `useMemo` with a
+    // dep array missing `holdId` would keep the OLD id in the URL and
+    // silently reinstate the dead end.
+    expect(bookingPageSrc).not.toMatch(
+      /useMemo\([^)]*new URLSearchParams/
+    );
+    expect(corporatePageSrc).not.toMatch(
+      /useMemo\([^)]*new URLSearchParams/
+    );
+  });
+
+  it("the recovery action still exists on the expired state in the banner", () => {
+    // IMT-01 changes WHO mints the id, not WHETHER the guest can recover.
+    expect(bannerSrc).toMatch(/onPickNewRoom/);
+    expect(bookingPageSrc).toMatch(/onPickNewRoom=\{\(\) =>/);
+    expect(corporatePageSrc).toMatch(/onPickNewRoom=\{\(\) =>/);
+  });
+
+  it("NEGATIVE: `setHoldId` is called from exactly ONE site per page (explicit action only)", () => {
+    // If a future change adds a second call site — e.g. an effect that
+    // re-rolls whenever the hold reads as expired — the countdown becomes
+    // unexpirable and the whole timer becomes decorative. This pin is the
+    // enforcement mechanism for that design decision.
+    expect((bookingPageSrc.match(/setHoldId\(/g) ?? []).length).toBe(1);
+    expect((corporatePageSrc.match(/setHoldId\(/g) ?? []).length).toBe(1);
+  });
+
+  it("NEGATIVE: `useInFlowHold` still auto-stamps ONLY on a 404 (no auto-revive of a terminal hold)", () => {
+    // The server-side counterpart to the pin above. If a future change
+    // makes the hook POST /api/holds/start when the read reports a
+    // terminal status, an expired hold silently revives on every remount
+    // and the 15-minute window stops meaning anything.
+    expect(hookSrc).toMatch(/readResponse\.status === 404 && startInput/);
+    expect(hookSrc).not.toMatch(/status === "expired"/);
+  });
+});
+
 describe("IFH-01 follow-up — Janitor sweep cron", () => {
   it("the sweep handler is registered in the apiRouter (no new Vercel function, just a new catch-all branch)", () => {
     expect(routerSrc).toMatch(

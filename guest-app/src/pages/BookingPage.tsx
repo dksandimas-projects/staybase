@@ -232,7 +232,31 @@ export function BookingPage() {
   // `useInFlowHold` hook stamps the server-side doc on
   // first read; the booking transaction consumes the
   // hold best-effort after the booking commits.
-  const [holdId] = useState(() => generateHoldId());
+  //
+  // Per IMT-01 (2026-10-13): the setter is now live. The
+  // `onPickNewRoom` callback re-rolls the id so that
+  // returning to Step 1 after the hold expires starts a
+  // genuinely fresh hold. Previously the id was minted
+  // once per page instance and never re-rolled, while
+  // `onPickNewRoom` only rewrote `?step=select-room` —
+  // so Step 1 re-added the SAME dead id via
+  // `continueParams`, `/api/holds/read` answered 200
+  // with `status: "expired"` (read-time evaluation), the
+  // hook's 404 → `POST /api/holds/start` branch therefore
+  // never fired, and the guest landed in a red-banner
+  // loop they could only escape with a hard reload.
+  //
+  // Re-rolling on an EXPLICIT guest action only. The id is
+  // deliberately NOT re-rolled on a plain re-entry (e.g.
+  // browser Back to Step 1): auto-reviving a dead hold
+  // would silently defeat the countdown, since a guest who
+  // sits on the expired banner and reloads would otherwise
+  // get a new window forever and the timer would stop
+  // meaning anything. An expired banner stays red until
+  // the guest asks for a new room or extends the hold
+  // (IMT-03). See `plan/features/BOOKING-FLOW.md
+  // §In-flow Hold` + `plan/project/ROADMAP.md §IMT`.
+  const [holdId, setHoldId] = useState(() => generateHoldId());
 
   // Dynamic config states loaded from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({
@@ -1931,6 +1955,15 @@ export function BookingPage() {
           turnstileToken: turnstileToken || undefined
         }}
         onPickNewRoom={() => {
+          // Per IMT-01 (2026-10-13): re-roll the hold id
+          // BEFORE rewriting the URL. The id is what
+          // `continueParams` reads on the next "Continue to
+          // Step 2" (`hold: holdId`), so minting it first
+          // means the guest re-enters Step 2 with a fresh id
+          // that the hook's 404 → `POST /api/holds/start`
+          // branch can stamp — instead of re-reading the
+          // expired doc and getting an instantly-red banner.
+          setHoldId(generateHoldId());
           const next = new URLSearchParams();
           next.set("step", "select-room");
           setSearchParams(next, { replace: true });
