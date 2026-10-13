@@ -261,15 +261,44 @@ describe("PR #9 fix — BookingPage Step 3 self-redeem control (apply-at-create)
     expect(bookingPageSrc).toMatch(/below the \$\{rewardsConfig\.minPointsToRedeem\}-point minimum/);
   });
 
-  it("the success card confirms 'will be applied at booking submission'", () => {
-    // The control's success branch displays a confirmation that
-    // the redemption is pending at submit (NOT already applied —
-    // that would be a lie since the redemption happens at
-    // create time, not at Apply click time).
-    expect(bookingPageSrc).toMatch(/will be applied at booking submission/);
+  it("the success card shows the queued points + discount + discounted total", () => {
+    // The control's success branch surfaces three concrete values
+    // so the member can SEE the discount applied to their total
+    // (this is the bug-fix that made the Apply-at-create flow
+    // visible — the previous copy only said "X points will be
+    // applied" without showing the math).
+    expect(bookingPageSrc).toMatch(/pendingPointsToRedeem\.toLocaleString\(\)\} points · ₱\{pendingRedemptionValue\.toLocaleString\(\)\} off/);
+    expect(bookingPageSrc).toMatch(/New total ₱\{displayTotal\.toLocaleString\(\)\} — applied at booking submission/);
     // The legacy "Points applied to this booking" copy is gone
     // — that implied the redemption already happened on click.
     expect(bookingPageSrc).not.toMatch(/Points applied to this booking\./);
+  });
+
+  it("derives a discounted displayTotal that mirrors the server's apply-at-create math", () => {
+    // The fix for the bug where Apply queued the discount but the
+    // summary total kept showing the pre-redemption value. The
+    // client computes `pendingRedemptionValue` with the same
+    // formula as the server (`Math.round((points * rate) / 100)`)
+    // and subtracts it from `total` to produce `displayTotal`.
+    expect(bookingPageSrc).toMatch(/const pendingRedemptionValue = useMemo\(\(\) => \{/);
+    expect(bookingPageSrc).toMatch(/Math\.round\(\(pendingPointsToRedeem \* rate\) \/ 100\)/);
+    expect(bookingPageSrc).toMatch(/const displayTotal = distributedRoomCart\.length > 0\s*\n\s*\? Math\.max\(total - pendingRedemptionValue, 0\)/);
+  });
+
+  it("threads displayTotal through every total-rendering site + the PriceBreakdown", () => {
+    // The bug existed in 6 places: hero total, payment copy, two
+    // aside-instances (header + footer), PriceBreakdown, VAT
+    // calc, and the total line in the summary. All read from
+    // `displayTotal` now (or get it via the `total` prop threaded
+    // through BookingReviewAside). The deduction line is added to
+    // the breakdown so the member sees the points line item.
+    expect(bookingPageSrc).toMatch(/finalTotal: displayTotal/);
+    expect(bookingPageSrc).toMatch(/pendingRedemptionPoints: pendingPointsToRedeem/);
+    expect(bookingPageSrc).toMatch(/Spark Rewards points \(\$\{pendingPts\.toLocaleString\(\)\} pts\)/);
+    // The hero total + payment copy + hero aside total + summary
+    // total render `displayTotal` (the fix made these reflect the
+    // queued discount).
+    expect(bookingPageSrc).toMatch(/formatPrice\(displayTotal\)/);
   });
 });
 

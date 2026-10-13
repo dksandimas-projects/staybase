@@ -875,6 +875,23 @@ export function BookingPage() {
   const total = distributedRoomCart.length > 0
     ? Math.max(afterVoucher - memberDiscount, 0)
     : 0;
+  // Per PR #9 fix (2026-10-13): the member has queued
+  // `pendingPointsToRedeem` points for redemption at booking
+  // creation. Mirror the server's `Math.round(validation.value)`
+  // math (where `validation.value = (points / 100) *
+  // pointsRedemptionRate`) so the displayed total reflects the
+  // same number the server will subtract atomically at submit.
+  // Byte-equivalent when `pendingPointsToRedeem === 0`:
+  // `displayTotal === total`.
+  const pendingRedemptionValue = useMemo(() => {
+    if (pendingPointsToRedeem <= 0) return 0;
+    const rate = Number(rewardsConfig?.pointsRedemptionRate || 0);
+    if (rate <= 0) return 0;
+    return Math.round((pendingPointsToRedeem * rate) / 100);
+  }, [pendingPointsToRedeem, rewardsConfig?.pointsRedemptionRate]);
+  const displayTotal = distributedRoomCart.length > 0
+    ? Math.max(total - pendingRedemptionValue, 0)
+    : 0;
 
   const rateBreakdown = useMemo(() => {
     if (distributedRoomCart.length === 0) return null;
@@ -898,7 +915,13 @@ export function BookingPage() {
       voucherApplied,
       voucherDiscount,
       memberDiscountPct,
-      finalTotal: total
+      finalTotal: displayTotal,
+      // Per PR #9 fix (2026-10-13): surface the pending points
+      // redemption as a deductions line so the member sees the
+      // breakdown match the queued discount. The server applies
+      // it at booking creation via `applyPointsRedemption`.
+      pendingRedemptionPoints: pendingPointsToRedeem,
+      pendingRedemptionValue
     });
   }, [
     distributedRoomCart,
@@ -914,7 +937,10 @@ export function BookingPage() {
     voucherApplied,
     voucherDiscount,
     memberDiscountPct,
-    total
+    total,
+    displayTotal,
+    pendingPointsToRedeem,
+    pendingRedemptionValue
   ]);
 
   const continueParams = new URLSearchParams({
@@ -2156,7 +2182,7 @@ export function BookingPage() {
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
             typeDescription={selectedTypeEntry?.description ?? ""}
-            total={total}
+            total={displayTotal}
             breakfastRate={breakfastRate}
             seasonalRateOverrides={seasonalRateOverrides}
             discountPct={discountPct}
@@ -2304,9 +2330,14 @@ export function BookingPage() {
 
                 {selfPointsApplied ? (
                   <div className="mt-4 flex items-center justify-between rounded-lg bg-status-green-bg p-3 text-sm font-medium text-status-green-text">
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle2 size={16} />
-                      {pendingPointsToRedeem.toLocaleString()} points will be applied at booking submission.
+                    <span className="flex flex-col gap-0.5">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 size={16} />
+                        {pendingPointsToRedeem.toLocaleString()} points · ₱{pendingRedemptionValue.toLocaleString()} off
+                      </span>
+                      <span className="ml-6 text-xs font-normal text-status-green-text/80">
+                        New total ₱{displayTotal.toLocaleString()} — applied at booking submission
+                      </span>
                     </span>
                     <button
                       type="button"
@@ -2346,7 +2377,7 @@ export function BookingPage() {
                             Preview: ₱{value.toLocaleString()} off ·{" "}
                             {rewardsConfig?.minPointsToRedeem && entered < Number(rewardsConfig.minPointsToRedeem)
                               ? `below the ${rewardsConfig.minPointsToRedeem}-point minimum`
-                              : `new total ₱${Math.max(0, subtotal - value).toLocaleString()}`}
+                              : `new total ₱${Math.max(0, total - value).toLocaleString()}`}
                           </span>
                         );
                       })()}
@@ -2601,7 +2632,7 @@ export function BookingPage() {
                         <div className="sm:col-span-3 p-5 flex flex-col justify-center">
                           <h4 className="font-semibold text-primary text-base">{currentPaymentMethod.label} Payment Details</h4>
                               <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(total)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
+                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(displayTotal)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
                               </p>
                           {currentPaymentMethod.accountNumber && (
                             <p className="mt-1 text-xs font-semibold text-gray-800">
@@ -2839,7 +2870,7 @@ export function BookingPage() {
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
             typeDescription={selectedTypeEntry?.description ?? ""}
-            total={total}
+            total={displayTotal}
             discountPct={discountPct}
             voucherDiscount={voucherDiscount}
             discountType={discountType}
@@ -3731,7 +3762,7 @@ export function BookingPage() {
               {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
             </p>
             <p className="text-2xl font-semibold text-gray-950">
-              {formatPrice(total)} <span className="text-sm font-normal text-gray-500">including selected options</span>
+              {formatPrice(displayTotal)} <span className="text-sm font-normal text-gray-500">including selected options</span>
             </p>
           </div>
 	          {cartIsReady ? (
@@ -3820,6 +3851,12 @@ function buildGuestRateBreakdown(input: {
   voucherDiscount: number;
   memberDiscountPct: number;
   finalTotal: number;
+  // Per PR #9 fix (2026-10-13): the queued points redemption the
+  // member applied via the BookingPage control. Surfaces as a
+  // deductions line so the breakdown matches the discount the
+  // server will subtract at booking creation.
+  pendingRedemptionPoints?: number;
+  pendingRedemptionValue?: number;
 }): BookingRateBreakdown {
   const addOns = [
     ...(input.breakfastTotal > 0
@@ -3838,6 +3875,8 @@ function buildGuestRateBreakdown(input: {
   const afterSeniorPwd = subtotal - seniorPwdDiscount;
   const afterVoucher = afterSeniorPwd - input.voucherDiscount;
   const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, input.memberDiscountPct));
+  const pendingPts = Number(input.pendingRedemptionPoints || 0);
+  const pendingVal = Number(input.pendingRedemptionValue || 0);
   const deductions = [
     ...(seniorPwdDiscount > 0
       ? [{
@@ -3850,6 +3889,19 @@ function buildGuestRateBreakdown(input: {
       : []),
     ...(memberDiscount > 0
       ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }]
+      : []),
+    // Per PR #9 fix (2026-10-13): the queued points redemption
+    // line. Same shape as the other deductions — label + amount
+    // — so the PriceBreakdown renders it consistently. Only
+    // surfaced when the member has actually applied points (both
+    // fields > 0); the rateBreakdown useMemo also depends on
+    // `pendingPointsToRedeem`, so removing the redemption clears
+    // this line.
+    ...(pendingPts > 0 && pendingVal > 0
+      ? [{
+          label: `Spark Rewards points (${pendingPts.toLocaleString()} pts)`,
+          amount: pendingVal
+        }]
       : [])
   ];
 
