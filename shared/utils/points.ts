@@ -35,6 +35,10 @@ export interface RewardsConfigLike {
     pointsMultiplier: number;
     perks: string;
   }>;
+  // Per PR #9 (2026-10-13): admin opt-in for member self-service
+  // points redemption at booking Step 3. Default absent = off
+  // (front-desk-mediated).
+  allowMemberPointsRedemption?: boolean;
   // Existing legacy fallback used by tier-less members (per the
   // decision "Tier takes precedence; global is fallback only").
   memberDiscountPct?: number;

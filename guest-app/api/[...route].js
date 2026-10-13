@@ -227631,7 +227631,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.14.0";
+    VERSION2 = "1.16.0";
   }
 });
 
@@ -230475,7 +230475,17 @@ var init_rewardsConfig = __esm({
       minPointsToRedeem: external_exports.number().int().min(0).max(1e6).optional(),
       pointsCanPayUpToBillPct: external_exports.number().min(0, "Bill cap cannot be negative").max(100, "Bill cap cannot exceed 100%").optional(),
       freeNightEvery: external_exports.number().int().min(0, "Free-night-every cannot be negative").max(365).optional(),
-      levels: external_exports.array(LevelDefSchema).optional()
+      levels: external_exports.array(LevelDefSchema).optional(),
+      // Per PR #9 (2026-10-13): admin opt-in toggle for member
+      // self-service points redemption at booking checkout. Defaults
+      // to `false` so existing deployments preserve the front-desk-
+      // mediated redemption model. When `true`, the booking Step 3
+      // panel exposes an "Apply my points" input (member-authenticated
+      // endpoint). The server still owns all 7 redemption guards
+      // (min-redeem, bill cap, balance, one-per-booking, status
+      // pre-checkin, member match, booking exists) — the toggle only
+      // changes WHO clicks Apply, not WHICH guards run.
+      allowMemberPointsRedemption: external_exports.boolean().optional()
     }).superRefine((value, ctx) => {
       const levels = value.levels;
       if (!levels || levels.length === 0) {
@@ -243979,6 +243989,10 @@ var redeemPointsSchema = external_exports.object({
   memberId: external_exports.string().trim().max(120).optional().default(""),
   pointsToRedeem: external_exports.coerce.number().int().min(1)
 }).strict();
+var selfRedeemSchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(1).max(120),
+  pointsToRedeem: external_exports.coerce.number().int().min(1).max(1e6)
+}).strict();
 var undoRedemptionSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(120)
 }).strict();
@@ -244261,104 +244275,174 @@ async function handleRedeemMemberPoints(req, res) {
     });
   }
   try {
-    const now = /* @__PURE__ */ new Date();
     const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed2.data;
-    let responseData = {};
-    await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef);
-      if (!bookingDoc.exists) {
-        throw new Error("Booking not found.");
-      }
-      const booking = bookingDoc.data();
-      if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
-        throw new Error("Points can only be redeemed before check-in.");
-      }
-      if ((booking.pointsRedeemed || 0) > 0) {
-        throw new Error("This booking already has a points redemption.");
-      }
-      const memberId = requestedMemberId || booking.memberId;
-      if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
-        throw new Error("Booking is not linked to this member.");
-      }
-      const memberRef = adminDb.collection("members").doc(memberId);
-      const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
-      const memberDoc = await transaction.get(memberRef);
-      const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
-      if (!memberDoc.exists) {
-        throw new Error("Member not found.");
-      }
-      const member = memberDoc.data();
-      if (member.isActive === false || member.isMember === false) {
-        throw new Error("Member account is not active.");
-      }
-      const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
-      if (pointsRedemptionRate <= 0) {
-        throw new Error("Points redemption is not configured.");
-      }
-      const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
-      const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
-      const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
-      if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
-        throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
-      }
-      if (Number.isFinite(billPct) && billPct < 100) {
-        const bookingSubtotal = Number(booking.totalPrice || 0);
-        const maxRedeemableCurrency = Math.floor(bookingSubtotal * Math.max(0, billPct) / 100);
-        const maxRedeemablePoints = Math.floor(maxRedeemableCurrency * 100 / pointsRedemptionRate);
-        if (pointsToRedeem > maxRedeemablePoints) {
-          throw new Error(
-            `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
-          );
-        }
-      }
-      const validation = validatePointsRedemption(pointsToRedeem, Number(member.rewardsPoints || 0), pointsRedemptionRate);
-      if (!validation.valid) {
-        throw new Error(validation.error);
-      }
-      const redemptionValue = Math.round(validation.value);
-      if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
-        throw new Error("Points redemption value exceeds the booking total.");
-      }
-      const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
-      const rateBreakdown = rebuildRateBreakdown(booking, {
-        pointsRedeemedValue: redemptionValue,
-        finalTotal: nextTotalPrice
-      });
-      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
-      transaction.update(bookingRef, {
-        memberId,
-        totalPrice: nextTotalPrice,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        pointsRedeemedBy: staff.uid,
-        pointsRedeemedAt: now,
-        ...rateBreakdown ? { rateBreakdown } : {},
-        updatedAt: now
-      });
-      transaction.update(memberRef, {
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
-        updatedAt: now
-      });
-      transaction.set(historyRef, {
-        type: "redeem",
-        points: -pointsToRedeem,
-        description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
-        reason: "Points redeemed by staff",
+    const result = await adminDb.runTransaction(async (transaction) => {
+      return applyPointsRedemption(transaction, {
         bookingId,
-        by: staff.uid,
-        at: now
+        memberId: requestedMemberId,
+        pointsToRedeem,
+        appliedBy: staff.uid,
+        appliedByLabel: "staff"
       });
-      responseData = {
-        bookingId,
-        memberId,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        totalPrice: nextTotalPrice,
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
-      };
     });
-    return res.status(200).json({ success: true, data: responseData });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "We could not redeem points for this booking."
+    });
+  }
+}
+async function applyPointsRedemption(transaction, args) {
+  const now = /* @__PURE__ */ new Date();
+  const { bookingId, memberId: requestedMemberId, pointsToRedeem, appliedBy, appliedByLabel } = args;
+  const bookingRef = adminDb.collection("bookings").doc(bookingId);
+  const bookingDoc = await transaction.get(bookingRef);
+  if (!bookingDoc.exists) {
+    throw new Error("Booking not found.");
+  }
+  const booking = bookingDoc.data();
+  if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
+    throw new Error("Points can only be redeemed before check-in.");
+  }
+  if ((booking.pointsRedeemed || 0) > 0) {
+    throw new Error("This booking already has a points redemption.");
+  }
+  const memberId = requestedMemberId || booking.memberId;
+  if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
+    throw new Error("Booking is not linked to this member.");
+  }
+  const memberRef = adminDb.collection("members").doc(memberId);
+  const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
+  const memberDoc = await transaction.get(memberRef);
+  const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
+  if (!memberDoc.exists) {
+    throw new Error("Member not found.");
+  }
+  const member = memberDoc.data();
+  if (member.isActive === false || member.isMember === false) {
+    throw new Error("Member account is not active.");
+  }
+  const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
+  if (pointsRedemptionRate <= 0) {
+    throw new Error("Points redemption is not configured.");
+  }
+  const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
+  const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
+  const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
+  if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+    throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+  }
+  if (Number.isFinite(billPct) && billPct < 100) {
+    const bookingSubtotal = Number(booking.totalPrice || 0);
+    const maxRedeemableCurrency = Math.floor(bookingSubtotal * Math.max(0, billPct) / 100);
+    const maxRedeemablePoints = Math.floor(maxRedeemableCurrency * 100 / pointsRedemptionRate);
+    if (pointsToRedeem > maxRedeemablePoints) {
+      throw new Error(
+        `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+      );
+    }
+  }
+  const validation = validatePointsRedemption(
+    pointsToRedeem,
+    Number(member.rewardsPoints || 0),
+    pointsRedemptionRate
+  );
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+  const redemptionValue = Math.round(validation.value);
+  if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
+    throw new Error("Points redemption value exceeds the booking total.");
+  }
+  const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+  const rateBreakdown = rebuildRateBreakdown(booking, {
+    pointsRedeemedValue: redemptionValue,
+    finalTotal: nextTotalPrice
+  });
+  const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+  const historyReason = appliedByLabel === "staff" ? "Points redeemed by staff" : "Points redeemed by member at checkout";
+  transaction.update(bookingRef, {
+    memberId,
+    totalPrice: nextTotalPrice,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    pointsRedeemedBy: appliedBy,
+    pointsRedeemedAt: now,
+    ...rateBreakdown ? { rateBreakdown } : {},
+    updatedAt: now
+  });
+  transaction.update(memberRef, {
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
+    updatedAt: now
+  });
+  transaction.set(historyRef, {
+    type: "redeem",
+    points: -pointsToRedeem,
+    description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
+    reason: historyReason,
+    bookingId,
+    by: appliedBy,
+    at: now
+  });
+  return {
+    bookingId,
+    memberId,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    totalPrice: nextTotalPrice,
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
+  };
+}
+async function handleRedeemPointsSelf(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const authHeader = req.headers.authorization || "";
+  const token2 = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  if (!token2) {
+    return res.status(401).json({ success: false, error: "Sign in is required to redeem points." });
+  }
+  let authUser;
+  try {
+    authUser = await adminAuth.verifyIdToken(token2);
+  } catch {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+  if (!authUser?.uid) {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+  const parsed2 = selfRedeemSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the points redemption details and try again."
+    });
+  }
+  try {
+    const { bookingId, pointsToRedeem } = parsed2.data;
+    const rewardsConfigSnap = await adminDb.collection("settings").doc("rewardsConfig").get();
+    const rewardsCfgData = rewardsConfigSnap.exists ? rewardsConfigSnap.data() : null;
+    if (rewardsCfgData?.allowMemberPointsRedemption !== true) {
+      return res.status(403).json({
+        success: false,
+        error: "Self-service points redemption is not enabled. Please contact the front desk."
+      });
+    }
+    const result = await adminDb.runTransaction(async (transaction) => {
+      return applyPointsRedemption(transaction, {
+        bookingId,
+        // Force memberId = authenticated UID. The helper's
+        // member-match guard rejects when this doesn't equal
+        // booking.memberId — the auth UID is the only input
+        // accepted for the self path (clients cannot spoof).
+        memberId: authUser.uid,
+        pointsToRedeem,
+        appliedBy: `self:${authUser.uid}`,
+        appliedByLabel: "self"
+      });
+    });
+    return res.status(200).json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -247289,6 +247373,9 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleRedeemMemberPoints(req, res);
+  }
+  if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
+    return await handleRedeemPointsSelf(req, res);
   }
   if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
     const authResult = await authenticateStaff(req);

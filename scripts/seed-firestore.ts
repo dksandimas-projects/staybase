@@ -248,6 +248,10 @@ async function seedRewardsConfig() {
     // pay up to (% of bill): 50" — admin tunes via the UI).
     pointsCanPayUpToBillPct: 100,
     freeNightEvery: 0,
+    // Per PR #9 (2026-10-13): admin opt-in for member self-service
+    // points redemption at booking Step 3. Default false preserves
+    // the existing front-desk-mediated redemption model.
+    allowMemberPointsRedemption: false,
     levels: [
       {
         id: "tier_default_member",

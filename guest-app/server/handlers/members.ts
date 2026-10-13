@@ -33,6 +33,17 @@ const redeemPointsSchema = z.object({
   pointsToRedeem: z.coerce.number().int().min(1)
 }).strict();
 
+// Per PR #9 (2026-10-13): the member-self path uses a separate,
+// stricter schema — no `memberId` (the auth UID IS the member
+// ID; clients cannot supply it). The bookingId is required and
+// the points amount is bounded to a sane upper limit so a buggy
+// client can't underflow the member's balance or trigger absurd
+// writes.
+const selfRedeemSchema = z.object({
+  bookingId: z.string().trim().min(1).max(120),
+  pointsToRedeem: z.coerce.number().int().min(1).max(1_000_000)
+}).strict();
+
 const undoRedemptionSchema = z.object({
   bookingId: z.string().trim().min(1).max(120)
 }).strict();
@@ -450,139 +461,272 @@ export async function handleRedeemMemberPoints(req: any, res: any) {
   }
 
   try {
-    const now = new Date();
     const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed.data;
-    let responseData: any = {};
-
-    await adminDb.runTransaction(async (transaction: any) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef);
-      if (!bookingDoc.exists) {
-        throw new Error("Booking not found.");
-      }
-
-      const booking = bookingDoc.data();
-      if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
-        throw new Error("Points can only be redeemed before check-in.");
-      }
-      if ((booking.pointsRedeemed || 0) > 0) {
-        throw new Error("This booking already has a points redemption.");
-      }
-
-      const memberId = requestedMemberId || booking.memberId;
-      if (!memberId || (booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId)) {
-        throw new Error("Booking is not linked to this member.");
-      }
-
-      const memberRef = adminDb.collection("members").doc(memberId);
-      const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
-      const memberDoc = await transaction.get(memberRef);
-      const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
-
-      if (!memberDoc.exists) {
-        throw new Error("Member not found.");
-      }
-
-      const member = memberDoc.data();
-      if (member.isActive === false || member.isMember === false) {
-        throw new Error("Member account is not active.");
-      }
-
-      const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
-      if (pointsRedemptionRate <= 0) {
-        throw new Error("Points redemption is not configured.");
-      }
-
-      // Per Phase 4 of the Spark Rewards tier system
-      // (2026-10-12): two new redemption guards, both sourced
-      // from `settings/rewardsConfig`:
-      //   1. `minPointsToRedeem` — minimum points required for
-      //      any redemption. 0 (the default) = no minimum.
-      //      Rejects with a 400 if the requested amount is below
-      //      the floor (clear error message for the staff).
-      //   2. `pointsCanPayUpToBillPct` — cap on how much of the
-      //      booking's subtotal can be paid with points. Stored
-      //      as a percentage (0..100, default 100 = no cap).
-      //      Computes `maxRedeemablePoints = floor(subtotal ×
-      //      pct/100) / pointsRedemptionRate` and rejects when
-      //      `pointsToRedeem > maxRedeemablePoints`.
-      // Both guards are AFTER the existing balance check
-      // (`validatePointsRedemption` below) so the staff sees the
-      // most actionable error first.
-      const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
-      const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
-      const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
-      if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
-        throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
-      }
-      // Bill-cap check uses the booking's current totalPrice as the
-      // basis (the post-discount subtotal — the actual amount the
-      // guest owes). `Math.floor` rounds DOWN so the cap is a
-      // hard ceiling: any fraction-of-a-point that would exceed
-      // the cap is rejected. 100% (or 100) means no cap.
-      if (Number.isFinite(billPct) && billPct < 100) {
-        const bookingSubtotal = Number(booking.totalPrice || 0);
-        const maxRedeemableCurrency = Math.floor((bookingSubtotal * Math.max(0, billPct)) / 100);
-        const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
-        if (pointsToRedeem > maxRedeemablePoints) {
-          throw new Error(
-            `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
-          );
-        }
-      }
-
-      const validation = validatePointsRedemption(pointsToRedeem, Number(member.rewardsPoints || 0), pointsRedemptionRate);
-      if (!validation.valid) {
-        throw new Error(validation.error);
-      }
-
-      const redemptionValue = Math.round(validation.value);
-      if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
-        throw new Error("Points redemption value exceeds the booking total.");
-      }
-
-      const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
-      const rateBreakdown = rebuildRateBreakdown(booking, {
-        pointsRedeemedValue: redemptionValue,
-        finalTotal: nextTotalPrice
-      });
-      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
-
-      transaction.update(bookingRef, {
-        memberId,
-        totalPrice: nextTotalPrice,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        pointsRedeemedBy: staff.uid,
-        pointsRedeemedAt: now,
-        ...(rateBreakdown ? { rateBreakdown } : {}),
-        updatedAt: now
-      });
-      transaction.update(memberRef, {
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
-        updatedAt: now
-      });
-      transaction.set(historyRef, {
-        type: "redeem",
-        points: -pointsToRedeem,
-        description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
-        reason: "Points redeemed by staff",
+    const result = await adminDb.runTransaction(async (transaction: any) => {
+      return applyPointsRedemption(transaction, {
         bookingId,
-        by: staff.uid,
-        at: now
+        memberId: requestedMemberId,
+        pointsToRedeem,
+        appliedBy: staff.uid,
+        appliedByLabel: "staff"
       });
-
-      responseData = {
-        bookingId,
-        memberId,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        totalPrice: nextTotalPrice,
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
-      };
     });
 
-    return res.status(200).json({ success: true, data: responseData });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "We could not redeem points for this booking."
+    });
+  }
+}
+
+// Per PR #9 (2026-10-13): the shared redemption transaction body.
+// Both the staff handler (`handleRedeemMemberPoints`) and the
+// member-self handler (`handleRedeemPointsSelf`) call this helper
+// — same 7 guards run atomically regardless of caller. The only
+// difference between the two paths is the audit-trail marker on
+// the booking doc + the `pointsHistory` row (`appliedBy` and the
+// `reason` text).
+//
+// Guard stack (in source order, most actionable error first):
+//   1. Booking exists
+//   2. Status pre-checkin (rejects checked-in/checked-out/cancelled)
+//   3. One redemption per booking (`pointsRedeemed > 0` → reject)
+//   4. Member ID matches booking.memberId (no cross-member redeem)
+//   5. Member exists + is active
+//   6. rewardsConfig.pointsRedemptionRate > 0 (rewards enabled)
+//   7. `minPointsToRedeem` floor (Phase 4 — default 0 = no min)
+//   8. `pointsCanPayUpToBillPct` cap (Phase 4 — default 100 = no cap)
+//   9. Balance check via `validatePointsRedemption` (most actionable error first)
+//
+// Atomic write block: booking update + member `rewardsPoints`
+// decrement + negative `pointsHistory/redeem-${randomId}` row.
+// The history `reason` text + the `appliedBy` marker are the
+// audit trail's view of who initiated the action.
+async function applyPointsRedemption(
+  transaction: any,
+  args: {
+    bookingId: string;
+    memberId: string;
+    pointsToRedeem: number;
+    appliedBy: string;
+    appliedByLabel: "staff" | "self";
+  }
+): Promise<{
+  bookingId: string;
+  memberId: string;
+  pointsRedeemed: number;
+  pointsRedeemedValue: number;
+  totalPrice: number;
+  rewardsPoints: number;
+}> {
+  const now = new Date();
+  const { bookingId, memberId: requestedMemberId, pointsToRedeem, appliedBy, appliedByLabel } = args;
+
+  const bookingRef = adminDb.collection("bookings").doc(bookingId);
+  const bookingDoc = await transaction.get(bookingRef);
+  if (!bookingDoc.exists) {
+    throw new Error("Booking not found.");
+  }
+
+  const booking = bookingDoc.data();
+  if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
+    throw new Error("Points can only be redeemed before check-in.");
+  }
+  if ((booking.pointsRedeemed || 0) > 0) {
+    throw new Error("This booking already has a points redemption.");
+  }
+
+  const memberId = requestedMemberId || booking.memberId;
+  if (!memberId || (booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId)) {
+    throw new Error("Booking is not linked to this member.");
+  }
+
+  const memberRef = adminDb.collection("members").doc(memberId);
+  const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
+  const memberDoc = await transaction.get(memberRef);
+  const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
+
+  if (!memberDoc.exists) {
+    throw new Error("Member not found.");
+  }
+
+  const member = memberDoc.data();
+  if (member.isActive === false || member.isMember === false) {
+    throw new Error("Member account is not active.");
+  }
+
+  const pointsRedemptionRate = rewardsConfigDoc.exists
+    ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0)
+    : 0;
+  if (pointsRedemptionRate <= 0) {
+    throw new Error("Points redemption is not configured.");
+  }
+
+  // Per Phase 4 of the Spark Rewards tier system (2026-10-12):
+  // two new redemption guards, both sourced from
+  // `settings/rewardsConfig`:
+  //   1. `minPointsToRedeem` — minimum points required for any
+  //      redemption. 0 (the default) = no minimum. Rejects with a
+  //      400 if the requested amount is below the floor (clear
+  //      error message for the actor).
+  //   2. `pointsCanPayUpToBillPct` — cap on how much of the
+  //      booking's subtotal can be paid with points. Stored as a
+  //      percentage (0..100, default 100 = no cap). Computes
+  //      `maxRedeemablePoints = floor(subtotal × pct/100) /
+  //      pointsRedemptionRate` and rejects when
+  //      `pointsToRedeem > maxRedeemablePoints`. `Math.floor`
+  //      rounds DOWN so the cap is a hard ceiling. 100% (or 100)
+  //      means no cap.
+  const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
+  const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
+  const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
+  if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+    throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+  }
+  if (Number.isFinite(billPct) && billPct < 100) {
+    const bookingSubtotal = Number(booking.totalPrice || 0);
+    const maxRedeemableCurrency = Math.floor((bookingSubtotal * Math.max(0, billPct)) / 100);
+    const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
+    if (pointsToRedeem > maxRedeemablePoints) {
+      throw new Error(
+        `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+      );
+    }
+  }
+
+  const validation = validatePointsRedemption(
+    pointsToRedeem,
+    Number(member.rewardsPoints || 0),
+    pointsRedemptionRate
+  );
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  const redemptionValue = Math.round(validation.value);
+  if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
+    throw new Error("Points redemption value exceeds the booking total.");
+  }
+
+  const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+  const rateBreakdown = rebuildRateBreakdown(booking, {
+    pointsRedeemedValue: redemptionValue,
+    finalTotal: nextTotalPrice
+  });
+  const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+
+  const historyReason =
+    appliedByLabel === "staff"
+      ? "Points redeemed by staff"
+      : "Points redeemed by member at checkout";
+
+  transaction.update(bookingRef, {
+    memberId,
+    totalPrice: nextTotalPrice,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    pointsRedeemedBy: appliedBy,
+    pointsRedeemedAt: now,
+    ...(rateBreakdown ? { rateBreakdown } : {}),
+    updatedAt: now
+  });
+  transaction.update(memberRef, {
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
+    updatedAt: now
+  });
+  transaction.set(historyRef, {
+    type: "redeem",
+    points: -pointsToRedeem,
+    description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
+    reason: historyReason,
+    bookingId,
+    by: appliedBy,
+    at: now
+  });
+
+  return {
+    bookingId,
+    memberId,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    totalPrice: nextTotalPrice,
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
+  };
+}
+
+// Per PR #9 (2026-10-13): the member-self-service redemption
+// handler. Gated by `rewardsConfig.allowMemberPointsRedemption`
+// (admin toggle in Settings → Rewards). The member must own the
+// booking — the helper rejects when `booking.memberId !== authUser.uid`,
+// which is the real authorization gate (the toggle is a feature
+// switch, not a security boundary).
+//
+// Auth: Firebase ID token from the booking-flow client
+// (`adminAuth.verifyIdToken`). NOT staff-authenticated. Rate limit
+// is applied at the Vercel API catch-all level via the existing
+// `withRateLimit` middleware on the guest-side redemption endpoints.
+export async function handleRedeemPointsSelf(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Sign in is required to redeem points." });
+  }
+
+  let authUser: { uid: string; email?: string | null };
+  try {
+    authUser = await adminAuth.verifyIdToken(token);
+  } catch {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+  if (!authUser?.uid) {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+
+  const parsed = selfRedeemSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the points redemption details and try again."
+    });
+  }
+
+  try {
+    const { bookingId, pointsToRedeem } = parsed.data;
+
+    // Fail fast on the toggle — avoids acquiring a transaction
+    // for a request that will be rejected anyway. The toggle is
+    // a feature flag, NOT a security check (the helper's
+    // member-match guard is the real authorization).
+    const rewardsConfigSnap = await adminDb.collection("settings").doc("rewardsConfig").get();
+    const rewardsCfgData = rewardsConfigSnap.exists ? rewardsConfigSnap.data() : null;
+    if (rewardsCfgData?.allowMemberPointsRedemption !== true) {
+      return res.status(403).json({
+        success: false,
+        error: "Self-service points redemption is not enabled. Please contact the front desk."
+      });
+    }
+
+    const result = await adminDb.runTransaction(async (transaction: any) => {
+      return applyPointsRedemption(transaction, {
+        bookingId,
+        // Force memberId = authenticated UID. The helper's
+        // member-match guard rejects when this doesn't equal
+        // booking.memberId — the auth UID is the only input
+        // accepted for the self path (clients cannot spoof).
+        memberId: authUser.uid,
+        pointsToRedeem,
+        appliedBy: `self:${authUser.uid}`,
+        appliedByLabel: "self"
+      });
+    });
+
+    return res.status(200).json({ success: true, data: result });
   } catch (error: any) {
     return res.status(400).json({
       success: false,
