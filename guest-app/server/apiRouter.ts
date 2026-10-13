@@ -22,6 +22,10 @@ import { handleGetBreakfastManage, handleUpdateBreakfast } from "./handlers/brea
 import { handleStaffUpdateBreakfast } from "./handlers/breakfast-staff-update";
 import { handleMarkServed } from "./handlers/breakfast-mark-served";
 import { handleMarkRefundPaid } from "./handlers/breakfast-refund-paid";
+import {
+  handleAcknowledgeKitchenListAudit,
+  handleGetKitchenList
+} from "./handlers/breakfast-kitchen-list";
 import { handleMarkRefundPaidStandalone } from "./handlers/refunds";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
@@ -1197,6 +1201,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
 
     return await handleMarkRefundPaidStandalone(req, res);
+  }
+
+  // Per BR-07 (2026-10-13, decision #236): the kitchen
+  // list read endpoint. Returns the `finalized` (live
+  // recompute from `breakfastSelections`) + `lateChanges`
+  // (`breakfastAudit` with `occurredAfterCutoff === true`)
+  // for one date. STAFF-Token gated; rate-limited at
+  // 30/min/IP — the page reloads occasionally during a
+  // shift. The 30s in-memory cache is owned by the
+  // handler module (not Redis) — see
+  // `breakfast-kitchen-list.ts` for the cache contract.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "kitchen-list" &&
+    pathSegments[3] === undefined &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-kitchen-list:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many kitchen-list requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleGetKitchenList(req, res);
+  }
+
+  // Per BR-07: the per-audit acknowledge endpoint for
+  // the kitchen list's "Late changes" column. STAFF-Token
+  // gated; rate-limited at 120/min/IP — a single shift
+  // can acknowledge 60+ entries during the breakfast
+  // service window.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "kitchen-list" &&
+    pathSegments[3] === "acknowledge" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-kitchen-list-acknowledge:${ip}`, 120, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many acknowledge requests. Please slow down." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    // Acknowledge is a low-risk idempotent mutation
+    // (the handler writes a fresh `acknowledgedAt`
+    // if absent; re-acknowledge is a no-op update).
+    // Turnstile is omitted intentionally to avoid
+    // punishing the kitchen for routine clicks.
+    return await handleAcknowledgeKitchenListAudit(req, res);
   }
 
   // Per BR-03 (2026-10-12, decision #232): the public

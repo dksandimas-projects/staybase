@@ -14,6 +14,7 @@ import { QRManagementPage } from "./pages/QRManagementPage";
 import { MembersPage } from "./pages/MembersPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AudioSettingsPage } from "./pages/AudioSettingsPage";
+import KitchenListPage, { KitchenListPrintPage } from "./pages/KitchenListPage";
 
 export function App() {
   return (
@@ -35,7 +36,11 @@ export function App() {
           <Route path="/members" element={<MembersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/audio" element={<AudioSettingsPage />} />
+          <Route path="/kitchen-list" element={<KitchenListPage />} />
         </Route>
+
+        {/* Print-friendly kitchen list view (no admin chrome). */}
+        <Route path="/kitchen-list/print" element={<KitchenListPrintPage />} />
 
         {/* Fallback routing */}
         <Route path="*" element={<Navigate to="/" replace />} />
