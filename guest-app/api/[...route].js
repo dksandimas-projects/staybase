@@ -221218,7 +221218,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.17.4";
+    VERSION2 = "1.18.0";
   }
 });
 
@@ -235998,6 +235998,69 @@ async function handleRescheduleBooking(req, res) {
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
   }
 }
+var GUEST_EXTEND_STATUSES = ["payment-confirmed", "confirmed", "checked-in"];
+async function handleExtendStay(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const {
+    bookingId,
+    bookingRef,
+    guestEmail,
+    token: token2,
+    checkOut,
+    reason
+  } = req.body || {};
+  if (!bookingRef || !guestEmail && !token2 || !checkOut) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking reference, email or token, and new check-out date are required."
+    });
+  }
+  try {
+    const parsed2 = guestCancelSchema.safeParse(req.body || {});
+    if (!parsed2.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a valid booking reference and email or lookup token."
+      });
+    }
+    const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
+    const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      return res.status(404).json({
+        success: false,
+        error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+      });
+    }
+    const bookingDocumentRef = snapshot.docs[0].ref;
+    const bookingData2 = snapshot.docs[0].data();
+    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData2.status || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "EXTEND_NOT_ELIGIBLE"
+      });
+    }
+    const extendReq = {
+      ...req,
+      body: {
+        bookingId: snapshot.docs[0].id,
+        roomId: bookingData2.roomId,
+        // locked — transaction enforces
+        checkIn: bookingData2.checkIn,
+        // locked — transaction enforces
+        checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        mode: "extend"
+      }
+    };
+    return await handleRescheduleBooking(extendReq, res);
+  } catch (err) {
+    console.error("[handleExtendStay]", err?.message);
+    return res.status(500).json({ success: false, error: "An unexpected error occurred." });
+  }
+}
 async function handleAddRoomToReservation(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -240747,6 +240810,22 @@ async function handler(req, res) {
     }
     req.staff = authResult.success ? authResult : null;
     return await handleCancelPreview(req, res);
+  }
+  if (domain === "bookings" && action === "extend-stay" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-extend-stay:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many extend requests. Please try again in a minute." });
+    }
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        return res.status(403).json({ success: false, error: "Staff authentication is not accepted on this endpoint." });
+      }
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleExtendStay(req, res);
   }
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-lookup:${ip}`, 10, 6e4)) {

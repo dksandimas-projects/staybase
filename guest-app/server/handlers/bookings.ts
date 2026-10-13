@@ -12450,6 +12450,103 @@ export async function handleRescheduleBooking(req: any, res: any) {
 // path + the per-child voucher rule). One
 // `booking-rescheduled` email fires after the commit (the
 // reservation-scope view carries the new room).
+
+// Per EXT-02 (2026-01-27): guest self-service extend stay.
+// Thin wrapper around handleRescheduleBooking with mode:"extend".
+// The booking is locked to its current room + check-in; only
+// check-out can be extended. The existing reschedule transaction
+// enforces the room-availability check — if the room is occupied
+// in the new window the transaction throws and we surface that
+// as a user-friendly error.
+//
+// Auth: same bookingRef + (guestEmail | lookupToken) credential
+// as handleCancelBooking. No staff auth on this endpoint.
+const GUEST_EXTEND_STATUSES = ["payment-confirmed", "confirmed", "checked-in"];
+
+export async function handleExtendStay(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const {
+    bookingId,
+    bookingRef,
+    guestEmail,
+    token,
+    checkOut,
+    reason
+  } = req.body || {};
+
+  if (!bookingRef || (!guestEmail && !token) || !checkOut) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking reference, email or token, and new check-out date are required."
+    });
+  }
+
+  try {
+    // ── Guest credential check (same as cancel) ────────────────────────
+    const parsed = guestCancelSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a valid booking reference and email or lookup token."
+      });
+    }
+
+    const compositeFilter = parsed.data.token
+      ? { field: "lookupToken" as const, value: String(parsed.data.token).toLowerCase() }
+      : { field: "guestEmail" as const, value: parsed.data.guestEmail };
+
+    const query = adminDb.collection("bookings")
+      .where("bookingRef", "==", parsed.data.bookingRef)
+      .where(compositeFilter.field, "==", compositeFilter.value)
+      .limit(1);
+
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      return res.status(404).json({
+        success: false,
+        error: parsed.data.token
+          ? "Booking not found with matching token."
+          : "Booking not found with matching email."
+      });
+    }
+
+    const bookingDocumentRef = snapshot.docs[0].ref;
+    const bookingData = snapshot.docs[0].data();
+
+    // ── Status gate: only confirmed / checked-in can self-extend ────────
+    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData.status || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "EXTEND_NOT_ELIGIBLE"
+      });
+    }
+
+    // ── Delegate to the reschedule transaction with mode:"extend" ───────
+    // Pass through the req so handleRescheduleBooking reads req.staff
+    // (always null/undefined on this guest-only path) and writes the
+    // rescheduleHistory[] entry with kind:"extend".
+    const extendReq = {
+      ...req,
+      body: {
+        bookingId: snapshot.docs[0].id,
+        roomId: bookingData.roomId,   // locked — transaction enforces
+        checkIn: bookingData.checkIn, // locked — transaction enforces
+        checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        mode: "extend"
+      }
+    };
+
+    return await handleRescheduleBooking(extendReq, res);
+  } catch (err: any) {
+    console.error("[handleExtendStay]", err?.message);
+    return res.status(500).json({ success: false, error: "An unexpected error occurred." });
+  }
+}
+
 export async function handleAddRoomToReservation(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });

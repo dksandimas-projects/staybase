@@ -249,6 +249,15 @@ export function BookingLookupPage() {
   const [completedCancellationPreview, setCompletedCancellationPreview] = useState<CancellationPreview | null>(null);
   const cancelPreviewRequestIdRef = useRef(0);
 
+  // Per EXT-02 (2026-01-27): guest self-service extend stay.
+  // Same bookingRef + (email | token) credential as cancel.
+  const [showExtendModal, setShowExtendModal] = useState(false);
+  const [extendCheckOut, setExtendCheckOut] = useState("");
+  const [extendReason, setExtendReason] = useState("");
+  const [isExtending, setIsExtending] = useState(false);
+  const [extendError, setExtendError] = useState("");
+  const [extendSuccess, setExtendSuccess] = useState(false);
+
   const [isResending, setIsResending] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sent" | "rate-limited" | "error">("idle");
   const [resendError, setResendError] = useState("");
@@ -1025,6 +1034,79 @@ export function BookingLookupPage() {
     }
   };
 
+  // Per EXT-02 (2026-01-27): guest self-service extend stay.
+  // Sends `POST /api/bookings/extend-stay` with the same
+  // bookingRef + (email | token) credential as cancel.
+  // Turnstile is shared with the cancel flow (same token).
+  const handleExtendStaySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const activeRef = activeBooking?.bookingRef;
+    if (!activeRef || !extendCheckOut) return;
+    if (!turnstileToken) {
+      setExtendError("The security check hasn't finished yet. Please wait a moment and try again.");
+      return;
+    }
+    setIsExtending(true);
+    setExtendError("");
+
+    try {
+      const extendPayload: Record<string, string> = {
+        bookingRef: activeRef,
+        checkOut: extendCheckOut,
+        reason: extendReason,
+        turnstileToken
+      };
+      if (lookupAuthMode === "token" && activeLookupToken) {
+        extendPayload.token = activeLookupToken;
+      } else {
+        extendPayload.guestEmail = emailInput.trim();
+      }
+      const response = await fetch("/api/bookings/extend-stay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(extendPayload)
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        // Per EXT-02: room-not-available surfaces as a CTA
+        // bundle (Call / Chat / Email) instead of an error.
+        if (result?.error === "ROOM_NOT_AVAILABLE") {
+          setExtendError("EXTEND_ROOM_NOT_AVAILABLE");
+          return;
+        }
+        setExtendError(result?.error || "We couldn't extend your stay. Please try again.");
+        return;
+      }
+
+      setExtendSuccess(true);
+      // Update the active booking with the new check-out so the
+      // card reflects the extended stay immediately.
+      if (activeBooking) {
+        const newCheckOutDate = new Date(`${extendCheckOut}T00:00:00Z`);
+        const newNumNights = Math.round(
+          (newCheckOutDate.getTime() - new Date(`${activeBooking.checkIn}T00:00:00Z`).getTime())
+          / 86400000
+        );
+        setActiveBooking({
+          ...activeBooking,
+          checkOut: extendCheckOut,
+          numNights: newNumNights,
+          totalPrice: result?.data?.totalPrice ?? activeBooking.totalPrice,
+          ratePerNight: result?.data?.ratePerNight ?? activeBooking.ratePerNight
+        });
+      }
+      setShowExtendModal(false);
+    } catch (err) {
+      console.error("Extend stay failed:", err);
+      setExtendError("We couldn't reach the booking service. Please try again.");
+    } finally {
+      resetTurnstile();
+      setIsExtending(false);
+    }
+  };
+
   // Per 2026-08-07 (decision #200): the payment-method label
   // for the result card is resolved through the shared
   // `resolvePaymentMethodLabel` helper. The admin's
@@ -1523,12 +1605,28 @@ export function BookingLookupPage() {
                 )}
 
                 <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
-                  <Sparkles className="text-primary shrink-0 mt-0.5 animate-pulse" size={18} />
-                  <div>
-                    <p className="text-sm font-bold text-primary-dark">Need to make adjustments?</p>
+                  <Sparkles className="text-primary shrink-0 mt-0.5" size={18} />
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-primary-dark">Want to extend your stay?</p>
                     <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                      To change check-in dates, guest count, or breakfast selections, please call our front desk directly at {config.frontDeskPhone}.
+                      You can extend your check-out date directly — no need to call.
                     </p>
+                    <button
+                      onClick={() => {
+                        // Pre-fill with day after current check-out as default.
+                        const tomorrow = new Date(`${activeBooking.checkOut}T00:00:00Z`);
+                        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+                        setExtendCheckOut(tomorrow.toISOString().slice(0, 10));
+                        setExtendReason("");
+                        setExtendError("");
+                        setExtendSuccess(false);
+                        setShowExtendModal(true);
+                      }}
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-white hover:bg-primary-dark transition-colors"
+                    >
+                      Extend stay
+                      <Calendar size={13} />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1722,6 +1820,154 @@ export function BookingLookupPage() {
           </div>
         )}
       </section>
+
+      {showExtendModal && activeBooking && (
+        <Modal
+          open={showExtendModal}
+          onClose={() => {
+            if (isExtending) return;
+            setShowExtendModal(false);
+            setExtendError("");
+            setExtendSuccess(false);
+          }}
+          title="Extend your stay"
+        >
+          {extendSuccess ? (
+            <div className="text-center py-6">
+              <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-4">
+                <Sparkles className="text-green-600" size={22} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">Stay extended!</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                Your check-out has been pushed to{" "}
+                <strong>{new Date(`${extendCheckOut}T00:00:00Z`).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", weekday: "long", month: "long", day: "numeric" })}</strong>.
+                We look forward to having you!
+              </p>
+              <button
+                onClick={() => {
+                  setShowExtendModal(false);
+                  setExtendSuccess(false);
+                }}
+                className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-dark transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleExtendStaySubmit} className="space-y-4">
+              {/* Current booking summary */}
+              <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-semibold text-gray-900">{activeBooking.roomName}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Current check-out:{" "}
+                      <strong>
+                        {new Date(`${activeBooking.checkOut}T00:00:00Z`).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", weekday: "long", month: "long", day: "numeric" })}
+                      </strong>
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded-md">
+                    + {Math.round((new Date(`${extendCheckOut}T00:00:00Z`).getTime() - new Date(`${activeBooking.checkOut}T00:00:00Z`).getTime()) / 86400000)} night{Math.round((new Date(`${extendCheckOut}T00:00:00Z`).getTime() - new Date(`${activeBooking.checkOut}T00:00:00Z`).getTime()) / 86400000) !== 1 ? "s" : ""}
+                  </span>
+                </div>
+              </div>
+
+              {/* New check-out date */}
+              <label className="grid gap-2 text-sm font-semibold text-gray-700">
+                New check-out date
+                <input
+                  type="date"
+                  required
+                  min={
+                    (() => {
+                      const d = new Date(`${activeBooking.checkOut}T00:00:00Z`);
+                      d.setUTCDate(d.getUTCDate() + 1);
+                      return d.toISOString().slice(0, 10);
+                    })()
+                  }
+                  value={extendCheckOut}
+                  onChange={(e) => setExtendCheckOut(e.target.value)}
+                  className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </label>
+
+              {/* Reason */}
+              <label className="grid gap-2 text-sm font-semibold text-gray-700">
+                Reason for extending (optional)
+                <textarea
+                  placeholder="Let us know if you have any special requests for the extra night..."
+                  value={extendReason}
+                  onChange={(e) => setExtendReason(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                />
+              </label>
+
+              {/* Error states */}
+              {extendError === "EXTEND_ROOM_NOT_AVAILABLE" ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={18} />
+                    <div>
+                      <p className="text-sm font-bold text-red-800">Room not available for those dates</p>
+                      <p className="mt-1 text-xs text-red-700 leading-relaxed">
+                        Your current room <strong>{activeBooking.roomName}</strong> is not available for extension. Please use one of the options below to arrange alternative accommodation.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 pt-1">
+                    <a
+                      href={`tel:${config.frontDeskPhone}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-white hover:bg-primary-dark transition-colors"
+                    >
+                      <Calendar size={15} />
+                      Call front desk — {config.frontDeskPhone}
+                    </a>
+                    <a
+                      href={`mailto:${config.supportEmail}?subject=Extend stay — ${activeBooking.bookingRef}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <Mail size={15} />
+                      Send an email
+                    </a>
+                  </div>
+                </div>
+              ) : extendError ? (
+                <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                  <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={16} />
+                  <p className="text-sm text-red-700">{extendError}</p>
+                </div>
+              ) : null}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isExtending) return;
+                    setShowExtendModal(false);
+                    setExtendError("");
+                    setExtendSuccess(false);
+                  }}
+                  disabled={isExtending}
+                  className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isExtending || !extendCheckOut}
+                  className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-white hover:bg-primary-dark transition-colors disabled:opacity-50"
+                >
+                  {isExtending ? "Extending…" : "Confirm extension"}
+                </button>
+              </div>
+            </form>
+          )}
+        </Modal>
+      )}
 
       {(showCancelModal && (activeBooking || activeReservation)) && (
         <Modal open={showCancelModal} onClose={() => {

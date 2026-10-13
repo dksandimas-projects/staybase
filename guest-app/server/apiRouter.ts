@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment, handleExtendStay } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateBulkRoomBlocks, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleAcquireStaffInventoryHold, handleExtendStaffInventoryHold, handleReleaseStaffInventoryHold } from "./handlers/staff-inventory-holds";
@@ -940,6 +940,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult.success ? authResult : null;
     return await handleCancelPreview(req, res);
+  }
+
+  // Per EXT-02 (2026-01-27): guest self-service extend stay.
+  // Same bookingRef + (email | token) credential as cancel.
+  // Turnstile gates the guest path; staff auth is NOT accepted
+  // on this endpoint (staff use handleRescheduleBooking directly
+  // via the admin API router).
+  if (domain === "bookings" && action === "extend-stay" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-extend-stay:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many extend requests. Please try again in a minute." });
+    }
+
+    // Staff token → reject (guest-only endpoint)
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        return res.status(403).json({ success: false, error: "Staff authentication is not accepted on this endpoint." });
+      }
+    }
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleExtendStay(req, res);
   }
 
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
