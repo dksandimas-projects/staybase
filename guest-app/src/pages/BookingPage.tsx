@@ -2419,16 +2419,23 @@ export function BookingPage() {
               </div>
             )}
 
-            {/* Discount Section */}
-            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+            {/* Discount Section — rendered only while the online
+                Senior/PWD claim path is enabled
+                (`settings/hotelConfig.seniorPwdOnlineEnabled`).
+                Per owner request 2026-10-13 (decision #231): when
+                the toggle is off the whole card is dropped — no
+                heading, no selector, and no "claims unavailable"
+                note. The discount itself is unaffected: staff
+                still apply the 20% at the front desk when an
+                eligible guest presents a valid ID (RA 9994 /
+                RA 10754). */}
+            {seniorPwdOnlineEnabled && <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Discount Options</h3>
               <p className="mt-1 text-sm text-gray-600">
-                {seniorPwdOnlineEnabled
-                  ? "Select if you are eligible for government-mandated discounts. A valid ID must be uploaded."
-                  : "Senior/PWD online claims are currently unavailable. Eligible guests may present a valid ID at check-in to receive the mandated discount."}
+                Select if you are eligible for government-mandated discounts. A valid ID must be uploaded.
               </p>
-              
-              {seniorPwdOnlineEnabled && <div className="mt-4 grid gap-3 sm:grid-cols-3">
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 {(["none", "senior", "pwd"] as const).map((type) => {
                   // Per the per-individual discount guard:
                   // the senior / PWD buttons are disabled
@@ -2465,14 +2472,14 @@ export function BookingPage() {
                     </button>
                   );
                 })}
-              </div>}
-              {seniorPwdOnlineEnabled && cartIsMultiRoom && (
+              </div>
+              {cartIsMultiRoom && (
                 <p className="mt-3 text-xs text-amber-700">
                   Senior Citizen and PWD discounts are per-individual entitlements and apply to a single room. If you need a senior or PWD discount, please book that guest's room in a separate booking — the additional rooms can be added to the same reservation from the front desk at check-in.
                 </p>
               )}
 
-              {seniorPwdOnlineEnabled && discountType !== "none" && (
+              {discountType !== "none" && (
                 <div className="mt-5">
                   <p className="text-sm font-semibold text-gray-700">
                     {discountType === "senior" ? "Upload OSCA Card Photo" : "Upload PWD ID Card Photo"} <span className="text-red-500">*</span>
@@ -2534,7 +2541,7 @@ export function BookingPage() {
                   </div>
                   </div>
                 )}
-            </div>
+            </div>}
 
             {/* Payment Method Section — dynamic, per
                 `plan/features/SETTINGS.md §Payment Methods`. The

@@ -81,8 +81,11 @@ describe("Per-individual discount guard — guest-app BookingPage", () => {
     // a one-line hint explaining the per-individual
     // constraint + the recommended flow (book
     // separately, add the other rooms at check-in).
+    // Per decision #231 the whole card is now gated on
+    // `seniorPwdOnlineEnabled`, so this hint no longer
+    // re-checks that flag — the outer gate owns it.
     expect(bookingPageSrc).toMatch(
-      /\{seniorPwdOnlineEnabled && cartIsMultiRoom && \(/
+      /\{cartIsMultiRoom && \(/
     );
     expect(bookingPageSrc).toMatch(
       /If you need a senior or PWD discount, please book that guest's room in a separate booking/
