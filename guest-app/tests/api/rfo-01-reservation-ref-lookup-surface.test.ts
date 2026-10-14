@@ -144,7 +144,7 @@ describe("RFO-01 — BookingLookupPage form routes R- inputs through reservation
     // surface as a 400 from the server.
     expect(sharedIndexSrc).toMatch(/export \* from "\.\/utils\/references"/);
     expect(lookupPageSrc).toMatch(
-      /import \{ GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn \} from "@spark-inn\/shared"/
+      /import \{ GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn, addDaysToIsoDate, isValidIsoDate \} from "@spark-inn\/shared"/
     );
   });
 

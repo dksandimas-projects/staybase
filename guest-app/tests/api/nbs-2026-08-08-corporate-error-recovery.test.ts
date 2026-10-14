@@ -25,31 +25,36 @@ const corporatePageSrc = readFileSync(
 
 describe("NBS-2026-08-08 — corporate /corporate/book error recovery + URL fallback (F2 + F10 + F11)", () => {
   describe("F10 — corporate checkIn / checkOut URL fallback", () => {
-    it("validates the URL checkIn value against the YYYY-MM-DD shape", () => {
-      // The previous `useState(searchParams.get("checkIn") ?? ...)`
-      // accepted any URL value verbatim. The
-      // F10 fix parses the value through
-      // `isValidDateKey`; an invalid value
-      // falls back to today's Manila date.
+    // Per DR-01 (2026-10-14): the F10 contract is unchanged in
+    // INTENT but STRICTER in implementation. `isValidDateKey`
+    // only checked the `YYYY-MM-DD` SHAPE, so an inverted pair
+    // (`?checkIn=2026-10-16&checkOut=2026-10-09`) and a past
+    // check-in both passed. `normalizeStayRange` now owns the
+    // seed: it validates shape AND ordering AND the past-date
+    // floor, then falls back to the Manila "today" helper.
+    it("validates the URL checkIn/checkOut pair through the shared range normalizer", () => {
       const validatorMatch = corporatePageSrc.match(
-        /const isValidDateKey = \(value: string \| null\) =>[\s\S]*?typeof value === "string" && \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\//
+        /const initialStayRange = normalizeStayRange\(\{[\s\S]*?checkIn: searchParams\.get\("checkIn"\),[\s\S]*?checkOut: searchParams\.get\("checkOut"\)/
       );
       expect(validatorMatch).not.toBeNull();
+      // The shape-only helper is gone — superseded by the
+      // normalizer, which is strictly stronger.
+      expect(corporatePageSrc).not.toMatch(/const isValidDateKey =/);
     });
 
     it("falls back to today's Manila date when the URL checkIn value is invalid", () => {
-      // The useState init reads the validated
-      // value; invalid → the Manila "today"
-      // helper is the default.
+      // The useState init reads the normalized value; an invalid
+      // or missing value resolves to the Manila "today" helper.
       const fallbackMatch = corporatePageSrc.match(
-        /const \[checkIn, setCheckIn\] = useState\(\s*isValidDateKey\(initialCheckInParam\)/
+        /const \[checkIn, setCheckIn\] = useState\(initialStayRange\.checkIn\)/
       );
       expect(fallbackMatch).not.toBeNull();
+      expect(corporatePageSrc).toMatch(/minCheckIn: getDateKeyInTimezone\(config\.timezone\)/);
     });
 
     it("falls back to today's Manila date when the URL checkOut value is invalid", () => {
       const fallbackMatch = corporatePageSrc.match(
-        /const \[checkOut, setCheckOut\] = useState\(\s*isValidDateKey\(initialCheckOutParam\)/
+        /const \[checkOut, setCheckOut\] = useState\(initialStayRange\.checkOut\)/
       );
       expect(fallbackMatch).not.toBeNull();
     });

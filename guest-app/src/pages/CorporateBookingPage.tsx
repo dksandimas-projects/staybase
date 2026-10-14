@@ -36,6 +36,7 @@ import {
   calculateBookingTotal,
   compressImageFile,
   getDateKeyInTimezone,
+  normalizeStayRange,
   getNumNights,
   // Per EXB-07 (2026-08-01, per decision #155): the
   // capacity overflow rule (per decision #153) is the
@@ -258,20 +259,19 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   // value falls back to today's Manila date. The same
   // pattern guards `checkOut` (a missing URL value
   // previously landed as `null` → empty date input).
-  const initialCheckInParam = searchParams.get("checkIn");
-  const initialCheckOutParam = searchParams.get("checkOut");
-  const isValidDateKey = (value: string | null) =>
-    typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const [checkIn, setCheckIn] = useState(
-    isValidDateKey(initialCheckInParam)
-      ? initialCheckInParam!
-      : getDateKeyInTimezone(config.timezone, 1)
-  );
-  const [checkOut, setCheckOut] = useState(
-    isValidDateKey(initialCheckOutParam)
-      ? initialCheckOutParam!
-      : getDateKeyInTimezone(config.timezone, 2)
-  );
+  // DR-01 (2026-10-14): the old `isValidDateKey` regex only checked
+  // the `YYYY-MM-DD` SHAPE — it happily accepted an inverted or
+  // past range from the URL. Route both params through
+  // `normalizeStayRange` so a shared corporate-booking link can't
+  // seed a 0-night stay.
+  const initialStayRange = normalizeStayRange({
+    checkIn: searchParams.get("checkIn"),
+    checkOut: searchParams.get("checkOut"),
+    minCheckIn: getDateKeyInTimezone(config.timezone),
+    defaultNights: 1
+  });
+  const [checkIn, setCheckIn] = useState(initialStayRange.checkIn);
+  const [checkOut, setCheckOut] = useState(initialStayRange.checkOut);
   // Per EXB-07 (2026-08-01, per decision #155): the
   // corporate /book page gains the same adult/child split
   // + extra bed count the guest /book page already has.

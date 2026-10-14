@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.1.0";
+    VERSION2 = "2.2.0";
   }
 });
 
@@ -222178,6 +222178,105 @@ function getDateKeyInTimezone(timezone = "Asia/Manila", offsetDays = 0) {
 var init_bookingDates = __esm({
   "../shared/utils/bookingDates.ts"() {
     "use strict";
+  }
+});
+
+// ../shared/utils/stayRange.ts
+function isValidIsoDate(value) {
+  if (typeof value !== "string" || !ISO_DATE_PATTERN.test(value)) return false;
+  const parsed2 = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed2.getTime())) return false;
+  return parsed2.toISOString().slice(0, 10) === value;
+}
+function addDaysToIsoDate(value, days, fallback = "") {
+  if (!isValidIsoDate(value)) return fallback;
+  const date = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function diffNightsBetweenIso(first, second) {
+  if (!isValidIsoDate(first) || !isValidIsoDate(second)) return 0;
+  const start = Date.parse(`${first}T00:00:00Z`);
+  const end = Date.parse(`${second}T00:00:00Z`);
+  return Math.round((end - start) / 864e5);
+}
+function normalizeStayRange({
+  checkIn,
+  checkOut,
+  minCheckIn,
+  previousNights = null,
+  defaultNights = DEFAULT_STAY_NIGHTS,
+  maxNights = DEFAULT_MAX_STAY_NIGHTS,
+  maxCheckOut
+}) {
+  const today = isValidIsoDate(minCheckIn) ? minCheckIn : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const horizon = isValidIsoDate(maxCheckOut ?? "") && maxCheckOut > today ? maxCheckOut : addDaysToIsoDate(today, maxNights, addDaysToIsoDate(today, defaultNights, today));
+  const horizonNights = Math.max(diffNightsBetweenIso(today, horizon), defaultNights);
+  const stayCap = Math.max(Math.min(maxNights, horizonNights), 1);
+  const rawIn = isValidIsoDate(checkIn ?? "") ? checkIn : null;
+  const rawOut = isValidIsoDate(checkOut ?? "") ? checkOut : null;
+  if (!rawIn && !rawOut) {
+    const seededCheckOut = addDaysToIsoDate(today, defaultNights, today);
+    return {
+      checkIn: today,
+      checkOut: seededCheckOut <= today ? addDaysToIsoDate(today, 1, today) : seededCheckOut,
+      nights: defaultNights,
+      adjustment: "empty"
+    };
+  }
+  let adjustment = null;
+  let checkInCandidate;
+  if (!rawIn) {
+    const derived = rawOut && rawOut > today ? addDaysToIsoDate(rawOut, -defaultNights, "") : "";
+    checkInCandidate = !derived || derived < today ? today : derived;
+    adjustment = "invalid-check-in";
+  } else if (rawIn < today) {
+    checkInCandidate = today;
+    adjustment = "check-in-clamped-to-today";
+  } else {
+    checkInCandidate = rawIn;
+  }
+  const nextIn = checkInCandidate;
+  let checkOutCandidate;
+  if (!rawOut) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, defaultNights, addDaysToIsoDate(nextIn, 1, nextIn));
+    if (adjustment === null) adjustment = "invalid-check-out";
+  } else if (rawOut <= nextIn) {
+    const preserveable = typeof previousNights === "number" && Number.isFinite(previousNights) ? Math.floor(previousNights) : null;
+    const nights = preserveable !== null && preserveable >= 1 ? Math.min(preserveable, stayCap) : Math.min(defaultNights, stayCap);
+    checkOutCandidate = addDaysToIsoDate(nextIn, nights, addDaysToIsoDate(nextIn, 1, nextIn));
+    adjustment = preserveable !== null && preserveable >= 1 ? "nights-preserved" : "check-out-clamped-after-check-in";
+  } else {
+    checkOutCandidate = rawOut;
+  }
+  if (checkOutCandidate > horizon) {
+    checkOutCandidate = horizon;
+    adjustment = "horizon-capped";
+  }
+  if (checkOutCandidate <= nextIn) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, 1, nextIn);
+    adjustment = "check-out-clamped-after-check-in";
+  }
+  const nextOut = checkOutCandidate;
+  return {
+    checkIn: nextIn,
+    checkOut: nextOut,
+    nights: Math.max(diffNightsBetweenIso(nextIn, nextOut), 1),
+    adjustment
+  };
+}
+function isValidStayRange(checkIn, checkOut, minCheckIn) {
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) return false;
+  if (checkIn < minCheckIn) return false;
+  return diffNightsBetweenIso(checkIn, checkOut) >= 1;
+}
+var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS;
+var init_stayRange = __esm({
+  "../shared/utils/stayRange.ts"() {
+    "use strict";
+    ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+    DEFAULT_STAY_NIGHTS = 1;
+    DEFAULT_MAX_STAY_NIGHTS = 30;
   }
 });
 
@@ -224538,8 +224637,10 @@ __export(shared_exports, {
   DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
   DEFAULT_IN_FLOW_HOLD_MINUTES: () => DEFAULT_IN_FLOW_HOLD_MINUTES,
+  DEFAULT_MAX_STAY_NIGHTS: () => DEFAULT_MAX_STAY_NIGHTS,
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
   DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
+  DEFAULT_STAY_NIGHTS: () => DEFAULT_STAY_NIGHTS,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
   DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
   DEFAULT_VAT_CONFIG: () => DEFAULT_VAT_CONFIG,
@@ -224601,6 +224702,7 @@ __export(shared_exports, {
   WalkinRoomLineSchema: () => WalkinRoomLineSchema,
   WebsiteContentSchema: () => WebsiteContentSchema,
   __test__: () => __test__,
+  addDaysToIsoDate: () => addDaysToIsoDate,
   applyRoomTypeDefaults: () => applyRoomTypeDefaults,
   applyVoucherDiscount: () => applyVoucherDiscount,
   assertBookingFinanceInvariant: () => assertBookingFinanceInvariant,
@@ -224647,6 +224749,7 @@ __export(shared_exports, {
   datesOverlap: () => datesOverlap,
   deriveReservationCounters: () => deriveReservationCounters,
   deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
+  diffNightsBetweenIso: () => diffNightsBetweenIso,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
   evaluateCancelPreview: () => evaluateCancelPreview,
@@ -224683,9 +224786,11 @@ __export(shared_exports, {
   isPaymentVerified: () => isPaymentVerified,
   isRewardVoucher: () => isRewardVoucher,
   isValidBookingRef: () => isValidBookingRef,
+  isValidIsoDate: () => isValidIsoDate,
   isValidLookupToken: () => isValidLookupToken,
   isValidReservationId: () => isValidReservationId,
   isValidReservationRef: () => isValidReservationRef,
+  isValidStayRange: () => isValidStayRange,
   isVatEnabled: () => isVatEnabled,
   isWeekendNight: () => isWeekendNight,
   mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
@@ -224697,6 +224802,7 @@ __export(shared_exports, {
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
+  normalizeStayRange: () => normalizeStayRange,
   normalizeVatConfig: () => normalizeVatConfig,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
@@ -224738,6 +224844,7 @@ var init_shared = __esm({
     init_seo();
     init_types3();
     init_bookingDates();
+    init_stayRange();
     init_bookingFolio();
     init_bookingAddOns();
     init_bookingDiscounts();
@@ -230566,6 +230673,18 @@ async function handleCreateBooking(req, res) {
     });
   }
   const body = parsedBody.data;
+  if (!isValidIsoDate(body.checkIn) || !isValidIsoDate(body.checkOut)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid check-in or check-out date."
+    });
+  }
+  if (diffNightsBetweenIso(body.checkIn, body.checkOut) < 1) {
+    return res.status(400).json({
+      success: false,
+      error: "Check-out must be at least one night after check-in."
+    });
+  }
   const {
     bookingId,
     roomType,

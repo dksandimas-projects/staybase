@@ -35,6 +35,7 @@ import {
   calculateBreakfastMealsTotal,
   getDateKeyInTimezone,
   getNumNights,
+  normalizeStayRange,
   staggerChild,
   staggerContainer,
   compressImageFile,
@@ -435,8 +436,19 @@ export function BookingPage() {
     ? Number(rewardsConfig?.memberDiscountPct) || 0
     : 0;
 
-  const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
-  const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
+  // DR-01 (2026-10-14): seed the range from the URL only through
+  // `normalizeStayRange`. Previously the params were trusted raw, so
+  // a shared or hand-edited `?checkIn=2026-10-16&checkOut=2026-10-09`
+  // opened the flow on an inverted range and the first availability
+  // query already used the bad dates.
+  const initialStayRange = normalizeStayRange({
+    checkIn: searchParams.get("checkIn"),
+    checkOut: searchParams.get("checkOut"),
+    minCheckIn: getDateKeyInTimezone(config.timezone),
+    defaultNights: 1
+  });
+  const [checkIn, setCheckIn] = useState(initialStayRange.checkIn);
+  const [checkOut, setCheckOut] = useState(initialStayRange.checkOut);
   // Per CHD-11.5 (2026-08-05, per decision #196): the picker
   // asks for Adults + Children directly, not Guests (total) +
   // Children. `adults` is the state; `guests` is derived as
