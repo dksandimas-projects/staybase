@@ -21,7 +21,7 @@ import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
-import { handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
+import { handleExtendInFlowHold, handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
@@ -1621,6 +1621,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleReadInFlowHold(req, res);
+  }
+
+  // Per IMT-02 (2026-10-14, `plan/project/ROADMAP.md §IMT`): the "I
+  // need more time" endpoint. Adds a window to an active hold, or
+  // revives an expired one — the explicit-action-only counterpart to
+  // IMT-01's "Pick a new room" fresh-hold path.
+  //
+  // Rate limit is 10/IP/min, deliberately TIGHTER than start's 30.
+  // Start is a one-per-booking-attempt call; extend is the one that
+  // extends doc lifetime, so it gets the tighter budget. Combined with
+  // the server-side `MAX_IN_FLOW_HOLD_EXTENSIONS` cap, the two bound
+  // how long a doc can sit in `"active"`.
+  //
+  // No Turnstile gate, same reason as start: the banner renders on
+  // Steps 2 + 3 and fires before the Step-3-only Turnstile widget has
+  // loaded a token, so gating here would break the exact surface the
+  // button lives on (see `fix/holds-start-turnstile`). Extending a
+  // SOFT hold unlocks nothing — the authoritative boundary stays the
+  // Turnstile-gated `/api/bookings/create`.
+  if (domain === "holds" && action === "extend" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-extend:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many hold extension requests. Please try again in a minute." });
+    }
+
+    return await handleExtendInFlowHold(req, res);
   }
 
   // Per the IFH-01 follow-up: the daily Janitor sweep

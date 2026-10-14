@@ -335,3 +335,36 @@ export const StartBookingHoldSchema = z
   });
 
 export type StartBookingHoldInput = z.infer<typeof StartBookingHoldSchema>;
+
+// Per IMT-02 (2026-10-14, `plan/project/ROADMAP.md §IMT`): the "I
+// need more time" request body for `POST /api/holds/extend`.
+//
+// DELIBERATELY two fields and nothing else.
+//
+//  * No `minutes` / `holdMinutes` / `extraMinutes`. The extension
+//    window is read from the hold doc's own `holdMinutes` snapshot,
+//    so a client cannot ask for a longer window than the hotel
+//    configured in Settings. A client-supplied duration would be an
+//    open, unauthenticated way to pin a doc in `"active"` for as long
+//    as the caller liked, which defeats `MAX_IN_FLOW_HOLD_EXTENSIONS`
+//    entirely. `.strict()` is what makes that enforceable — any extra
+//    key is a 400 rather than being silently dropped.
+//  * `reservationId` mirrors `StartBookingHoldSchema` and binds the
+//    request to the hold's own reservation, the same anti-tamper
+//    check `handleStartInFlowHold` performs on its idempotency guard.
+//    The hold id is an opaque client-preallocated UUIDv4 with no auth
+//    behind it (the documented trust model — see the `useInFlowHold`
+//    docstring), so this second field is the only thing tying an
+//    extend to the booking attempt it claims to belong to.
+//
+// No roomType / dates: an extension never changes WHAT is held, only
+// how long. The hold doc is authoritative for those fields and the
+// booking transaction re-reads them at Confirm.
+export const ExtendBookingHoldSchema = z
+  .object({
+    holdId: z.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+    reservationId: z.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
+  })
+  .strict();
+
+export type ExtendBookingHoldInput = z.infer<typeof ExtendBookingHoldSchema>;
