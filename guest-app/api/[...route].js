@@ -221219,7 +221219,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.21.0";
+    VERSION2 = "1.22.1";
   }
 });
 

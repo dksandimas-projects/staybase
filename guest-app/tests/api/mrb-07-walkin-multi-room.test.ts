@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // Per MRB-07 (2026-08-02, per decision #159): the admin New Booking
 // modal can create a reservation covering N rooms, so
@@ -218,9 +220,28 @@ const nextWeekday = (targetDay: number) => {
 
 // Tue → Thu: two weekday nights, no weekend rate in play, so every
 // expected figure below is `pricePerNight * 2`.
+//
+// Per the 2026-10-14 triage: check-out is DERIVED from check-in by
+// +2 days rather than computed with a second independent
+// `nextWeekday(4)` call. Two independent calls are not guaranteed to
+// be ordered — `nextWeekday` returns the next occurrence of a weekday,
+// so when "today" falls on a Tuesday or a Wednesday the Tue result
+// lands 7 and 6 days out while the Thu result lands only 2 and 1 days
+// out. That inverted the stay, and `handleCreateWalkin` correctly
+// rejected it with 400 "Invalid check-in or check-out date." The
+// handler was right; the fixture was a time bomb that fired 2 days out
+// of every 7 and looked like a production regression.
+//
+// Deriving from one anchor keeps the same Tue → Thu weekday pair (and
+// therefore the same "no weekend rate" premise) while making the
+// ordering unconditional. The sibling suite
+// `bookings-walkin-roomtype.test.ts` already used this safer pattern.
+const _checkInDate = nextWeekday(2);
+const _checkOutDate = new Date(_checkInDate);
+_checkOutDate.setUTCDate(_checkOutDate.getUTCDate() + 2);
 const STAY = {
-  checkIn: fmtDate(nextWeekday(2)),
-  checkOut: fmtDate(nextWeekday(4))
+  checkIn: fmtDate(_checkInDate),
+  checkOut: fmtDate(_checkOutDate)
 };
 const NIGHTS = 2;
 
@@ -617,5 +638,46 @@ describe("MRB-07 — multi-room walk-in creation", () => {
     expect(reservation.roomCount).toBeUndefined();
     expect(reservation.activeRoomCount).toBeUndefined();
     expect(reservation.totalPrice).toBe(2000 * NIGHTS);
+  });
+});
+
+// Per the 2026-10-14 triage (GOTCHAS §Booking Flow, "never build a test
+// fixture's check-in AND check-out from two independent next-weekday
+// calls").
+//
+// This suite produced 10 failures that looked exactly like a P0 —
+// multi-room walk-in creation rejecting valid payloads with a 400. The
+// handler was correct; the FIXTURE had inverted itself. `nextWeekday(n)`
+// returns the next occurrence of weekday n, so two independent calls are
+// not ordered: on a Tuesday or a Wednesday the Tue result lands 7 and 6
+// days out while the Thu result lands only 2 and 1 day out, producing
+// checkOut < checkIn and a legitimate "Invalid check-in or check-out
+// date." rejection.
+//
+// The bug fired 2 days out of every 7 and hid inside a long tail of
+// pre-existing failures, so it was never triaged. These pins make the
+// shape explicit so the next person reading a red walk-in suite checks
+// the fixture before blaming the handler.
+describe("MRB-07 — date fixture cannot silently invert (2026-10-14 triage)", () => {
+  const src = readFileSync(resolve(__dirname, "mrb-07-walkin-multi-room.test.ts"), "utf-8");
+
+  test("check-out is DERIVED from check-in, not a second independent nextWeekday() call", () => {
+    // The shape that broke: two independent calls into an unordered helper.
+    expect(src).not.toMatch(/checkOut:\s*fmtDate\(nextWeekday\(/);
+    // The safe shape: one anchor, then an offset from it.
+    expect(src).toMatch(/const _checkInDate = nextWeekday\(2\)/);
+    expect(src).toMatch(/_checkOutDate\.setUTCDate\(_checkOutDate\.getUTCDate\(\) \+ 2\)/);
+  });
+
+  test("keeps the same Tue -> Thu weekday pair the price assertions assume", () => {
+    // The suite's expected figures are `pricePerNight * NIGHTS` with no
+    // weekend rate in play, which only holds for a Tue -> Thu stay. The
+    // fix must preserve that pair, not just any ordered pair.
+    const ci = nextWeekday(2);
+    const co = new Date(ci);
+    co.setUTCDate(co.getUTCDate() + 2);
+    expect(ci.getUTCDay()).toBe(2);
+    expect(co.getUTCDay()).toBe(4);
+    expect(Math.round((co.getTime() - ci.getTime()) / 86400000)).toBe(NIGHTS);
   });
 });
