@@ -69,7 +69,7 @@ The check-in/check-out pair is **never** validated per-input at a call site. Eve
 - [x] **Corporate *inquiry* pairs surface the constraint rather than rewriting them** — `CorporateStaysPage`'s preferred check-in/out captures what the client *wants*, so its inputs stay linked with `min`/`max` plus a live inline error. `BookingLookupPage`'s extend-stay field clamps on change and disables its CTA while invalid.
 - [x] **No nights stepper** — removed in DR-02. The range band already shows the length and clicking it is how you change it; a second control competed with the band. The night count remains visible as read-only text in the range summary.
 
-Tests: `shared/__tests__/stay-range.test.ts` (26 behavioural, incl. the two-step regression) + `guest-app/tests/api/dr-01-stay-range-guard.test.ts` (source-level contract pins). See `plan/docs/DECISIONS-FEATURES.md` #245 / #246 / #247 and `plan/docs/GOTCHAS.md` §Booking Flow.
+Tests: `shared/__tests__/stay-range.test.ts` (26 behavioural, incl. the two-step regression) + `guest-app/tests/api/dr-01-stay-range-guard.test.ts` (source-level contract pins). See `plan/docs/DECISIONS-FEATURES.md` #245 / #246 / #249 and `plan/docs/GOTCHAS.md` §Booking Flow.
 
 ## Step 2 — Guest Details
 
