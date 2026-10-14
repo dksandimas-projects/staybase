@@ -231,7 +231,7 @@ Block specced → items ship (`⬜` → `✅`) → when every item is done, move
 
 ### Block code registry
 
-Keep codes unique. In use as of 2026-10-14 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL` `CRT`. **Shipped blocks still listed here:** `IMT` (guest hold extension — IMT-01..06 complete, decision #237). Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
+Keep codes unique. In use as of 2026-10-14 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL` `CRT`. **Shipped blocks still listed here:** `IMT` (guest hold extension — IMT-01..06 complete, decision #237) · `BR` (breakfast redesign — BR-01..08 complete 2026-10-14 at `2.0.0`, decision #238) · `SR` (special requests + bed setup — SR-01..05 complete 2026-10-12) · `EXT` (extend stay — EXT-01..03 complete 2026-10-14) · `CAL` (calendar bulk blocks + staff inventory hold — complete 2026-10-12, decision CAL-01) · `VAT` (admin VAT toggle — VAT-01 complete 2026-10-12) · `SET-SBG` (Settings sidebar grouping — SET-SBG-01 complete 2026-10-12). Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
 
 ---
 

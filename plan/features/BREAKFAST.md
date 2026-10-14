@@ -1,10 +1,9 @@
 # Breakfast — Meal-Based Add-On Model
 > Requires: CLAUDE.md, `plan/docs/BACKEND.md`, `plan/docs/TYPES.md`, `plan/docs/API-ROUTES.md`, `plan/docs/FRONTEND.md`, `plan/features/BOOKING-FLOW.md`, `plan/features/BOOKINGS-MANAGEMENT.md`, `plan/features/SETTINGS.md`, `plan/features/EMAIL-PDF-STORAGE.md`
 >
-> **Status:** 🚧 BR-04 in progress. BR-01 / BR-02 / BR-03 shipped (commits
-> `5ba61a1`, `c55b2eb`, `5a40d9d` on `feature/breakfast-redesign`).
+> **Status:** ✅ BR-01..BR-08 ALL shipped 2026-10-14 on `feature/breakfast-redesign`, merged to `dev` @ `bed751f`. `VERSION` bumped MAJOR to **`2.0.0`** — the legacy flat-rate fields are **deleted, not deprecated** (see `§Data Model`). Per-ticket detail in `plan/project/ROADMAP.md §Phase 14`; decisions #231 (config) + #238 (close-out) in `plan/docs/DECISIONS-FEATURES.md`.
 >
-> **Spec author:** `feature/breakfast-redesign` — design conversation with the client closed 2026-10-12 (10 numbered decisions, see `§Decisions Locked`). Awaiting team review + ticket number assignment (proposed `BR-01..BR-08` below).
+> **Spec author:** `feature/breakfast-redesign` — design conversation with the client closed 2026-10-12 (10 numbered decisions, see `§Decisions Locked`).
 
 ---
 
@@ -39,7 +38,7 @@ Resolved in the 2026-10-12 design conversation. No further clarification needed 
 9. **Deleted menu items on existing bookings:** yes, **snapshot is immutable** — `breakfastSelections[key].mealId` and `.mealName` and `.price` are frozen at the time of order. When a meal is later deactivated, all existing bookings still show it; views append a "(no longer offered)" tag next to the meal name.
 10. **Kitchen list scope for v1:** ship a printable admin-page view first (option **c** in the design discussion). Build a dedicated real-time kitchen display (option **a**) in a follow-up if the hotel needs it after running on the printable view for a week.
 
-**Refund behaviour:** removing a paid meal **before the cut-off** opens a refund liability (staff records the actual refund). Removing an unpaid meal simply reduces the amount due. **No automatic email is sent** for breakfast changes (per client decision 2026-10-12, 5:36 PM). The kitchen needs a finalized list at the cut-off time, with late changes shown in a separate column.
+**Refund behaviour:** removing a paid meal **before the cut-off** opens a refund liability (staff records the actual refund). Removing an unpaid meal simply reduces the amount due. **No email is sent when the guest saves changes** (per client decision 2026-10-12, 5:36 PM) — the guest sees the change reflected on the page + on the next lookup. The one shipped exception is the **Late served** email (BR-08), which fires on a *staff* serve action, not on a guest save — see `§Email / PDF / Receipt`. The kitchen needs a finalized list at the cut-off time, with late changes shown in a separate column.
 
 **Cutoff rule:** `cutoffForDate(date) = (date − 1 calendar day) at configured cutoffTime, in hotel timezone`. The cut-off is enforced **server-side** using the hotel's configured local timezone (not the device timezone, not UTC). The default is 8:00 PM. The cut-off applies to add, change, AND remove.
 
@@ -316,7 +315,7 @@ The existing tab (`admin-app/src/pages/SettingsPage.tsx:2658+`) is extended. No 
 
 **Save batch:** a single update call sends `{ add: [...], change: [...], remove: [...] }`. The server validates each entry against the cut-off + served state, then writes `breakfastSelections` + `breakfastTotal` + audit entries + (if any) refund liability entries in a single Firestore transaction.
 
-**Email:** no email is sent on save (per client decision). The guest sees the change reflected on the page + on the next lookup.
+**Email:** no email is sent on save (per client decision). The guest sees the change reflected on the page + on the next lookup. Staff-driven *serve* actions are the one exception — see `§Email / PDF / Receipt`.
 
 **Cutoff-countdown copy** (per the design discussion):
 - `> 24h` away: "Order by Oct 13, 8:00 PM"
@@ -391,7 +390,7 @@ All routes are **Turnstile-gated** where they mutate state (per `plan/docs/SECUR
 
 The 8 W4.4 audit-extension email templates (per `plan/features/EMAIL-AUDIT-EXTENSIONS.md`) and the existing `buildReservationEmailView` (`shared/utils/emailView.ts`) are extended to render the new breakfast model. The shape of the existing `breakfastSelections: Record<key, string>` view becomes a `breakfastSelections: Record<key, { mealName, price, ... }>` view. Email templates that previously rendered the meal name from the string value now render `mealName` from the entry object.
 
-**No new email templates.** The `staff-new-booking` + `staff-new-payment` + `guest-booking-confirmed` + `guest-booking-lookup` templates all render the same `breakfast` block; the block is the only thing that changes shape.
+**One new email template (BR-08) — "Late served — please rate your meal."** Beyond the reshaped block, this is the single net-new template; the `lateServedEmail` handler lives in `guest-app/server/handlers/email.ts`. It fires from the `POST /api/bookings/breakfast/mark-served` handler when a serve action crosses that date's cut-off. The discriminator is the **existing** `breakfastAudit` entry's `occurredAfterCutoff: true` flag — no new `BreakfastAuditAction` enum value was added. A send failure is logged and never fails the serve action. The other templates (`staff-new-booking` + `staff-new-payment` + `guest-booking-confirmed` + `guest-booking-lookup`) only render the reshaped `breakfast` block.
 
 **PDF receipt:** the print-to-PDF receipt at `BookingDrawerWorkspace.tsx` (the "Print receipt" action) gains the same breakfast block, rendered from the new shape.
 
@@ -432,6 +431,8 @@ The 8 W4.4 audit-extension email templates (per `plan/features/EMAIL-AUDIT-EXTEN
 ---
 
 ## Implementation order (proposed tickets)
+
+✅ **BR-01..BR-08 all shipped 2026-10-14** — commits + per-ticket outcome in `plan/project/ROADMAP.md §Phase 14`. The breakdown below is the original proposal, retained as the ticket-to-file map.
 
 - **BR-01** — Data model + shared types
   - `BreakfastConfig` (replace `breakfastConfig`), `BreakfastMeal`, `BreakfastSelectionEntry`, `BreakfastServedEntry`, `BreakfastAuditEntry`
@@ -566,7 +567,7 @@ The client should confirm at deploy time that no production bookings predate thi
 
 ## Open decisions pending client
 
-(All non-blocking for the spec; the implementation team will need answers before the corresponding ticket ships.)
+✅ **All 10 resolved** — the shipped behaviour is the "Default if no answer" column below. Kept for traceability of what was assumed at spec time; the defaults are now the contract.
 
 | # | Decision | Default if no answer |
 |---|---|---|

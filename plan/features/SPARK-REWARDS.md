@@ -143,7 +143,7 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 - [x] Manual points adjustment — add or deduct points with required reason note
 - [x] Disable/enable member account (without deleting)
 - [x] Search by name or email
-- [x] Filter by tier (Deferred to Phase 2 when tiers are defined)
+- [x] Filter by tier (shipped in Phase 2 — tiers are defined)
 - [x] Export members list via the full data backup (XLSX) on the Reports page (admin-only — the "Members" worksheet inside the full-backup `.xlsx` carries member number, full name, email, phone, auth provider, rewards points, tier, active, member since; per `audit-admin-sev4-2026-07-07.test.ts` §AA-32, no standalone CSV button is shipped — the XLSX Members worksheet is the canonical export)
 
 ### Data & Logic Checklist
@@ -154,20 +154,22 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 
 ---
 
-## Phase 2 — Loyalty Rules (TBD — not building yet)
+## Phase 2 — Loyalty Rules (SHIPPED 2026-10-12 → 2026-10-13)
 
-These are documented here for awareness. Define before starting Phase 2:
+Tiers + redemption are live. PRs #1–#9 shipped on `feature/spark-rewards-tier-system` + `feature/spark-rewards-self-redeem`, merged to dev @ `408dfba` + `6f242c1`. Per-PR detail is in the `### Phase 2 PR #N detail` sections below.
 
-- [x] Points expiry policy (Deferred to Phase 2)
-- [x] Points redemption flow + conversion rate (e.g. 100 pts = ₱100 off) (Deferred to Phase 2)
-- [x] Tier system (names, thresholds, tier-based perks) (Deferred to Phase 2)
-- [x] Additional perks (free breakfast, room upgrades, etc.) (Deferred to Phase 2)
+The four scope questions settled at spec time (recorded here for traceability):
+
+- [x] Points expiry policy (shipped in Phase 2)
+- [x] Points redemption flow + conversion rate (e.g. 100 pts = ₱100 off) (shipped in Phase 2)
+- [x] Tier system (names, thresholds, tier-based perks) (shipped in Phase 2)
+- [x] Additional perks (free breakfast, room upgrades, etc.) (shipped in Phase 2)
 
 > Points earning and member discount are already configurable from Settings in Phase 1 — Phase 2 extends with tiers and redemption only.
 
-### Phase 2 schema & types (2026-10-12, partial — schema only)
+### Phase 2 schema & types (2026-10-12 — shipped)
 
-> The data model is in place; the UI + behavior wiring rolls out across multiple follow-up PRs. Nothing changes at runtime in this PR — backward-compat: all new fields default to "off / no-op" when absent.
+> The data model landed first, then the UI + behavior wiring across PRs #3–#9. Backward-compat is preserved: all new fields default to "off / no-op" when absent.
 
 - [x] **`settings/rewardsConfig`** — Zod-validated payload extended with the five new scalars + `levels[]`. Canonical schema: `shared/schemas/rewardsConfig.ts` (`RewardsConfigSchema`). Canonical TypeScript type: `RewardsConfig` in `shared/types/index.ts`. Seed defaults match the Settings → Rewards tab screenshot: 3 tiers (Member / Silver / Gold) with `discountPct` 5/7/10, `pointsMultiplier` 1/1.25/1.5, and the matching perks blurbs. All four new scalars seeded to `0` so a fresh deploy matches pre-Phase-2 behavior exactly.
 - [x] **`members/{memberId}`** — added `completedStays: number` (counter, default `0`) and `currentLevel: LevelDef | null` (cache, default `null`). Both optional — legacy member docs are valid as-is.
