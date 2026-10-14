@@ -696,6 +696,179 @@ describe("IMT-02 — no new Vercel function / no Firestore rules change", () => 
   });
 });
 
+// Per IMT-03 (2026-10-14): the "I need more time" UI. The endpoint
+// exists as of IMT-02; this block pins that the guest can actually
+// reach it, that the CTA respects the cap instead of letting them tap
+// a 409, and that the announcement channel is not the ticking
+// countdown.
+describe("IMT-03 — `extendHold()` in useInFlowHold", () => {
+  it("the hook exposes extendHold + the in-flight / error / canExtend state", () => {
+    expect(hookSrc).toMatch(/extendHold: \(\) => Promise<ExtendHoldResult>/);
+    expect(hookSrc).toMatch(/isExtending/);
+    expect(hookSrc).toMatch(/extendError/);
+    expect(hookSrc).toMatch(/canExtend/);
+  });
+
+  it("posts ONLY holdId + reservationId to /api/holds/extend", () => {
+    // The endpoint's schema is `.strict()` — anything else is a 400.
+    // Most importantly no duration: the window is server-derived.
+    expect(hookSrc).toMatch(/"\/api\/holds\/extend"/);
+    const body = hookSrc.slice(
+      hookSrc.indexOf('"/api/holds/extend"'),
+      hookSrc.indexOf('"/api/holds/extend"') + 700
+    );
+    expect(body).toMatch(/holdId,/);
+    expect(body).toMatch(/reservationId: hold\.reservationId/);
+    expect(body).not.toMatch(/minutes/i);
+  });
+
+  it("adopts the server's authoritative hold wholesale (no client-side timer restart)", () => {
+    // The hook owns no separate countdown — it reads `hold.expiresAt`.
+    // Pushing the server's shape in is what makes the existing 1s tick
+    // and 30s resync carry over unchanged.
+    expect(hookSrc).toMatch(/setHold\(json\.data as InFlowHoldView\)/);
+    expect(hookSrc).toMatch(/setNow\(Date\.now\(\)\)/);
+  });
+
+  it("does NOT clobber the running countdown on failure", () => {
+    // A failed extend must leave `hold` alone so the guest keeps their
+    // remaining time and can still submit.
+    const fn = hookSrc.slice(
+      hookSrc.indexOf("const extendHold = useCallback"),
+      hookSrc.indexOf("}, [holdId, hold, isExtending]);")
+    );
+    expect(fn).toMatch(/setExtendError\(message\)/);
+    expect(fn).toMatch(/return \{ ok: false, error: message \}/);
+    // No setHold on any failure branch: the only setHold in the
+    // callback is inside the success path guarded by a success check.
+    const setHoldAt = fn.indexOf("setHold(");
+    const okGuardAt = fn.indexOf("if (!response.ok || !json || json.success !== true)");
+    expect(setHoldAt).toBeGreaterThan(okGuardAt);
+  });
+
+  it("guards against a double-submit burning two extensions from one tap", () => {
+    // The cap is finite (3), so a double-tap must not consume two.
+    expect(hookSrc).toMatch(/if \(isExtending\) \{/);
+  });
+
+  it("NEGATIVE: the hook never calls its OWN extendHold — revival stays explicit", () => {
+    // The server-side never-auto-revive rule (GOTCHAS) has a client
+    // half: nothing inside the hook may invoke the extension. The only
+    // legitimate call site is the banner CTA's onClick handler.
+    //
+    // Counted as a hard zero rather than pattern-matched: the
+    // declaration is `const extendHold = useCallback(...)` (no paren
+    // after the name) and the return object lists `extendHold,`, so
+    // any `extendHold(` inside the hook body IS an invocation.
+    const hookBody = hookSrc.slice(hookSrc.indexOf("export function useInFlowHold"));
+    expect((hookBody.match(/extendHold\(\)/g) ?? []).length).toBe(0);
+    // And no effect may reach for it either, whatever the shape.
+    expect(hookBody).not.toMatch(/status === "expired"/);
+  });
+
+  it("delegates the cap gate to the shared helper instead of reimplementing it", () => {
+    expect(hookSrc).toMatch(/import \{ canExtendInFlowHold \} from "@spark-inn\/shared"/);
+    expect(hookSrc).toMatch(/canExtendInFlowHold\(\{/);
+  });
+});
+
+describe("IMT-03 — HoldCountdownBanner extend CTA", () => {
+  it("renders `hold-extend-cta` on BOTH the active and the expired state", () => {
+    // Two distinct branches, so the count must be 2 — one is a
+    // regression guard against the button silently existing only on
+    // one of them.
+    const matches = bannerSrc.match(/data-testid="hold-extend-cta"/g) ?? [];
+    expect(matches.length).toBe(2);
+  });
+
+  it("disables the CTA in flight and exposes the state for tests", () => {
+    expect(bannerSrc).toMatch(/disabled=\{isExtending\}/);
+    expect(bannerSrc).toMatch(/data-state=\{isExtending \? "extending" : "idle"\}/);
+  });
+
+  it("meets the hard UI rules: 8px radius + 44px touch height", () => {
+    // CLAUDE.md: no sharp corners (8px buttons), 44px minimum touch
+    // height. `min-h-11` is the guest app's dominant convention.
+    expect(bannerSrc).toMatch(/rounded-lg/);
+    expect(bannerSrc).toMatch(/min-h-11/);
+  });
+
+  it("hides the CTA at the cap instead of letting the guest tap a 409", () => {
+    expect(bannerSrc).toMatch(/\{canExtend \? \(/);
+    expect(bannerSrc).toMatch(/canExtend/);
+  });
+
+  it("NEGATIVE: the cap number is NOT hardcoded in the banner", () => {
+    // The component must consume `canExtend` from the hook, which
+    // delegates to shared `canExtendInFlowHold`.
+    expect(bannerSrc).not.toMatch(/MAX_IN_FLOW_HOLD_EXTENSIONS/);
+    expect(bannerSrc).not.toMatch(/extensionCount >= \d/);
+  });
+
+  it("demotes 'Pick a new room' on the expired state and gives extend the primary slot", () => {
+    // A guest watching the timer hit 0:00 wants to continue, not
+    // restart — emphasis, not removal. Both CTAs stay reachable.
+    expect(bannerSrc).toMatch(/data-testid="hold-pick-new-room-cta"/);
+    const expired = bannerSrc.slice(
+      bannerSrc.indexOf('data-state="expired"'),
+      bannerSrc.indexOf("// Active state")
+    );
+    expect(expired).toMatch(/data-testid="hold-extend-cta"/);
+    expect(expired).toMatch(/data-testid="hold-pick-new-room-cta"/);
+    // The expired branch no longer promises an extension it may not
+    // honour — the copy switches on `canExtend`.
+    expect(expired).toMatch(/canExtend \?/);
+  });
+
+  it("shows honest inline copy when the server refuses (extendError)", () => {
+    expect(bannerSrc).toMatch(/data-testid="hold-extend-error"/);
+    expect(bannerSrc).toMatch(/extendError \?/);
+  });
+
+  it("the banner's CTA handler is the ONE call site of extendHold()", () => {
+    expect(bannerSrc).toMatch(/const handleExtend = useCallback/);
+    expect(bannerSrc).toMatch(/await extendHold\(\)/);
+    // Both CTA branches route through the same handler rather than
+    // inlining their own fetch.
+    expect((bannerSrc.match(/onClick=\{handleExtend\}/g) ?? []).length).toBe(2);
+  });
+
+  it("announces through a dedicated sr-only live region, NOT the ticking banner", () => {
+    expect(bannerSrc).toMatch(/className="sr-only" role="status" aria-live="polite"/);
+    expect(bannerSrc).toMatch(/data-testid="hold-announcement"/);
+  });
+
+  it("NEGATIVE: the ticking active-state CONTAINER is not an aria-live region", () => {
+    // Pre-existing defect, fixed in IMT-03: the banner carried
+    // `role="status" aria-live="polite"` around a subtree that
+    // re-renders every second, i.e. one screen-reader announcement per
+    // second. It is now a plain `region`.
+    //
+    // Scoped to the container's OPENING TAG on purpose — the branch
+    // also contains the deliberate `sr-only` announcement region,
+    // which IS a live region and must stay one.
+    const active = bannerSrc.slice(
+      bannerSrc.indexOf("// Active state"),
+      bannerSrc.length
+    );
+    const openingTag = active.slice(0, active.indexOf(">"));
+    expect(openingTag).toMatch(/role="region"/);
+    expect(openingTag).toMatch(/aria-label="Room hold status"/);
+    expect(openingTag).not.toMatch(/aria-live/);
+    expect(openingTag).not.toMatch(/role="status"/);
+    // The pill keeps its own label for on-demand reading.
+    expect(active).toMatch(/aria-label=\{`Time left:/);
+  });
+
+  it("all React hooks run before the early returns (no conditional-hook order break)", () => {
+    const lastHook = bannerSrc.lastIndexOf("useCallback(");
+    const firstReturn = bannerSrc.indexOf("if (!holdId) return null;");
+    expect(lastHook).toBeGreaterThan(-1);
+    expect(firstReturn).toBeGreaterThan(-1);
+    expect(lastHook).toBeLessThan(firstReturn);
+  });
+});
+
 describe("IFH-01 follow-up — Janitor sweep cron", () => {
   it("the sweep handler is registered in the apiRouter (no new Vercel function, just a new catch-all branch)", () => {
     expect(routerSrc).toMatch(
