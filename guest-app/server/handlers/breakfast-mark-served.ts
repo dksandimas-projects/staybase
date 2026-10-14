@@ -118,11 +118,20 @@ async function loadServedGraceMinutes(): Promise<number> {
 }
 
 // Read the BR-02 per-date cutoff triple
-// (`cutoffTime` + `cutoffTimezone`) so the serve branch can
-// detect a late serve. Falls back to the BR-01 defaults so
-// a missing / unconfigured settings doc still gates (the
-// defaults match the documented hotel posture).
-async function loadCutoffConfig(): Promise<{ cutoffTime: string; cutoffTimezone: string }> {
+// (`cutoffTime` + `cutoffTimezone`) + the BR-10
+// `cutoffsEnabled` toggle so the serve branch can
+// detect a late serve without re-reading the settings
+// doc. Falls back to the BR-01 defaults so a missing /
+// unconfigured settings doc still gates (the defaults
+// match the documented hotel posture). `cutoffsEnabled`
+// defaults to `true` (pre-BR-10 behaviour) for legacy
+// / missing values — the same defensive shape
+// `normalizeBreakfastConfig` uses on the read side.
+async function loadCutoffConfig(): Promise<{
+  cutoffTime: string;
+  cutoffTimezone: string;
+  cutoffsEnabled: boolean;
+}> {
   try {
     const snap = await adminDb
       .collection("settings")
@@ -135,14 +144,19 @@ async function loadCutoffConfig(): Promise<{ cutoffTime: string; cutoffTimezone:
       /^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff) &&
       rawZone.length > 0
     ) {
-      return { cutoffTime: rawCutoff, cutoffTimezone: rawZone };
+      return {
+        cutoffTime: rawCutoff,
+        cutoffTimezone: rawZone,
+        cutoffsEnabled: source?.cutoffsEnabled !== false
+      };
     }
   } catch {
     // Fall through to defaults.
   }
   return {
     cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
-    cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
+    cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+    cutoffsEnabled: true
   };
 }
 
@@ -220,7 +234,7 @@ export async function handleMarkServed(req: VercelRequest, res: VercelResponse) 
   // The cut-off is a single canonical value keyed off the
   // BR-02 settings doc; a missing / unconfigured doc falls
   // back to the BR-01 defaults (`20:00 Asia/Manila`).
-  const { cutoffTime, cutoffTimezone } = await loadCutoffConfig();
+  const { cutoffTime, cutoffTimezone, cutoffsEnabled } = await loadCutoffConfig();
 
   // Detect a late serve up-front so the audit doc carries
   // `occurredAfterCutoff: true` AND the post-transaction
@@ -236,11 +250,21 @@ export async function handleMarkServed(req: VercelRequest, res: VercelResponse) 
   const slotDate = slotKey.slice(0, 10);
   let isLateServe = false;
   if (action === "serve") {
+    // Per BR-10 (2026-10-14, decision #244 reserved —
+    // Phase 14): thread the cut-off enforcement toggle
+    // through. When `cutoffsEnabled === false`, the
+    // late-serve detector (which stamps the
+    // `BreakfastAuditEntry.occurredAfterCutoff` flag)
+    // never fires — every serve is "on time" by
+    // construction. The `cutoffTime` + `cutoffTimezone`
+    // settings still flow through so the helper
+    // populates `cutoffAt` for any future UI hint.
     const cutoffState = computeBreakfastCutoffState({
       serviceDate: slotDate,
       now: new Date(),
       cutoffTime,
-      timezone: cutoffTimezone
+      timezone: cutoffTimezone,
+      cutoffsEnabled
     });
     isLateServe = cutoffState.isLocked;
   }

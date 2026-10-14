@@ -399,6 +399,14 @@ export type BreakfastMealInput = z.infer<typeof BreakfastMealSchema>;
  */
 export const BreakfastConfigSchema = z.object({
   isEnabled: z.boolean(),
+  /**
+   * Per BR-10 (2026-10-14, decision #244 reserved — Phase 14):
+   * the cut-off enforcement toggle. Required (no Zod default —
+   * the legacy-fallback is handled by `normalizeBreakfastConfig`
+   * at read time, not at schema-parse time, because the writer
+   * must always be explicit about whether cut-offs apply).
+   */
+  cutoffsEnabled: z.boolean(),
   cutoffTime: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),

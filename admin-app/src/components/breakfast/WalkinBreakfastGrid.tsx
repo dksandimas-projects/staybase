@@ -151,12 +151,21 @@ export function WalkinBreakfastGrid({
 
   const perDayLocked = useMemo(() => {
     const out: Record<string, boolean> = {};
+    // Per BR-10 (2026-10-14, decision #244 reserved —
+    // Phase 14): thread the cut-off enforcement toggle
+    // through. The walk-in / calendar-create grids share
+    // the same rule as the public flow — when the admin
+    // has cut-offs off on the config, every date is
+    // open and the dropdowns stay enabled for the desk.
+    const cutoffsEnabled =
+      ((config as { cutoffsEnabled?: boolean })?.cutoffsEnabled) !== false;
     for (const d of dates) {
       const c = computeBreakfastCutoffState({
         serviceDate: d,
         now: new Date(),
         cutoffTime,
-        timezone: tz
+        timezone: tz,
+        cutoffsEnabled
       });
       out[d] = Boolean(c.isLocked);
     }

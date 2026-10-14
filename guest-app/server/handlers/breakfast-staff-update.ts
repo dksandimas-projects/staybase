@@ -288,6 +288,15 @@ export async function handleStaffUpdateBreakfast(
       breakfastConfigAny.timezone ||
       "Asia/Manila"
   );
+  // Per BR-10 (2026-10-14, decision #244 reserved —
+  // Phase 14): thread the cut-off enforcement toggle
+  // through the per-op `assertNotLocked` calls. When
+  // `false`, the staff override flow becomes a no-op
+  // (no date ever locks, nothing to bypass) but the
+  // audit + write paths stay symmetric with the guest
+  // manage flow.
+  const cutoffsEnabled =
+    (publicConfig as { cutoffsEnabled?: boolean }).cutoffsEnabled !== false;
 
   const mealById = new Map<string, BreakfastMeal>();
   for (const meal of (breakfastConfigAny.meals || [])) {
@@ -383,7 +392,8 @@ export async function handleStaffUpdateBreakfast(
             slotKey: op.slotKey,
             serverNow,
             cutoffTime,
-            timezone: tz
+            timezone: tz,
+            cutoffsEnabled
           });
         } catch (err: any) {
           if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {
@@ -470,7 +480,8 @@ export async function handleStaffUpdateBreakfast(
             slotKey: op.slotKey,
             serverNow,
             cutoffTime,
-            timezone: tz
+            timezone: tz,
+            cutoffsEnabled
           });
         } catch (err: any) {
           if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {

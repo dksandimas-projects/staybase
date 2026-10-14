@@ -11,6 +11,17 @@ import type { BreakfastConfig, BreakfastMeal } from "../types";
 
 export interface PublicBreakfastConfig {
   isEnabled: boolean;
+  /**
+   * Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+   * the cut-off enforcement toggle mirrored to the public
+   * payload. The guest-side + server-side callers read this
+   * flag and forward it to `computeBreakfastCutoffState`,
+   * which short-circuits when it is `false`. Public visibility
+   * is intentional — the Add-ons step and Manage Breakfast
+   * page both render the "Cut-offs disabled — order any time"
+   * hint when this is off.
+   */
+  cutoffsEnabled: boolean;
   cutoffTime: string;
   cutoffTimezone: string;
   defaultMealInstructions: string;
@@ -85,6 +96,12 @@ export function normalizeBreakfastConfig(source: unknown): PublicBreakfastConfig
   void ADMIN_ONLY_FIELDS;
   return {
     isEnabled: safeBool(raw.isEnabled, false),
+    // Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+    // legacy / pre-BR-10 settings docs may not have a
+    // `cutoffsEnabled` field. Default to `true` (the
+    // pre-BR-10 behaviour — cut-offs always enforced).
+    // New writers always pass this explicitly.
+    cutoffsEnabled: safeBool(raw.cutoffsEnabled, true),
     cutoffTime: safeString(raw.cutoffTime, "20:00"),
     cutoffTimezone: safeString(raw.cutoffTimezone, "Asia/Manila"),
     defaultMealInstructions: safeString(raw.defaultMealInstructions, ""),

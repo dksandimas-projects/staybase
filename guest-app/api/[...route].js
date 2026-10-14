@@ -221818,6 +221818,14 @@ var init_booking = __esm({
     });
     BreakfastConfigSchema = external_exports.object({
       isEnabled: external_exports.boolean(),
+      /**
+       * Per BR-10 (2026-10-14, decision #244 reserved — Phase 14):
+       * the cut-off enforcement toggle. Required (no Zod default —
+       * the legacy-fallback is handled by `normalizeBreakfastConfig`
+       * at read time, not at schema-parse time, because the writer
+       * must always be explicit about whether cut-offs apply).
+       */
+      cutoffsEnabled: external_exports.boolean(),
       cutoffTime: external_exports.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),
       cutoffTimezone: external_exports.string().min(1),
       frontDeskOverrideEnabled: external_exports.boolean(),
@@ -224347,6 +224355,20 @@ function computeBreakfastCutoffState(input) {
   const cutoffMs = cutoffAt.getTime();
   const isLocked = nowMs >= cutoffMs;
   const minutesUntilCutoff = Math.floor((cutoffMs - nowMs) / 6e4);
+  if (input.cutoffsEnabled === false) {
+    return {
+      isLocked: false,
+      // The countdown is meaningless when cut-offs are off,
+      // but expose a large sentinel so any client renderer
+      // accidentally feeding `minutesUntilCutoff` into a
+      // "minutes remaining" line shows "always open" instead
+      // of a negative countdown.
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
+      cutoffAt: cutoffAt.toISOString(),
+      serviceDate: input.serviceDate,
+      reasonOrCutoff: "cutoffs-disabled"
+    };
+  }
   return {
     isLocked,
     minutesUntilCutoff,
@@ -224386,6 +224408,12 @@ function normalizeBreakfastConfig(source) {
   void ADMIN_ONLY_FIELDS;
   return {
     isEnabled: safeBool(raw.isEnabled, false),
+    // Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+    // legacy / pre-BR-10 settings docs may not have a
+    // `cutoffsEnabled` field. Default to `true` (the
+    // pre-BR-10 behaviour — cut-offs always enforced).
+    // New writers always pass this explicitly.
+    cutoffsEnabled: safeBool(raw.cutoffsEnabled, true),
     cutoffTime: safeString(raw.cutoffTime, "20:00"),
     cutoffTimezone: safeString(raw.cutoffTimezone, "Asia/Manila"),
     defaultMealInstructions: safeString(raw.defaultMealInstructions, ""),
@@ -229644,7 +229672,8 @@ function validateBreakfastSelections(input) {
       serviceDate,
       now,
       cutoffTime: breakfastConfig.cutoffTime,
-      timezone: breakfastConfig.cutoffTimezone
+      timezone: breakfastConfig.cutoffTimezone,
+      cutoffsEnabled: breakfastConfig.cutoffsEnabled
     });
     if (cutoffState.isLocked) {
       throw new BreakfastSelectionValidationError(
@@ -229723,7 +229752,7 @@ function assertMealExists(mealById, mealId) {
   }
 }
 function assertNotLocked(input) {
-  const { slotKey, serverNow, cutoffTime, timezone } = input;
+  const { slotKey, serverNow, cutoffTime, timezone, cutoffsEnabled } = input;
   const serviceDate = slotKey.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
     throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${slotKey}`);
@@ -229732,7 +229761,8 @@ function assertNotLocked(input) {
     serviceDate,
     now: serverNow,
     cutoffTime,
-    timezone
+    timezone,
+    cutoffsEnabled
   });
   if (cutoff.isLocked) {
     throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${serviceDate}`);
@@ -241151,12 +241181,14 @@ async function handleGetBreakfastManage(req, res) {
   const cutoffTz = String(
     breakfastConfig?.cutoffTimezone || tz
   );
+  const cutoffsEnabled = breakfastConfig.cutoffsEnabled !== false;
   const cutoffStates = dates.map((serviceDate) => {
     return computeBreakfastCutoffState({
       serviceDate,
       now,
       cutoffTime,
-      timezone: cutoffTz
+      timezone: cutoffTz,
+      cutoffsEnabled
     });
   });
   const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
@@ -241263,6 +241295,7 @@ async function handleUpdateBreakfast(req, res) {
       const cutoffTime = String(
         breakfastConfig.cutoffTime || "20:00"
       );
+      const cutoffsEnabled = breakfastConfig.cutoffsEnabled !== false;
       const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
       const existingServed = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
       const nextSelections = { ...existingSelections };
@@ -241275,7 +241308,8 @@ async function handleUpdateBreakfast(req, res) {
           slotKey: op.slotKey,
           serverNow,
           cutoffTime,
-          timezone: tz
+          timezone: tz,
+          cutoffsEnabled
         });
         assertSlotNotServed(existingServed, op.slotKey);
         assertSlotForAdd(nextSelections, op.slotKey);
@@ -241336,7 +241370,8 @@ async function handleUpdateBreakfast(req, res) {
           slotKey: op.slotKey,
           serverNow,
           cutoffTime,
-          timezone: tz
+          timezone: tz,
+          cutoffsEnabled
         });
         assertSlotNotServed(existingServed, op.slotKey);
         assertSlotForChange(nextSelections, op.slotKey);
@@ -241375,7 +241410,8 @@ async function handleUpdateBreakfast(req, res) {
           slotKey: op.slotKey,
           serverNow,
           cutoffTime,
-          timezone: tz
+          timezone: tz,
+          cutoffsEnabled
         });
         assertSlotNotServed(existingServed, op.slotKey);
         assertSlotForChange(nextSelections, op.slotKey);
@@ -241655,6 +241691,7 @@ async function handleStaffUpdateBreakfast(req, res) {
   const tz = String(
     breakfastConfigAny.cutoffTimezone || breakfastConfigAny.timezone || "Asia/Manila"
   );
+  const cutoffsEnabled = publicConfig.cutoffsEnabled !== false;
   const mealById = /* @__PURE__ */ new Map();
   for (const meal of breakfastConfigAny.meals || []) {
     if (meal && meal.id) mealById.set(meal.id, meal);
@@ -241715,7 +241752,8 @@ async function handleStaffUpdateBreakfast(req, res) {
             slotKey: op.slotKey,
             serverNow,
             cutoffTime,
-            timezone: tz
+            timezone: tz,
+            cutoffsEnabled
           });
         } catch (err) {
           if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {
@@ -241792,7 +241830,8 @@ async function handleStaffUpdateBreakfast(req, res) {
             slotKey: op.slotKey,
             serverNow,
             cutoffTime,
-            timezone: tz
+            timezone: tz,
+            cutoffsEnabled
           });
         } catch (err) {
           if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {
@@ -241952,13 +241991,18 @@ async function loadCutoffConfig() {
     const rawCutoff = String(source && source.cutoffTime || "").trim();
     const rawZone = String(source && source.cutoffTimezone || "").trim();
     if (/^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff) && rawZone.length > 0) {
-      return { cutoffTime: rawCutoff, cutoffTimezone: rawZone };
+      return {
+        cutoffTime: rawCutoff,
+        cutoffTimezone: rawZone,
+        cutoffsEnabled: source?.cutoffsEnabled !== false
+      };
     }
   } catch {
   }
   return {
     cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
-    cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
+    cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+    cutoffsEnabled: true
   };
 }
 async function readBookingSlotEntry(bookingId, slotKey) {
@@ -242001,7 +242045,7 @@ async function handleMarkServed(req, res) {
   const { bookingId, slotKey, action, reason } = parsed2.data;
   const trimmedReason = String(reason || "").trim() || null;
   const graceMinutes = await loadServedGraceMinutes();
-  const { cutoffTime, cutoffTimezone } = await loadCutoffConfig();
+  const { cutoffTime, cutoffTimezone, cutoffsEnabled } = await loadCutoffConfig();
   const slotDate = slotKey.slice(0, 10);
   let isLateServe = false;
   if (action === "serve") {
@@ -242009,7 +242053,8 @@ async function handleMarkServed(req, res) {
       serviceDate: slotDate,
       now: /* @__PURE__ */ new Date(),
       cutoffTime,
-      timezone: cutoffTimezone
+      timezone: cutoffTimezone,
+      cutoffsEnabled
     });
     isLateServe = cutoffState.isLocked;
   }
@@ -242452,7 +242497,8 @@ function toIsoString(value) {
 }
 async function computeKitchenList(date) {
   const datePrefix = date;
-  const cutoffState = computeBreakfastCutoffStateSafe(date);
+  const cutoffsEnabled = await loadKitchenListCutoffsEnabled();
+  const cutoffState = computeBreakfastCutoffStateSafe(date, cutoffsEnabled);
   const cutoffAtIso = cutoffState.cutoffAt.toISOString();
   const cutoffPassed = cutoffState.isLocked;
   const bookings = [];
@@ -242566,7 +242612,7 @@ async function computeKitchenList(date) {
     summary
   };
 }
-function computeBreakfastCutoffStateSafe(date) {
+function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true) {
   try {
     const state = computeBreakfastCutoffState({
       serviceDate: date,
@@ -242576,9 +242622,15 @@ function computeBreakfastCutoffStateSafe(date) {
       // Firestore on every kitchen list hit is a
       // worthwhile follow-up but not required for
       // BR-07 (the defaults match the BR-02
-      // settings surface 99% of the time).
+      // settings surface 99% of the time). Per
+      // BR-10 the `cutoffsEnabled` toggle IS
+      // re-read on every uncached request via
+      // `loadKitchenListCutoffsEnabled` so the
+      // late-change split honors the admin-side
+      // flip immediately.
       cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
-      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
+      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled
     });
     return {
       cutoffAt: state.cutoffAt instanceof Date ? state.cutoffAt : new Date(state.cutoffAt),
@@ -242589,6 +242641,23 @@ function computeBreakfastCutoffStateSafe(date) {
       cutoffAt: /* @__PURE__ */ new Date(),
       isLocked: false
     };
+  }
+}
+var cutoffsEnabledCache = null;
+var KITCHEN_LIST_CUTOFFS_CACHE_MS = 3e4;
+async function loadKitchenListCutoffsEnabled() {
+  const now = Date.now();
+  if (cutoffsEnabledCache && now - cutoffsEnabledCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS) {
+    return cutoffsEnabledCache.value;
+  }
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    const value = source?.cutoffsEnabled !== false;
+    cutoffsEnabledCache = { value, at: now };
+    return value;
+  } catch {
+    return true;
   }
 }
 async function handleGetKitchenList(req, res) {

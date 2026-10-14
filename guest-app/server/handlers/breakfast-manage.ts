@@ -366,12 +366,23 @@ export async function handleGetBreakfastManage(req: VercelRequest, res: VercelRe
   const cutoffTz = String(
     (breakfastConfig as any)?.cutoffTimezone || tz
   );
+  // Per BR-10 (2026-10-14, decision #244 reserved —
+  // Phase 14): thread the cut-off enforcement toggle
+  // through. `breakfastConfig.cutoffsEnabled` is
+  // normalised to `true` for legacy / missing values
+  // by `normalizeBreakfastConfig`, so this read is
+  // always defined. When `false`, every date is
+  // returned with `isLocked: false` regardless of
+  // `now` vs. `cutoffAt`.
+  const cutoffsEnabled =
+    (breakfastConfig as { cutoffsEnabled?: boolean }).cutoffsEnabled !== false;
   const cutoffStates: CutoffState[] = dates.map((serviceDate) => {
     return computeBreakfastCutoffState({
       serviceDate,
       now,
       cutoffTime,
-      timezone: cutoffTz
+      timezone: cutoffTz,
+      cutoffsEnabled
     });
   });
 
@@ -573,6 +584,14 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
       const cutoffTime = String(
         (breakfastConfig as any).cutoffTime || "20:00"
       );
+      // Per BR-10 (2026-10-14, decision #244 reserved —
+      // Phase 14): when the admin has cut-offs off,
+      // every per-op `assertNotLocked` short-circuits to
+      // `isLocked: false` and the guest can edit up until
+      // service time without staff intervention. The flag
+      // is normalised to `true` for legacy docs.
+      const cutoffsEnabled =
+        (breakfastConfig as { cutoffsEnabled?: boolean }).cutoffsEnabled !== false;
 
       const existingSelections: Record<string, BreakfastSelectionEntry> =
         (booking.breakfastSelections && typeof booking.breakfastSelections === "object")
@@ -600,7 +619,8 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
           slotKey: op.slotKey,
           serverNow,
           cutoffTime,
-          timezone: tz
+          timezone: tz,
+          cutoffsEnabled
         });
         // A slot that's already been served is locked
         // for any further add / change (the guest can't
@@ -679,7 +699,8 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
           slotKey: op.slotKey,
           serverNow,
           cutoffTime,
-          timezone: tz
+          timezone: tz,
+          cutoffsEnabled
         });
         assertSlotNotServed(existingServed, op.slotKey);
         assertSlotForChange(nextSelections, op.slotKey);
@@ -725,7 +746,8 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
           slotKey: op.slotKey,
           serverNow,
           cutoffTime,
-          timezone: tz
+          timezone: tz,
+          cutoffsEnabled
         });
         assertSlotNotServed(existingServed, op.slotKey);
         assertSlotForChange(nextSelections, op.slotKey);

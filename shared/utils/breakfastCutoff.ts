@@ -10,6 +10,17 @@
 // the per-date countdown display, but the server is the
 // authoritative gate.
 //
+// Per BR-10 (Phase 14 — Cut-off toggle + Skip add-ons,
+// decision #244 reserved, 2026-10-14): the
+// `cutoffsEnabled` flag on the input bypasses the lock
+// when off. The math above is still run (so `cutoffAt`
+// is populated for the UI to render the disabled hint),
+// but `isLocked` is forced `false` and the response
+// carries `reasonOrCutoff: "cutoffs-disabled"`. Every
+// caller threads this flag from `breakfastConfig.cutoffsEnabled`
+// (normalised to `true` for legacy docs by
+// `normalizeBreakfastConfig`), so the bypass is global.
+//
 // The timezone math runs through the existing
 // `getManilaDateInfo` helper shape (`toLocaleString` +
 // `new Date(...)` round-trip) — see
@@ -25,9 +36,22 @@
  * consumers gate every add / change / remove against
  * `isLocked`; client consumers render the countdown via
  * `minutesUntilCutoff`.
+ *
+ * Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+ * the `reasonOrCutoff` field carries an enum-stable label so
+ * the client can render a per-state hint without re-running
+ * the lock math itself. Values:
+ *   - omitted (or absent on the wire) — the normal cutoff
+ *     arm; the date is either locked or unlocked per the
+ *     time-of-day rule.
+ *   - `"cutoffs-disabled"` — the admin has flipped
+ *     `cutoffsEnabled` off on `BreakfastConfig`. The cutoff
+ *     math was still run (so `cutoffAt` is populated for the
+ *     UI to render the would-be moment), but `isLocked` is
+ *     forced `false` regardless.
  */
 export interface CutoffState {
-  /** True when `now >= cutoffAt` (server-side authoritative gate). */
+  /** True when `now >= cutoffAt` AND cutoffs are enabled (server-side authoritative gate). */
   isLocked: boolean;
   /** Minutes until the cutoff. Negative when locked. */
   minutesUntilCutoff: number;
@@ -35,6 +59,14 @@ export interface CutoffState {
   cutoffAt: string;
   /** The service date the cutoff applies to (`YYYY-MM-DD`). */
   serviceDate: string;
+  /**
+   * Optional enum-stable reason label. Absent on the normal
+   * cutoff arm; `"cutoffs-disabled"` when the admin toggle
+   * bypassed the lock (per BR-10). String shape is stable so
+   * a future feature can add new reasons without an interface
+   * break.
+   */
+  reasonOrCutoff?: "cutoffs-disabled";
 }
 
 export interface ComputeCutoffStateInput {
@@ -46,6 +78,16 @@ export interface ComputeCutoffStateInput {
   cutoffTime: string;
   /** IANA timezone string (e.g. `"Asia/Manila"`). */
   timezone: string;
+  /**
+   * Optional per BR-10 (decision #244 reserved, 2026-10-14 —
+   * Phase 14). When `false`, the function short-circuits to
+   * `isLocked: false` regardless of `now` vs. `cutoffAt`.
+   * `cutoffAt` is still populated (the rule is still computed)
+   * so the UI can render the disabled hint. Default `true` for
+   * back-compat — pre-BR-10 callers that omit the flag keep
+   * the locked behaviour they had before.
+   */
+  cutoffsEnabled?: boolean;
 }
 
 /**
@@ -245,6 +287,30 @@ export function computeBreakfastCutoffState(input: ComputeCutoffStateInput): Cut
   const cutoffMs = cutoffAt.getTime();
   const isLocked = nowMs >= cutoffMs;
   const minutesUntilCutoff = Math.floor((cutoffMs - nowMs) / 60_000);
+
+  // Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+  // the admin-side "Cut-offs enabled" toggle short-circuits
+  // the lock when off. We always compute the rule above so
+  // `cutoffAt` is populated for the UI to render the
+  // "would-be cutoff" hint, but we override `isLocked` to
+  // `false` and stamp `reasonOrCutoff: "cutoffs-disabled"`.
+  // The flag defaults to `true` so pre-BR-10 callers
+  // (omitting the field) preserve the locked behaviour
+  // they had before this change.
+  if (input.cutoffsEnabled === false) {
+    return {
+      isLocked: false,
+      // The countdown is meaningless when cut-offs are off,
+      // but expose a large sentinel so any client renderer
+      // accidentally feeding `minutesUntilCutoff` into a
+      // "minutes remaining" line shows "always open" instead
+      // of a negative countdown.
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
+      cutoffAt: cutoffAt.toISOString(),
+      serviceDate: input.serviceDate,
+      reasonOrCutoff: "cutoffs-disabled"
+    };
+  }
 
   return {
     isLocked,

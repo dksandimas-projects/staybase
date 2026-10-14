@@ -396,12 +396,22 @@ export function BookingPage() {
   // section renders nothing before the config loads.
   const [breakfastConfig, setBreakfastConfig] = useState<{
     isEnabled: boolean;
+    // Per BR-10 (decision #244 reserved, 2026-10-14 —
+    // Phase 14): the cut-off enforcement toggle is
+    // optional on the local state (the Firestore
+    // snapshot may pre-date BR-10), so a missing /
+    // `undefined` field defaults to `true` on every
+    // read site (`!== false` pattern). The setting is
+    // also forwarded to `computeBreakfastCutoffState`
+    // inside `renderBreakfastSection`.
+    cutoffsEnabled?: boolean;
     cutoffTime?: string;
     cutoffTimezone?: string;
     defaultMealInstructions?: string;
     meals?: Array<{ id: string; name: string; description?: string; price: number; displayOrder?: number; isActive?: boolean }>;
   }>({
     isEnabled: false,
+    cutoffsEnabled: true,
     cutoffTime: "20:00",
     cutoffTimezone: "Asia/Manila",
     defaultMealInstructions: "",
@@ -2229,7 +2239,14 @@ export function BookingPage() {
                 serviceDate: date,
                 now: new Date(),
                 cutoffTime: breakfastConfig.cutoffTime || "20:00",
-                timezone: breakfastConfig.cutoffTimezone || "Asia/Manila"
+                timezone: breakfastConfig.cutoffTimezone || "Asia/Manila",
+                // Per BR-10 (2026-10-14, decision #244 reserved —
+                // Phase 14): thread the cut-off enforcement toggle
+                // through to the helper. When the admin has the
+                // toggle off, every date is rendered as open —
+                // the meal picker is enabled and the countdown
+                // banner collapses.
+                cutoffsEnabled: breakfastConfig.cutoffsEnabled !== false
               });
               return (
                 <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
@@ -2474,14 +2491,67 @@ export function BookingPage() {
                 Continue to guest details when you&apos;re ready — breakfast is optional.
               </p>
             </div>
-            {/* Per BR-09: the Add-ons step always allows
-                proceeding to Guest Details (the user can
-                skip breakfast entirely). The button
-                copy says "Continue to guest details" so
-                the destination step is unambiguous. */}
-            <PrimaryButton to={`/book?${guestDetailsParams.toString()}`} className="sm:min-w-56">
-              Continue to guest details <ArrowRight size={16} />
-            </PrimaryButton>
+            {/* Per BR-10 (decision #244 reserved, 2026-10-14
+                — Phase 14): the Add-ons step now renders TWO
+                parallel CTAs that both advance to the same
+                `guest-details` step. They differ only in
+                visual style + label:
+                  - **Primary**  "Continue to guest details"
+                    — for the user who is ready to finish.
+                  - **Ghost**    "No add-ons, continue"
+                    — for the user who skipped the breakfast
+                    grid entirely and wants an explicit
+                    "skip" affordance.
+                Both buttons advance to the identical
+                `/book?step=guest-details` URL (the same
+                pre-BR-10 destination), so the URL-side guard
+                + the per-step payload validation are
+                exercised by both paths. No new step-key is
+                minted.
+                Layout: stacked vertically on mobile (primary
+                above ghost so primary reads first) and
+                side-by-side on `sm:` breakpoints. The choice
+                of `sm:flex-row` + the gap comment is the same
+                pattern the FilterChip row uses in the Rooms
+                page — verified against FRONTEND.md
+                §Button Variants (ghost is `bg-transparent
+                text-gray-500 border border-gray-300
+                hover:bg-gray-50`). Per-date breakfast lock
+                (when cut-offs are enforced) still applies
+                to BOTH buttons — the meal picker is the only
+                path forward and the grid renders locked or
+                edit per `computeBreakfastCutoffState`. */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {/* Primary CTA — mirrors the pre-BR-10 single button. */}
+              <PrimaryButton
+                to={`/book?${guestDetailsParams.toString()}`}
+                className="sm:min-w-56"
+                data-testid="booking-addons-continue-primary"
+              >
+                Continue to guest details <ArrowRight size={16} />
+              </PrimaryButton>
+              {/* Ghost CTA — the BR-10 "skip" affordance. Same
+                  URL as the primary (so the same URL-side guard +
+                  step payload validation runs), different label.
+                  Uses `react-router-dom`'s `Link` to keep the
+                  navigation client-side (a raw `<a href>` would
+                  full-reload and discard `breakfastSelections` +
+                  `breakfastTotal` + the IMT timer state). The
+                  muted gray-ghost styling (`bg-transparent
+                  text-gray-500 border border-gray-300`) matches
+                  FRONTEND.md §Button Variants — the existing
+                  `GhostButton` component uses `border-primary
+                  text-primary` which would visually compete with
+                  the primary "Continue" CTA, so we inline the
+                  muted recipe instead. */}
+              <Link
+                to={`/book?${guestDetailsParams.toString()}`}
+                data-testid="booking-addons-skip-addons"
+                className="inline-flex w-full items-center justify-center gap-2 self-center rounded-lg border border-gray-300 bg-transparent px-5 py-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto sm:min-w-56"
+              >
+                No add-ons, continue
+              </Link>
+            </div>
           </div>
         </div>
       </>

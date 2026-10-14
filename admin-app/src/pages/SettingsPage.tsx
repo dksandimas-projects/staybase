@@ -2713,6 +2713,20 @@ export function SettingsPage() {
   const [breakfastCutoffTime, setBreakfastCutoffTime] = useState(
     breakfastConfig.cutoffTime ?? DEFAULT_BREAKFAST_CUTOFF_TIME
   );
+  // Per BR-10 (decision #244 reserved, 2026-10-14 —
+  // Phase 14): the cut-off enforcement toggle. Defaults
+  // to `true` (pre-BR-10 behaviour) for legacy / missing
+  // values. When flipped off, the shared
+  // `computeBreakfastCutoffState` helper short-circuits
+  // to `isLocked: false` on every read path (guest
+  // Add-ons step, Manage Breakfast, staff drawer,
+  // walk-in + calendar-create modals, and the server
+  // gate). The `cutoffTime` + `cutoffTimezone` settings
+  // stay on the doc so flipping the toggle back on
+  // restores the original cut-off without re-entering.
+  const [breakfastCutoffsEnabled, setBreakfastCutoffsEnabled] = useState(
+    breakfastConfig.cutoffsEnabled !== false
+  );
   // Per spec decision #7: defensive default `true` — historical
   // behavior allowed staff to override the cut-off, so a missing
   // config field hydrates to the permissive side until the admin
@@ -3741,6 +3755,14 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = {
       isEnabled: breakfastEnabled,
+      // Per BR-10 (decision #244 reserved, 2026-10-14
+      // — Phase 14): the cut-off enforcement toggle is
+      // explicit on every write. The Zod schema
+      // requires a boolean so the writer can never
+      // silently lose the field. The reader
+      // (`normalizeBreakfastConfig`) defaults missing
+      // values to `true` for legacy docs.
+      cutoffsEnabled: breakfastCutoffsEnabled,
       cutoffTime: breakfastCutoffTime,
       cutoffTimezone: config.timezone,
       frontDeskOverrideEnabled: breakfastFrontDeskOverrideEnabled,
@@ -3770,12 +3792,25 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
         // so we short-circuit when no prior snapshot exists.
         const previous = (breakfastConfig ?? {}) as Partial<BreakfastConfig>;
         const previousSnapshot: Record<string, unknown> = {
+          // Per BR-10 (decision #244 reserved,
+          // 2026-10-14 — Phase 14): the cut-off
+          // enforcement toggle is part of the
+          // config-level audit diff. A flip to / from
+          // `false` writes a single audit entry naming
+          // `cutoffsEnabled` so the change is
+          // traceable (a hotel can recover who
+          // disabled cut-offs and when). Legacy docs
+          // hydrate to `true` (`!== false` defensively),
+          // so a first-ever save writes every config
+          // field once.
+          cutoffsEnabled: previous.cutoffsEnabled !== false,
           cutoffTime: previous.cutoffTime,
           frontDeskOverrideEnabled: previous.frontDeskOverrideEnabled,
           servedGraceMinutes: previous.servedGraceMinutes,
           defaultMealInstructions: previous.defaultMealInstructions
         };
         const nextSnapshot: Record<string, unknown> = {
+          cutoffsEnabled: parsed.data.cutoffsEnabled,
           cutoffTime: parsed.data.cutoffTime,
           frontDeskOverrideEnabled: parsed.data.frontDeskOverrideEnabled,
           servedGraceMinutes: parsed.data.servedGraceMinutes,
@@ -6084,6 +6119,40 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                     }`} />
                   </button>
                   Front desk can override the cutoff
+                </label>
+
+                {/* Per BR-10 (decision #244 reserved, 2026-10-14 —
+                    Phase 14): the cut-off enforcement toggle. When
+                    off, every per-date breakfast lock is bypassed
+                    and guests can edit meals up until the morning of
+                    service. Visual mirror of the "Front desk can
+                    override the cutoff" toggle — `bg-primary` for
+                    the on state per FRONTEND.md brand colors. The
+                    helper text calls out the BR-10 intent (a guest
+                    who edits at 11:59 PM the night before still
+                    goes through). */}
+                <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setBreakfastCutoffsEnabled(!breakfastCutoffsEnabled)}
+                    disabled={!breakfastEnabled}
+                    data-testid="breakfast-cutoffs-enabled-toggle"
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                      breakfastCutoffsEnabled ? "bg-primary" : "bg-gray-300"
+                    }`}
+                    aria-pressed={breakfastCutoffsEnabled}
+                    aria-label="Enforce the breakfast cutoff"
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      breakfastCutoffsEnabled ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  <span className="flex flex-col gap-0.5">
+                    <span>Cut-offs enabled</span>
+                    <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                      When off, guests can edit breakfast meals up until the morning of service.
+                    </span>
+                  </span>
                 </label>
 
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">

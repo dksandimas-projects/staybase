@@ -859,13 +859,22 @@ export function BookingDrawerBreakfastTab({
     if (!config) return {} as Record<string, boolean>;
     const cutoffTime = String(config.cutoffTime || "20:00");
     const tz = String(config.cutoffTimezone || "Asia/Manila");
+    // Per BR-10 (2026-10-14, decision #244 reserved —
+    // Phase 14): thread the cut-off enforcement toggle
+    // through. When the admin has cut-offs off on the
+    // config, the drawer renders every date as
+    // editable — the override flow becomes a no-op
+    // (no date ever locks, nothing to bypass).
+    const cutoffsEnabled =
+      (config as { cutoffsEnabled?: boolean }).cutoffsEnabled !== false;
     const out: Record<string, boolean> = {};
     for (const d of breakfastDates) {
       const c = computeBreakfastCutoffState({
         serviceDate: d,
         now: new Date(),
         cutoffTime,
-        timezone: tz
+        timezone: tz,
+        cutoffsEnabled
       });
       out[d] = Boolean(c.isLocked);
     }

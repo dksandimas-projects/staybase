@@ -500,6 +500,13 @@ export default function ManageBreakfastPage() {
     if (!payload) return new Map<string, CutoffState>();
     const tz = payload.breakfastConfig.cutoffTimezone;
     const hhmm = payload.breakfastConfig.cutoffTime;
+    // Per BR-10 (2026-10-14, decision #244 reserved —
+    // Phase 14): thread the cut-off enforcement toggle
+    // through. When the admin has cut-offs off on the
+    // config, every date row is open regardless of
+    // `now` vs. `cutoffAt`.
+    const cutoffsEnabled =
+      (payload.breakfastConfig as { cutoffsEnabled?: boolean }).cutoffsEnabled !== false;
     const map = new Map<string, CutoffState>();
     const now = new Date();
     for (const date of breakfastDates) {
@@ -509,7 +516,8 @@ export default function ManageBreakfastPage() {
           serviceDate: date,
           now,
           cutoffTime: hhmm,
-          timezone: tz
+          timezone: tz,
+          cutoffsEnabled
         })
       );
     }
