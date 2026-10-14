@@ -142,7 +142,7 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 
 ## Extend Stay (EXT-01)
 
-> Implementation: `feature/extend-stay-staff` (2026-01-27). Staff-side extend-stay in the admin booking drawer. One of three deliverables: EXT-01 (staff), EXT-02 (guest self-service), EXT-03 (unavailable-room handoff).
+> Implementation: `feature/extend-stay-staff` (2026-01-27). All three deliverables shipped (EXT-01 staff + EXT-02 guest self-service + EXT-03 unavailable-room handoff). Commits `890aced` (EXT-01), `028570f` (EXT-02), `039fa42` (EXT-03 config), merged to dev @ `5712483`.
 
 ### What ships in EXT-01
 
