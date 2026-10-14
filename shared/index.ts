@@ -62,6 +62,23 @@ export * from "./utils/breakfastTotal";
 // guest app's Step 2 UI.
 export * from "./utils/breakfastConfig";
 
+// Per BR-12 (Phase 14 — Other Add-Ons, decision #245
+// reserved, 2026-10-14): the per-add-on cut-off helper
+// (`computeOtherAddOnCutoffState`) + the total
+// recompute + breakdown helpers (`recomputeOtherAddOnTotal`,
+// `otherAddOnBreakdownByDate`, `hasAnyOtherAddOns`,
+// `buildOtherAddOnSelectionKey`, `parseOtherAddOnSelectionKey`)
+// + the catalog normalizer + enabler filter
+// (`normalizeAddOn`, `getEnabledAddOnsByHotel`,
+// `sortAddOnsByDisplayOrder`, `AIRPORT_TRANSFER_PRESEED`).
+// Mirrors the BR-01 + BR-03 export pattern; both the
+// guest-app Step 2 + Manage Other Add-Ons page AND the
+// admin-app booking drawer + Settings tab consume from
+// here.
+export * from "./utils/otherAddOnCutoff";
+export * from "./utils/otherAddOnTotal";
+export * from "./utils/addOns";
+
 // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
 // decision pending): Zod schema + inferred types for the
 // `settings/rewardsConfig` document + `LevelDef` row. Used by

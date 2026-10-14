@@ -62,7 +62,7 @@ import { WalkinBreakfastGrid, type WalkinBreakfastSelections } from "../componen
 // drawer. Imported here so the booking drawer can
 // render the tab alongside the existing overview /
 // check-in / folio panels.
-import { BookingDrawerBreakfastTab } from "../components/BookingDrawerWorkspace";
+import { BookingDrawerBreakfastTab, BookingDrawerOtherAddOnsTab } from "../components/BookingDrawerWorkspace";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
 import { ConfirmStatusModal } from "../components/ConfirmStatusModal";
@@ -7027,6 +7027,15 @@ export function BookingsPage() {
                 shape). */}
             <BookingDrawerSectionPanel section="breakfast" activeSection={activeBookingSection} primary>
               <BookingDrawerBreakfastTab booking={selectedBooking} />
+            </BookingDrawerSectionPanel>
+
+            {/* Per BR-12 (2026-10-14, decision #245 reserved):
+                the staff "Other Add-Ons" tab. Read view of the
+                per-day × per-add-on selection map + served
+                badges + a total summary. Edit support ships in
+                the BR-13 refactor. */}
+            <BookingDrawerSectionPanel section="addons" activeSection={activeBookingSection} primary>
+              <BookingDrawerOtherAddOnsTab booking={selectedBooking} />
             </BookingDrawerSectionPanel>
 
             {/* Secondary and destructive booking actions */}

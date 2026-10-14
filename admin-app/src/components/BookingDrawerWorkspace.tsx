@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   Phone,
   Save,
+  Sparkles,
   Utensils,
   User,
   Wallet,
@@ -87,7 +88,7 @@ async function postMarkRefundPaid(input: {
   }
 }
 
-export type BookingDrawerSection = "overview" | "check-in" | "folio" | "breakfast" | "more";
+export type BookingDrawerSection = "overview" | "check-in" | "folio" | "breakfast" | "addons" | "more";
 
 interface BookingDrawerWorkspaceHeaderProps {
   booking: Booking;
@@ -134,6 +135,12 @@ const sections: Array<{
   // rendering lives in the `BreakfastTab` component
   // further down this file.
   { id: "breakfast", desktopLabel: "Breakfast", mobileLabel: "Breakfast", icon: Utensils },
+  // Per BR-12 (2026-10-14, decision #245 reserved): the
+  // staff other-add-ons tab mirrors the breakfast tab's
+  // shape but uses the per-day × per-add-on (not
+  // per-day × per-guest) selection map. Add-on names +
+  // per-date quantity grid + served-stamp badge.
+  { id: "addons", desktopLabel: "Other Add-Ons", mobileLabel: "Add-Ons", icon: Sparkles },
   { id: "more", desktopLabel: "Activity & More", mobileLabel: "More", icon: MoreHorizontal }
 ];
 
@@ -1895,5 +1902,125 @@ export function StayHistory({ entries }: StayHistoryProps) {
         })}
       </ol>
     </section>
+  );
+}
+
+// ============================================================================
+// BR-12 (Phase 14 — Other Add-Ons, decision #245 reserved, 2026-10-14)
+// ============================================================================
+// The staff "Other Add-Ons" booking-drawer tab. Mirrors the
+// `BookingDrawerBreakfastTab` shape but for the per-day ×
+// per-add-on `otherAddOnSelections` field. Read-only by
+// default — staff can edit quantities through the
+// `WalkinOtherAddOnGrid` modal (the same pattern as
+// `WalkinBreakfastGrid`). BR-12 v1 ships with a compact
+// read view + the per-selection lock badge + a "Mark as
+// served" button (the most-used staff action for the
+// add-on workflow). Full edit support is the BR-13
+// refactor's territory.
+
+interface BookingDrawerOtherAddOnsTabProps {
+  booking: Booking;
+}
+
+export function BookingDrawerOtherAddOnsTab({
+  booking
+}: BookingDrawerOtherAddOnsTabProps) {
+  const selections = booking.otherAddOnSelections || {};
+  const served = (booking as any).otherAddOnServed || {};
+  const hasAny = Boolean(booking.hasAnyOtherAddOns);
+  const dates = (() => {
+    const ci = String(booking.checkIn || "");
+    const co = String(booking.checkOut || "");
+    const a = Date.parse(`${ci}T00:00:00Z`);
+    const b = Date.parse(`${co}T00:00:00Z`);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return [];
+    const out: string[] = [];
+    for (let ms = a, i = 0; ms < b && i < 60; ms += 86_400_000, i += 1) {
+      const d = new Date(ms);
+      const yyyy = d.getUTCFullYear();
+      const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(d.getUTCDate()).padStart(2, "0");
+      out.push(`${yyyy}-${mm}-${dd}`);
+    }
+    return out;
+  })();
+
+  if (!hasAny) {
+    return (
+      <div className="rounded-card border border-gray-200 bg-gray-50 p-5">
+        <p className="font-heading text-lg text-gray-950">Other Add-Ons</p>
+        <p className="mt-2 text-sm text-gray-600">
+          No add-ons ordered for this booking.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-card border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-heading text-lg text-gray-950">Other Add-Ons</p>
+          <p className="text-xs text-gray-600">
+            Total: ₱{Number(booking.otherAddOnTotal || 0).toLocaleString()}
+          </p>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {dates.map((date) => {
+          const list = selections[date] || [];
+          if (list.length === 0) return null;
+          return (
+            <div
+              key={date}
+              className="rounded-card border border-gray-200 bg-white p-4 shadow-sm"
+              data-testid={`booking-drawer-addons-${date}`}
+            >
+              <p className="font-semibold text-gray-950">{date}</p>
+              <div className="mt-3 space-y-2">
+                {list
+                  .filter((e: any) => e && e.removedAt === null)
+                  .map((entry: any) => {
+                    const key = `${date}-${entry.addOnId}`;
+                    const isServed = Boolean(served[key]);
+                    const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+                    const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+                    return (
+                      <div
+                        key={key}
+                        className="flex items-center justify-between rounded-lg bg-gray-50 p-3 ring-1 ring-gray-100"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-gray-950">
+                            {entry.nameSnapshot || entry.addOnId}
+                          </p>
+                          <p className="text-xs text-gray-600">
+                            {qty} guest{qty === 1 ? "" : "s"} · ₱{price.toLocaleString()} / unit
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-gray-950">
+                            ₱{(qty * price).toLocaleString()}
+                          </span>
+                          {isServed ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                              Served
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                              Pending
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

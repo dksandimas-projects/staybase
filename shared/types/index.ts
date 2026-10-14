@@ -962,6 +962,45 @@ export interface Booking {
 
   createdAt: Date;
   updatedAt: Date;
+
+  // ------------------------------------------------------------------
+  // BR-12 — Other Add-Ons (Phase 14, decision #245, 2026-10-14)
+  // ------------------------------------------------------------------
+  // Additive on top of the BR-01 breakfast fields — the breakfast
+  // shape is frozen per BR-08 (decision #238). Other add-ons use
+  // their own per-day × per-add-on selection map (NOT a per-guest
+  // slot — add-ons are quantity-based, not guest-slot-based).
+  //
+  // `otherAddOnSelections` is keyed by `yyyy-mm-dd` (the service
+  // date). The value is a flat array of `OtherAddOnSelectionEntry`
+  // items — one per add-on type on that date. The composite key
+  // `${date}-${addOnId}` lives in the entry's `selectionKey`
+  // mirror field so audit + refund lookups don't have to scan
+  // arrays.
+  //
+  // `otherAddOnTotal` is the denormalized total recomputed by
+  // `recomputeOtherAddOnTotal(selections)` on every write —
+  // source of truth is the helper, `0` for bookings that never
+  // had add-ons.
+  //
+  // `hasAnyOtherAddOns` mirrors `hasAnyBreakfast` so the read
+  // sites that just need "is there any add-on on this booking"
+  // are O(1).
+  //
+  // BR-13 refactor note: when a second add-on TYPE lands
+  // (seaport), this shape stays — the BR-13 refactor pulls
+  // the common patterns out without touching the booking
+  // schema.
+  // ------------------------------------------------------------------
+  /**
+   * `yyyy-mm-dd` → `OtherAddOnSelectionEntry[]`. Absent on
+   * pre-BR-12 bookings; reads as `null` per `normalizeBooking`.
+   */
+  otherAddOnSelections?: Record<string, OtherAddOnSelectionEntry[]> | null;
+  /** Denormalized sum, PHP. Recomputed by `recomputeOtherAddOnTotal`. */
+  otherAddOnTotal?: number;
+  /** O(1) "is there any other add-on on this booking" flag. */
+  hasAnyOtherAddOns?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -1167,6 +1206,133 @@ export interface BreakfastRefundContext {
   slotKey: string;
   mealName: string;
   priceSnapshot: number;
+}
+
+// ============================================================================
+// BR-12 — Other Add-Ons (Phase 14, 2026-10-14, decision #245 reserved)
+// ============================================================================
+//
+// v1 ships the "Airport transfer" catalog and readies the
+// schema for the BR-13 generic-add-on refactor that will
+// pull out common patterns when a second add-on TYPE (e.g.
+// seaport transfer with its own booking-time semantics)
+// lands. The data model is intentionally close to the
+// breakfast shape (per-day × per-guest selections,
+// denormalized total, audit subcollection, refund
+// context) but lives in its own Firestore collection +
+// separate booking fields — *no* shared base type, per
+// the BR-12 brief ("DO NOT add a generic-add-on abstract
+// base class"). The BR-13 refactor is expected to be a
+// non-breaking extraction, not a schema migration.
+
+/**
+ * One entry in the admin-managed add-on catalog at
+ * `addOns/{addOnId}`. v1 only ships
+ * `unit: "per-person"` (airport transfer is per-person),
+ * but `unit: "per-stay"` is reserved for the BR-13
+ * refactor — the spec accepts the union now to avoid a
+ * future schema migration.
+ *
+ * `cutoffHoursBeforeCheckIn` is the per-add-on lead
+ * window (default 24h). The shared
+ * `computeOtherAddOnCutoffState` helper computes
+ * `cutoffAt = checkInDate - cutoffHoursBeforeCheckIn`.
+ * When `isEnabled === false`, the helper short-circuits
+ * to `isLocked: true, reasonOrCutoff: "addons-disabled"`
+ * — same UX as breakfast's `cutoffsEnabled: false`.
+ */
+export interface AddOn {
+  id: string;
+  name: string;
+  description: string;
+  /** PHP; >= 0. The booking snapshots its own copy at order time (the `priceSnapshot` on the entry). */
+  price: number;
+  /** v1 only uses `"per-person"`; `"per-stay"` is reserved for the BR-13 refactor. */
+  unit: "per-person" | "per-stay";
+  /** Master per-add-on switch. `false` hides the add-on from new orders + locks existing bookings for new writes. */
+  isEnabled: boolean;
+  /** Cut-off lead time in hours before each check-in date (default 24). */
+  cutoffHoursBeforeCheckIn: number;
+  /** Asc; drives the catalog sort. */
+  displayOrder: number;
+  updatedAt: Timestamp | string;
+  updatedBy: string;
+}
+
+/**
+ * Per-day × per-add-on selection entry on a booking.
+ * Mirrors `BreakfastSelectionEntry` exactly: the
+ * `priceSnapshot` + `nameSnapshot` triple is frozen at
+ * order time so a later catalog price edit never
+ * rewrites existing bills; `quantity` is the count of
+ * guests using the add-on that day (default = the
+ * booking's total guest count, editable 0..guest count).
+ *
+ * `cutoffHoursBeforeCheckInSnapshot` is frozen so a
+ * later admin edit to the catalog lead time never
+ * rewrites the per-booking lock (the BR-13 refactor
+ * may move to a hotel-wide `otherAddOnCutoffsEnabled`
+ * toggle, which is why this is captured separately from
+ * the live catalog).
+ */
+export interface OtherAddOnSelectionEntry {
+  addOnId: string;
+  /** Snapshotted `AddOn.name`. */
+  nameSnapshot: string;
+  /** Snapshotted price (PHP, per unit). */
+  priceSnapshot: number;
+  /** Number of guests using the add-on that day. 0 means "removed but keep history". */
+  quantity: number;
+  /** Snapshotted `unit` so the receipt stays correct even if the catalog later flips. */
+  unitSnapshot: "per-person" | "per-stay";
+  addedAt: Timestamp | string;
+  addedBy: string;
+  lastModifiedAt: Timestamp | string;
+  lastModifiedBy: string;
+  removedAt: Timestamp | string | null;
+  removedBy: string | null;
+  /** Snapshotted at first add. */
+  cutoffHoursBeforeCheckInSnapshot: number;
+}
+
+/**
+ * Audit subcollection entry at
+ * `bookings/{id}/otherAddOnAudit/{auditId}`. Mirrors
+ * `BreakfastAuditEntry`. `occurredAfterCutoff === true`
+ * drives any "Late changes" UI surface (BR-12 v1 has
+ * none — the add-ons are served at check-in/by-arrival
+ * and don't need a kitchen list).
+ */
+export interface OtherAddOnAuditEntry {
+  id?: string;
+  action: "add" | "change" | "remove" | "mark-served" | "override-add" | "override-change" | "override-remove";
+  /** `yyyy-mm-dd-{addOnId}` — composite per-day × per-add-on key (analog of breakfast's slotKey). */
+  selectionKey: string;
+  /** Snapshotted add-on triple; `null` on remove. */
+  addOnSnapshot: { addOnId: string; name: string; price: number; quantity: number } | null;
+  actorUid: string;
+  actorRole: "guest" | "front-desk" | "admin";
+  reason: string | null;
+  occurredAt: Timestamp | string;
+  occurredAfterCutoff: boolean;
+}
+
+/**
+ * Refund-context blob stamped onto a
+ * `bookings/{id}/refunds/{refundId}` doc when the
+ * refund is for a removed add-on selection. Mirror
+ * values from `OtherAddOnSelectionEntry` so a later
+ * catalog price change never rewrites the refund amount.
+ * Mirrors `BreakfastRefundContext` — kept in a separate
+ * type (not a discriminated union) so the BR-13
+ * refactor can normalize without a breaking change.
+ */
+export interface OtherAddOnRefundContext {
+  addOnId: string;
+  selectionKey: string;
+  addOnName: string;
+  priceSnapshot: number;
+  quantitySnapshot: number;
 }
 
 /**

@@ -85,7 +85,7 @@ export interface RefundActor {
 }
 
 /** Refund category discriminator (per BR-01 §OnsitePayment extension). */
-export type RefundCategory = "cancellation" | "breakfast";
+export type RefundCategory = "cancellation" | "breakfast" | "otherAddOn";
 
 /** Free-text refund reason / note (nullable). */
 export type RefundReasonString = string | null | undefined;
@@ -188,7 +188,10 @@ function resolveRefundDocParent(
   reservationId: string | null | undefined
 ): { parent: DocumentReference; collection: "refunds" | "payments" } {
   const bookingRef = transaction.firestore.collection("bookings").doc(bookingId);
-  if (category === "breakfast") {
+  // Per BR-12: other-add-on refunds share the same parent
+  // path as breakfast — both are per-booking refunds. The
+  // `category` discriminator separates them at read time.
+  if (category === "breakfast" || category === "otherAddOn") {
     return { parent: bookingRef, collection: "refunds" };
   }
   if (reservationId && String(reservationId).trim().length > 0) {
@@ -239,8 +242,8 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
   const bookingRef: DocumentReference = transaction.firestore.collection("bookings").doc(bookingId);
   const refundRef: DocumentReference = pathParent.parent.collection(pathParent.collection).doc(refundId);
 
-  if (category === "breakfast") {
-    // ----- BR-05 path: UPDATE an existing pending entry to paid -----
+  if (category === "breakfast" || category === "otherAddOn") {
+    // ----- BR-05 / BR-12 path: UPDATE an existing pending entry to paid -----
     if (!existingDoc || !existingDoc.exists) {
       throw new Error("REFUND_NOT_FOUND");
     }
@@ -255,7 +258,7 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
     if (String(existingData.status || "") !== "pending") {
       throw new Error("REFUND_NOT_PENDING");
     }
-    if (String(existingData.category || "") !== "breakfast") {
+    if (String(existingData.category || "") !== category) {
       throw new Error("CATEGORY_MISMATCH");
     }
 
@@ -289,13 +292,17 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
       lastRefundClearedAt: now
     });
 
-    // Append the breakfast audit row. The action enum stays
-    // inside the BR-04/BR-05 surface; the `reason` carries
-    // the BR-06 discriminator (`mark-refund-paid:{refundId}`).
-    const auditRef = bookingRef.collection("breakfastAudit").doc();
+    // Append the per-category audit row. The `action` enum
+    // stays inside the BR-04/BR-05 surface for breakfast; for
+    // BR-12 the action is `mark-served` (the closest analog
+    // in `OtherAddOnAuditEntry`). The `reason` carries the
+    // BR-06 discriminator (`mark-refund-paid:{refundId}`).
+    const auditCollection = category === "breakfast" ? "breakfastAudit" : "otherAddOnAudit";
+    const auditRef = bookingRef.collection(auditCollection).doc();
     transaction.create(auditRef, {
-      action: "serve", // sentinel — same as BR-05
+      action: category === "breakfast" ? "serve" : "mark-served",
       slotKey: safeSlotKey,
+      selectionKey: safeSlotKey,
       mealSnapshot: mealSnapshot || null,
       actorUid: actor.uid,
       actorRole: actor.role,
@@ -386,6 +393,6 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
 export function refundPaidErrorToMessage(code: string): string {
   if (code === "REFUND_NOT_FOUND") return "Refund liability not found.";
   if (code === "REFUND_NOT_PENDING") return "This refund is already paid (or has been resolved).";
-  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the breakfast category.";
+  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the expected category.";
   return "We couldn't record the refund payment. Please try again in a moment.";
 }

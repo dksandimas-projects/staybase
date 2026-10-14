@@ -105,7 +105,8 @@ import {
   // degrades (renders empty selection rows for legacy
   // bookings with the old string-id map).
   type BreakfastSelectionEntry,
-  type BreakfastServedEntry
+  type BreakfastServedEntry,
+  type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -478,6 +479,20 @@ export interface Booking {
   // total (the BR-01 `recomputeBreakfastTotal` sum) —
   // the drawer header shows it alongside the slot count.
   breakfastTotal?: number;
+  // Per BR-12 (Phase 14 — Other Add-Ons, decision #245
+  // reserved, 2026-10-14): the admin-side view of the
+  // per-day × per-add-on selection map. Mirrors the
+  // shared `Booking.otherAddOnSelections` shape exactly —
+  // the admin drawer is a read site, the writes are
+  // through the new `handleStaffUpdateAddOns` /
+  // `handleMarkServedAddOns` endpoints. `hasAnyOtherAddOns`
+  // is the O(1) read mirror of
+  // `recomputeOtherAddOnTotal(selections) > 0`.
+  otherAddOnSelections?: Record<string, OtherAddOnSelectionEntry[]>;
+  otherAddOnTotal?: number;
+  hasAnyOtherAddOns?: boolean;
+  /** Per BR-12: the served map keyed by `yyyy-mm-dd-{addOnId}`. */
+  otherAddOnServed?: Record<string, { servedAt: any; servedBy: string }>;
   // Per BR-05: the timestamp + uid of the last meal /
   // served update so the header can display "Last edit".
   updatedBy?: string | null;

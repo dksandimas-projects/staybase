@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.1.0";
+    VERSION2 = "2.2.0";
   }
 });
 
@@ -221587,7 +221587,7 @@ var init_bookingInFlowHold = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, ExtendBookingHoldSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, ExtendBookingHoldSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     "use strict";
@@ -221889,6 +221889,100 @@ var init_booking = __esm({
       mealName: external_exports.string().min(1),
       priceSnapshot: external_exports.number().min(0)
     });
+    AddOnSchema = external_exports.object({
+      id: external_exports.string().min(1).max(80),
+      name: external_exports.string().min(1).max(120),
+      description: external_exports.string().max(500).default(""),
+      price: external_exports.number().min(0).max(1e4),
+      unit: external_exports.enum(["per-person", "per-stay"]),
+      isEnabled: external_exports.boolean(),
+      cutoffHoursBeforeCheckIn: external_exports.number().int().min(0).max(168),
+      displayOrder: external_exports.number().int().min(0).max(1e3),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedBy: external_exports.string().optional()
+    });
+    OtherAddOnSelectionEntrySchema = external_exports.object({
+      addOnId: external_exports.string().min(1).max(80),
+      nameSnapshot: external_exports.string().min(1).max(120),
+      priceSnapshot: external_exports.number().min(0).max(1e4),
+      quantity: external_exports.number().int().min(0).max(50),
+      unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
+      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      addedBy: external_exports.string().min(1),
+      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      lastModifiedBy: external_exports.string().min(1),
+      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      removedBy: external_exports.string().nullable().default(null),
+      cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
+    });
+    OtherAddOnAuditEntrySchema = external_exports.object({
+      id: external_exports.string().optional(),
+      action: external_exports.enum([
+        "add",
+        "change",
+        "remove",
+        "mark-served",
+        "override-add",
+        "override-change",
+        "override-remove"
+      ]),
+      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/, "serviceDate-addOnId format"),
+      addOnSnapshot: external_exports.object({
+        addOnId: external_exports.string(),
+        name: external_exports.string(),
+        price: external_exports.number().min(0),
+        quantity: external_exports.number().int().min(0)
+      }).nullable(),
+      actorUid: external_exports.string().min(1),
+      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
+      reason: external_exports.string().nullable().default(null),
+      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      occurredAfterCutoff: external_exports.boolean()
+    });
+    OtherAddOnRefundContextSchema = external_exports.object({
+      addOnId: external_exports.string().min(1),
+      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/),
+      addOnName: external_exports.string().min(1),
+      priceSnapshot: external_exports.number().min(0),
+      quantitySnapshot: external_exports.number().int().min(0)
+    });
+    OtherAddOnUpdateSchema = external_exports.object({
+      bookingRef: external_exports.string().trim().min(4).max(40),
+      lookupToken: external_exports.string().trim().min(8).max(200),
+      turnstileToken: external_exports.string().optional(),
+      clientBatchId: external_exports.string().trim().min(8).max(80),
+      selections: external_exports.record(
+        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        external_exports.array(OtherAddOnSelectionEntrySchema)
+      ),
+      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([])
+    }).passthrough();
+    StaffOtherAddOnUpdateSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      turnstileToken: external_exports.string().optional(),
+      selections: external_exports.record(
+        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        external_exports.array(OtherAddOnSelectionEntrySchema)
+      ),
+      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([]),
+      overrideReason: external_exports.string().trim().min(8).max(280).optional()
+    }).passthrough();
+    OtherAddOnMarkServedSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      selectionKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).min(1).max(50),
+      turnstileToken: external_exports.string().optional()
+    }).passthrough();
+    OtherAddOnMarkRefundPaidSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      refundId: external_exports.string().trim().regex(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        "Invalid refundId."
+      ),
+      method: external_exports.string().trim().min(1).max(60),
+      transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
+      note: external_exports.string().trim().max(500).nullable().optional().default(null),
+      turnstileToken: external_exports.string().optional()
+    }).passthrough();
     ExtendBookingHoldSchema = external_exports.object({
       holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
@@ -224433,6 +224527,179 @@ var init_breakfastConfig = __esm({
   }
 });
 
+// ../shared/utils/otherAddOnCutoff.ts
+function computeOtherAddOnCutoffState(input) {
+  const { checkInDate, addOn, now = /* @__PURE__ */ new Date() } = input;
+  const checkInMs = Date.parse(`${checkInDate}T00:00:00Z`);
+  if (!Number.isFinite(checkInMs)) {
+    return {
+      isLocked: false,
+      cutoffAt: now.toISOString(),
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER
+    };
+  }
+  const leadHours = Math.min(168, Math.max(0, Number(addOn.cutoffHoursBeforeCheckIn) || 24));
+  const cutoffMs = checkInMs - leadHours * 36e5;
+  const cutoffAt = new Date(cutoffMs).toISOString();
+  const minutesUntilCutoff = Math.floor((cutoffMs - now.getTime()) / 6e4);
+  if (addOn.isEnabled === false) {
+    return {
+      isLocked: true,
+      cutoffAt,
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
+      reasonOrCutoff: "addons-disabled"
+    };
+  }
+  if (now.getTime() >= cutoffMs) {
+    return {
+      isLocked: true,
+      cutoffAt,
+      minutesUntilCutoff,
+      reasonOrCutoff: "cutoff-passed"
+    };
+  }
+  return { isLocked: false, cutoffAt, minutesUntilCutoff };
+}
+var init_otherAddOnCutoff = __esm({
+  "../shared/utils/otherAddOnCutoff.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/otherAddOnTotal.ts
+function recomputeOtherAddOnTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const dateKey2 of Object.keys(selections)) {
+    const items = selections[dateKey2];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      total += price * qty;
+    }
+  }
+  return Math.round(total);
+}
+function otherAddOnBreakdownByDate(selections) {
+  if (!selections) return [];
+  const rows = [];
+  const dates = Object.keys(selections).sort();
+  for (const date of dates) {
+    const items = selections[date];
+    if (!Array.isArray(items) || items.length === 0) continue;
+    let s4 = 0;
+    let n2 = 0;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      if (qty > 0) {
+        s4 += price * qty;
+        n2 += 1;
+      }
+    }
+    if (n2 > 0) {
+      rows.push({ date, subtotal: Math.round(s4), itemCount: n2 });
+    }
+  }
+  return rows;
+}
+function hasAnyOtherAddOns(selections) {
+  if (!selections) return false;
+  for (const date of Object.keys(selections)) {
+    const items = selections[date];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
+    }
+  }
+  return false;
+}
+function buildOtherAddOnSelectionKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function parseOtherAddOnSelectionKey(key) {
+  const trimmed = String(key || "").trim();
+  if (!trimmed) return null;
+  if (trimmed.length < 14) return null;
+  const date = trimmed.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const addOnId = trimmed.slice(11);
+  if (!addOnId) return null;
+  return { date, addOnId };
+}
+var init_otherAddOnTotal = __esm({
+  "../shared/utils/otherAddOnTotal.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/addOns.ts
+function normalizeAddOn(raw, fallbackId) {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw;
+  const id = String(obj.id || fallbackId || "").trim();
+  const name2 = String(obj.name || "").trim();
+  if (!id || !name2) return null;
+  const price = Math.max(0, Number(obj.price) || 0);
+  const unit = obj.unit === "per-stay" ? "per-stay" : "per-person";
+  const cutoffHoursBeforeCheckIn = Math.max(
+    0,
+    Math.min(168, Math.floor(Number(obj.cutoffHoursBeforeCheckIn) || 24))
+  );
+  return {
+    id,
+    name: name2,
+    description: String(obj.description || "").trim().slice(0, 500),
+    price,
+    unit,
+    isEnabled: obj.isEnabled !== false,
+    cutoffHoursBeforeCheckIn,
+    displayOrder: Math.floor(Number(obj.displayOrder) || 0),
+    updatedAt: obj.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
+    updatedBy: String(obj.updatedBy || "")
+  };
+}
+function getEnabledAddOnsByHotel(addOns) {
+  if (!Array.isArray(addOns)) return [];
+  return addOns.filter((a) => a && a.isEnabled === true).slice().sort((a, b3) => {
+    const da3 = Math.floor(Number(a.displayOrder) || 0);
+    const db = Math.floor(Number(b3.displayOrder) || 0);
+    if (da3 !== db) return da3 - db;
+    return String(a.name || "").localeCompare(String(b3.name || ""));
+  });
+}
+function sortAddOnsByDisplayOrder(addOns) {
+  if (!Array.isArray(addOns)) return [];
+  return addOns.slice().sort((a, b3) => {
+    const da3 = Math.floor(Number(a.displayOrder) || 0);
+    const db = Math.floor(Number(b3.displayOrder) || 0);
+    if (da3 !== db) return da3 - db;
+    return String(a.name || "").localeCompare(String(b3.name || ""));
+  });
+}
+var AIRPORT_TRANSFER_PRESEED;
+var init_addOns = __esm({
+  "../shared/utils/addOns.ts"() {
+    "use strict";
+    AIRPORT_TRANSFER_PRESEED = {
+      name: "Airport transfer",
+      description: "One-way airport pickup or drop-off at Panglao International Airport (TAG). Driver meets you at arrivals with a name board. Price is per guest.",
+      price: 500,
+      unit: "per-person",
+      isEnabled: true,
+      cutoffHoursBeforeCheckIn: 24,
+      displayOrder: 10
+    };
+  }
+});
+
 // ../shared/schemas/rewardsConfig.ts
 var LevelDefSchema, RewardsConfigSchema;
 var init_rewardsConfig = __esm({
@@ -224508,8 +224775,10 @@ var shared_exports = {};
 __export(shared_exports, {
   ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
   ADDITIONAL_REQUEST_MAX_LENGTH: () => ADDITIONAL_REQUEST_MAX_LENGTH,
+  AIRPORT_TRANSFER_PRESEED: () => AIRPORT_TRANSFER_PRESEED,
   ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
   AboutContentSchema: () => AboutContentSchema,
+  AddOnSchema: () => AddOnSchema,
   AddRoomBookingSchema: () => AddRoomBookingSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
   BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
@@ -224570,6 +224839,12 @@ __export(shared_exports, {
   MIN_BREAKFAST_OVERRIDE_REASON_LENGTH: () => MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
   MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
+  OtherAddOnAuditEntrySchema: () => OtherAddOnAuditEntrySchema,
+  OtherAddOnMarkRefundPaidSchema: () => OtherAddOnMarkRefundPaidSchema,
+  OtherAddOnMarkServedSchema: () => OtherAddOnMarkServedSchema,
+  OtherAddOnRefundContextSchema: () => OtherAddOnRefundContextSchema,
+  OtherAddOnSelectionEntrySchema: () => OtherAddOnSelectionEntrySchema,
+  OtherAddOnUpdateSchema: () => OtherAddOnUpdateSchema,
   PAYMENT_REJECTED_FRESH_DEADLINE_FROM: () => PAYMENT_REJECTED_FRESH_DEADLINE_FROM,
   PROTECTED_BOOKING_SOURCES: () => PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS: () => PROTECTED_PAYMENT_METHODS,
@@ -224591,6 +224866,7 @@ __export(shared_exports, {
   SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
   SeoPublishSchema: () => SeoPublishSchema,
   SetLouReceivedSchema: () => SetLouReceivedSchema,
+  StaffOtherAddOnUpdateSchema: () => StaffOtherAddOnUpdateSchema,
   StartBookingHoldSchema: () => StartBookingHoldSchema,
   TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
   TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
@@ -224611,6 +224887,7 @@ __export(shared_exports, {
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
+  buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
   calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
@@ -224637,6 +224914,7 @@ __export(shared_exports, {
   computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
+  computeOtherAddOnCutoffState: () => computeOtherAddOnCutoffState,
   computeRequestFingerprint: () => computeRequestFingerprint,
   computeReservationActualDateRange: () => computeReservationActualDateRange,
   computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
@@ -224667,6 +224945,7 @@ __export(shared_exports, {
   getDateKeyInTimezone: () => getDateKeyInTimezone,
   getEffectiveStorePaymentMethods: () => getEffectiveStorePaymentMethods,
   getEffectiveVatRate: () => getEffectiveVatRate,
+  getEnabledAddOnsByHotel: () => getEnabledAddOnsByHotel,
   getLatestPaymentReference: () => getLatestPaymentReference,
   getLegacyCancellationPolicy: () => getLegacyCancellationPolicy,
   getLockedManualNightlyRate: () => getLockedManualNightlyRate,
@@ -224677,6 +224956,7 @@ __export(shared_exports, {
   getSeasonalRateForNight: () => getSeasonalRateForNight,
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
+  hasAnyOtherAddOns: () => hasAnyOtherAddOns,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
   isFreeNightVoucher: () => isFreeNightVoucher,
   isInFlowHoldActive: () => isInFlowHoldActive,
@@ -224690,6 +224970,7 @@ __export(shared_exports, {
   isWeekendNight: () => isWeekendNight,
   mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
   nextSequence: () => nextSequence,
+  normalizeAddOn: () => normalizeAddOn,
   normalizeBreakfastConfig: () => normalizeBreakfastConfig,
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
@@ -224698,12 +224979,15 @@ __export(shared_exports, {
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   normalizeVatConfig: () => normalizeVatConfig,
+  otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
+  parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
   recomputeBreakfastTotal: () => recomputeBreakfastTotal,
+  recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
   recordSweepResult: () => recordSweepResult,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolveCurrentLevel: () => resolveCurrentLevel,
@@ -224713,6 +224997,7 @@ __export(shared_exports, {
   slideInBottom: () => slideInBottom,
   slideInLeft: () => slideInLeft,
   slideInRight: () => slideInRight,
+  sortAddOnsByDisplayOrder: () => sortAddOnsByDisplayOrder,
   staggerChild: () => staggerChild,
   staggerContainer: () => staggerContainer,
   startOfDayUtc: () => startOfDayUtc,
@@ -224772,6 +225057,9 @@ var init_shared = __esm({
     init_breakfastCutoff();
     init_breakfastTotal();
     init_breakfastConfig();
+    init_otherAddOnCutoff();
+    init_otherAddOnTotal();
+    init_addOns();
     init_rewardsConfig();
   }
 });
@@ -229271,7 +229559,7 @@ function computeRefundPaidAmountDelta(currentPaidAmount, refundAmountPositive) {
 }
 function resolveRefundDocParent(transaction, bookingId, category, reservationId) {
   const bookingRef2 = transaction.firestore.collection("bookings").doc(bookingId);
-  if (category === "breakfast") {
+  if (category === "breakfast" || category === "otherAddOn") {
     return { parent: bookingRef2, collection: "refunds" };
   }
   if (reservationId && String(reservationId).trim().length > 0) {
@@ -229309,7 +229597,7 @@ function markRefundPaid(input) {
   const pathParent = resolveRefundDocParent(transaction, bookingId, category, reservationId);
   const bookingRef2 = transaction.firestore.collection("bookings").doc(bookingId);
   const refundRef = pathParent.parent.collection(pathParent.collection).doc(refundId);
-  if (category === "breakfast") {
+  if (category === "breakfast" || category === "otherAddOn") {
     if (!existingDoc || !existingDoc.exists) {
       throw new Error("REFUND_NOT_FOUND");
     }
@@ -229324,7 +229612,7 @@ function markRefundPaid(input) {
     if (String(existingData.status || "") !== "pending") {
       throw new Error("REFUND_NOT_PENDING");
     }
-    if (String(existingData.category || "") !== "breakfast") {
+    if (String(existingData.category || "") !== category) {
       throw new Error("CATEGORY_MISMATCH");
     }
     const now2 = Timestamp.now();
@@ -229348,11 +229636,12 @@ function markRefundPaid(input) {
       paidAmount: newBookingPaidAmount2,
       lastRefundClearedAt: now2
     });
-    const auditRef = bookingRef2.collection("breakfastAudit").doc();
+    const auditCollection = category === "breakfast" ? "breakfastAudit" : "otherAddOnAudit";
+    const auditRef = bookingRef2.collection(auditCollection).doc();
     transaction.create(auditRef, {
-      action: "serve",
-      // sentinel — same as BR-05
+      action: category === "breakfast" ? "serve" : "mark-served",
       slotKey: safeSlotKey,
+      selectionKey: safeSlotKey,
       mealSnapshot: mealSnapshot || null,
       actorUid: actor.uid,
       actorRole: actor.role,
@@ -229415,7 +229704,7 @@ function markRefundPaid(input) {
 function refundPaidErrorToMessage(code) {
   if (code === "REFUND_NOT_FOUND") return "Refund liability not found.";
   if (code === "REFUND_NOT_PENDING") return "This refund is already paid (or has been resolved).";
-  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the breakfast category.";
+  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the expected category.";
   return "We couldn't record the refund payment. Please try again in a moment.";
 }
 
@@ -242369,6 +242658,1257 @@ async function handleMarkRefundPaid(req, res) {
   });
 }
 
+// server/handlers/addons-config.ts
+init_firebase_admin();
+init_shared();
+async function handleGetAddOnsConfig(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  try {
+    const snap = await adminDb.collection("addOns").get();
+    const rawAddOns = [];
+    for (const doc of snap.docs) {
+      const norm = normalizeAddOn({ id: doc.id, ...doc.data() }, doc.id);
+      if (norm) rawAddOns.push(norm);
+    }
+    if (rawAddOns.length === 0) {
+      const pre = {
+        id: "airport-transfer",
+        ...AIRPORT_TRANSFER_PRESEED,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        updatedBy: "pre-seed"
+      };
+      rawAddOns.push(pre);
+    }
+    const enabled = getEnabledAddOnsByHotel(rawAddOns);
+    res.setHeader("Cache-Control", "public, max-age=60");
+    return res.status(200).json({
+      success: true,
+      addOns: enabled.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        price: a.price,
+        unit: a.unit,
+        cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
+        displayOrder: a.displayOrder
+      })),
+      preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to load other-add-ons catalog."
+    });
+  }
+}
+
+// server/handlers/addons-manage.ts
+init_firebase_admin();
+init_shared();
+function isIsoDate(s4) {
+  return typeof s4 === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s4);
+}
+function enumerateDates(checkIn, checkOut) {
+  const out = [];
+  const a = Date.parse(`${checkIn}T00:00:00Z`);
+  const b3 = Date.parse(`${checkOut}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b3)) return out;
+  const maxDays = 60;
+  for (let ms2 = a, i2 = 0; ms2 < b3 && i2 < maxDays; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    out.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return out;
+}
+async function handleGetAddOnsManage(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const ref = String(req.query.ref || "").trim();
+  const token2 = String(req.query.token || "").trim();
+  if (!ref || !token2) {
+    return res.status(400).json({ success: false, error: "Missing bookingRef or token." });
+  }
+  let bookingSnap;
+  let bookingData2;
+  try {
+    const q3 = await adminDb.collection("bookings").where("bookingRef", "==", ref).limit(1).get();
+    if (q3.empty) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    const doc = q3.docs[0];
+    bookingSnap = doc;
+    bookingData2 = doc.data();
+    if (String(bookingData2.lookupToken || "") !== token2) {
+      return res.status(403).json({ success: false, error: "Invalid token." });
+    }
+  } catch {
+    return res.status(500).json({ success: false, error: "Failed to load booking." });
+  }
+  if (!bookingSnap || !bookingData2) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const checkIn = bookingData2.checkIn;
+  const checkOut = bookingData2.checkOut;
+  const checkInDate = isIsoDate(checkIn) ? checkIn : typeof checkIn === "object" && checkIn && typeof checkIn.toDate === "function" ? (() => {
+    const d = checkIn.toDate();
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  })() : "";
+  const checkOutDate = isIsoDate(checkOut) ? checkOut : typeof checkOut === "object" && checkOut && typeof checkOut.toDate === "function" ? (() => {
+    const d = checkOut.toDate();
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  })() : "";
+  const status = String(bookingData2.status || "").trim();
+  const readOnly = status === "checked-out" || status === "cancelled";
+  let enabledAddOns = [];
+  try {
+    const snap = await adminDb.collection("addOns").get();
+    for (const d of snap.docs) {
+      const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+      if (norm) enabledAddOns.push(norm);
+    }
+    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns);
+  } catch {
+  }
+  const existingSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
+  const dates = enumerateDates(checkInDate, checkOutDate);
+  const now = /* @__PURE__ */ new Date();
+  const addOnById = /* @__PURE__ */ new Map();
+  for (const a of enabledAddOns) addOnById.set(a.id, a);
+  const dateLockByAddOn = [];
+  for (const date of dates) {
+    for (const a of enabledAddOns) {
+      const state = computeOtherAddOnCutoffState({
+        checkInDate: date,
+        addOn: { isEnabled: a.isEnabled, cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn },
+        now
+      });
+      dateLockByAddOn.push({
+        date,
+        addOnId: a.id,
+        isLocked: state.isLocked,
+        cutoffAt: state.cutoffAt,
+        minutesUntilCutoff: state.minutesUntilCutoff,
+        reasonOrCutoff: state.reasonOrCutoff
+      });
+    }
+  }
+  const served = bookingData2.otherAddOnServed && typeof bookingData2.otherAddOnServed === "object" ? bookingData2.otherAddOnServed : {};
+  let refunds = [];
+  try {
+    const refundSnap = await adminDb.collection("bookings").doc(bookingSnap.id).collection("refunds").where("category", "==", "otherAddOn").get();
+    for (const d of refundSnap.docs) {
+      refunds.push({ id: d.id, ...d.data() });
+    }
+  } catch {
+    refunds = [];
+  }
+  const totalPrice = Number(bookingData2.totalPrice || 0);
+  const otherAddOnTotal = recomputeOtherAddOnTotal(existingSelections);
+  const hasAny = hasAnyOtherAddOns(existingSelections);
+  const paidAmount = Number(bookingData2.paidAmount || 0);
+  const balance = Math.max(0, totalPrice + otherAddOnTotal - paidAmount);
+  return res.status(200).json({
+    success: true,
+    data: {
+      readOnly,
+      booking: {
+        id: bookingSnap.id,
+        bookingRef: ref,
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        numNights: dates.length,
+        numGuests: Number(bookingData2.numGuests || 0),
+        numAdults: Number(bookingData2.numAdults || bookingData2.numGuests || 0),
+        numChildren: Number(bookingData2.numChildren || 0),
+        totalPrice,
+        otherAddOnTotal,
+        hasAnyOtherAddOns: hasAny,
+        paidAmount,
+        balance,
+        status
+      },
+      otherAddOnSelections: existingSelections,
+      otherAddOnServed: served,
+      refunds,
+      addOns: enabledAddOns.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        price: a.price,
+        unit: a.unit,
+        cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
+        displayOrder: a.displayOrder
+      })),
+      dateLockByAddOn
+    }
+  });
+}
+
+// server/handlers/addons-manage-save.ts
+init_firestore();
+init_firebase_admin();
+init_shared();
+
+// server/lib/otherAddOn-selections.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+var OTHER_ADDON_OP_ERROR = {
+  ADDON_NOT_AVAILABLE: "ADDON_NOT_AVAILABLE",
+  LOCKED_DATE_PREFIX: "LOCKED_DATE:",
+  SELECTION_ALREADY_ORDERED: "SELECTION_ALREADY_ORDERED",
+  SELECTION_NOT_ORDERED: "SELECTION_NOT_ORDERED",
+  INVALID_QUANTITY: "INVALID_QUANTITY",
+  SERVE_NOT_FOUND: "SERVE_NOT_FOUND",
+  REFUND_NOT_FOUND: "REFUND_NOT_FOUND"
+};
+var otherAddOnEntryShape = external_exports.object({
+  addOnId: external_exports.string().trim().min(1).max(80),
+  nameSnapshot: external_exports.string().trim().min(1).max(120),
+  priceSnapshot: external_exports.number().finite().min(0),
+  quantity: external_exports.number().int().min(0).max(50),
+  unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
+  addedBy: external_exports.string().trim().max(120).optional().default(""),
+  addedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedBy: external_exports.string().trim().max(120).optional().default(""),
+  removedAt: external_exports.string().trim().max(64).nullable().optional().default(null),
+  removedBy: external_exports.string().trim().max(120).nullable().optional().default(null),
+  cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
+});
+var otherAddOnSelectionsWireSchema = external_exports.record(
+  external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  external_exports.array(otherAddOnEntryShape)
+);
+function assertAddOnExists(addOnLookup, addOnId) {
+  if (!addOnLookup.has(addOnId)) {
+    throw new Error(OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE);
+  }
+}
+function assertNotLocked2(input) {
+  const { selectionKey, serverNow, addOn, checkInDate } = input;
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) {
+    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${selectionKey}`);
+  }
+  const date = checkInDate || parsed2.date;
+  const state = computeOtherAddOnCutoffState({
+    checkInDate: date,
+    addOn,
+    now: serverNow
+  });
+  if (state.isLocked) {
+    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsed2.date}`);
+  }
+}
+function assertSelectionForAdd(next, selectionKey) {
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) return;
+  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  if (prior && prior.removedAt === null) {
+    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
+  }
+}
+function assertSelectionForChange(next, selectionKey) {
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) return;
+  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  if (!prior || prior.removedAt !== null) {
+    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+  }
+}
+function auditOtherAddOnOp(input) {
+  const {
+    transaction,
+    bookingId,
+    selectionKey,
+    action,
+    addOnSnapshot,
+    actorUid,
+    actorRole,
+    reasonOrCutoff
+  } = input;
+  let reason = null;
+  let occurredAfterCutoff = false;
+  if (typeof reasonOrCutoff === "string") {
+    reason = reasonOrCutoff;
+  } else if (typeof reasonOrCutoff === "boolean") {
+    occurredAfterCutoff = reasonOrCutoff;
+  }
+  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("otherAddOnAudit").doc();
+  transaction.set(auditRef, {
+    action,
+    selectionKey,
+    addOnSnapshot,
+    actorUid,
+    actorRole,
+    reason,
+    occurredAt: Timestamp.now(),
+    occurredAfterCutoff
+  });
+}
+function createOtherAddOnRefundLiability(input) {
+  const {
+    transaction,
+    booking,
+    selectionKey,
+    addOnEntry,
+    amount,
+    reason,
+    recordedBy,
+    recordedByUid
+  } = input;
+  const refundId = generateOtherAddOnRefundId();
+  const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
+  const qty = Math.max(0, Math.floor(Number(addOnEntry.quantity) || 0));
+  const unitPrice = Math.max(0, Number(addOnEntry.priceSnapshot) || 0);
+  const totalAmount = Math.abs(Number(amount || 0)) || unitPrice * qty;
+  const refundRecord = {
+    id: refundId,
+    bookingId: booking.id,
+    bookingRef: booking.bookingRef,
+    type: "refund",
+    category: "otherAddOn",
+    status: "pending",
+    amount: -totalAmount,
+    method: "pending",
+    note: "Pending \u2014 staff processes the payout.",
+    transactionReference: null,
+    reason,
+    approvedBy: null,
+    recordedBy,
+    recordedByUid,
+    recordedAt: Timestamp.now(),
+    otherAddOnRefundContext: {
+      addOnId: addOnEntry.addOnId,
+      selectionKey,
+      addOnName: addOnEntry.nameSnapshot,
+      priceSnapshot: unitPrice,
+      quantitySnapshot: qty
+    }
+  };
+  transaction.set(refundLiabilityRef, refundRecord);
+}
+function generateOtherAddOnRefundId() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    const id = String(g.crypto.randomUUID());
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    )) {
+      return id;
+    }
+  }
+  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
+  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
+  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
+  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
+  return `${part()}-${part4}-${part4b}-${part4c}-${part().slice(0, 8)}${part().slice(0, 4)}`;
+}
+
+// server/handlers/addons-manage-save.ts
+init_shared();
+var IDEMPOTENCY_WINDOW_MS = 6e4;
+function readOps(body) {
+  const out = { add: [], change: [], remove: [] };
+  const mapOp = (raw, kind) => {
+    if (!raw || typeof raw !== "object") return null;
+    const selectionKey = String(raw.selectionKey || "").trim();
+    const addOnId = String(raw.addOnId || "").trim();
+    if (!selectionKey || !addOnId) return null;
+    const op = { kind, selectionKey, addOnId };
+    if (kind !== "remove") {
+      op.quantity = Math.max(0, Math.floor(Number(raw.quantity ?? 0)));
+      op.priceSnapshot = Math.max(0, Number(raw.priceSnapshot ?? 0));
+      op.nameSnapshot = String(raw.nameSnapshot || "").trim().slice(0, 120);
+      op.unitSnapshot = raw.unitSnapshot === "per-stay" ? "per-stay" : "per-person";
+      op.cutoffHoursBeforeCheckInSnapshot = Math.max(
+        0,
+        Math.min(168, Math.floor(Number(raw.cutoffHoursBeforeCheckInSnapshot ?? 24)))
+      );
+    }
+    return op;
+  };
+  if (Array.isArray(body?.add)) for (const r3 of body.add) {
+    const m2 = mapOp(r3, "add");
+    if (m2) out.add.push(m2);
+  }
+  if (Array.isArray(body?.change)) for (const r3 of body.change) {
+    const m2 = mapOp(r3, "change");
+    if (m2) out.change.push(m2);
+  }
+  if (Array.isArray(body?.remove)) for (const r3 of body.remove) {
+    const m2 = mapOp(r3, "remove");
+    if (m2) out.remove.push(m2);
+  }
+  return out;
+}
+function opErrorToMessage(code) {
+  if (code === OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE) return "That add-on is not available.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED) return "Add-on already ordered for that day.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED) return "Nothing to change \u2014 add the add-on first.";
+  if (code === OTHER_ADDON_OP_ERROR.INVALID_QUANTITY) return "Quantity must be between 0 and 50.";
+  if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
+    const date = code.slice(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX.length);
+    return `Ordering closed for ${date}.`;
+  }
+  return "Could not save the add-on change.";
+}
+async function handleUpdateAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = OtherAddOnUpdateSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid other-add-ons update payload." });
+  }
+  const { bookingRef: bookingRef2, lookupToken, clientBatchId } = parsed2.data;
+  const ops = readOps(req.body || {});
+  const totalOps = ops.add.length + ops.change.length + ops.remove.length;
+  if (totalOps === 0) {
+    return res.status(400).json({ success: false, error: "No add-on changes supplied." });
+  }
+  if (totalOps > 80) {
+    return res.status(400).json({ success: false, error: "Too many add-on changes in one batch." });
+  }
+  const idempotencyRef = adminDb.collection("idempotencyLog").doc(`addons-update:${bookingRef2}:${clientBatchId}`);
+  try {
+    const existing = await idempotencyRef.get();
+    if (existing.exists) {
+      const stamp = existing.data() || {};
+      const ageMs = Date.now() - Number(stamp.createdAtMs || 0);
+      if (ageMs < IDEMPOTENCY_WINDOW_MS) {
+        return res.status(200).json({
+          success: true,
+          idempotent: true,
+          otherAddOnTotal: Number(stamp.otherAddOnTotal || 0),
+          hasAnyOtherAddOns: Boolean(stamp.hasAnyOtherAddOns),
+          pendingRefunds: stamp.pendingRefunds || []
+        });
+      }
+    }
+  } catch {
+  }
+  const bookingQ = await adminDb.collection("bookings").where("bookingRef", "==", bookingRef2).limit(1).get();
+  if (bookingQ.empty) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const bookingDoc = bookingQ.docs[0];
+  if (String(bookingDoc.data().lookupToken || "") !== lookupToken) {
+    return res.status(403).json({ success: false, error: "Invalid token." });
+  }
+  const bookingId = bookingDoc.id;
+  const bookingData2 = bookingDoc.data();
+  const status = String(bookingData2.status || "").trim();
+  if (status === "checked-out" || status === "cancelled") {
+    return res.status(400).json({ success: false, error: "Booking is read-only." });
+  }
+  const addOnSnap = await adminDb.collection("addOns").get();
+  const addOnById = /* @__PURE__ */ new Map();
+  for (const d of addOnSnap.docs) {
+    const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+    if (norm) addOnById.set(norm.id, norm);
+  }
+  if (addOnById.size === 0) {
+    return res.status(400).json({ success: false, error: "No add-ons available right now." });
+  }
+  let opCode = null;
+  let pendingRefundKeys = [];
+  let newTotal = 0;
+  let newHasAny = false;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRefInTx = adminDb.collection("bookings").doc(bookingId);
+      const bookingSnap = await transaction.get(bookingRefInTx);
+      if (!bookingSnap.exists) {
+        opCode = "BOOKING_NOT_FOUND";
+        return;
+      }
+      const liveBooking = bookingSnap.data() || {};
+      const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
+      const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
+      const next = { ...liveSelections };
+      const auditWrites = [];
+      const refundWrites = [];
+      const now = /* @__PURE__ */ new Date();
+      const nowIso = now.toISOString();
+      const livePaidAmount = Number(liveBooking.paidAmount || 0);
+      for (const op of ops.remove) {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn
+          });
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
+          return;
+        }
+        if (liveServed[op.selectionKey]) {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return;
+        }
+        assertSelectionForChange(next, op.selectionKey);
+        const dateKey2 = parsedKey.date;
+        const prior = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+        if (!prior) continue;
+        const quantity = Math.max(0, Math.floor(Number(prior.quantity) || 0));
+        const price = Math.max(0, Number(prior.priceSnapshot) || 0);
+        const totalAmt = price * quantity;
+        const marked = {
+          ...prior,
+          removedAt: nowIso,
+          removedBy: "guest",
+          lastModifiedAt: nowIso,
+          lastModifiedBy: "guest"
+        };
+        next[dateKey2] = (next[dateKey2] || []).map(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId ? marked : e3
+        );
+        if (totalAmt > 0 && livePaidAmount > 0) {
+          refundWrites.push({
+            selectionKey: op.selectionKey,
+            entry: marked,
+            amount: totalAmt
+          });
+        }
+        auditWrites.push({
+          op,
+          addOnSnapshot: { addOnId: op.addOnId, name: prior.nameSnapshot, price, quantity },
+          actorRole: "guest",
+          reason: "Guest removed add-on.",
+          occurredAfterCutoff: false
+        });
+      }
+      for (const op of ops.add) {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn
+          });
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
+          return;
+        }
+        if (liveServed[op.selectionKey]) {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return;
+        }
+        try {
+          assertAddOnExists(addOnById, op.addOnId);
+          assertSelectionForAdd(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
+          return;
+        }
+        const dateKey2 = parsedKey.date;
+        const entry = {
+          addOnId: op.addOnId,
+          nameSnapshot: op.nameSnapshot || liveAddOn.name,
+          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+          quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
+          unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+          addedAt: nowIso,
+          addedBy: "guest",
+          lastModifiedAt: nowIso,
+          lastModifiedBy: "guest",
+          removedAt: null,
+          removedBy: null,
+          cutoffHoursBeforeCheckInSnapshot: Math.max(
+            0,
+            Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+          )
+        };
+        next[dateKey2] = [...next[dateKey2] || [], entry];
+        auditWrites.push({
+          op,
+          addOnSnapshot: {
+            addOnId: entry.addOnId,
+            name: entry.nameSnapshot,
+            price: entry.priceSnapshot,
+            quantity: entry.quantity
+          },
+          actorRole: "guest",
+          reason: null,
+          occurredAfterCutoff: false
+        });
+      }
+      for (const op of ops.change) {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn
+          });
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
+          return;
+        }
+        if (liveServed[op.selectionKey]) {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return;
+        }
+        try {
+          assertSelectionForChange(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+          return;
+        }
+        const dateKey2 = parsedKey.date;
+        const prior = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+        if (!prior) continue;
+        const updated = {
+          ...prior,
+          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
+          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
+          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          lastModifiedAt: nowIso,
+          lastModifiedBy: "guest"
+        };
+        next[dateKey2] = (next[dateKey2] || []).map(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId ? updated : e3
+        );
+        auditWrites.push({
+          op,
+          addOnSnapshot: {
+            addOnId: updated.addOnId,
+            name: updated.nameSnapshot,
+            price: updated.priceSnapshot,
+            quantity: updated.quantity
+          },
+          actorRole: "guest",
+          reason: null,
+          occurredAfterCutoff: false
+        });
+      }
+      newTotal = recomputeOtherAddOnTotal(next);
+      newHasAny = hasAnyOtherAddOns(next);
+      transaction.update(bookingRefInTx, {
+        otherAddOnSelections: next,
+        otherAddOnTotal: newTotal,
+        hasAnyOtherAddOns: newHasAny,
+        updatedAt: Timestamp.now()
+      });
+      for (const r3 of refundWrites) {
+        createOtherAddOnRefundLiability({
+          transaction,
+          booking: { id: bookingId, bookingRef: bookingRef2 },
+          selectionKey: r3.selectionKey,
+          addOnEntry: {
+            addOnId: r3.entry.addOnId,
+            nameSnapshot: r3.entry.nameSnapshot,
+            priceSnapshot: r3.entry.priceSnapshot,
+            quantity: r3.entry.quantity
+          },
+          amount: r3.amount,
+          reason: `Guest removed ${r3.entry.nameSnapshot} on ${parseOtherAddOnSelectionKey(r3.selectionKey)?.date || ""}.`,
+          recordedBy: "guest",
+          recordedByUid: "guest"
+        });
+        pendingRefundKeys.push(r3.selectionKey);
+      }
+      for (const a of auditWrites) {
+        auditOtherAddOnOp({
+          transaction,
+          bookingId,
+          selectionKey: a.op.selectionKey,
+          action: a.op.kind === "add" ? "add" : a.op.kind === "change" ? "change" : "remove",
+          addOnSnapshot: a.addOnSnapshot,
+          actorUid: "guest",
+          actorRole: a.actorRole,
+          reasonOrCutoff: a.reason
+        });
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to save add-on changes."
+    });
+  }
+  if (opCode) {
+    return res.status(400).json({
+      success: false,
+      error: opErrorToMessage(opCode)
+    });
+  }
+  try {
+    await idempotencyRef.set({
+      bookingRef: bookingRef2,
+      clientBatchId,
+      createdAtMs: Date.now(),
+      otherAddOnTotal: newTotal,
+      hasAnyOtherAddOns: newHasAny,
+      pendingRefunds: pendingRefundKeys
+    });
+  } catch {
+  }
+  return res.status(200).json({
+    success: true,
+    otherAddOnTotal: newTotal,
+    hasAnyOtherAddOns: newHasAny,
+    pendingRefunds: pendingRefundKeys
+  });
+}
+
+// server/handlers/addons-staff-update.ts
+init_firestore();
+init_firebase_admin();
+init_shared();
+function readOps2(body) {
+  const out = { add: [], change: [], remove: [] };
+  const mapOp = (raw, kind) => {
+    if (!raw || typeof raw !== "object") return null;
+    const selectionKey = String(raw.selectionKey || "").trim();
+    const addOnId = String(raw.addOnId || "").trim();
+    if (!selectionKey || !addOnId) return null;
+    const op = { kind, selectionKey, addOnId };
+    if (kind !== "remove") {
+      op.quantity = Math.max(0, Math.floor(Number(raw.quantity ?? 0)));
+      op.priceSnapshot = Math.max(0, Number(raw.priceSnapshot ?? 0));
+      op.nameSnapshot = String(raw.nameSnapshot || "").trim().slice(0, 120);
+      op.unitSnapshot = raw.unitSnapshot === "per-stay" ? "per-stay" : "per-person";
+      op.cutoffHoursBeforeCheckInSnapshot = Math.max(
+        0,
+        Math.min(168, Math.floor(Number(raw.cutoffHoursBeforeCheckInSnapshot ?? 24)))
+      );
+    }
+    return op;
+  };
+  if (Array.isArray(body?.add)) for (const r3 of body.add) {
+    const m2 = mapOp(r3, "add");
+    if (m2) out.add.push(m2);
+  }
+  if (Array.isArray(body?.change)) for (const r3 of body.change) {
+    const m2 = mapOp(r3, "change");
+    if (m2) out.change.push(m2);
+  }
+  if (Array.isArray(body?.remove)) for (const r3 of body.remove) {
+    const m2 = mapOp(r3, "remove");
+    if (m2) out.remove.push(m2);
+  }
+  return out;
+}
+function opErrorToMessage2(code) {
+  if (code === OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE) return "That add-on is not available.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED) return "Add-on already ordered for that day.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED) return "Nothing to change.";
+  if (code === OTHER_ADDON_OP_ERROR.INVALID_QUANTITY) return "Quantity must be between 0 and 50.";
+  if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
+    return `Ordering closed \u2014 use overrideReason for late changes.`;
+  }
+  return "Could not save the staff add-on update.";
+}
+async function handleStaffUpdateAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = StaffOtherAddOnUpdateSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid staff other-add-ons update payload." });
+  }
+  const { bookingId, overrideReason } = parsed2.data;
+  const ops = readOps2(req.body || {});
+  const totalOps = ops.add.length + ops.change.length + ops.remove.length;
+  if (totalOps === 0) {
+    return res.status(400).json({ success: false, error: "No add-on changes supplied." });
+  }
+  if (totalOps > 200) {
+    return res.status(400).json({ success: false, error: "Too many add-on changes in one batch." });
+  }
+  const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+  const bookingSnap = await bookingRef2.get();
+  if (!bookingSnap.exists) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const bookingData2 = bookingSnap.data() || {};
+  const bookingRefValue = String(bookingData2.bookingRef || "");
+  const addOnSnap = await adminDb.collection("addOns").get();
+  const addOnById = /* @__PURE__ */ new Map();
+  for (const d of addOnSnap.docs) {
+    const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+    if (norm) addOnById.set(norm.id, norm);
+  }
+  let opCode = null;
+  let newTotal = 0;
+  let newHasAny = false;
+  let pendingRefundKeys = [];
+  const actorUid = req.staff?.uid || "staff";
+  const actorRole = req.staff?.role === "admin" ? "admin" : "front-desk";
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const live = await transaction.get(bookingRef2);
+      const liveBooking = live.data() || {};
+      const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
+      const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
+      const next = { ...liveSelections };
+      const auditWrites = [];
+      const refundWrites = [];
+      const now = /* @__PURE__ */ new Date();
+      const nowIso = now.toISOString();
+      const livePaidAmount = Number(liveBooking.paidAmount || 0);
+      const runOp = (op, kind) => {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return false;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return false;
+        }
+        let isLateCutoff = false;
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn
+          });
+        } catch (err) {
+          if (!overrideReason || overrideReason.length < 8) {
+            opCode = `${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsedKey.date}`;
+            return false;
+          }
+          isLateCutoff = true;
+        }
+        if (liveServed[op.selectionKey] && kind !== "remove") {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return false;
+        }
+        const dateKey2 = parsedKey.date;
+        if (kind === "remove") {
+          try {
+            assertSelectionForChange(next, op.selectionKey);
+          } catch (err) {
+            opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+            return false;
+          }
+          const prior2 = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+          if (!prior2) return true;
+          const price = Math.max(0, Number(prior2.priceSnapshot) || 0);
+          const quantity = Math.max(0, Math.floor(Number(prior2.quantity) || 0));
+          const totalAmt = price * quantity;
+          const marked = {
+            ...prior2,
+            removedAt: nowIso,
+            removedBy: actorUid,
+            lastModifiedAt: nowIso,
+            lastModifiedBy: actorUid
+          };
+          next[dateKey2] = (next[dateKey2] || []).map(
+            (e3) => e3 && e3.addOnId === parsedKey.addOnId ? marked : e3
+          );
+          if (totalAmt > 0 && livePaidAmount > 0) {
+            refundWrites.push({ selectionKey: op.selectionKey, entry: marked, amount: totalAmt });
+          }
+          auditWrites.push({
+            op,
+            addOnSnapshot: { addOnId: op.addOnId, name: prior2.nameSnapshot, price, quantity },
+            reason: isLateCutoff ? overrideReason || null : "Staff removed add-on.",
+            occurredAfterCutoff: isLateCutoff
+          });
+          return true;
+        }
+        if (kind === "add") {
+          try {
+            assertAddOnExists(addOnById, op.addOnId);
+            assertSelectionForAdd(next, op.selectionKey);
+          } catch (err) {
+            opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
+            return false;
+          }
+          const entry = {
+            addOnId: op.addOnId,
+            nameSnapshot: op.nameSnapshot || liveAddOn.name,
+            priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+            quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
+            unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+            addedAt: nowIso,
+            addedBy: actorUid,
+            lastModifiedAt: nowIso,
+            lastModifiedBy: actorUid,
+            removedAt: null,
+            removedBy: null,
+            cutoffHoursBeforeCheckInSnapshot: Math.max(
+              0,
+              Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            )
+          };
+          next[dateKey2] = [...next[dateKey2] || [], entry];
+          auditWrites.push({
+            op,
+            addOnSnapshot: {
+              addOnId: entry.addOnId,
+              name: entry.nameSnapshot,
+              price: entry.priceSnapshot,
+              quantity: entry.quantity
+            },
+            reason: isLateCutoff ? overrideReason || null : null,
+            occurredAfterCutoff: isLateCutoff
+          });
+          return true;
+        }
+        try {
+          assertSelectionForChange(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+          return false;
+        }
+        const prior = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+        if (!prior) return true;
+        const updated = {
+          ...prior,
+          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
+          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
+          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          lastModifiedAt: nowIso,
+          lastModifiedBy: actorUid
+        };
+        next[dateKey2] = (next[dateKey2] || []).map(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId ? updated : e3
+        );
+        auditWrites.push({
+          op,
+          addOnSnapshot: {
+            addOnId: updated.addOnId,
+            name: updated.nameSnapshot,
+            price: updated.priceSnapshot,
+            quantity: updated.quantity
+          },
+          reason: isLateCutoff ? overrideReason || null : null,
+          occurredAfterCutoff: isLateCutoff
+        });
+        return true;
+      };
+      for (const op of ops.remove) {
+        if (!runOp(op, "remove")) return;
+      }
+      for (const op of ops.add) {
+        if (!runOp(op, "add")) return;
+      }
+      for (const op of ops.change) {
+        if (!runOp(op, "change")) return;
+      }
+      newTotal = recomputeOtherAddOnTotal(next);
+      newHasAny = hasAnyOtherAddOns(next);
+      transaction.update(bookingRef2, {
+        otherAddOnSelections: next,
+        otherAddOnTotal: newTotal,
+        hasAnyOtherAddOns: newHasAny,
+        updatedAt: Timestamp.now()
+      });
+      for (const r3 of refundWrites) {
+        createOtherAddOnRefundLiability({
+          transaction,
+          booking: { id: bookingId, bookingRef: bookingRefValue },
+          selectionKey: r3.selectionKey,
+          addOnEntry: {
+            addOnId: r3.entry.addOnId,
+            nameSnapshot: r3.entry.nameSnapshot,
+            priceSnapshot: r3.entry.priceSnapshot,
+            quantity: r3.entry.quantity
+          },
+          amount: r3.amount,
+          reason: `Staff removed ${r3.entry.nameSnapshot} on ${parseOtherAddOnSelectionKey(r3.selectionKey)?.date || ""}.`,
+          recordedBy: actorRole,
+          recordedByUid: actorUid
+        });
+        pendingRefundKeys.push(r3.selectionKey);
+      }
+      for (const a of auditWrites) {
+        const baseAction = a.op.kind === "add" ? "add" : a.op.kind === "change" ? "change" : "remove";
+        auditOtherAddOnOp({
+          transaction,
+          bookingId,
+          selectionKey: a.op.selectionKey,
+          action: a.occurredAfterCutoff ? `override-${baseAction}` : baseAction,
+          addOnSnapshot: a.addOnSnapshot,
+          actorUid,
+          actorRole,
+          reasonOrCutoff: a.reason
+        });
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to save staff add-on updates."
+    });
+  }
+  if (opCode) {
+    return res.status(400).json({
+      success: false,
+      error: opErrorToMessage2(opCode)
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    otherAddOnTotal: newTotal,
+    hasAnyOtherAddOns: newHasAny,
+    pendingRefunds: pendingRefundKeys
+  });
+}
+
+// server/handlers/addons-mark-served.ts
+init_firestore();
+init_firebase_admin();
+init_shared();
+async function handleMarkServedAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = OtherAddOnMarkServedSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid mark-served payload." });
+  }
+  const { bookingId, selectionKeys } = parsed2.data;
+  const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+  const actorUid = req.staff?.uid || "staff";
+  const actorRole = req.staff?.role === "admin" ? "admin" : "front-desk";
+  let opCode = null;
+  const servedAt = Timestamp.now();
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const live = await transaction.get(bookingRef2);
+      if (!live.exists) {
+        opCode = "BOOKING_NOT_FOUND";
+        return;
+      }
+      const liveBooking = live.data() || {};
+      const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
+      const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? { ...liveBooking.otherAddOnServed } : {};
+      const servedSnapshot = { ...liveServed };
+      for (const key of selectionKeys) {
+        const parsedKey = parseOtherAddOnSelectionKey(key);
+        if (!parsedKey) {
+          opCode = `INVALID_KEY:${key}`;
+          return;
+        }
+        const entry = (liveSelections[parsedKey.date] || []).find(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId
+        );
+        if (!entry) {
+          opCode = `SERVE_NOT_FOUND:${key}`;
+          return;
+        }
+        servedSnapshot[key] = {
+          servedAt,
+          servedBy: actorUid
+        };
+        auditOtherAddOnOp({
+          transaction,
+          bookingId,
+          selectionKey: key,
+          action: "mark-served",
+          addOnSnapshot: {
+            addOnId: entry.addOnId,
+            name: entry.nameSnapshot,
+            price: entry.priceSnapshot,
+            quantity: entry.quantity
+          },
+          actorUid,
+          actorRole,
+          reasonOrCutoff: null
+        });
+      }
+      transaction.update(bookingRef2, {
+        otherAddOnServed: servedSnapshot,
+        updatedAt: Timestamp.now()
+      });
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to mark add-on served." });
+  }
+  if (opCode) {
+    if (opCode.startsWith("SERVE_NOT_FOUND:")) {
+      return res.status(404).json({ success: false, error: "Add-on selection not found." });
+    }
+    if (opCode === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    return res.status(400).json({ success: false, error: "Could not mark add-on served." });
+  }
+  return res.status(200).json({ success: true });
+}
+
+// server/handlers/addons-refund-paid.ts
+init_firebase_admin();
+init_shared();
+function readStaff4(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+async function handleMarkRefundPaidAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = OtherAddOnMarkRefundPaidSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid mark-refund-paid payload." });
+  }
+  const staff = readStaff4(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
+  const trimmedNote = note ? String(note).trim() : null;
+  let opCode = null;
+  let resultSummary = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const refundRef = adminDb.collection("bookings").doc(bookingId).collection("refunds").doc(refundId);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const [refundSnap, bookingSnap] = await Promise.all([
+        transaction.get(refundRef),
+        transaction.get(bookingRef2)
+      ]);
+      if (!refundSnap.exists) {
+        opCode = "REFUND_NOT_FOUND";
+        return;
+      }
+      const refundData = refundSnap.data() || {};
+      const bookingData2 = bookingSnap.data() || {};
+      const selectionKey = String(refundData?.otherAddOnRefundContext?.selectionKey || "");
+      const liveSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
+      const entry = selectionKey ? (() => {
+        const parts = selectionKey.split("-");
+        const date = parts.slice(0, 3).join("-");
+        const addOnId = parts.slice(3).join("-");
+        return (liveSelections[date] || []).find((e3) => e3 && e3.addOnId === addOnId);
+      })() : null;
+      try {
+        const helperResult = markRefundPaid({
+          category: "otherAddOn",
+          bookingId,
+          refundId,
+          amount: Math.abs(Number(refundData.amount || 0)),
+          method,
+          transactionReference: trimmedReference,
+          note: trimmedNote,
+          actor: { uid: staff.uid, role: staff.role },
+          transaction,
+          existingDoc: refundSnap,
+          currentPaidAmount: Number(bookingData2.paidAmount || 0),
+          slotKey: selectionKey
+        });
+        resultSummary = {
+          refundEntry: {
+            refundId,
+            status: helperResult.refundEntry.status || "paid",
+            paidAt: helperResult.refundEntry.paidAt,
+            paidBy: helperResult.refundEntry.paidBy,
+            method: helperResult.refundEntry.method,
+            transactionReference: helperResult.refundEntry.transactionReference,
+            note: helperResult.refundEntry.note,
+            amount: helperResult.refundEntry.amount,
+            category: helperResult.refundEntry.category || "otherAddOn",
+            selectionKey: helperResult.refundEntry.slotKey
+          },
+          newBookingPaidAmount: helperResult.newBookingPaidAmount,
+          alreadyPaid: helperResult.alreadyPaid
+        };
+        if (entry) {
+          auditOtherAddOnOp({
+            transaction,
+            bookingId,
+            selectionKey,
+            action: "mark-served",
+            addOnSnapshot: {
+              addOnId: entry.addOnId,
+              name: entry.nameSnapshot,
+              price: entry.priceSnapshot,
+              quantity: entry.quantity
+            },
+            actorUid: staff.uid,
+            actorRole: staff.role,
+            reasonOrCutoff: `Mark refund paid via ${method}.`
+          });
+        }
+      } catch (err) {
+        opCode = String(err?.message || "UNKNOWN");
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  if (opCode) {
+    if (opCode === "REFUND_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: refundPaidErrorToMessage(opCode) });
+    }
+    return res.status(400).json({ success: false, error: refundPaidErrorToMessage(opCode) });
+  }
+  if (!resultSummary) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    newBookingPaidAmount: resultSummary.newBookingPaidAmount,
+    refundEntry: resultSummary.refundEntry,
+    alreadyPaid: resultSummary.alreadyPaid
+  });
+}
+
 // server/handlers/breakfast-kitchen-list.ts
 init_zod();
 init_firestore();
@@ -242420,7 +243960,7 @@ function invalidateKitchenListCacheForSlotKey(slotKey) {
   if (responseCache.delete(datePrefix)) {
   }
 }
-function readStaff4(req) {
+function readStaff5(req) {
   const anyReq = req;
   const staff = anyReq.staff;
   if (!staff || !staff.uid) return null;
@@ -242665,7 +244205,7 @@ async function handleGetKitchenList(req, res) {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = readStaff4(req);
+  const staff = readStaff5(req);
   if (!staff) {
     return res.status(403).json({
       success: false,
@@ -242702,7 +244242,7 @@ async function handleAcknowledgeKitchenListAudit(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = readStaff4(req);
+  const staff = readStaff5(req);
   if (!staff) {
     return res.status(403).json({
       success: false,
@@ -242767,7 +244307,7 @@ var markRefundPaidBodySchema2 = external_exports.object({
   transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
   note: external_exports.string().trim().max(500).nullable().optional().default(null)
 }).passthrough();
-function readStaff5(req) {
+function readStaff6(req) {
   const anyReq = req;
   const staff = anyReq.staff;
   if (!staff || !staff.uid) return null;
@@ -242779,7 +244319,7 @@ async function handleMarkRefundPaidStandalone(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = readStaff5(req);
+  const staff = readStaff6(req);
   if (!staff) {
     return res.status(403).json({
       success: false,
@@ -243876,6 +245416,73 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
     }
     return await handleGetBreakfastConfig(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "manage" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-manage:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many manage-addons requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsManage(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-update:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many addons-save requests. Please try again in a minute." });
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleUpdateAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "staff-update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-staff-update:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many staff addons-update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleStaffUpdateAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-served" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-served:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkServedAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-refund-paid:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkRefundPaidAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-config:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many addons-config requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsConfig(req, res);
   }
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-voucher:${ip}`, 20, 6e4)) {

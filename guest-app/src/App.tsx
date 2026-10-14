@@ -7,6 +7,7 @@ import { AboutPage } from "./pages/AboutPage";
 import { BookingConfirmPage } from "./pages/BookingConfirmPage";
 import { BookingLookupPage } from "./pages/BookingLookupPage";
 import ManageBreakfastPage from "./pages/ManageBreakfastPage";
+import ManageOtherAddOnsPage from "./pages/ManageOtherAddOnsPage";
 import { BookingPage } from "./pages/BookingPage";
 import { ContactPage } from "./pages/ContactPage";
 import { CorporateBookingPage } from "./pages/CorporateBookingPage";
@@ -97,6 +98,19 @@ export function App() {
           element={
             <WithMeta title="Manage Breakfast" description={`Adjust your per-date breakfast selections at ${config.brandName}.`} noIndex>
               <ManageBreakfastPage />
+            </WithMeta>
+          }
+        />
+        {/* Per BR-12 (2026-10-14, decision #245 reserved): the
+            guest Manage Other Add-Ons page. Same magic-link
+            auth as /my-booking/breakfast (`ref` + `token`
+            query params). Post-booking edit surface for the
+            new `otherAddOnSelections` field. */}
+        <Route
+          path="/my-booking/addons"
+          element={
+            <WithMeta title="Manage Add-Ons" description={`Adjust your other add-ons at ${config.brandName}.`} noIndex>
+              <ManageOtherAddOnsPage />
             </WithMeta>
           }
         />

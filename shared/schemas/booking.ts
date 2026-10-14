@@ -522,6 +522,199 @@ export const BreakfastRefundContextSchema = z.object({
 });
 export type BreakfastRefundContextInput = z.infer<typeof BreakfastRefundContextSchema>;
 
+// ============================================================================
+// BR-12 — Other Add-Ons (Phase 14, decision #245 reserved, 2026-10-14)
+// ============================================================================
+//
+// The other-add-on schema family mirrors the breakfast one
+// above — admin catalog, per-day × per-add-on entry, audit,
+// refund context, and the two batch-update payloads (guest
+// Manage Other Add-Ons + staff drawer). The shape is
+// intentionally close so the BR-13 generic-add-on refactor
+// can pull the common patterns without a schema break.
+
+/**
+ * Admin catalog row. The id is the Firestore doc id
+ * (passed as the URL parameter, NOT validated by the schema —
+ * Zod parses bodies, not URLs). `unit` is the union the
+ * BR-13 refactor will normalize; v1 only ships `per-person`
+ * but the union is in the schema now to avoid a future
+ * migration.
+ */
+export const AddOnSchema = z.object({
+  id: z.string().min(1).max(80),
+  name: z.string().min(1).max(120),
+  description: z.string().max(500).default(""),
+  price: z.number().min(0).max(10000),
+  unit: z.enum(["per-person", "per-stay"]),
+  isEnabled: z.boolean(),
+  cutoffHoursBeforeCheckIn: z.number().int().min(0).max(168),
+  displayOrder: z.number().int().min(0).max(1000),
+  updatedAt: z.union([z.string(), z.any()]).optional(),
+  updatedBy: z.string().optional()
+});
+export type AddOnInput = z.infer<typeof AddOnSchema>;
+
+/**
+ * The per-day × per-add-on selection entry on a booking.
+ * Mirrors `BreakfastSelectionEntrySchema` but the slot is
+ * `${date}-${addOnId}` (no guest index — quantity-based, not
+ * guest-slot-based). `priceSnapshot` + `nameSnapshot` +
+ * `unitSnapshot` are frozen at order time. `quantity` is
+ * the number of guests using the add-on that day
+ * (default = total guests, editable 0..guest count).
+ */
+export const OtherAddOnSelectionEntrySchema = z.object({
+  addOnId: z.string().min(1).max(80),
+  nameSnapshot: z.string().min(1).max(120),
+  priceSnapshot: z.number().min(0).max(10000),
+  quantity: z.number().int().min(0).max(50),
+  unitSnapshot: z.enum(["per-person", "per-stay"]),
+  addedAt: z.union([z.string(), z.any()]),
+  addedBy: z.string().min(1),
+  lastModifiedAt: z.union([z.string(), z.any()]),
+  lastModifiedBy: z.string().min(1),
+  removedAt: z.union([z.string(), z.any()]).nullable().default(null),
+  removedBy: z.string().nullable().default(null),
+  cutoffHoursBeforeCheckInSnapshot: z.number().int().min(0).max(168)
+});
+export type OtherAddOnSelectionEntryInput = z.infer<typeof OtherAddOnSelectionEntrySchema>;
+
+/**
+ * The audit subcollection entry at
+ * `bookings/{id}/otherAddOnAudit/{auditId}`. Mirrors
+ * `BreakfastAuditEntrySchema` minus `unserve` (the
+ * BR-12 v1 served workflow is one-way — staff mark
+ * served at check-in/by-arrival, no grace-window
+ * un-serve).
+ */
+export const OtherAddOnAuditEntrySchema = z.object({
+  id: z.string().optional(),
+  action: z.enum([
+    "add",
+    "change",
+    "remove",
+    "mark-served",
+    "override-add",
+    "override-change",
+    "override-remove"
+  ]),
+  selectionKey: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/, "serviceDate-addOnId format"),
+  addOnSnapshot: z
+    .object({
+      addOnId: z.string(),
+      name: z.string(),
+      price: z.number().min(0),
+      quantity: z.number().int().min(0)
+    })
+    .nullable(),
+  actorUid: z.string().min(1),
+  actorRole: z.enum(["guest", "front-desk", "admin"]),
+  reason: z.string().nullable().default(null),
+  occurredAt: z.union([z.string(), z.any()]),
+  occurredAfterCutoff: z.boolean()
+});
+export type OtherAddOnAuditEntryInput = z.infer<typeof OtherAddOnAuditEntrySchema>;
+
+/**
+ * The refund-context blob stamped onto a
+ * `bookings/{id}/refunds/{refundId}` doc when the refund
+ * is for a removed add-on selection.
+ */
+export const OtherAddOnRefundContextSchema = z.object({
+  addOnId: z.string().min(1),
+  selectionKey: z.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/),
+  addOnName: z.string().min(1),
+  priceSnapshot: z.number().min(0),
+  quantitySnapshot: z.number().int().min(0)
+});
+export type OtherAddOnRefundContextInput = z.infer<typeof OtherAddOnRefundContextSchema>;
+
+/**
+ * The Guest Manage Other Add-Ons save-batch payload (mirror
+ * of `BreakfastUpdateSchema`). Per BR-12: the guest can add /
+ * change / remove per-day entries up to the per-add-on
+ * cutoff. `clientBatchId` is the 60s idempotency token
+ * (the same shape as the BR-04 breakfast batch).
+ */
+export const OtherAddOnUpdateSchema = z
+  .object({
+    bookingRef: z.string().trim().min(4).max(40),
+    lookupToken: z.string().trim().min(8).max(200),
+    turnstileToken: z.string().optional(),
+    clientBatchId: z.string().trim().min(8).max(80),
+    selections: z.record(
+      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+      z.array(OtherAddOnSelectionEntrySchema)
+    ),
+    removedKeys: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([])
+  })
+  .passthrough();
+export type OtherAddOnUpdateInput = z.infer<typeof OtherAddOnUpdateSchema>;
+
+/**
+ * The Staff drawer / Add-Ons batch-save payload (mirror
+ * of `StaffBreakfastUpdateSchema`). Adds `overrideReason`
+ * for late writes past the per-add-on cutoff and
+ * `bookingId` for the staff-side direct path.
+ */
+export const StaffOtherAddOnUpdateSchema = z
+  .object({
+    bookingId: z.string().trim().min(8).max(80),
+    turnstileToken: z.string().optional(),
+    selections: z.record(
+      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+      z.array(OtherAddOnSelectionEntrySchema)
+    ),
+    removedKeys: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([]),
+    overrideReason: z.string().trim().min(8).max(280).optional()
+  })
+  .passthrough();
+export type StaffOtherAddOnUpdateInput = z.infer<typeof StaffOtherAddOnUpdateSchema>;
+
+/**
+ * The staff "mark served" payload. Per BR-12: served is
+ * per-day × per-add-on (not per-slot). The handler writes
+ * to `bookings/{id}/otherAddOnServed/{selectionKey}` AND
+ * stamps the `otherAddOnAudit/{auditId}` row with
+ * `action: "mark-served"`.
+ */
+export const OtherAddOnMarkServedSchema = z
+  .object({
+    bookingId: z.string().trim().min(8).max(80),
+    selectionKeys: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).min(1).max(50),
+    turnstileToken: z.string().optional()
+  })
+  .passthrough();
+export type OtherAddOnMarkServedInput = z.infer<typeof OtherAddOnMarkServedSchema>;
+
+/**
+ * The staff "mark refund paid" payload (mirror of the
+ * breakfast one). The unified `markRefundPaid` helper
+ * takes a `category` discriminator (`"breakfast"` |
+ * `"otherAddOn"` | `"cancellation"`) — BR-12 adds
+ * `"otherAddOn"`.
+ */
+export const OtherAddOnMarkRefundPaidSchema = z
+  .object({
+    bookingId: z.string().trim().min(8).max(80),
+    refundId: z
+      .string()
+      .trim()
+      .regex(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        "Invalid refundId."
+      ),
+    method: z.string().trim().min(1).max(60),
+    transactionReference: z.string().trim().max(200).nullable().optional().default(null),
+    note: z.string().trim().max(500).nullable().optional().default(null),
+    turnstileToken: z.string().optional()
+  })
+  .passthrough();
+export type OtherAddOnMarkRefundPaidInput = z.infer<typeof OtherAddOnMarkRefundPaidSchema>;
+
 // NOTE: The `BreakfastUpdateSchema` + `StaffBreakfastUpdateSchema`
 // payloads (the Manage Booking save-batch + the staff-override
 // variant) are intentionally NOT in BR-01. They belong in BR-04

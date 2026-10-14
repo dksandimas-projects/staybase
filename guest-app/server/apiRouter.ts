@@ -23,6 +23,12 @@ import { handleGetBreakfastManage, handleUpdateBreakfast } from "./handlers/brea
 import { handleStaffUpdateBreakfast } from "./handlers/breakfast-staff-update";
 import { handleMarkServed } from "./handlers/breakfast-mark-served";
 import { handleMarkRefundPaid } from "./handlers/breakfast-refund-paid";
+import { handleGetAddOnsConfig } from "./handlers/addons-config";
+import { handleGetAddOnsManage } from "./handlers/addons-manage";
+import { handleUpdateAddOns } from "./handlers/addons-manage-save";
+import { handleStaffUpdateAddOns } from "./handlers/addons-staff-update";
+import { handleMarkServedAddOns } from "./handlers/addons-mark-served";
+import { handleMarkRefundPaidAddOns } from "./handlers/addons-refund-paid";
 import {
   handleAcknowledgeKitchenListAudit,
   handleGetKitchenList
@@ -1336,6 +1342,129 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
     }
     return await handleGetBreakfastConfig(req, res);
+  }
+
+  // Per BR-12 (Phase 14 — Other Add-Ons, decision #245 reserved,
+  // 2026-10-14): the guest Manage Other Add-Ons read endpoint
+  // (`/api/bookings/addons/manage`). Lookup-token gated via the
+  // `handleGetAddOnsManage` dispatcher. Rate-limited at 10/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "manage" &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-manage:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many manage-addons requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsManage(req, res);
+  }
+
+  // Per BR-12: the guest Manage Other Add-Ons save endpoint
+  // (`/api/bookings/addons/update`). Lookup-token gated + Turnstile
+  // gated at the apiRouter layer. Rate-limited at 10/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-update:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many addons-save requests. Please try again in a minute." });
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleUpdateAddOns(req, res);
+  }
+
+  // Per BR-12: the staff booking-drawer batch-save endpoint
+  // (`/api/bookings/addons/staff-update`). STAFF-Token gated +
+  // Turnstile gated; rate-limited at 30/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "staff-update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-staff-update:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many staff addons-update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleStaffUpdateAddOns(req, res);
+  }
+
+  // Per BR-12: the staff mark-served endpoint
+  // (`/api/bookings/addons/mark-served`). STAFF-Token gated +
+  // Turnstile gated; rate-limited at 60/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "mark-served" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-served:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkServedAddOns(req, res);
+  }
+
+  // Per BR-12: the staff mark-refund-paid endpoint
+  // (`/api/bookings/addons/mark-refund-paid`). STAFF-Token gated +
+  // Turnstile gated; rate-limited at 30/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "mark-refund-paid" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-refund-paid:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkRefundPaidAddOns(req, res);
+  }
+
+  // Per BR-12: the public other-add-ons catalog endpoint
+  // (`/api/bookings/addons/config`). Mirrors the BR-03
+  // breakfast-config surface. No auth, cached 60s, rate-
+  // limited at 60/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    (pathSegments[2] === undefined || pathSegments[2] === "config") &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-config:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many addons-config requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsConfig(req, res);
   }
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
