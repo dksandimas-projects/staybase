@@ -6,9 +6,17 @@ interface StepIndicatorProps {
   currentStep: number;
 }
 
+/**
+ * Per BR-09 (2026-10-14): the stepper now adapts to any
+ * step count (the BR-09 refactor split Step 2 into two
+ * steps, so the public booking flow renders 5 entries
+ * instead of 4). The grid uses a flex layout so the
+ * per-row gap scales with the count without forcing a
+ * hardcoded column count.
+ */
 export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
   return (
-    <ol className="grid gap-3 sm:grid-cols-4">
+    <ol className="flex flex-wrap gap-x-4 gap-y-3">
       {steps.map((step, index) => {
         const number = index + 1;
         const complete = number < currentStep;

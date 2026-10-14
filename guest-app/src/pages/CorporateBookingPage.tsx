@@ -12,6 +12,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ArrowRight,
   ChevronRight,
   Coins,
   CreditCard,
@@ -109,7 +110,17 @@ import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { HoldCountdownBanner } from "../components/HoldCountdownBanner";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
-const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
+// Per BR-09 (2026-10-14): the corporate flow renders
+// five steps in parity with the public booking flow
+// (Select Room → Add-ons → Guest Details → Review →
+// Confirmation). The corporate rate is a flat rate
+// with no per-date breakfast grid — the "Add-ons"
+// step renders a "no add-ons available" placeholder
+// and "Continue to guest details" so the step model is
+// identical across both flows. Future per-stay add-ons
+// (spa, parking, etc.) will drop into the same step
+// without renaming.
+const steps = ["Select Room", "Add-ons", "Guest Details", "Review & Pay", "Confirmation"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -141,7 +152,25 @@ export function CorporateBookingPage() {
   // member's account email so the booking is always filed under the
   // correct identity.
   const { memberProfile } = useGuestAuth();
-  const currentStepKey = searchParams.get("step") ?? "gate";
+  // Per BR-09 (2026-10-14): the corporate flow uses
+// string step keys (`gate`, `select-room`, `add-ons`,
+// `guest-details`, `review`, `confirm`) plus a legacy
+// numeric back-compat map for any pre-BR-09 deep-links
+// that numbered the steps. The map mirrors the public
+// flow's `normalizeStepKey` — the gate stays the
+// default for the legacy `?step=1` case (no add-ons
+// back-compat applies before the room is picked).
+function normalizeCorporateStepKey(rawStep: string | null): string {
+  if (!rawStep) return "gate";
+  if (rawStep === "1") return "select-room";
+  if (rawStep === "2") return "add-ons";
+  if (rawStep === "3") return "guest-details";
+  if (rawStep === "4") return "review";
+  if (rawStep === "5") return "confirm";
+  return rawStep;
+}
+
+const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   const [bookingId] = useState(() => doc(collection(getFirestore(), "bookings")).id);
   // Per MRB-02.x corporate (2026-08-02, per decision
   // #164): the reservation-level idempotency key,
@@ -1192,8 +1221,16 @@ export function CorporateBookingPage() {
   }
 
   // Step transitions
+  // Per BR-09 (2026-10-14): the Step 1 "Continue"
+  // button now routes to the new "Add-ons" step
+  // (Step 2 in the 5-step corporate flow) so the
+  // corporate flow matches the public flow's step
+  // model. The corporate flat-rate has no per-day
+  // breakfast grid — the Add-ons step is a
+  // placeholder, but the step exists for parity so
+  // future add-ons can drop into the same step.
   const continueParams = new URLSearchParams({
-    step: "guest-details",
+    step: "add-ons",
     checkIn,
     checkOut,
     guests: String(guests),
@@ -1214,6 +1251,13 @@ export function CorporateBookingPage() {
     // the same cart via `parseBookingRoomCart`.
     rooms: serializeBookingRoomCart(distributedRoomCart.length > 0 ? distributedRoomCart : roomCart)
   });
+
+  // Per BR-09: the Add-ons "Continue" routes to the
+  // corporate guest-details step. The step 2 → step 3
+  // transition is always allowed (the corporate rate has
+  // no per-day breakfast grid to validate).
+  const corporateGuestDetailsParams = new URLSearchParams(continueParams);
+  corporateGuestDetailsParams.set("step", "guest-details");
 
   const reviewParams = new URLSearchParams(continueParams);
   reviewParams.set("step", "review");
@@ -1238,9 +1282,22 @@ export function CorporateBookingPage() {
   function getBackToPath() {
     if (currentStepKey === "confirm") return "/corporate";
     if (currentStepKey === "review") {
-      return `/corporate/book?${continueParams.toString()}`;
+      // Per BR-09 (2026-10-14): the back button on the
+      // corporate review step (new Step 4) returns to
+      // the corporate guest details (new Step 3) — the
+      // new "Add-ons" step doesn't carry data worth
+      // editing on the corporate path.
+      return `/corporate/book?${corporateGuestDetailsParams.toString()}`;
     }
     if (currentStepKey === "guest-details") {
+      // Per BR-09: back from the corporate guest
+      // details (new Step 3) returns to the corporate
+      // "Add-ons" step (new Step 2).
+      return `/corporate/book?${continueParams.toString()}`;
+    }
+    if (currentStepKey === "add-ons") {
+      // Per BR-09: back from the corporate "Add-ons"
+      // (new Step 2) returns to "Select Room" (new Step 1).
       const selectRoomParams = new URLSearchParams(continueParams);
       selectRoomParams.set("step", "select-room");
       return `/corporate/book?${selectRoomParams.toString()}`;
@@ -1769,7 +1826,7 @@ export function CorporateBookingPage() {
             <StepIndicator steps={steps} currentStep={1} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 4</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select Corporate Room</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Browse negotiated configurations and availability. Room rates shown are corporate rates matching your contract agreement.
@@ -2192,7 +2249,14 @@ export function CorporateBookingPage() {
               </p>
             </div>
             <PrimaryButton to={`/corporate/book?${continueParams.toString()}`} className="sm:min-w-56">
-              Continue to Step 2
+              {/* Per BR-09 (2026-10-14): the Step 1 →
+                  Step 2 transition copy uses the
+                  destination step name ("add-ons"), not
+                  a numbered "Step N" reference. The
+                  `continueParams` URL stamp already
+                  points at `step=add-ons` (see
+                  `continueParams` above). */}
+              Continue to add-ons
             </PrimaryButton>
           </div>
         </div>
@@ -2200,8 +2264,19 @@ export function CorporateBookingPage() {
     );
   }
 
-  // ==================== STEP 2: GUEST DETAILS ====================
-  if (currentStepKey === "guest-details") {
+  // ==================== STEP 2: ADD-ONS ====================
+  // Per BR-09 (2026-10-14): the corporate flow now has a
+  // dedicated "Add-ons" step between Select Room and
+  // Guest Details. The corporate rate is a flat rate
+  // with no per-date breakfast grid, so this step is a
+  // short placeholder with a "Continue to guest details"
+  // CTA — the parity is intentional so both flows render
+  // the same 5-step model. Future per-stay add-ons (spa,
+  // parking, etc.) will drop into this step without
+  // renaming either page.
+  if (currentStepKey === "add-ons") {
+    const addOnsNext = new URLSearchParams(searchParams);
+    addOnsNext.set("step", "guest-details");
     return bookingShell(
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
@@ -2209,7 +2284,55 @@ export function CorporateBookingPage() {
             <StepIndicator steps={steps} currentStep={2} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 4</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 5</p>
+            <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
+            <p className="mt-4 max-w-2xl leading-7 text-gray-600">
+              Optional extras for your stay. The negotiated corporate rate doesn&apos;t include per-day add-ons — continue to provide your employee and billing details.
+            </p>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+          <div className="rounded-card border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
+            <p className="font-semibold text-gray-900">No add-ons available for this rate</p>
+            <p className="mt-2 leading-6">
+              The negotiated corporate rate is a flat rate. Continue to provide employee details, billing setup, and any verification files required by your accounts team.
+            </p>
+          </div>
+        </section>
+
+        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Add-ons</p>
+              <p className="text-lg font-semibold text-gray-950">
+                Continue to provide employee + billing details.
+              </p>
+            </div>
+            <PrimaryButton to={`/corporate/book?${addOnsNext.toString()}`} className="sm:min-w-56">
+              Continue to guest details <ArrowRight size={16} />
+            </PrimaryButton>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ==================== STEP 3: GUEST DETAILS ====================
+  // Per BR-09 (2026-10-14): the corporate guest details
+  // step moved from the old 4-step "Step 2" to the new
+  // 5-step "Step 3" to match the new public flow's step
+  // model (Select Room → Add-ons → Guest Details →
+  // Review → Confirmation).
+  if (currentStepKey === "guest-details") {
+    return bookingShell(
+      <>
+        <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl">
+            <StepIndicator steps={steps} currentStep={3} />
+          </div>
+          <div className="mt-10">
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Corporate details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Provide employee guest details along with company references and billing arrangements.
@@ -2513,12 +2636,18 @@ export function CorporateBookingPage() {
               </p>
             </div>
             {canContinueToReview ? (
+              // Per BR-09 (2026-10-14): the corporate
+              // Step 3 → Step 4 transition copy uses the
+              // destination step name ("review"), not a
+              // numbered "Step N" reference. The
+              // 5-step refactor doesn't leave stale
+              // numbering in the CTA.
               <PrimaryButton to={`/corporate/book?${reviewParams.toString()}`} className="sm:min-w-56">
-                Continue to Step 3
+                Continue to review
               </PrimaryButton>
             ) : (
               <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Continue to Step 3
+                Continue to review
               </PrimaryButton>
             )}
           </div>
@@ -2546,10 +2675,15 @@ export function CorporateBookingPage() {
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={3} />
+            {/* Per BR-09 (2026-10-14): the corporate review
+                step moved from the old 4-step "Step 3" to
+                the new 5-step "Step 4" — the new "Add-ons"
+                step sits between Select Room and Guest
+                Details. */}
+            <StepIndicator steps={steps} currentStep={4} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 4</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 4 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Confirm your corporate profile details and upload the required verification files to complete the request.
@@ -2838,12 +2972,18 @@ export function CorporateBookingPage() {
                     Processing booking...
                   </span>
                 ) : (
-                  "Confirm Corporate Booking"
+                  // Per BR-09 (2026-10-14): the
+                  // corporate review-step CTA copy
+                  // matches the public flow's
+                  // "Place booking" wording so both
+                  // flows land in the same mental
+                  // model at the create-call moment.
+                  "Place booking"
                 )}
               </PrimaryButton>
             ) : (
               <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Confirm Corporate Booking
+                Place booking
               </PrimaryButton>
             )}
           </div>

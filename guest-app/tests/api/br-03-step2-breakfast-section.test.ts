@@ -23,6 +23,16 @@
 //   8. `computeBreakfastCutoffState` is imported
 //      and used in the per-date locked state.
 //
+// Per BR-09 (decision #239, 2026-10-14): the BR-03
+// "breakfast section lives in Step 2" assertion is
+// superseded. The breakfast grid now lives in the
+// new "Add-ons" step (new Step 2 in the 5-step
+// model). The tripwires here stay skipped (the file
+// predates the BR-09 refactor + would need rewrites
+// to assert the new step model); the BR-09 active
+// tripwires live in
+// `br-09-step-flow.test.ts`.
+//
 // The data model in `shared/types/index.ts` is
 // locked per BR-01 — the `PublicRoomSelection` type
 // still has the legacy `hasBreakfast` /
