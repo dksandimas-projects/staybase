@@ -139,6 +139,7 @@ HotelConfig {
 
   // Contact extras
   frontDeskPhone: string    // used as tel: fallback in WebRTC intercom call
+  intercomGuestAppId: string // guest-facing Intercom workspace app id — empty string hides the guest chat button until populated (shipped with EXT-03, 2026-10-14)
   twitterHandle: string     // X/Twitter handle for twitter:site; empty string omits the tag
 
   // Domains
@@ -220,6 +221,7 @@ address:
   postalCode: "6300"
 
 frontDeskPhone: "+63-38-000-0000"   // update with real number before launch
+intercomGuestAppId: ""               // empty → guest chat button hidden until the workspace app id is filled in
 
 analyticsId: ""
 whatsappNumber: ""

@@ -4,16 +4,16 @@
 
 ## Why
 
-The public booking Step 2 + the corporate Step 2 collected no in-flow preferences before this PR. The `Booking.specialRequests` free-text field was retired from the public form on `feat/special-requests-redirect` (2026-08-21) — the guest now sees a "Need something special? Reach out" redirect card pointing at the hotel email / phone. That worked for the staff-captured free-text path but left a real gap: guests have structured preferences (twin vs large bed, high-floor, quiet room, airport transfer) that the front desk cares about, and there's no booking-time surface to capture them. Owner-requested 2026-11-12 (concurrent with the dev cutover); implemented on `feature/special-requests-bed-setup`, v1.7.2 → v1.8.0.
+The public booking Step 2 + the corporate Step 2 collected no in-flow preferences before this PR. The `Booking.specialRequests` free-text field was retired from the public form on `feat/special-requests-redirect` (2026-08-21) — the guest now sees a "Need something special? Reach out" redirect card pointing at the hotel email / phone. That worked for the staff-captured free-text path but left a real gap: guests have structured preferences (twin vs large bed, high-floor, quiet room, airport transfer) that the front desk cares about, and there's no booking-time surface to capture them. Owner-requested 2026-10-12 (concurrent with the dev cutover); implemented on `feature/special-requests-bed-setup`, v1.7.2 → v1.8.0.
 
 ## Decisions
 
 1. **Bed set-up selection is per-room and always visible when applicable** — not a hidden accordion. Twin and Double room types can offer a guest choice between a large bed and twin beds (the classic hotel-flow example). Each room type carries a per-type `bedSetupValues: string[]` subset of the global `bedSetups` catalog; the section renders only when the subset is non-empty. Empty subset = "this type doesn't offer a choice" (Single + Family in the seed data).
-2. **Additional preferences are a hidden accordion** ("Show additional preferences" toggle, default collapsed). Inside: a 2-column checkbox grid + a free-text "additional request" box + an "expected arrival time" dropdown. Mirrors the screenshot from the owner request (2026-11-12).
+2. **Additional preferences are a hidden accordion** ("Show additional preferences" toggle, default collapsed). Inside: a 2-column checkbox grid + a free-text "additional request" box + an "expected arrival time" dropdown. Mirrors the screenshot from the owner request (2026-10-12).
 3. **Bed set-ups + additional preferences are admin-configurable catalogs** in Settings → Booking Preferences. Bed set-ups is global (one list per hotel); additional preferences is also global (one list per hotel). Room types carry only the per-type subset.
-4. **Smoking/non-smoking is out of scope** — owner explicitly excluded it on 2026-11-12 ("no need for smoking/nonsmoking"). It's not part of the seed preferences.
+4. **Smoking/non-smoking is out of scope** — owner explicitly excluded it on 2026-10-12 ("no need for smoking/nonsmoking"). It's not part of the seed preferences.
 5. **Free-text "additional request" re-introduces the guest-captured path** — the redirect card is retired. The `Booking.specialRequests` staff-captured field stays for post-booking email/phone follow-ups (`feat/staff-special-requests-capture`, 2026-08-21). The two surfaces are independent and live side-by-side in the booking drawer.
-6. **Arrival time dropdown = 24h window from `hotelConfig.checkInTime`, not admin-configurable**. Owner decision on 2026-11-12 ("keep it fixed"). Times earlier than check-in are NOT offered (the existing `earlyCheckIn` Step 4 flow covers that). "I don't know" is the canonical first option and maps to `expectedArrivalTime: null` on the wire.
+6. **Arrival time dropdown = 24h window from `hotelConfig.checkInTime`, not admin-configurable**. Owner decision on 2026-10-12 ("keep it fixed"). Times earlier than check-in are NOT offered (the existing `earlyCheckIn` Step 4 flow covers that). "I don't know" is the canonical first option and maps to `expectedArrivalTime: null` on the wire.
 7. **Scope = both `/book` (public) AND `/corporate/book`**. Corporate's per-request flat-rate booking carries the same fields; the corporate cart is single-room-group so `bedSetup` is set on the first (and only) room.
 8. **Admin read surfaces (per artifact list)**:
    - Booking drawer — new "Guest special requests" block above the staff `BookingSpecialRequestsEditor`
@@ -103,7 +103,7 @@ A single shared `<SpecialRequestsBlock />` component renders:
 - **Per-preference surcharges** — `surchargeNote` is informational only. A future per-preference price tag (e.g. "baby cot + ₱500/night") would need its own wire field + booking total update + admin price calculator. Logged for a future feature (probably `SPECIAL-REQUESTS-2`).
 - **Admin editing of guest SR fields** — guest-set fields are immutable on the booking doc (the snapshot is the legal record). Staff follow-up edits go into the existing `Booking.specialRequests` staff-captured field.
 - **Multi-language preference labels** — the seed English labels match the existing tone. A future `i18n` feature (Folia? See `plan/features/STORE-GUEST.md` for a similar precedent) would localize the rest of the booking form too.
-- **24h arrival window per-hotel admin override** — the `ARRIVAL_WINDOW_HOURS = 24` is a hardcoded constant per owner decision 2026-11-12.
+- **24h arrival window per-hotel admin override** — the `ARRIVAL_WINDOW_HOURS = 24` is a hardcoded constant per owner decision 2026-10-12.
 
 ## Verified
 

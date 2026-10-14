@@ -82,51 +82,42 @@ describe("Special requests redirect — guest /book form", () => {
   });
 
   it("renders the redirect card with the support email + front desk phone", () => {
-    // The redirect follows the same `contact?.X || config.X`
-    // pattern as ContactPage.tsx and Footer.tsx so the per-hotel
-    // override (Settings → Hotel Info) wins when set, and the
-    // deploy-time `hotel.config.ts` is the safe fallback.
-    expect(guestBookingPage).toMatch(
-      /contact\?\.frontDeskPhone\s*\|\|\s*config\.frontDeskPhone/
-    );
-    expect(guestBookingPage).toMatch(
-      /contact\?\.supportEmail\s*\|\|\s*config\.supportEmail/
-    );
-    // The redirect's user-facing heading (Draft B, no SLA).
-    expect(guestBookingPage).toMatch(/Need something special\?/);
+    // SR-01..05 (2026-10-12): the `feat/special-requests-redirect`
+    // card is retired. The booking form now has a `SpecialRequestsBlock`
+    // component on Step 2 (bed set-up + additional preferences +
+    // free-text + arrival time). The contact override pattern is gone.
+    expect(guestBookingPage).not.toMatch(/Need something special\?/);
+    expect(guestBookingPage).not.toMatch(/contact\?\.frontDeskPhone/);
+    expect(guestBookingPage).not.toMatch(/contact\?\.supportEmail/);
   });
 
   it("uses the `usePublicSiteContent` hook to read the per-hotel contact override", () => {
-    // ContactPage + Footer both use this hook; the redirect
-    // card on the booking form must use the same hook so the
-    // source of truth is consistent across the guest app.
+    // SR-01..05: `usePublicSiteContent` is still imported but only
+    // used for `hotelCheckInTime` (the arrival-time dropdown default).
+    // The `contact` destructure was removed when the redirect card retired.
     expect(guestBookingPage).toMatch(/usePublicSiteContent/);
-    expect(guestBookingPage).toMatch(/const\s*{\s*contact\s*}\s*=\s*usePublicSiteContent\(\)/);
+    expect(guestBookingPage).not.toMatch(/const\s*{\s*contact\s*}\s*=\s*usePublicSiteContent\(\)/);
+    // The hook is still used for hotelCheckInTime (arrival dropdown).
+    expect(guestBookingPage).toMatch(/hotelCheckInTime/);
   });
 });
 
 describe("Special requests redirect — guest /book/confirm page", () => {
   it("renders the 'Forgot something?' redirect card after the email alert", () => {
-    // The confirmation page now surfaces a "did you forget?"
-    // prompt (the confirmation moment is when guests most often
-    // remember a special need). The card lives between the email
-    // alert banner and the early check-in section.
-    expect(guestBookingConfirmPage).toMatch(/Forgot something\? Need something special\?/);
-    // The redirect card is rendered as a `motion.div` (Framer
-    // Motion) — match the `data-testid` attribute on its own so
-    // the assertion is robust to the wrapper element name.
-    expect(guestBookingConfirmPage).toMatch(/data-testid="special-requests-redirect"/);
+    // SR-01..05 (2026-10-12): the confirmation page's
+    // `feat/special-requests-redirect` card is retired. The guest
+    // captured their preferences on Step 2; the confirmation page
+    // no longer surfaces a redirect prompt.
+    expect(guestBookingConfirmPage).not.toMatch(/Forgot something\? Need something special\?/);
+    expect(guestBookingConfirmPage).not.toMatch(/data-testid="special-requests-redirect"/);
   });
 
   it("uses the per-hotel contact override with config fallback", () => {
-    // Same pattern as the booking form redirect.
-    expect(guestBookingConfirmPage).toMatch(
-      /contact\?\.frontDeskPhone\s*\|\|\s*config\.frontDeskPhone/
-    );
-    expect(guestBookingConfirmPage).toMatch(
-      /contact\?\.supportEmail\s*\|\|\s*config\.supportEmail/
-    );
-    expect(guestBookingConfirmPage).toMatch(/usePublicSiteContent/);
+    // The confirmation page still uses `usePublicSiteContent` for
+    // the "Email the staff" card (different feature), but the
+    // special-requests redirect pattern is gone.
+    expect(guestBookingConfirmPage).not.toMatch(/contact\?\.frontDeskPhone\s*\|\|\s*config\.frontDeskPhone/);
+    expect(guestBookingConfirmPage).not.toMatch(/contact\?\.supportEmail\s*\|\|\s*config\.supportEmail/);
   });
 
   it("does not call the `specialRequests` field on the confirmation page", () => {

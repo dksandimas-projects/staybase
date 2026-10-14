@@ -326,23 +326,23 @@ describe("Staff special-requests capture — intercom banner preserved", () => {
 });
 
 describe("Staff special-requests capture — redirect preservation", () => {
-  // The previous PR (feat/special-requests-redirect,
-  // commit 78a79f7) shipped the redirect copy on the guest
-  // booking form + confirmation page. This PR does NOT
-  // remove the redirect — the redirect is for guest-initiated
-  // contact; the staff capture is the inbound record. These
-  // tests pin the redirect so a future refactor can't
-  // silently undo it.
+  // SR-01..05 (2026-10-12): the `feat/special-requests-redirect`
+  // cards on both the booking form and confirmation page are retired.
+  // The guest now captures preferences via `SpecialRequestsBlock`
+  // on Step 2 (bed set-up + additional preferences + free-text +
+  // arrival time). The staff capture flow is the inbound record.
+  // These tests pin the retirement so a future refactor can't
+  // silently re-introduce the retired redirect cards.
 
-  it("keeps the 'Need something special?' card on the /book form", () => {
-    expect(guestBookingPage).toMatch(/Need something special\?/);
-    expect(guestBookingPage).toMatch(/data-testid="special-requests-redirect"/);
+  it("removed the 'Need something special?' card from the /book form (SR-05)", () => {
+    expect(guestBookingPage).not.toMatch(/Need something special\?/);
+    expect(guestBookingPage).not.toMatch(/data-testid="special-requests-redirect"/);
   });
 
-  it("keeps the 'Forgot something?' card on the /book/confirm page", () => {
-    expect(guestBookingConfirmPage).toMatch(
+  it("removed the 'Forgot something?' card from the /book/confirm page (SR-05)", () => {
+    expect(guestBookingConfirmPage).not.toMatch(
       /Forgot something\? Need something special\?/,
     );
-    expect(guestBookingConfirmPage).toMatch(/data-testid="special-requests-redirect"/);
+    expect(guestBookingConfirmPage).not.toMatch(/data-testid="special-requests-redirect"/);
   });
 });

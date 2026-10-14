@@ -221219,12 +221219,8 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-<<<<<<< HEAD
     "use strict";
-    VERSION2 = "1.15.0";
-=======
-    VERSION2 = "1.22.1";
->>>>>>> origin/dev
+    VERSION2 = "2.1.0";
   }
 });
 
@@ -221273,7 +221269,7 @@ var init_animations = __esm({
 });
 
 // ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
 var init_constants = __esm({
   "../shared/constants/index.ts"() {
     "use strict";
@@ -221331,7 +221327,6 @@ var init_constants = __esm({
     ADDITIONAL_REQUEST_MAX_LENGTH = 500;
     ARRIVAL_WINDOW_HOURS = 24;
     MAX_ROOM_TYPE_PHOTOS = 10;
-    DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
     DEFAULT_BREAKFAST_CUTOFF_TIME = "20:00";
     DEFAULT_BREAKFAST_CUTOFF_TIMEZONE = "Asia/Manila";
     DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES = 15;
@@ -221592,11 +221587,7 @@ var init_bookingInFlowHold = __esm({
 });
 
 // ../shared/schemas/booking.ts
-<<<<<<< HEAD
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema;
-=======
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, ExtendBookingHoldSchema;
->>>>>>> origin/dev
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, ExtendBookingHoldSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     "use strict";
@@ -221648,13 +221639,16 @@ var init_booking = __esm({
       roomId: external_exports.string().trim().min(1).max(64),
       numAdults: external_exports.coerce.number().int().min(0).max(100),
       numChildren: external_exports.coerce.number().int().min(0).max(100),
-      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
-      // Per EXB-12 (2026-08-06, per decision #199): whether the
-      // walk-in guest wants breakfast for the extra-bed occupant(s).
-      // Optional — when absent, the server treats it as `false`.
-      // The server validates the invariant: `extraBedBreakfast`
-      // can only be `true` when `extraBedCount > 0`.
-      extraBedBreakfast: external_exports.boolean().optional()
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0)
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+      // toggle is deleted. Extra-bed occupants are ordinary meal
+      // slots in Step 2 (the per-meal picker), so the create
+      // payload no longer carries a breakfast flag for them.
+      // The BR-08 audit-trail comment is kept here as a record
+      // of the close-out — see `plan/features/BREAKFAST.md
+      // §Decisions Locked` (decision 4 — extra-bed occupants
+      // are ordinary meal slots).
     }).strict();
     WalkinBookingSchema = external_exports.object({
       bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
@@ -221671,14 +221665,19 @@ var init_booking = __esm({
       checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       guests: external_exports.coerce.number().int().min(1).max(100),
-      hasBreakfast: external_exports.boolean(),
-      // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-      // the server snapshots the admin default from
-      // `settings/breakfastConfig.breakfastIncludesChildrenDefault` and
-      // writes the result to the booking doc alongside `hasBreakfast`.
-      // `true` is the safe default (matches the historical "children pay
-      // the full rate" math).
-      breakfastIncludesChildren: external_exports.boolean().optional(),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy flat-rate `hasBreakfast: boolean` +
+      // `breakfastIncludesChildren: boolean` pair is deleted from
+      // the walk-in schema. The walk-in modal now sends the rich
+      // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+      // shape (per-date × per-guest meal entries) which is
+      // captured by `WalkinBreakfastGrid` and validated by the
+      // BR-01 `BreakfastSelectionSchema`. The BR-08 audit-trail
+      // comment is kept here as a record of the close-out — see
+      // `plan/features/BREAKFAST.md §Decisions Locked` (decision
+      // 5 — Step 1 carries no breakfast data).
+      breakfastSelections: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
+      breakfastTotal: external_exports.coerce.number().finite().min(0).optional(),
       // Per CHD-01 (2026-08-01, per decision #144): adults/children
       // split. Both optional — when absent, the server derives
       // `numAdults = guests`, `numChildren = 0` (the historical
@@ -221695,14 +221694,18 @@ var init_booking = __esm({
       // server snapshots the room type's `extraBedRate` onto the
       // booking doc alongside this field.
       extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
-      // Per EXB-12 (2026-08-06, per decision #199): whether the
-      // guest wants breakfast for the extra-bed occupant(s). When
-      // `true`, all `extraBedCount` beds in this room are counted
-      // toward the breakfast total. Optional — when absent, the
-      // server treats it as `false` (no breakfast for extra beds).
-      // The server validates the invariant: `extraBedBreakfast`
-      // can only be `true` when `extraBedCount > 0`.
-      extraBedBreakfast: external_exports.boolean().optional(),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+      // toggle is deleted from the walk-in schema. Extra-bed
+      // occupants are ordinary meal slots in Step 2 (the
+      // per-meal picker) — the walk-in modal captures them via
+      // `WalkinBreakfastGrid` which writes the rich
+      // `breakfastSelections` shape (per-date × per-guest
+      // meal entries) validated by `BreakfastSelectionSchema`.
+      // The BR-08 audit-trail comment is kept here as a record
+      // of the close-out — see `plan/features/BREAKFAST.md
+      // §Decisions Locked` (decision 4 — extra-bed occupants
+      // are ordinary meal slots).
       guestDetails: WalkinGuestDetailsSchema,
       paymentMethod: external_exports.string().trim().min(1).max(80),
       // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
@@ -221803,7 +221806,6 @@ var init_booking = __esm({
       message: "Check-out must be after check-in",
       path: ["checkOut"]
     });
-<<<<<<< HEAD
     BreakfastMealSchema = external_exports.object({
       id: external_exports.string().min(1).max(64),
       name: external_exports.string().min(1).max(80),
@@ -221879,12 +221881,10 @@ var init_booking = __esm({
       mealName: external_exports.string().min(1),
       priceSnapshot: external_exports.number().min(0)
     });
-=======
     ExtendBookingHoldSchema = external_exports.object({
       holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
     }).strict();
->>>>>>> origin/dev
   }
 });
 
@@ -222389,9 +222389,7 @@ function getBookingRevenueStreams(booking) {
   const roomSubtotalRaw = Number(booking.rateBreakdown?.roomSubtotal);
   const roomSubtotal = Number.isFinite(roomSubtotalRaw) && roomSubtotalRaw > 0 ? roomSubtotalRaw : round2(Number(booking.ratePerNight) || 0) * Math.max(0, Number(booking.numNights) || 0);
   const nights = Math.max(0, Number(booking.numNights) || 0);
-  const breakfastGross = round2(
-    (booking.hasBreakfast ? Number(booking.breakfastRate) || 0 : 0) * Math.max(0, Number(booking.numGuests) || 0) * nights
-  );
+  const breakfastGross = round2(Math.max(0, Number(booking.breakfastTotal) || 0));
   let room = total;
   let breakfast = 0;
   if (total > 0 && breakfastGross > 0 && roomSubtotal > 0) {
@@ -222445,9 +222443,7 @@ function computeBookingRevenueAllocation(input) {
   const ratePerNight = Number(input.ratePerNight) || 0;
   const numNights = Math.max(0, Number(input.numNights) || 0);
   const roomTotal = round2(ratePerNight * numNights);
-  const breakfastTotal = round2(
-    (input.hasBreakfast ? Number(input.breakfastRate) || 0 : 0) * Math.max(0, Number(input.numGuests) || 0) * numNights
-  );
+  const breakfastTotal = round2(Math.max(0, Number(input.breakfastTotal) || 0));
   const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
   const chain2 = calculateDiscountChain({
     roomTotal,
@@ -222558,28 +222554,6 @@ var init_breakfastTotal = __esm({
 });
 
 // ../shared/utils/bookingAddOns.ts
-function calculateBreakfastAddOn(input) {
-  if (!input.hasBreakfast) return 0;
-  const rate = Number(input.breakfastRate) || 0;
-  const nights = Number(input.numNights) || 0;
-  if (rate === 0 || nights === 0) return 0;
-  const numAdults = Number(input.numAdults);
-  const useSplit = Number.isFinite(numAdults) && numAdults > 0;
-  let effectiveOccupancy;
-  if (useSplit) {
-    const numChildren = Number(input.numChildren) || 0;
-    const includesChildren = input.breakfastIncludesChildren !== false;
-    effectiveOccupancy = numAdults + (includesChildren ? numChildren : 0);
-  } else {
-    effectiveOccupancy = Number(input.numGuests) || 0;
-  }
-  if (input.extraBedBreakfast) {
-    const extraBedCount = Number(input.extraBedCount) || 0;
-    effectiveOccupancy += extraBedCount;
-  }
-  if (effectiveOccupancy === 0) return 0;
-  return rate * effectiveOccupancy * nights;
-}
 function calculateExtraBedAddOn(input) {
   const count = Number(input.extraBedCount) || 0;
   const rate = Number(input.extraBedRate) || 0;
@@ -223193,7 +223167,7 @@ var init_paymentVerification = __esm({
 // ../shared/utils/pricing.ts
 function calculateBookingTotal(input) {
   const roomTotal = input.roomTotal ?? input.ratePerNight * input.numNights;
-  const breakfastTotal = calculateBreakfastAddOn(input);
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
   const extraBedTotal = Number(input.extraBedTotal) || 0;
   const { total } = calculateDiscountChain({
     roomTotal,
@@ -223221,7 +223195,6 @@ function getLockedManualNightlyRate(breakdown) {
 var init_pricing = __esm({
   "../shared/utils/pricing.ts"() {
     "use strict";
-    init_bookingAddOns();
     init_bookingDiscounts();
   }
 });
@@ -223271,14 +223244,22 @@ function defaultHasher() {
   return (input) => createHash("sha256").update(input).digest("hex");
 }
 function normalizeRoomLine(line) {
+  const selections = Array.isArray(line.breakfastSelections) ? line.breakfastSelections.map((s4) => ({
+    key: String(s4.key || "").trim(),
+    mealId: String(s4.mealId || "").trim(),
+    price: Math.max(0, Number(s4.price) || 0)
+  })).sort((a, b3) => {
+    const aKey = `${a.key}|${a.mealId}|${a.price}`;
+    const bKey = `${b3.key}|${b3.mealId}|${b3.price}`;
+    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+  }) : [];
   return {
     type: String(line.type || "").trim(),
     quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
     adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
     children: Math.max(0, Math.floor(Number(line.children) || 0)),
     extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0)),
-    hasBreakfast: Boolean(line.hasBreakfast),
-    breakfastIncludesChildren: Boolean(line.breakfastIncludesChildren)
+    breakfastSelections: selections
   };
 }
 function normalizeDiscountScope2(scope) {
@@ -224260,7 +224241,6 @@ var init_bookingPreferences = __esm({
   }
 });
 
-<<<<<<< HEAD
 // ../shared/utils/breakfastCutoff.ts
 function parseServiceDateUtc(value) {
   if (typeof value !== "string") return null;
@@ -224422,11 +224402,14 @@ var init_breakfastConfig = __esm({
       "updatedBy",
       "updatedAt"
     ]);
-=======
+  }
+});
+
 // ../shared/schemas/rewardsConfig.ts
 var LevelDefSchema, RewardsConfigSchema;
 var init_rewardsConfig = __esm({
   "../shared/schemas/rewardsConfig.ts"() {
+    "use strict";
     init_zod();
     LevelDefSchema = external_exports.object({
       id: external_exports.string().min(1).max(64),
@@ -224489,7 +224472,6 @@ var init_rewardsConfig = __esm({
         });
       }
     });
->>>>>>> origin/dev
   }
 });
 
@@ -224524,7 +224506,6 @@ __export(shared_exports, {
   DEFAULT_BOOKING_SOURCES: () => DEFAULT_BOOKING_SOURCES,
   DEFAULT_BREAKFAST_CUTOFF_TIME: () => DEFAULT_BREAKFAST_CUTOFF_TIME,
   DEFAULT_BREAKFAST_CUTOFF_TIMEZONE: () => DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT: () => DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES: () => DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
   DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
@@ -224604,7 +224585,6 @@ __export(shared_exports, {
   buildIcsContent: () => buildIcsContent,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
-  calculateBreakfastAddOn: () => calculateBreakfastAddOn,
   calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
   calculateDiscountChain: () => calculateDiscountChain,
   calculateExtraBedAddOn: () => calculateExtraBedAddOn,
@@ -224761,13 +224741,10 @@ var init_shared = __esm({
     init_cancellation();
     init_uploads();
     init_bookingPreferences();
-<<<<<<< HEAD
     init_breakfastCutoff();
     init_breakfastTotal();
     init_breakfastConfig();
-=======
     init_rewardsConfig();
->>>>>>> origin/dev
   }
 });
 
@@ -226581,6 +226558,7 @@ __export(email_exports, {
   sendCorporateInquiryTrigger: () => sendCorporateInquiryTrigger,
   sendEarlyCheckinRequestTrigger: () => sendEarlyCheckinRequestTrigger,
   sendEarlyCheckinResolveTrigger: () => sendEarlyCheckinResolveTrigger,
+  sendLateServedTrigger: () => sendLateServedTrigger,
   sendStaffNewBookingTrigger: () => sendStaffNewBookingTrigger,
   sendStaffNewPaymentTrigger: () => sendStaffNewPaymentTrigger,
   sendStaffRefundReviewTrigger: () => sendStaffRefundReviewTrigger,
@@ -226667,7 +226645,7 @@ function generateReceiptPdf(booking) {
     text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
     for (const room of rooms) {
       const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
+      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
       text(label, value, { gap: 5 });
     }
   } else {
@@ -226844,7 +226822,18 @@ function buildReservationEmailView(reservation, children) {
     numAdults: Number(child.numAdults || 0),
     numChildren: Number(child.numChildren || 0),
     extraBedCount: Number(child.extraBedCount || 0),
-    hasBreakfast: child.hasBreakfast === true,
+    // Per BR-08 (Phase 13 — Breakfast Redesign, decision
+    // #238, 2026-10-14): the per-room `breakfastSelections`
+    // rich shape + `breakfastTotal` + `hasAnyBreakfast`
+    // flag replace the legacy flat-rate `hasBreakfast`
+    // boolean. The email reader reads the per-date
+    // breakdown from `rateBreakdown.addOns[]` (already
+    // populated by BR-03's `buildRateBreakdown`); the
+    // `hasAnyBreakfast` flag below drives the per-room
+    // "breakfast" pill on the rooms table.
+    breakfastSelections: child.breakfastSelections && typeof child.breakfastSelections === "object" ? child.breakfastSelections : {},
+    breakfastTotal: Number(child.breakfastTotal || 0),
+    hasAnyBreakfast: child.hasAnyBreakfast === true || child.breakfastSelections && typeof child.breakfastSelections === "object" && Object.keys(child.breakfastSelections).length > 0,
     ratePerNight: Number(child.ratePerNight || 0),
     totalPrice: Number(child.totalPrice || 0)
   }));
@@ -227015,7 +227004,7 @@ function bookingRows(booking) {
       const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut ? ` \xB7 ${formatDate(room.checkIn)} \u2192 ${formatDate(room.checkOut)}` : "";
       return row(
         `Room ${room.position || 1} (${escapeHtml2(String(room.roomType || "Room"))})`,
-        room.bookingRef ? `${escapeHtml2(String(room.bookingRef))} \xB7 ${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+        room.bookingRef ? `${escapeHtml2(String(room.bookingRef))} \xB7 ${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
       );
     }).join("")}
       </table>
@@ -228086,6 +228075,44 @@ async function sendStaffRefundReviewTrigger(order) {
     staffRefundReviewEmail(order)
   );
 }
+function lateServedEmail(booking, slotEntry, occurredAtIso) {
+  const slotDate = typeof slotEntry?.slotKey === "string" ? slotEntry.slotKey.slice(0, 10) : "\u2014";
+  const mealLabel = slotEntry?.mealName || "your meal";
+  const bookingRef2 = booking.bookingRef || booking.reservationRef || booking.id || "your booking";
+  const ratingUrl = siteUrl(`/my-booking?ref=${encodeURIComponent(bookingRef2 || "")}`);
+  return emailLayout({
+    preheader: `Your breakfast on ${slotDate} was served past our cutoff \u2014 we'd value your feedback.`,
+    eyebrow: "Service update",
+    title: "We served your breakfast late",
+    intro: `We noticed that the breakfast for ${escapeHtml2(String(bookingRef2))} on ${escapeHtml2(slotDate)} (${escapeHtml2(mealLabel)}) was served past our ${escapeHtml2(String(bookingRef2)).length > 0 ? "published" : ""} cutoff window. We're sorry for the delay.`,
+    body: `
+      ${callout2("warm", "How was it?", "If a few minutes of delay affected your meal, let us know \u2014 your feedback helps the kitchen team tighten their morning service. Open the booking below and tap the rate-this-meal card on the breakfast section.")}
+      ${card("What happened", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", bookingRef2)}
+        ${row("Service date", slotDate)}
+        ${row("Meal", mealLabel)}
+        ${row("Served at", occurredAtIso)}
+      </table>`)}
+    `,
+    ctaLabel: "Rate this meal",
+    ctaUrl: ratingUrl,
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+async function sendLateServedTrigger(booking, slotEntry, occurredAtIso) {
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
+  await sendEmail(
+    booking.guestEmail,
+    `[${hotel_config_default.brandName}] Late served \u2014 please rate your meal`,
+    lateServedEmail(booking, slotEntry, occurredAtIso),
+    void 0,
+    banner
+  );
+}
 async function getTomorrowConfirmedBookings() {
   const { manilaDate } = getManilaDateInfo(hotel_config_default.timezone);
   const start = new Date(manilaDate);
@@ -228549,9 +228576,9 @@ async function handleEmailPreview(req, res) {
           roomCount: 3,
           activeRoomCount: 2,
           rooms: [
-            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 7200 },
-            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
-            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasBreakfast: true, totalPrice: 9800 }
+            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 7200 },
+            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
+            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasAnyBreakfast: true, totalPrice: 9800 }
           ],
           cancellationReason: "Guest requested partial cancellation.",
           cancellationSource: "guest"
@@ -229528,35 +229555,9 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
   }
   const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
   const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
-  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite2(line.amount) * addOnRatio * 100) / 100 })) : booking.hasBreakfast ? [{
-    label: "Breakfast add-on",
-    amount: calculateBreakfastAddOn({
-      hasBreakfast: booking.hasBreakfast,
-      breakfastRate: booking.breakfastRate,
-      numGuests: booking.numGuests,
-      numNights: nights,
-      // Per EXB-12 (2026-08-06, per decision #199):
-      // pass the extra-bed breakfast fields from
-      // the booking doc so the rebuild matches the
-      // create-time total. Nullish → no extra-bed
-      // breakfast (back-compat with older docs).
-      extraBedCount: booking.extraBedCount,
-      extraBedBreakfast: booking.extraBedBreakfast === true
-    })
-  }] : [];
+  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite2(line.amount) * addOnRatio * 100) / 100 })) : [];
   const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite2(booking.ratePerNight) * originalNights;
-  const originalAddOns = existing?.addOns ?? (booking.hasBreakfast ? [{
-    label: "Breakfast add-on",
-    amount: calculateBreakfastAddOn({
-      hasBreakfast: booking.hasBreakfast,
-      breakfastRate: booking.breakfastRate,
-      numGuests: booking.numGuests,
-      numNights: originalNights,
-      // Per EXB-12: same as above.
-      extraBedCount: booking.extraBedCount,
-      extraBedBreakfast: booking.extraBedBreakfast === true
-    })
-  }] : []);
+  const originalAddOns = existing?.addOns ?? [];
   const originalPricing = composeRateBreakdown({
     roomLines: existing?.roomLines || roomLines,
     roomSubtotal: originalRoomSubtotal,
@@ -229921,7 +229922,7 @@ function buildCreateEmailView(args) {
   const children = args.finalRooms.map((room, index) => {
     const typeEntry = args.roomTypes.find((type) => type && type.value === room.roomType);
     const roomName = typeEntry?.label || typeEntry?.shortLabel || room.roomType;
-    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0, finalHasBreakfast: false };
+    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0 };
     return {
       id: room.bookingId,
       bookingRef: args.finalBookingRefs[index] || "",
@@ -229933,7 +229934,13 @@ function buildCreateEmailView(args) {
       numAdults: room.numAdults,
       numChildren: room.numChildren,
       extraBedCount: room.extraBedCount,
-      hasBreakfast: pricing.finalHasBreakfast,
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag
+      // is deleted from the create-write. The new meal-based
+      // model writes `breakfastSelections` +
+      // `breakfastTotal` directly (the room's per-child
+      // breakfast state lives on the snapshot map stamped
+      // later in the create transaction).
       ratePerNight: pricing.activeRoomRate,
       totalPrice: room.totalPrice,
       rateBreakdown: pricing.rateBreakdown,
@@ -230295,19 +230302,18 @@ var publicRoomSelectionSchema = external_exports.object({
   numAdults: external_exports.coerce.number().int().min(0).max(100),
   numChildren: external_exports.coerce.number().int().min(0).max(100),
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
-  hasBreakfast: external_exports.boolean(),
-  breakfastIncludesChildren: external_exports.boolean().optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // per-room opt-in for breakfast on the extra-bed
-  // occupant(s). The client sends this from the
-  // per-type toggle in the Extras sub-section (or
-  // always, even when false — the strict schema
-  // would otherwise reject every booking because
-  // EXB-12's body always includes the field).
-  // The server enforces the invariant
-  // `extraBedBreakfast implies extraBedCount > 0`
-  // in the `validatedRoomStays` loop below.
-  extraBedBreakfast: external_exports.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` +
+  // `extraBedBreakfast: boolean` per-room fields are
+  // deleted from the public-room-selection schema. The
+  // new meal-based model carries breakfast intent in the
+  // request body's root-level `breakfastSelections`
+  // record (validated by `breakfastSelectionsSchema`)
+  // and applies it uniformly to every room in the booking
+  // — per-room flags are gone. The `extraBedCount` field
+  // stays (it's still a per-room physical-occupancy value,
+  // independent of breakfast).
   // Per SR-01..05 (2026-10-12): the per-room
   // bed-set-up choice. Empty string means
   // "no preference" (the guest left the
@@ -230348,14 +230354,15 @@ var createBookingSchema = external_exports.object({
   checkIn: external_exports.string().trim().min(1).max(40),
   checkOut: external_exports.string().trim().min(1).max(40),
   guests: external_exports.number().finite().int().min(1).max(100),
-  hasBreakfast: external_exports.boolean(),
-  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-  // the server snapshots the admin default from
-  // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-  // and writes the result to the booking doc alongside
-  // `hasBreakfast`. `true` is the safe default (matches the
-  // historical "children pay the full rate" math).
-  breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` pair is deleted
+  // from the create-booking schema. The new meal-based
+  // model carries breakfast intent in the request body's
+  // optional `breakfastSelections` field (validated by
+  // `breakfastSelectionsSchema`); the legacy "include
+  // children in breakfast" toggle is gone (every guest —
+  // adult or child — is an ordinary meal slot in Step 2).
   // Per CHD-01 (2026-08-01, per decision #144): the
   // adults/children split. Both optional — when absent,
   // the server derives `numAdults = guests`, `numChildren
@@ -230373,17 +230380,13 @@ var createBookingSchema = external_exports.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // top-level extra-bed breakfast toggle. The client
-  // always sends it (defaults to `false` from
-  // `bookingRoomCart.ts:63`), so the strict schema
-  // must accept the field. The server-side
-  // authoritative value lives on each
-  // `roomSelections[i].extraBedBreakfast` (per-room
-  // pricing + invariant enforcement); this top-level
-  // field is accepted for wire back-compat with the
-  // EXB-12 client shape and otherwise unused.
-  extraBedBreakfast: external_exports.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy top-level `extraBedBreakfast: boolean` toggle
+  // is deleted from the create-booking schema. Extra-bed
+  // occupants are ordinary meal slots in Step 2 (the
+  // per-meal picker). The room-level `extraBedCount`
+  // (line above) stays — it's still a per-room physical
+  // occupancy value independent of breakfast.
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -230539,7 +230542,15 @@ async function handleCreateBooking(req, res) {
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+    // legacy `hasBreakfast: boolean` +
+    // `breakfastIncludesChildren: boolean` pair is gone
+    // from the create handler's body destructure. The new
+    // meal-based model carries breakfast intent in the
+    // optional `breakfastSelections` field (validated by
+    // `breakfastSelectionsSchema`); the create transaction
+    // reads it below and stamps `breakfastSelections` +
+    // `breakfastTotal` onto the booking doc.
     // Per CHD-01 (2026-08-01, per decision #144): the
     // adults/children split. Both optional — when absent,
     // the server derives `numAdults = guests`, `numChildren
@@ -230553,14 +230564,6 @@ async function handleCreateBooking(req, res) {
     // (CHD-07 follow-up).
     numAdults: requestedNumAdults,
     numChildren: requestedNumChildren,
-    // Per CHD-10 (2026-07-31, per CVQ-01): the optional per-booking
-    // override for "include children in the breakfast charge". When
-    // undefined, the server snapshots the admin default from
-    // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-    // inside the create transaction. Storing the result on the
-    // booking doc means a later policy change never rewrites an
-    // existing bill.
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
     // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
     // absent, treated as 0. Bounded server-side by the room type's
     // `maxExtraBeds` (a booking with `extraBedCount > maxExtraBeds`
@@ -230613,8 +230616,16 @@ async function handleCreateBooking(req, res) {
     numAdults: selection.numAdults,
     numChildren: selection.numChildren,
     extraBedCount: selection.extraBedCount || 0,
-    hasBreakfast: selection.hasBreakfast,
-    breakfastIncludesChildren: selection.breakfastIncludesChildren,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy per-room `hasBreakfast` +
+    // `breakfastIncludesChildren` + `extraBedBreakfast`
+    // flags are deleted from the room-selection
+    // normalization. The new meal-based model carries
+    // breakfast intent in the request body's root-level
+    // `breakfastSelections` record (validated by
+    // `breakfastSelectionsSchema`); the create
+    // transaction reads it below and stamps per-room
+    // snapshots via the rate-breakdown builder.
     // Per SR-01..05 (2026-10-12): the per-room
     // bed-set-up choice. Empty string means
     // "no preference" (the guest left the
@@ -230628,8 +230639,14 @@ async function handleCreateBooking(req, res) {
     numAdults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
     numChildren: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
     extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0)),
-    hasBreakfast,
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` field is
+    // deleted from the room-selection normalization.
+    // The breakfast data is carried by the root-level
+    // `breakfastSelections` record (validated by
+    // `breakfastSelectionsSchema`); the create
+    // transaction reads it below and stamps per-room
+    // snapshots via the rate-breakdown builder.
     // Per SR-01..05 (2026-10-12): the corporate
     // path sends `bedSetup` at the top level;
     // mirror it onto every room (the corporate
@@ -230717,9 +230734,7 @@ async function handleCreateBooking(req, res) {
       quantity: 1,
       adults: selection.numAdults,
       children: selection.numChildren,
-      extraBeds: selection.extraBedCount,
-      hasBreakfast: selection.hasBreakfast,
-      breakfastIncludesChildren: selection.breakfastIncludesChildren
+      extraBeds: selection.extraBedCount
     })),
     checkIn: String(checkIn || "").trim(),
     checkOut: String(checkOut || "").trim(),
@@ -231013,10 +231028,9 @@ async function handleCreateBooking(req, res) {
       assignedRoomNumber = String(roomData.roomNumber || "");
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
-      const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== void 0 ? requestedBreakfastIncludesChildren : breakfastIncludesChildrenDefault;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate2 = 0;
+      const breakfastIncludesChildrenDefault = true;
       const validatedBreakfastSelections = validateBreakfastSelections({
         selections: body.breakfastSelections,
         breakfastConfig,
@@ -231055,20 +231069,13 @@ async function handleCreateBooking(req, res) {
             requestedRoomSelections?.length ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra bed(s), but only ${extraBedCount2} selected.` : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount2} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
-        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount2 > 0;
         return {
           ...assignedRoom,
           numAdults: numAdults2,
           numChildren: numChildren2,
           numGuests: numAdults2 + numChildren2,
           extraBedCount: extraBedCount2,
-          extraBedRate: extraBedCount2 > 0 ? Math.max(0, Number(selectionType.extraBedRate) || 0) : 0,
-          // Per EXB-12: snapshot the breakfast-for-extra-beds
-          // toggle onto the validated stay. The pricing loop
-          // reads this to count the extra beds toward the
-          // breakfast total (same rate as adult breakfast).
-          extraBedBreakfast,
-          breakfastIncludesChildren: selection.breakfastIncludesChildren !== void 0 ? selection.breakfastIncludesChildren : breakfastIncludesChildrenDefault
+          extraBedRate: extraBedCount2 > 0 ? Math.max(0, Number(selectionType.extraBedRate) || 0) : 0
         };
       });
       const numAdults = validatedRoomStays[0].numAdults;
@@ -231188,27 +231195,8 @@ async function handleCreateBooking(req, res) {
           seasonalRateOverrides
         });
         const breakfastSelectionsActive = validatedBreakfastSelections !== null;
-        const stayHasBreakfast = breakfastSelectionsActive ? validatedBreakfastSelections.hasAny : breakfastConfig.isEnabled && stay.selection.hasBreakfast;
-        const stayBreakfastTotal = breakfastSelectionsActive ? 0 : calculateBreakfastAddOn({
-          hasBreakfast: stayHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: stay.numGuests,
-          numAdults: stay.numAdults,
-          numChildren: stay.numChildren,
-          numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren,
-          // Per EXB-12 (2026-08-06, per decision #199):
-          // when the guest opts in to breakfast for the
-          // extra-bed occupant(s), the helper counts
-          // `extraBedCount` toward the breakfast total
-          // (priced as `breakfastRate × extraBedCount ×
-          // numNights`). The toggle is per-type, snapshotted
-          // onto the validated stay above. The invariant
-          // `extraBedBreakfast implies extraBedCount > 0`
-          // is enforced above.
-          extraBedCount: stay.extraBedCount,
-          extraBedBreakfast: stay.extraBedBreakfast === true
-        });
+        const stayHasBreakfast = breakfastSelectionsActive ? validatedBreakfastSelections.hasAny : false;
+        const stayBreakfastTotal = 0;
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
           extraBedRate: stay.extraBedRate,
@@ -231649,6 +231637,18 @@ async function handleCreateBooking(req, res) {
         //     read site can switch on `breakfastSelections`
         //     being a non-null object. The legacy fields
         //     are NOT written when the new shape is used.
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` +
+        // `breakfastIncludesChildren: boolean` pair is gone
+        // from the create-write. When the new rich
+        // `breakfastSelections` shape is in use, only the
+        // new fields are written. When no
+        // `breakfastSelections` is provided (no breakfast
+        // was selected), no legacy or new fields are
+        // written — `breakfastSelections` reads as
+        // `undefined` on the doc and `breakfastTotal` is
+        // implicitly 0.
         ...validatedBreakfastSelections !== null ? {
           breakfastSelections: validatedBreakfastSelections.entries,
           hasAnyBreakfast: validatedBreakfastSelections.hasAny,
@@ -231656,18 +231656,7 @@ async function handleCreateBooking(req, res) {
           // (denormalized); expose the same value the
           // chain saw.
           breakfastTotal: validatedBreakfastSelections.total
-        } : {
-          hasBreakfast: finalHasBreakfast,
-          breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
-          // Per CHD-10 (2026-07-31, per CVQ-01): the
-          // snapshotted "include children in breakfast"
-          // flag. Written to the booking doc so a
-          // later policy change never rewrites an
-          // existing bill. Math consumers (the helper,
-          // the receipt PDF, the rate breakdown) read
-          // this field.
-          breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false
-        },
+        } : {},
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
         // snapshotted at booking time so a later rate change never
@@ -231981,19 +231970,32 @@ async function handleCreateBooking(req, res) {
             originalTotalPrice: pricingForRoom.subtotal,
             rateBreakdown: pricingForRoom.rateBreakdown,
             voucherDiscount: pricingForRoom.voucherDiscount,
-            hasBreakfast: pricingForRoom.finalHasBreakfast,
-            breakfastRate: pricingForRoom.finalHasBreakfast ? actualBreakfastRate : 0,
-            breakfastIncludesChildren: pricingForRoom.finalHasBreakfast ? pricingForRoom.breakfastIncludesChildren : false,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast: boolean` +
+            // `breakfastRate: number` +
+            // `breakfastIncludesChildren: boolean` pair is
+            // deleted from the create-write. The per-room
+            // breakfast data is carried by the new rich
+            // `breakfastSelections` shape stamped onto the
+            // doc header (above), or by the `breakfastTotal`
+            // denormalized field for folio math. The legacy
+            // fallback to "no breakfast" is the empty object
+            // (no fields written).
+            ...validatedBreakfastSelections !== null ? {
+              breakfastSelections: validatedBreakfastSelections.entries,
+              breakfastTotal: validatedBreakfastSelections.total
+            } : {},
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
-            // Per EXB-12 (2026-08-06, per decision #199):
-            // snapshot the extra-bed breakfast toggle onto
-            // the booking doc. The invariant
-            // `extraBedBreakfast implies extraBedCount > 0`
-            // is enforced in the validatedRoomStays loop
-            // above. Absent → `false` (no breakfast for extra
-            // beds) for back-compat with older booking docs.
-            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy EXB-12 `extraBedBreakfast: boolean`
+            // toggle is deleted from the create-write. Extra-bed
+            // occupants are ordinary meal slots in Step 2 (the
+            // per-meal picker) — the per-room breakfast intent is
+            // carried by `breakfastSelections` (stamped above).
+            // The invariant `extraBedCount > 0` (the only check
+            // that survives the close-out) is enforced in the
+            // validatedRoomStays loop above.
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
@@ -232069,7 +232071,6 @@ async function handleCreateBooking(req, res) {
           numAdults: pricing.numAdults,
           numChildren: pricing.numChildren,
           extraBedCount: pricing.extraBedCount,
-          hasBreakfast: pricing.finalHasBreakfast,
           totalPrice: pricing.totalPrice
         };
       });
@@ -232358,11 +232359,14 @@ async function handleCreateWalkin(req, res) {
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
-    // Per CHD-10: walk-ins are staff-created. The breakfast toggle
-    // is snapshotted from the admin default (no per-booking override
-    // on the walk-in surface).
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` flat-rate flag is
+    // removed from the walk-in create path. Walk-ins that
+    // want breakfast must send the rich `breakfastSelections`
+    // shape — the per-meal sum becomes `booking.breakfastTotal`.
+    // The variable below (`breakfastTotal: 0`) was the
+    // legacy default; now it's the unconditional default
+    // when no selections are provided.
     // Per EXB-01: extra-bed count. Optional — walk-in defaults to
     // 0 when absent. Bounded by the room type's `maxExtraBeds`.
     extraBedCount: requestedExtraBedCount,
@@ -232703,9 +232707,9 @@ async function handleCreateWalkin(req, res) {
       }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate2 = 0;
+      const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
       const walkinPerRoomExtraBeds = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
@@ -232754,7 +232758,6 @@ async function handleCreateWalkin(req, res) {
           );
         }
       }
-      const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
       const walkinRoomStayPricing = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
         const lineRoomBreakdown = calculateSeasonalAwareRoomBreakdown({
@@ -232765,13 +232768,7 @@ async function handleCreateWalkin(req, res) {
           weekendRate: Number(lineTypeEntry.weekendRate) || 0,
           seasonalRateOverrides
         });
-        const lineBreakfastTotal = calculateBreakfastAddOn({
-          hasBreakfast: finalHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: assigned.numAdults + assigned.numChildren,
-          numNights,
-          breakfastIncludesChildren
-        });
+        const lineBreakfastTotal = 0;
         const lineExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
           extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
@@ -233003,13 +233000,21 @@ async function handleCreateWalkin(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastRate: number` write is
+        // removed from the walk-in booking doc. Walk-ins
+        // that want breakfast must send the rich
+        // `breakfastSelections` shape — the per-meal sum
+        // becomes `booking.breakfastTotal` via the
+        // `calculateBreakfastMealsTotal` helper. The
+        // `finalHasBreakfast` derivation above is now
+        // dead; the variable is retained only as a
+        // type-system placeholder for downstream
+        // consumers.
         // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
         // "include children in breakfast" flag. Same shape as
         // the online-create path; walk-in + corporate inquiry
         // surfaces don't expose a per-booking override.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate for the walk-in (which also covers the
         // corporate inquiry conversion). Same shape as the
@@ -236186,7 +236191,6 @@ async function enrichAndRespond(res, bookingData2) {
       rateBreakdown: bookingData2.rateBreakdown || null,
       paymentMethod: bookingData2.paymentMethod,
       status: bookingData2.status,
-      hasBreakfast: bookingData2.hasBreakfast,
       specialRequests: bookingData2.specialRequests || ""
     }
   });
@@ -236215,7 +236219,14 @@ function buildReservationLookupView(reservation, children, anchorRoomData, ancho
       numAdults: Number(child.numAdults || 0),
       numChildren: Number(child.numChildren || 0),
       extraBedCount: Number(child.extraBedCount || 0),
-      hasBreakfast: Boolean(child.hasBreakfast),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag is
+      // removed; the lookup view carries the BR-01
+      // `breakfastTotal` stamp + the per-slot
+      // `breakfastSelections` map so the page can render
+      // the new model end-to-end without the legacy gate.
+      breakfastTotal: Number(child.breakfastTotal || 0),
+      breakfastSelections: child.breakfastSelections && typeof child.breakfastSelections === "object" ? child.breakfastSelections : null,
       ratePerNight: Number(child.ratePerNight || 0),
       totalPrice: Number(child.totalPrice || 0),
       status: child.status,
@@ -236657,19 +236668,9 @@ async function handleRescheduleBooking(req, res) {
         seasonalRateOverrides
       });
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
-      const preservedExtraBedBreakfast = booking.extraBedBreakfast === true;
-      const breakfastTotal = manualNightlyRate === null ? calculateBreakfastAddOn({
-        hasBreakfast: booking.hasBreakfast,
-        breakfastRate,
-        numGuests: booking.numGuests,
-        numNights,
-        breakfastIncludesChildren: booking.breakfastIncludesChildren,
-        extraBedCount: preservedExtraBedCount,
-        extraBedBreakfast: preservedExtraBedBreakfast
-      }) : 0;
+      const breakfastTotal = manualNightlyRate === null ? Number(booking.breakfastTotal) || 0 : 0;
       const extraBedTotal = manualNightlyRate === null ? calculateExtraBedAddOn({
         extraBedCount: preservedExtraBedCount,
         extraBedRate: preservedExtraBedRate,
@@ -237003,13 +237004,13 @@ async function handleExtendStay(req, res) {
   }
   const {
     bookingId,
-    bookingRef,
+    bookingRef: bookingRef2,
     guestEmail,
     token: token2,
     checkOut,
     reason
   } = req.body || {};
-  if (!bookingRef || !guestEmail && !token2 || !checkOut) {
+  if (!bookingRef2 || !guestEmail && !token2 || !checkOut) {
     return res.status(400).json({
       success: false,
       error: "Booking reference, email or token, and new check-out date are required."
@@ -237231,18 +237232,7 @@ async function handleAddRoomToReservation(req, res) {
         seasonalRateOverrides
       });
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() || {} : {};
-      const breakfastRate = Number(breakfastConfig.ratePerPersonPerNight) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const hasBreakfast = Boolean(reservation.hasBreakfast ?? false);
-      const breakfastIncludesChildren = reservation.breakfastIncludesChildren ?? true;
-      const breakfastTotal = hasBreakfast ? calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate,
-        numGuests: numAdults + numChildren,
-        numNights: headerNumNights,
-        breakfastIncludesChildren
-      }) : 0;
+      const breakfastTotal = Number(reservation.breakfastTotal) || 0;
       const extraBedRate = Number(targetTypeEntry.extraBedRate) || 0;
       const extraBedTotal = extraBedCount > 0 ? extraBedCount * extraBedRate * headerNumNights : 0;
       const subtotal = roomTotal + breakfastTotal + extraBedTotal;
@@ -237355,30 +237345,18 @@ async function handleAddRoomToReservation(req, res) {
         // Per CHD-10 (2026-07-31, per CVQ-01): the
         // snapshotted `breakfastIncludesChildren`
         // value the new child inherits from the
-        // header (the per-room override is out of
-        // scope for MRB-14 v1). `true` is the safe
-        // default for legacy reservations that
-        // pre-date the CHD-10 snapshot — matches the
-        // historical "children pay the full rate"
-        // math. The create + walkin paths write the
-        // same field; the add-room path pre-v0.264.8
-        // silently dropped it (silent data loss for
-        // any future read site that checks
-        // `booking.breakfastIncludesChildren === true`).
-        breakfastIncludesChildren: Boolean(reservation.breakfastIncludesChildren ?? true),
-        // Per EXB-12 (2026-08-06, per decision #199):
-        // the snapshotted `extraBedBreakfast` toggle
-        // the new child inherits. The current
-        // add-room admin UI doesn't expose the
-        // toggle yet (consistent with the walkin
-        // admin surface per the EXB-12 spec — a
-        // future UX work item), so the value is
-        // `false` for every new child created via
-        // add-room until the UI is updated. The
-        // create + walkin paths write the same
-        // field; the add-room path pre-v0.264.8
-        // silently dropped it.
-        extraBedBreakfast: false,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastIncludesChildren: boolean`
+        // flat-rate field is removed. The "include
+        // children in breakfast" toggle is gone (every
+        // guest is an ordinary meal slot in the new
+        // `breakfastSelections` map — no parent /
+        // children distinction). The add-room path
+        // doesn't expose the toggle (a future UX work
+        // item, per the EXB-12 spec) — the new child
+        // carries no legacy `breakfastIncludesChildren`
+        // field; the per-meal math runs through the new
+        // `breakfastSelections` picker instead.
         checkIn: Timestamp.fromDate(headerCheckIn),
         checkOut: Timestamp.fromDate(headerCheckOut),
         numNights: headerNumNights,
@@ -237412,8 +237390,15 @@ async function handleAddRoomToReservation(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast,
-        breakfastRate,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` flat-rate fields are
+        // removed from the booking-doc write. The new
+        // child carries `breakfastTotal: number` (the
+        // sum of `breakfastSelections[key].price`) —
+        // any breakfast that the staff add-room path
+        // brings in is added via the new per-meal
+        // picker, not a legacy boolean toggle.
         breakfastTotal,
         reminderSentAt: null,
         guestIdPhotoUrl: null,
@@ -238212,9 +238197,7 @@ async function handleConvertInquiryToBooking(req, res) {
       }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
-      const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false };
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
       const hasExplicitOverride = ratePerNightOverride !== void 0 && ratePerNightOverride !== null;
@@ -238266,6 +238249,7 @@ async function handleConvertInquiryToBooking(req, res) {
       }
       const bookingRef2 = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef2;
+      const finalHasBreakfast = false;
       const roomTotal = ratePerNight * numNights;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       finalTotalPrice = roomTotal + breakfastTotal;
@@ -238358,8 +238342,17 @@ async function handleConvertInquiryToBooking(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` flat-rate fields are
+        // removed from the corporate-inquiry-conversion
+        // booking-doc write. The new conversion creates a
+        // breakfast-free booking by default
+        // (`breakfastTotal: 0` + `hasAnyBreakfast: false`).
+        // Catering is negotiated separately per the corporate
+        // group's contract; staff add breakfast later via the
+        // booking drawer's breakfast section.
+        breakfastTotal: 0,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -238660,7 +238653,14 @@ function projectStay(bookingDoc) {
     numNights: Number(data.numNights || 0),
     totalPrice: Number(data.totalPrice || 0),
     status: data.status || "",
-    hasBreakfast: Boolean(data.hasBreakfast),
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` is removed. The
+    // My Stays card derives the breakfast pill from
+    // `breakfastSelections` (a non-empty map of non-removed
+    // entries = a breakfast on file). Carry the map
+    // through so the client doesn't have to round-trip
+    // the booking doc.
+    breakfastSelections: data.breakfastSelections && typeof data.breakfastSelections === "object" ? data.breakfastSelections : null,
     earlyCheckIn: data.earlyCheckIn || null
   };
 }
@@ -238851,77 +238851,8 @@ async function handleRedeemMemberPoints(req, res) {
   }
   try {
     const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed2.data;
-<<<<<<< HEAD
-    let responseData = {};
-    await adminDb.runTransaction(async (transaction) => {
-      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef2);
-      if (!bookingDoc.exists) {
-        throw new Error("Booking not found.");
-      }
-      const booking = bookingDoc.data();
-      if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
-        throw new Error("Points can only be redeemed before check-in.");
-      }
-      if ((booking.pointsRedeemed || 0) > 0) {
-        throw new Error("This booking already has a points redemption.");
-      }
-      const memberId = requestedMemberId || booking.memberId;
-      if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
-        throw new Error("Booking is not linked to this member.");
-      }
-      const memberRef = adminDb.collection("members").doc(memberId);
-      const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
-      const memberDoc = await transaction.get(memberRef);
-      const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
-      if (!memberDoc.exists) {
-        throw new Error("Member not found.");
-      }
-      const member = memberDoc.data();
-      if (member.isActive === false || member.isMember === false) {
-        throw new Error("Member account is not active.");
-      }
-      const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
-      if (pointsRedemptionRate <= 0) {
-        throw new Error("Points redemption is not configured.");
-      }
-      const validation = validatePointsRedemption(pointsToRedeem, Number(member.rewardsPoints || 0), pointsRedemptionRate);
-      if (!validation.valid) {
-        throw new Error(validation.error);
-      }
-      const redemptionValue = Math.round(validation.value);
-      if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
-        throw new Error("Points redemption value exceeds the booking total.");
-      }
-      const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
-      const rateBreakdown = rebuildRateBreakdown(booking, {
-        pointsRedeemedValue: redemptionValue,
-        finalTotal: nextTotalPrice
-      });
-      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
-      transaction.update(bookingRef2, {
-        memberId,
-        totalPrice: nextTotalPrice,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        pointsRedeemedBy: staff.uid,
-        pointsRedeemedAt: now,
-        ...rateBreakdown ? { rateBreakdown } : {},
-        updatedAt: now
-      });
-      transaction.update(memberRef, {
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
-        updatedAt: now
-      });
-      transaction.set(historyRef, {
-        type: "redeem",
-        points: -pointsToRedeem,
-        description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
-        reason: "Points redeemed by staff",
-=======
     const result = await adminDb.runTransaction(async (transaction) => {
       return applyPointsRedemption(transaction, {
->>>>>>> origin/dev
         bookingId,
         memberId: requestedMemberId,
         pointsToRedeem,
@@ -238940,8 +238871,8 @@ async function handleRedeemMemberPoints(req, res) {
 async function applyPointsRedemption(transaction, args) {
   const now = /* @__PURE__ */ new Date();
   const { bookingId, memberId: requestedMemberId, pointsToRedeem, appliedBy, appliedByLabel } = args;
-  const bookingRef = adminDb.collection("bookings").doc(bookingId);
-  const bookingDoc = await transaction.get(bookingRef);
+  const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+  const bookingDoc = await transaction.get(bookingRef2);
   if (!bookingDoc.exists) {
     throw new Error("Booking not found.");
   }
@@ -239006,7 +238937,7 @@ async function applyPointsRedemption(transaction, args) {
   });
   const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
   const historyReason = appliedByLabel === "staff" ? "Points redeemed by staff" : "Points redeemed by member at checkout";
-  transaction.update(bookingRef, {
+  transaction.update(bookingRef2, {
     memberId,
     totalPrice: nextTotalPrice,
     pointsRedeemed: pointsToRedeem,
@@ -241987,6 +241918,7 @@ init_zod();
 init_firestore();
 init_shared();
 init_firebase_admin();
+init_email();
 var slotKeySchema3 = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
 var markServedBodySchema = external_exports.object({
   bookingId: external_exports.string().trim().min(8).max(80),
@@ -242012,6 +241944,22 @@ async function loadServedGraceMinutes() {
   } catch {
   }
   return DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES;
+}
+async function loadCutoffConfig() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    const rawCutoff = String(source && source.cutoffTime || "").trim();
+    const rawZone = String(source && source.cutoffTimezone || "").trim();
+    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff) && rawZone.length > 0) {
+      return { cutoffTime: rawCutoff, cutoffTimezone: rawZone };
+    }
+  } catch {
+  }
+  return {
+    cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
+    cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
+  };
 }
 async function readBookingSlotEntry(bookingId, slotKey) {
   const ref = adminDb.collection("bookings").doc(bookingId);
@@ -242053,6 +242001,18 @@ async function handleMarkServed(req, res) {
   const { bookingId, slotKey, action, reason } = parsed2.data;
   const trimmedReason = String(reason || "").trim() || null;
   const graceMinutes = await loadServedGraceMinutes();
+  const { cutoffTime, cutoffTimezone } = await loadCutoffConfig();
+  const slotDate = slotKey.slice(0, 10);
+  let isLateServe = false;
+  if (action === "serve") {
+    const cutoffState = computeBreakfastCutoffState({
+      serviceDate: slotDate,
+      now: /* @__PURE__ */ new Date(),
+      cutoffTime,
+      timezone: cutoffTimezone
+    });
+    isLateServe = cutoffState.isLocked;
+  }
   const slotLookup = await readBookingSlotEntry(bookingId, slotKey);
   if (!slotLookup.ok) {
     if (slotLookup.code === "NOT_FOUND") {
@@ -242118,7 +242078,15 @@ async function handleMarkServed(req, res) {
           },
           actorUid: staff.uid,
           actorRole: staff.role,
-          reasonOrCutoff: false
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // late serves (a serve action after the per-date
+          // cutoff window) carry `true` so the audit doc
+          // stamps `occurredAfterCutoff: true`. The kitchen
+          // list's "Late changes" column (BR-07) and the new
+          // late-served guest email both read this flag.
+          // On-time serves (`isLocked === false`) keep the
+          // historical `false` (no flag).
+          reasonOrCutoff: isLateServe
         });
         resultPayload = {
           servedAt: now,
@@ -242204,6 +242172,38 @@ async function handleMarkServed(req, res) {
   }
   if (opError) {
     return res.status(opError.status).json({ success: false, error: opError.error });
+  }
+  if (isLateServe && action === "serve") {
+    try {
+      const detail = await adminDb.collection("bookings").doc(bookingId).get();
+      const data = detail.exists ? detail.data() || {} : {};
+      const guestEmail = String(data.guestEmail || "").trim();
+      if (guestEmail) {
+        const slotEntry = {
+          slotKey,
+          mealId: String(selection.mealId),
+          mealName: String(selection.mealName),
+          price: Number(selection.price || 0)
+        };
+        const occurredAtIso = (/* @__PURE__ */ new Date()).toISOString();
+        await sendLateServedTrigger(
+          {
+            id: bookingId,
+            bookingRef: data.bookingRef || data.reservationRef || bookingId,
+            reservationRef: data.reservationRef || null,
+            guestEmail,
+            guestName: data.guestName || "",
+            isTestData: data.isTestData === true,
+            testRunName: typeof data.testRunName === "string" ? data.testRunName : void 0,
+            testRunEnvironment: data.testRunEnvironment === "staging" || data.testRunEnvironment === "production" ? data.testRunEnvironment : void 0
+          },
+          slotEntry,
+          occurredAtIso
+        );
+      }
+    } catch (err) {
+      console.error("[breakfast-mark-served] late-served email failed:", err?.message || err);
+    }
   }
   return res.status(200).json({ success: true, data: resultPayload });
 }

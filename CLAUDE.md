@@ -57,6 +57,8 @@ Load only the bundle for your task type — do not read all MDs.
 | Booking data model / multi-room refactor (BAR) | `plan/features/BOOKING-UNIFIED.md` + `plan/docs/BACKEND.md` + `plan/docs/TYPES.md` |
 | Corporate booking | `plan/features/CORPORATE-BOOKING.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
 | Vouchers | `plan/features/VOUCHERS.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
+| Breakfast (any surface) | `plan/features/BREAKFAST.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
+| Special requests / bed setup | `plan/features/SPECIAL-REQUESTS.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
 | Email / PDF | `plan/features/EMAIL-PDF-STORAGE.md` + `plan/docs/API-ROUTES.md` |
 | Security / PII / compliance | `plan/docs/SECURITY.md` + `plan/docs/GOTCHAS.md` + `plan/docs/DECISIONS-FEATURES.md` |
 | New feature / architecture | `plan/docs/DECISIONS-ARCH.md` + `plan/docs/GOTCHAS.md` |
@@ -128,6 +130,8 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/STORE-MANAGEMENT.md` — catalog management, order processing, store reports
 
 ### plan/features/ — Cross-cutting
+- `plan/features/BREAKFAST.md` — Breakfast redesign (BR-01..BR-08, shipped 2026-10-14 at `2.0.0`): per-date × per-guest meal model, cut-off + served state, kitchen list, refund liability; supersedes the legacy flat-rate toggle
+- `plan/features/SPECIAL-REQUESTS.md` — Structured guest preferences + bed-setup capture (SR-01..05, shipped 2026-10-12)
 - `plan/features/SEO-OPENGRAPH.md` — Search indexability (Google/Bing/Yahoo) + link-preview cards (Facebook/Messenger/WhatsApp/Viber/X): robots, sitemap, OG image, per-route meta, JSON-LD
 - `plan/features/BOOKING-UNIFIED.md` — BAR-01 booking data-model refactor (rooms denormalized into the booking doc) — deferred spec; tasks in `plan/project/ROADMAP.md §BAR` · BAR-02 (derive counters) + BAR-03 (FOL-05 sibling-flip helper) shipped 2026-08-08; see `plan/docs/DECISIONS-FEATURES.md #203` + `#204`
 - `plan/features/AVAILABILITY-LOCKING.md` — Double-booking prevention, Firestore transactions

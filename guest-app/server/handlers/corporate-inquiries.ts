@@ -353,6 +353,10 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       finalBookingRef = bookingRef;
 
       // 7. Totals
+      // Per BR-08 (decision #238, 2026-10-14): corporate inquiry
+      // conversion no longer carries breakfast (groups negotiate
+      // catering separately). hasAnyBreakfast is always false.
+      const finalHasBreakfast = false;
       const roomTotal = ratePerNight * numNights;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       finalTotalPrice = roomTotal + breakfastTotal;

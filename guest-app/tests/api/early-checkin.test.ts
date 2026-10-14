@@ -18,7 +18,10 @@ describe("RewardsPage.tsx — early check-in real submission (decision #92)", ()
 
   it("does not query the staff-only bookings collection from the guest client", () => {
     expect(src).not.toMatch(/collection\(db,\s*["']bookings["']\)/);
-    expect(src).not.toMatch(/where\(['"]memberId['"]/);
+    // The vouchers feature (Phase 5) queries collection(db, "vouchers")
+    // with where("memberId"...) — that is guest-safe and expected.
+    // Guard specifically against a bookings query with memberId.
+    expect(src).not.toMatch(/collection\(db,\s*["']bookings["']\).*\?.*where\(["']memberId["']/s);
   });
 
   it("has an UpcomingBooking interface that matches the member stays response shape", () => {

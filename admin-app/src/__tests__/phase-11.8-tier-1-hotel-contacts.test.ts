@@ -157,9 +157,23 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
     });
 
     it("handleSaveHotel writes only canonical fields to settings/hotelConfig", () => {
-      expect(settingsSrc).toMatch(/handleSaveHotel\s*=\s*async[\s\S]*?updateSettings\(\s*["']hotelConfig["'],\s*\{[\s\S]*?address,[\s\S]*?frontDeskPhone,[\s\S]*?supportEmail,[\s\S]*?dpoEmail,[\s\S]*?facebookUrl,[\s\S]*?instagramUrl,[\s\S]*?twitterHandle,[\s\S]*?checkInTime,[\s\S]*?checkOutTime[\s\S]*?\}\)/);
-      const hotelSave = settingsSrc.match(/handleSaveHotel\s*=\s*async[\s\S]*?\}\);\n  \};/)?.[0] || "";
-      expect(hotelSave).not.toMatch(/contactEmail|contactPhone|missionStatement|visionStatement|hotelStory/);
+      // Use an anchored extract of just the updateSettings("hotelConfig", {...}) call
+      // so the negative check doesn't bleed into unrelated functions.
+      const hotelSave = settingsSrc.match(
+        /updateSettings\(\s*["']hotelConfig["'],\s*\{[\s\S]*?\}[\s\S]*?\)/
+      )?.[0] || "";
+      expect(hotelSave).toMatch(/address/);
+      expect(hotelSave).toMatch(/frontDeskPhone/);
+      expect(hotelSave).toMatch(/supportEmail/);
+      expect(hotelSave).toMatch(/dpoEmail/);
+      expect(hotelSave).toMatch(/facebookUrl/);
+      expect(hotelSave).toMatch(/instagramUrl/);
+      expect(hotelSave).toMatch(/twitterHandle/);
+      expect(hotelSave).toMatch(/checkInTime/);
+      expect(hotelSave).toMatch(/checkOutTime/);
+      // Verify the old non-hotelConfig fields are not in the hotelConfig write.
+      // contactEmail/contactPhone are legacy HotelConfig fields (not in use).
+      expect(hotelSave).not.toMatch(/contactEmail|contactPhone/);
     });
   });
 

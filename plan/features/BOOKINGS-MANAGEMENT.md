@@ -142,7 +142,7 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 
 ## Extend Stay (EXT-01)
 
-> Implementation: `feature/extend-stay-staff` (2026-01-27). All three deliverables shipped (EXT-01 staff + EXT-02 guest self-service + EXT-03 unavailable-room handoff). Commits `890aced` (EXT-01), `028570f` (EXT-02), `039fa42` (EXT-03 config), merged to dev @ `5712483`.
+> Implementation: `feature/extend-stay-staff` (2026-10-14). All three deliverables shipped (EXT-01 staff + EXT-02 guest self-service + EXT-03 unavailable-room handoff). Commits `890aced` (EXT-01), `028570f` / `7193f56` (EXT-02, branch + dev), `039fa42` (EXT-03 config), merged to dev @ `5712483`.
 
 ### What ships in EXT-01
 
@@ -178,10 +178,12 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 
 When a reservation has N rooms and staff extend one room, the extend form operates on the **selected room only**. The `rescheduleHistory[]` entry is per-booking (per-child room). Staff can extend each room independently by opening each room's drawer. This matches the MRB-14 "per-child" design principle.
 
-### What does NOT ship in EXT-01
+### EXT-02 + EXT-03 (guest-facing, also shipped)
 
-- **EXT-02** (guest self-service extend): the guest-facing "Extend stay" CTA on `/my-booking`. Guest can only extend if the current room is free for the new dates — no room-picking UI.
-- **EXT-03** (unavailable-room handoff): when the current room is not available for the new dates, the CTA bundle (Call / Chat / Email) routes the guest to staff instead of a room-picker.
+Both shipped on the same branch — the scope note below is retained because the *boundaries* still define them:
+
+- **EXT-02** (guest self-service extend): the guest-facing "Extend stay" CTA on `/my-booking`. Guest can only extend if the current room is free for the new dates — no room-picking UI. Ships as `POST /api/bookings/extend-stay`, Turnstile-gated.
+- **EXT-03** (unavailable-room handoff): when the current room is not available for the new dates, the CTA bundle (Call / Chat / Email) routes the guest to staff instead of a room-picker. Chat uses `intercomGuestAppId` from `hotel.config.ts` — empty value hides the chat button until populated.
 
 ---
 
