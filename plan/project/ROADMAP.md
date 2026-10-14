@@ -1,5 +1,7 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
+> Last updated: October 14, 2026 — **BR-08 close-out shipped** (`feature/breakfast-redesign` @ `9c9d016`, VERSION `2.0.0` MAJOR): the BR-08 close-out closes the loop on the 8-ticket Breakfast Redesign (BR-01..BR-08). Email / PDF / Receipt / Reports → Sales → Breakfast tab + a new "Late served — please rate" email template + close-out deletions of the legacy `Booking.hasBreakfast` / `Booking.breakfastRate` / `Booking.breakfastIncludesChildren` / `Booking.extraBedBreakfast` fields + the `PublicRoomSelection` interface + `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` constant + `calculateBreakfastAddOn` + `BreakfastAddOnInput` helper/type. 13 source-text tripwires in `shared/__tests__/br-08-closeout.test.ts` + 3 in `guest-app/tests/api/br-08-email-templates.test.ts`. Pre-existing 14 admin-app baseline failures unchanged. `feature/breakfast-redesign` is ready to merge to `dev` → `main` as the v2.0.0 release tag.
+> Last ship: October 14, 2026 (BR-08 close-out, breakfast redesign v2.0.0).
 > Last updated: October 14, 2026 — **IMT-05 shipped, IMT block COMPLETE; CRT-01 filed** (`feature/phase-12-imt-05-banner-brand-tokens`): the checkout banner is now brand-rebrandable. The active state was painted in `indigo-*`, which a grep confirmed appears in **zero** other guest-app components — an unbranded orphan, not a house convention, so a white-label client changing `colors.primary` still got a blue banner. Now on `primary*` tokens, with both CTAs routed through `primary` per the hard rule. Danger and warning surfaces stay on red/amber **on purpose**: they are state signals, not brand, and already match the app's established patterns. Measured contrast kept brand color out of body copy (2.35:1 on the light surface). 8 new pins (guest-app 2014 → 2022). **CRT-01 filed:** the app-wide `bg-primary text-white` convention is 2.58:1 and **fails WCAG AA** across ~125 uses — this banner departs from it deliberately, but a real fix needs an `onPrimary` token decision and is the owner's call.
 >
 > Previous: October 14, 2026 — **IMT block complete (IMT-01..04 + 06 shipped), IMT-05 deferred** (`feature/phase-12-imt-03-hold-extend-cta`): the guest can now press "I need more time" on the checkout banner and carry on without losing their form — on both the active and expired states, on `/book` and `/corporate/book` alike. Decision **#237** written to `DECISIONS-FEATURES.md`. Two of my own test pins were wrong and mutation testing caught both: a never-auto-invoke guard whose regex could not cross a `)`, and a live-region guard that my own explanatory comment tripped. Also fixed an accessibility defect found in passing — the countdown banner was an `aria-live` region mutating every second. +18 tests (guest-app 1997 → 2014, zero new failures vs baseline). IMT-05 (brand-tokening the banner's hardcoded indigo/red) is the only item left open and is explicitly deferrable.
@@ -73,6 +75,8 @@
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
 | 12 — Enhancements, Multi-Room & CRL | ✅ Active (MRB-01..15, CRL-01..09 shipped) | Phase 12 fully shipped; follow-ups in ETR-R + BDUX (§Phase 12 below) |
 | BAR — Booking Architecture Refactor | ✅ BAR-02 + BAR-03 shipped · BAR-01 ⏸ deferred | 2026-08-08: BAR-02 + BAR-03 both shipped (5 counter fields + `paymentStatus` mirror now derived on read; FOL-05 sibling-flip extracted to a shared helper). BAR-01 remains gated on availability moving off per-room-doc conflict checks (§BAR trigger condition 4). |
+| 13 — Guest Booking Special Requests (SR) | ✅ SR-01..05 shipped 2026-11-12 | Step 2 bed set-up + additional preferences + arrival time, off-roadmap (decision SR-01, `feature/special-requests-bed-setup`) |
+| 14 — Breakfast Redesign (BR) | ✅ BR-01..BR-08 shipped 2026-10-14 | VER `2.0.0` (MAJOR — legacy flat-rate fields cut over); see commit list + decision #238 below |
 | Plan Audits (FIN, FR, FL, PF, QA, NC, AUD, SA, FLR, PC, INC) | ✅ Closed / In Prod | 0 — details in archive |
 
 ---
@@ -648,6 +652,74 @@ The agent's initial direct-read pass had 4 errors. The subagent fan-out caught t
 ### Open SR Tasks (none)
 
 All five SR tasks are shipped on `feature/special-requests-bed-setup`. No remaining items in this block.
+
+---
+
+## Phase 14 — Breakfast Redesign (BR)
+
+> Spec: [`plan/features/BREAKFAST.md`](../features/BREAKFAST.md) · Decisions: `plan/docs/DECISIONS-FEATURES.md #231 + #238` · Owner-requested 2026-10-12, design conversation closed 2026-10-12.
+> **Status:** ✅ BR-01..BR-08 ALL shipped 2026-10-14 on `feature/breakfast-redesign` → VERSION bumped to `2.0.0` (MAJOR — legacy flat-rate fields cut over; consumer code that reads the old shape will fail at compile-time + run-time).
+
+### What this phase replaces
+
+The current breakfast model is a flat-rate toggle with a per-date/per-guest `Record<key, string>` of meal names (`Booking.hasBreakfast` + `Booking.breakfastRate` + `Booking.breakfastSelections` + `PublicRoomSelection.hasBreakfast` + `PublicRoomSelection.breakfastIncludesChildren`). The redesign:
+
+- **Removes** `hasBreakfast` (Step 1 toggle) + `breakfastRate` (flat per-guest-per-night) + `breakfastIncludesChildren` (children are now ordinary slots)
+- **Replaces** the `silogItems[]` settings array with a `meals[]` array that carries `price` + `description` + `displayOrder`
+- **Replaces** `breakfastSelections: Record<key, string>` with `Record<key, { mealId, mealName, price, addedAt, addedBy, ... }>` (price snapshot, immutable)
+- **Adds** `breakfastTotal: number` (denormalized from selections, server-recomputed)
+- **Adds** `bookings/{id}/breakfastAudit/{auditId}` subcollection (avoids the GOTCHAS fan-out-array race)
+- **Extends** `OnsitePayment.category: "cancellation" \| "breakfast"` + `breakfastRefundContext` (no new collection; reuse the existing refunds subcollection)
+- **Adds** `settings/breakfastConfig.cutoffTime` (default 20:00) + `cutoffTimezone` (defaults to `hotel.config.ts`) + `frontDeskOverrideEnabled` + `defaultMealInstructions` + `servedGraceMinutes`
+- **No new Vercel function** — all 6 new routes are handlers in the existing catch-all
+
+### Decisions locked (10 client + 5 design)
+
+1. **Migration: none** (production has zero bookings)
+2. **Discounts apply per the scope matrix** (Senior/PWD, voucher, Spark Rewards, corporate); `allowOnlineSeniorPwdClaim` toggle is the gate for online Senior/PWD claims
+3. **One meal per slot, no "No meal" placeholder** — leaving a slot empty means skip
+4. **Children + extra-bed occupants are ordinary meal slots**
+5. **Public + corporate + walk-in parity**
+6. **Always rolls into the running booking balance** (no separate online-payment moment)
+7. **Front-desk + admin can override cut-off with required reason + audit**
+8. **Hotel-wide per-meal pricing** (no per-room-type or per-season)
+9. **Snapshot immutability** — deleted menu items still show on existing bookings, tagged "(no longer offered)"
+10. **Kitchen list v1 = printable admin view** (option c); dedicated real-time display (option a) is a follow-up only if printable is insufficient after a week
+
+**Refunds:** removing a paid meal before cut-off opens a refund liability (staff records the actual refund). No email on breakfast changes. Kitchen needs a finalized list at cut-off with late changes in a separate column. Cutoff applies to add, change, AND remove. Hotel-timezone enforcement on the server.
+
+### Shipped ticket breakdown (BR-01..BR-08) — all ✅ 2026-10-14 on `feature/breakfast-redesign`
+
+- ✅ **BR-01 — Data model + shared types** (commit `5ba61a1`, decision #231, 2026-10-12) — `BreakfastConfig` (replaces legacy `breakfastConfig` with `meals[]` carrying `price` + `description` + `displayOrder`) + `BreakfastMeal` + `BreakfastSelectionEntry` (snapshots `mealId`/`mealName`/`price` per slot) + `BreakfastServedEntry` + `BreakfastAuditEntry`; updated `Booking.breakfast*` to `breakfastSelections` + `breakfastTotal`; removed `hasBreakfast` + `breakfastRate`; new Zod schemas in `shared/schemas/booking.ts`; new `computeBreakfastCutoffState` helper in `shared/utils/breakfastCutoff.ts`; new `recomputeBreakfastTotal` helper in `shared/utils/breakfastTotal.ts`; `OnsitePayment.category: "cancellation" | "breakfast"` extension.
+- ✅ **BR-02 — Admin Settings: extend the existing `breakfast` tab** (commit `c55b2eb`, 2026-10-12) — `cutoffTime` + `cutoffTimezone` + `frontDeskOverrideEnabled` + `defaultMealInstructions` inputs; `meals` table extended with `price` + `description` + `displayOrder`; legacy `ratePerPersonPerNight` + `breakfastIncludesChildrenDefault` deleted; `servedGraceMinutes` input (default 15); cutoff-change audit entry writer.
+- ✅ **BR-03 — Step 1 cleanup + Step 2 breakfast section (public + corporate)** (commit `5a40d9d`, 2026-10-12) — removed the "Room + Breakfast" toggle from Step 1; new "Breakfast" section in Step 2 with per-date × per-guest meal grid; live sidebar update with breakfast subtotal + per-date breakdown; discount application per scope matrix; Step 3 review + Step 4 confirmation render the new shape; server-side `handleCreateBooking` writes `breakfastSelections` + `breakfastTotal` + `hasAnyBreakfast`.
+- ✅ **BR-04 — Guest Manage Breakfast page** (commit `5459c39`, 2026-10-13) — new `ManageBreakfastPage.tsx` at `/my-booking/breakfast` (lookup-token-gated + Turnstile-gated); "Manage Breakfast" link on existing `/my-booking` lookup; per-date × per-guest meal grid with cutoff countdown per date (recomputed every 60s); served badge for already-served slots + "Removed on {date} by {role}" subtext; batched `POST /api/bookings/breakfast/update` (idempotent on `clientBatchId`, 60s replay window); refund-due banner when removing a paid meal.
+- ✅ **BR-05 — Staff booking-drawer breakfast section** (commit `10ee4d9`, 2026-10-13) — rewrote the "Breakfast" tab in `BookingDrawerWorkspace.tsx`; cutoff-override modal with required reason; served/un-served actions with the grace-window rule (`BreakfastConfig.servedGraceMinutes`, default 15); new routes `POST /api/bookings/breakfast/staff-update` + `POST /api/bookings/breakfast/mark-served`; walk-in modal + calendar-create modal parity.
+- ✅ **BR-06 — Refund liability + refunds subcollection extension** (commit `c15bf84`, 2026-10-13) — `OnsitePayment` writes with `category: "breakfast"` + `breakfastRefundContext`; server-side refund liability creation on paid-meal removal; Refunds page `category` filter chip + pending-refunds badge; Reports → Liability tab counts pending breakfast refunds; idempotency matches CRL-01. Followup `c083660` patches the CRL-01 `paidAmount` decrement regression.
+- ✅ **BR-07 — Kitchen list page** (commit `94595e5`, 2026-10-13) — new `KitchenListPage.tsx` at `/admin/kitchen-list`; date selector + "Finalized" + "Late changes" two-column view; per-meal expand with per-guest detail; acknowledge button per late change; print-friendly route at `/admin/kitchen-list/print?date=...`; `GET /api/bookings/breakfast/kitchen-list?date=...` route.
+- ✅ **BR-08 — Email / PDF / Receipt / Reports + close-out** (commits `a428f11` + `9c9d016`, decision #238, 2026-10-14) — `buildReservationEmailView` extended for `breakfastSelections` rich shape; `BookingRateBreakdown.breakfast` extended; the 8 W4.4 audit-extension email templates carry the new breakfast block; print-to-PDF receipt at `BookingDrawerWorkspace.tsx` now renders per-date × per-guest breakdown; Reports → Sales → Breakfast sub-tab added (5 metrics: total selections, total revenue, top meals, late-change count, pending refund liability total); new "Late served — please rate" email template fires when a serve action crosses the per-date cutoff (the audit doc's existing `occurredAfterCutoff: true` flag is the discriminator — no new `BreakfastAuditAction` enum value); close-out deletes the legacy `Booking.hasBreakfast` / `Booking.breakfastRate` / `Booking.breakfastIncludesChildren` / `Booking.extraBedBreakfast` fields + the `PublicRoomSelection` interface + the `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` constant + the `calculateBreakfastAddOn` + `BreakfastAddOnInput` helper/type. VERSION bumped MAJOR to `2.0.0` per breaking-change policy. Tripwire tests: `shared/__tests__/br-08-closeout.test.ts` (13 assertions) + `guest-app/tests/api/br-08-email-templates.test.ts` (3 assertions).
+
+### Scope shipped
+
+- ~2,265 insertions / ~1,905 deletions across 69 modified files + 2 new test files (`br-08-closeout.test.ts` + `br-08-email-templates.test.ts`)
+- 8 tickets, completed end-to-end solo in ~3 days (the 6–8 week estimate was conservative — the per-meal `breakfastSelections` map proved much simpler than the original flat-rate `breakfastRate × numGuests × numNights` math)
+- 14 admin-app + 4 shared `__tests__/` files had pre-existing failures that pre-date this branch; none new from BR-08
+- The dedicated real-time kitchen display (option a, per the spec) remains a follow-up only if the printable list is insufficient after a week of use
+
+### Open items pending client (non-blocking for spec)
+
+| # | Decision | Default if no answer |
+|---|---|---|
+| 1 | Breakfast date count for a stay | N nights → N dates (Oct 14–16 for an Oct 14–17 stay) |
+| 2 | Per-meal dietary / allergen flags | Free-text `description` field only |
+| 3 | Per-meal special instructions | Use the existing `booking.specialRequests` field |
+| 4 | Per-meal child pricing | Same as adult |
+| 5 | Served-grace window | 15 minutes, configurable |
+| 6 | Editing after checked-out | Read-only |
+| 7 | Balance formula | `totalPrice + breakfastTotal - paidAmount` |
+| 8 | `breakfastTotal` is server-recomputed | Yes, never client-written |
+| 9 | Legacy booking fallback | `{}` / `0` / `false` defaults; no data |
+| 10 | New routes are handlers in the catch-all | Yes, per `VERCEL-FUNCTION-LIMIT.md` |
 
 ---
 

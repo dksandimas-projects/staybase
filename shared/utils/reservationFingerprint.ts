@@ -36,8 +36,17 @@ export interface FingerprintableRoomLine {
   adults: number;
   children: number;
   extraBeds: number;
-  hasBreakfast?: boolean;
-  breakfastIncludesChildren?: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` pair is deleted from
+  // the reservation request fingerprint. The new fingerprint
+  // uses `breakfastSelections` (the per-room per-guest per-date
+  // meal map) — its presence + total + sorted mealId list are
+  // what makes two requests "the same breakfast choice". Two
+  // requests with different meals produce different fingerprints
+  // (the same idempotency guarantee the legacy flat-rate flags
+  // provided).
+  breakfastSelections?: Array<{ key: string; mealId: string; price: number }>;
 }
 
 export interface FingerprintableDiscountScope {
@@ -78,14 +87,33 @@ function defaultHasher(): FingerprintHasher {
 }
 
 function normalizeRoomLine(line: FingerprintableRoomLine): FingerprintableRoomLine {
+  // Per BR-08: the fingerprint of the breakfast choice is the
+  // sorted list of `${key}|${mealId}|${price}` triples. The
+  // host code (the reservation create handler) projects the
+  // `breakfastSelections` record into this array before
+  // calling `computeRequestFingerprint` — the helper itself
+  // stays oblivious to the new shape's per-meal audit
+  // metadata (`addedAt`, `addedBy`, `lastModifiedAt`, …).
+  const selections = Array.isArray(line.breakfastSelections)
+    ? line.breakfastSelections
+      .map((s) => ({
+        key: String(s.key || "").trim(),
+        mealId: String(s.mealId || "").trim(),
+        price: Math.max(0, Number(s.price) || 0)
+      }))
+      .sort((a, b) => {
+        const aKey = `${a.key}|${a.mealId}|${a.price}`;
+        const bKey = `${b.key}|${b.mealId}|${b.price}`;
+        return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+      })
+    : [];
   return {
     type: String(line.type || "").trim(),
     quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
     adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
     children: Math.max(0, Math.floor(Number(line.children) || 0)),
     extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0)),
-    hasBreakfast: Boolean(line.hasBreakfast),
-    breakfastIncludesChildren: Boolean(line.breakfastIncludesChildren)
+    breakfastSelections: selections
   };
 }
 

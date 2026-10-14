@@ -54,13 +54,15 @@ describe("dateKeyInTimeZone", () => {
 
 describe("splitBookingRevenue", () => {
   it("counts a breakfast booking exactly once across disjoint streams", () => {
+    // BR-08: replaced `hasBreakfast: true` + `breakfastRate: 250`
+    // (which produced 250 × 2 guests × 2 nights = 1000) with the
+    // snapshotted `breakfastTotal: 1000`.
     const split = splitBookingRevenue({
       totalPrice: 6_000,
       ratePerNight: 2_500,
       numNights: 2,
       numGuests: 2,
-      hasBreakfast: true,
-      breakfastRate: 250,
+      breakfastTotal: 1000,
       rateBreakdown: { roomSubtotal: 5_000 }
     });
 
@@ -74,8 +76,9 @@ describe("splitBookingRevenue", () => {
       ratePerNight: 2_500,
       numNights: 2,
       numGuests: 2,
-      hasBreakfast: true,
-      breakfastRate: 250,
+      // BR-08: replaced `hasBreakfast` + `breakfastRate`
+      // with the snapshotted `breakfastTotal`.
+      breakfastTotal: 1000,
       rateBreakdown: { roomSubtotal: 5_000 }
     });
 
@@ -94,12 +97,13 @@ describe("splitBookingRevenue", () => {
   });
 
   it("allocates discounts proportionally between room and breakfast", () => {
+    // BR-08: replaced `hasBreakfast: true` + `breakfastRate: 250`
+    // with the snapshotted `breakfastTotal: 1000`.
     const split = splitBookingRevenue({
       totalPrice: 4_800,
       numNights: 2,
       numGuests: 2,
-      hasBreakfast: true,
-      breakfastRate: 250,
+      breakfastTotal: 1000,
       rateBreakdown: { roomSubtotal: 5_000 }
     });
 
@@ -108,9 +112,13 @@ describe("splitBookingRevenue", () => {
   });
 
   it("keeps non-breakfast and malformed legacy bookings safe", () => {
-    expect(splitBookingRevenue({ totalPrice: 3_000, hasBreakfast: false })).toEqual({ room: 3_000, breakfast: 0 });
-    expect(splitBookingRevenue({ totalPrice: 3_000, hasBreakfast: true, breakfastRate: 200, numGuests: 2, numNights: 1 })).toEqual({ room: 3_000, breakfast: 0 });
-    expect(splitBookingRevenue({ totalPrice: Number.NaN, hasBreakfast: true, breakfastRate: 200 })).toEqual({ room: 0, breakfast: 0 });
+    // BR-08: replaced `hasBreakfast: false` with
+    // `breakfastTotal: 0`. The defensive NaN test
+    // passes `breakfastTotal: NaN` to exercise the
+    // helper's non-negative coercion.
+    expect(splitBookingRevenue({ totalPrice: 3_000, breakfastTotal: 0 })).toEqual({ room: 3_000, breakfast: 0 });
+    expect(splitBookingRevenue({ totalPrice: 3_000, breakfastTotal: 0, numGuests: 2, numNights: 1 })).toEqual({ room: 3_000, breakfast: 0 });
+    expect(splitBookingRevenue({ totalPrice: Number.NaN, breakfastTotal: 0 })).toEqual({ room: 0, breakfast: 0 });
   });
 });
 

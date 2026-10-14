@@ -60,8 +60,13 @@ describe("CHD-08 — report occupancy exports", () => {
     expect(reportsPageSrc).toMatch(
       /const breakfastHeaders = \[[\s\S]*?"Guests", "Adults", "Children"/
     );
+    // BR-08 (decision #238, 2026-10-14 — close-out): the
+    // Breakfast CSV export row reads the snapshotted
+    // `b.breakfastTotal` (the per-meal catalog sum), not
+    // the legacy flat-rate `b.breakfastRate`. The source
+    // text tripwire is updated to match the new shape.
     expect(reportsPageSrc).toMatch(
-      /b\.numNights, occupancy\.guests, occupancy\.adults, occupancy\.children, b\.breakfastRate/
+      /b\.numNights, occupancy\.guests, occupancy\.adults, occupancy\.children,[\s\S]*?b\.breakfastTotal/
     );
   });
 

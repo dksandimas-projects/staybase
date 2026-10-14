@@ -44,6 +44,24 @@ export * from "./utils/uploads";
 // server-side validation).
 export * from "./utils/bookingPreferences";
 
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision
+// #231, 2026-10-12): the breakfast cut-off state
+// helper (`computeBreakfastCutoffState`) + the
+// breakfast-total recompute helper
+// (`recomputeBreakfastTotal`). Both are used by the
+// guest app's Manage Booking page, the admin app's
+// booking drawer, and the server's write-side gate.
+export * from "./utils/breakfastCutoff";
+export * from "./utils/breakfastTotal";
+
+// Per BR-03 (Phase 13 — Breakfast Redesign, decision
+// #232, 2026-10-12): the public breakfast-config
+// normalizer (`normalizeBreakfastConfig`) used by
+// `GET /api/bookings/breakfast/config` to strip
+// admin-only fields before serving the config to the
+// guest app's Step 2 UI.
+export * from "./utils/breakfastConfig";
+
 // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
 // decision pending): Zod schema + inferred types for the
 // `settings/rewardsConfig` document + `LevelDef` row. Used by

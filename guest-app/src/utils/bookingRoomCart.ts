@@ -7,15 +7,15 @@ export interface BookingRoomCartItem {
   numAdults: number;
   numChildren: number;
   extraBedCount: number;
-  /**
-   * Per EXB-12 (2026-08-06, per decision #199): whether the
-   * guest wants breakfast for the extra-bed occupant(s).
-   * When `true`, all `extraBedCount` beds in this room are
-   * counted toward the breakfast total. Defaults to `false`
-   * (no breakfast for extra beds). The server validates that
-   * `extraBedBreakfast` can only be `true` when `extraBedCount > 0`.
-   */
-  extraBedBreakfast?: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy EXB-12 `extraBedBreakfast?: boolean` toggle is
+  // deleted. Extra-bed occupants are ordinary meal slots in
+  // Step 2 (the per-meal picker) — there's no extra-bed
+  // breakfast toggle to maintain on the cart shape. The
+  // `breakfastSelections` rich map (top-level state) is
+  // the single source of truth for "which meal slots the
+  // guest selected", including any extra-bed slots the
+  // guest populated.
 }
 
 export interface BookingRoomCapacity {
@@ -55,12 +55,12 @@ export function parseBookingRoomCart(value: string | null): BookingRoomCartItem[
         rateChoice: room.rateChoice as BookingRoomRateChoice,
         numAdults: Math.max(0, Math.floor(Number(room.numAdults) || 0)),
         numChildren: Math.max(0, Math.floor(Number(room.numChildren) || 0)),
-        extraBedCount: Math.max(0, Math.floor(Number(room.extraBedCount) || 0)),
-        // Per EXB-12: preserve the extra-bed breakfast toggle
-        // from the URL. Nullish / false / non-boolean → false
-        // (no breakfast for extra beds). The server enforces
-        // the invariant `extraBedBreakfast implies extraBedCount > 0`.
-        extraBedBreakfast: room.extraBedBreakfast === true
+        extraBedCount: Math.max(0, Math.floor(Number(room.extraBedCount) || 0))
+        // Per BR-08: the legacy `extraBedBreakfast` toggle
+        // is dropped from the URL cart shape. Extra-bed
+        // occupants are ordinary meal slots in Step 2
+        // — the `breakfastSelections` map is the source
+        // of truth, not the cart.
       }];
     });
   } catch {

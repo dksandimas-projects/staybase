@@ -208,14 +208,40 @@ export const ARRIVAL_WINDOW_HOURS = 24;
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
 
-// Single source of truth for the breakfast rate fallback (PHP per
-// person, per night). The live rate lives in the Firestore document
-// `settings/breakfastConfig.ratePerPersonPerNight` and is snapshotted
-// onto `booking.breakfastRate` at booking time. This constant is used
-// ONLY as the fallback when that config doc / snapshot is missing or
-// unset. Every handler and UI must reference this — never a hardcoded
-// number — so the fallback can never drift out of sync again.
-export const DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
+// 2026-10-12): the daily breakfast-order cutoff. The
+// `cutoffForDate(serviceDate)` rule is `(serviceDate − 1
+// calendar day) at DEFAULT_BREAKFAST_CUTOFF_TIME` in
+// DEFAULT_BREAKFAST_CUTOFF_TIMEZONE. The default 8:00 PM
+// was confirmed with the client during the 2026-10-12
+// design call. Live values come from
+// `settings/breakfastConfig.cutoffTime` +
+// `settings/breakfastConfig.cutoffTimezone` (added in BR-02
+// to the Settings UI); this constant is the seed for new
+// configs and the fallback when the settings doc is missing.
+export const DEFAULT_BREAKFAST_CUTOFF_TIME = "20:00";
+
+// Per BR-01: the property timezone defaults to
+// `Asia/Manila` for Bohol. The live value comes from
+// `hotel.config.ts` (already wired as the source of truth
+// for every existing hotel-scoped helper). This constant
+// is the fallback when the config is missing.
+export const DEFAULT_BREAKFAST_CUTOFF_TIMEZONE = "Asia/Manila";
+
+// Per BR-01 + Open Item #5 (decision #231): how long after
+// a meal is marked served can staff un-mark it without an
+// override reason. The recommended 15-minute default is
+// long enough to correct a mistake, short enough to keep
+// the audit trail meaningful. Configurable on
+// `BreakfastConfig.servedGraceMinutes` in BR-02.
+export const DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES = 15;
+
+// Per BR-01 + decision #231: the minimum character length
+// for a staff override reason. Five is the floor — anything
+// shorter is a "ok" / "fine" tap, not a real reason. The
+// Zod `BreakfastMealSchema.overrideReason` validator
+// (added in BR-02) and the staff-update route enforce this.
+export const MIN_BREAKFAST_OVERRIDE_REASON_LENGTH = 5;
 
 // Default perks shown on the public /corporate page (under the hero).
 // Shared between the guest app (Firestore override → this fallback)

@@ -10,11 +10,15 @@ import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarClock, CalendarDays, Edi
 import {
   calculateSeasonalAwareRoomTotal,
   getNumNights,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   PaymentMethodConfig,
-  calculateBreakfastAddOn,
   generateReservationId
 } from "@spark-inn/shared";
+// Per BR-05 (2026-10-13, decision #234): the shared
+// `WalkinBreakfastGrid` powers both the walk-in modal +
+// this calendar-create modal. The grid is the staff
+// booking-entry surface for the rich `breakfastSelections`
+// shape — identical between both modals.
+import { WalkinBreakfastGrid, type WalkinBreakfastSelections } from "../components/breakfast/WalkinBreakfastGrid";
 import { collection, doc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
@@ -166,7 +170,15 @@ export function CalendarPage() {
   const [numAdults, setNumAdults] = useState(1);
   const [numChildren, setNumChildren] = useState(0);
   const [extraBedCount, setExtraBedCount] = useState(0);
-  const [hasBreakfast, setHasBreakfast] = useState(false);
+  // Per BR-05 (2026-10-13, decision #234): the legacy
+  // `hasBreakfast` boolean is gone. The calendar-create
+  // modal's breakfast section uses the same
+  // `WalkinBreakfastGrid` the walk-in modal at
+  // `BookingsPage.tsx` does. The grid feeds the rich
+  // `breakfastSelections` shape + total into the booking
+  // create call via `addWalkinBooking`.
+  const [calendarBreakfast, setCalendarBreakfast] = useState<WalkinBreakfastSelections | null>(null);
+  const [calendarBreakfastOverrideReason, setCalendarBreakfastOverrideReason] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("pay-at-hotel");
   // Per feat/staff-special-requests-capture (2026-08-21):
   // the calendar-create modal captures requests at booking
@@ -450,21 +462,15 @@ export function CalendarPage() {
       );
       return;
     }
-    const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-    // Per EXB-02 (2026-07-31): the historical inline
-    // `hasBreakfast ? breakfastRate * guestCount * selectedNights : 0`
-    // now routes through the shared `calculateBreakfastAddOn` helper.
-    // Byte-equivalent output — the helper's defensive coercion matches
-    // the ternary's `hasBreakfast` gate and the `Number(x) || 0`
-    // pattern this site uses. The `numGuests` for the
-    // breakfast add-on is the total (adults + children) per
-    // the CHD-10 helper's contract.
-    const totalPrice = selectedRoomTotal + calculateBreakfastAddOn({
-      hasBreakfast,
-      breakfastRate,
-      numGuests: safeNumAdults + safeNumChildren,
-      numNights: selectedNights
-    });
+    // Per BR-05 (2026-10-13, decision #234) + BR-08
+    // (decision #238, 2026-10-14 — close-out): the calendar
+    // create breakfast section uses the same rich-shape
+    // `breakfastSelections` + `breakfastTotal` as the walk-in
+    // modal at `BookingsPage.tsx`. The flat-rate
+    // `calculateBreakfastAddOn` helper is gone — the grid
+    // (`<WalkinBreakfastGrid>`) computes the total + snapshots
+    // the per-slot entries when the desk selects a meal.
+    const totalPrice = selectedRoomTotal + (calendarBreakfast ? calendarBreakfast.breakfastTotal : 0);
     const result = await addWalkinBooking({
       // Per NBS-2026-08-08 (F1): the modal-session preallocations.
       preallocatedBookingId: calendarPreallocatedBookingId,
@@ -527,8 +533,18 @@ export function CalendarPage() {
       pointsRedeemedValue: 0,
       pointsRedeemedBy: null,
       pointsRedeemedAt: null,
-      hasBreakfast,
-      breakfastRate,
+      // Per BR-05 (2026-10-13, decision #234) + BR-08
+      // (decision #238, 2026-10-14 — close-out): the calendar
+      // create writes only the rich `breakfastSelections`
+      // shape + `breakfastTotal` when the desk selected
+      // meals via `<WalkinBreakfastGrid>`. The legacy
+      // `hasBreakfast` + `breakfastRate` pair is gone —
+      // the registration-form printout + receipt PDF now
+      // read the new shape (BR-08 updated both).
+      ...(calendarBreakfast ? {
+        breakfastSelections: calendarBreakfast.breakfastSelections,
+        breakfastTotal: calendarBreakfast.breakfastTotal
+      } : {}),
       reminderSentAt: null,
       guestIdPhotoUrl: null,
       handledBy: "",
@@ -551,7 +567,13 @@ export function CalendarPage() {
     setNumAdults(1);
     setNumChildren(0);
     setExtraBedCount(0);
-    setHasBreakfast(false);
+    // Per BR-05: reset the rich-shape breakfast state
+    // + the override reason alongside the
+    // legacy hasBreakfast reset (the legacy boolean
+    // stays derived from `calendarBreakfast`, no longer
+    // a useState — the reset clears the rich shape).
+    setCalendarBreakfast(null);
+    setCalendarBreakfastOverrideReason("");
     // Per feat/staff-special-requests-capture (2026-08-21):
     // reset the staff-captured special request alongside the
     // other fields so the next modal open starts clean.
@@ -916,7 +938,18 @@ export function CalendarPage() {
             <label className="flex flex-col gap-2 font-semibold text-gray-700">Children<input type="number" min={0} max={20} value={numChildren} onChange={(e) => setNumChildren(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           </div>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Extra beds<input type="number" min={0} max={10} value={extraBedCount} onChange={(e) => setExtraBedCount(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
-          <label className="flex items-center gap-2 font-semibold text-gray-700"><input type="checkbox" checked={hasBreakfast} onChange={(e) => setHasBreakfast(e.target.checked)} /> Include breakfast</label>
+          {selection ? (
+            <WalkinBreakfastGrid
+              checkIn={selection.startDate}
+              checkOut={selection.endDate}
+              numGuests={numAdults + numChildren}
+              staffUid=""
+              overrideReason={calendarBreakfastOverrideReason}
+              onOverrideReasonChange={setCalendarBreakfastOverrideReason}
+              onChange={setCalendarBreakfast}
+              timezone={config.timezone}
+            />
+          ) : null}
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm">
             {[
               { method: "pay-at-hotel", label: "Pay at Hotel" },

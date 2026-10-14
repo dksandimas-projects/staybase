@@ -210,7 +210,6 @@ const baseBody = {
   checkIn: fmtDate(manilaToday),
   checkOut: fmtDate(new Date(manilaToday.getTime() + 2 * 24 * 60 * 60 * 1000)),
   guests: 2,
-  hasBreakfast: false,
   guestDetails: {
     firstName: "Maria",
     lastName: "Santos",

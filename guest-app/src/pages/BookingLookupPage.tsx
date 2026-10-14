@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Utensils, Wallet } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -55,7 +55,13 @@ interface BookingData {
   rateBreakdown?: BookingRateBreakdown | null;
   paymentMethod: string;
   status: string;
-  hasBreakfast: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the legacy `hasBreakfast: boolean` flat-rate flag is
+  // removed from the Booking doc. The lookup view derives
+  // the "Room + Breakfast" / "Room Only" copy from
+  // `breakfastSelections` — a non-empty map of non-removed
+  // entries means the booking has a breakfast on file.
+  breakfastSelections?: Record<string, unknown> | null;
   specialRequests: string;
   // Per 2026-07-24 (refactor/unify-payment-reference-fields):
   // the previous top-level `paymentReferenceNumber` was retired.
@@ -119,7 +125,7 @@ interface ReservationRoom {
   numAdults: number;
   numChildren: number;
   extraBedCount: number;
-  hasBreakfast: boolean;
+  breakfastTotal?: number;
   ratePerNight: number;
   totalPrice: number;
   status: string;
@@ -173,6 +179,49 @@ function formatStayDate(value: string) {
 }
 
 const RESEND_COOLDOWN_MS = 60_000;
+
+// Per BR-04 (2026-10-13, decision #233): the "Manage
+// Breakfast" link card on the booking-detail surface.
+// Renders only for the booking statuses the spec allows
+// edits on (confirmed | payment-confirmed | checked-in);
+// for everything else the link is omitted so the
+// post-check-out and cancelled bookings don't get a
+// dead-end CTA.
+function ManageBreakfastLink({
+  bookingRef,
+  status,
+  token
+}: {
+  bookingRef: string;
+  status: string;
+  token: string;
+}) {
+  // Per the BR-04 manage gate (decision #233): the
+  // guest can edit breakfast only while the booking is
+  // pre-checkout. Post-checkout the page redirects to
+  // read-only.
+  const canManage = ["confirmed", "payment-confirmed", "checked-in"].includes(status);
+  if (!canManage) return null;
+  if (!bookingRef || !token) return null;
+  const target = `/my-booking/breakfast?ref=${encodeURIComponent(bookingRef)}&token=${encodeURIComponent(token)}`;
+  return (
+    <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
+      <Utensils className="text-primary shrink-0 mt-0.5" size={18} aria-hidden="true" />
+      <div className="flex-1">
+        <p className="text-sm font-bold text-primary-dark">Manage Breakfast</p>
+        <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+          Update your per-date breakfast selections — orders close at the cutoff time each evening.
+        </p>
+        <Link
+          to={target}
+          className="mt-3 inline-flex min-h-11 items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+        >
+          Open Manage Breakfast
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 export function BookingLookupPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -625,7 +674,13 @@ export function BookingLookupPage() {
         rateBreakdown: data.rateBreakdown || null,
         paymentMethod: data.paymentMethod || "",
         status: data.status,
-        hasBreakfast: Boolean(data.hasBreakfast),
+        // Per BR-08: the legacy `hasBreakfast` flag is
+        // replaced by the new `breakfastSelections` map.
+        // A booking has a breakfast on file when the map
+        // has at least one non-removed entry — gated by
+        // `breakfastTotal` (the BR-01 server stamp) as
+        // a fast-path check.
+        breakfastSelections: data.breakfastSelections || null,
         specialRequests: data.specialRequests || "",
         paymentRejectionReason: data.paymentRejectionReason || null
       };
@@ -1561,7 +1616,15 @@ export function BookingLookupPage() {
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Rate Type</span>
                       <span className="font-semibold text-gray-900">
-                        {activeBooking.hasBreakfast ? "Room + Breakfast" : "Room Only"}
+                        {/* Per BR-08: derive from the
+                            `breakfastSelections` map (any non-removed
+                            entry = a breakfast on file). Keeps the
+                            legacy "Room + Breakfast" / "Room Only"
+                            copy post-close-out. */}
+                        {activeBooking.breakfastSelections &&
+                        Object.values(activeBooking.breakfastSelections).some((entry: any) =>
+                          entry && entry.removedAt == null
+                        ) ? "Room + Breakfast" : "Room Only"}
                       </span>
                     </div>
 
@@ -1602,6 +1665,32 @@ export function BookingLookupPage() {
                       </p>
                     </div>
                   </div>
+                )}
+
+                {/* Per BR-04 (2026-10-13, decision #233): the
+                    "Manage Breakfast" link. The link routes to
+                    `/my-booking/breakfast?ref=...&token=...`
+                    where `token` is the magic-link
+                    `lookupToken`. The page only renders the
+                    link when:
+                      • the URL still has a `token` param
+                        (the deep-link magic-link flow), AND
+                      • the booking's status is one the
+                        spec allows edits on (`confirmed`,
+                        `payment-confirmed`, `checked-in`).
+                    The token is required because the manage
+                    endpoint is lookup-token gated (per the
+                    spec's H2 inheritance). When the user
+                    instead searched with ref + email, there
+                    is no token — the link is omitted so a
+                    bot probing the route doesn't get an
+                    auth hint back. */}
+                {(searchParams.get("token") || "") && activeBooking && (
+                  <ManageBreakfastLink
+                    bookingRef={activeBooking.bookingRef}
+                    status={String(activeBooking.status || "")}
+                    token={String(searchParams.get("token") || "")}
+                  />
                 )}
 
                 <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
@@ -1795,7 +1884,11 @@ export function BookingLookupPage() {
                       <p className="mt-1 text-xs text-gray-500 font-mono">
                         {room.bookingRef}
                         {room.roomNumber ? ` · Room ${room.roomNumber}` : ""}
-                        {room.hasBreakfast ? " · breakfast" : ""}
+                        {/* Per BR-08: derive from `breakfastTotal`
+                            (the BR-01 server stamp); non-zero means
+                            the booking has at least one breakfast
+                            on file. */}
+                        {room.breakfastTotal && room.breakfastTotal > 0 ? " · breakfast" : ""}
                       </p>
                     </div>
                     <div className="text-right">

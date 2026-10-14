@@ -77,7 +77,11 @@ describe("BSP-02 (behavioral) — toggle survives snapshot refresh and is visibl
   type BookingLike = {
     id: string;
     status: string;
-    hasBreakfast: boolean;
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` field is deleted
+    // from the test fixture type. The new meal-based model
+    // is exercised by the `breakfastSelections` +
+    // `breakfastServed` map fields below.
     numGuests: number;
     breakfastSelections?: Record<string, string>;
     breakfastServed?: Record<string, boolean>;
@@ -127,7 +131,6 @@ describe("BSP-02 (behavioral) — toggle survives snapshot refresh and is visibl
     const initial: BookingLike = {
       id: "b-1",
       status: "checked-in",
-      hasBreakfast: true,
       numGuests: 2,
       breakfastSelections: { [guest1Key]: "Tapsilog", [guest2Key]: "Longsilog" }
     };
@@ -186,7 +189,6 @@ describe("BSP-02 (behavioral) — toggle survives snapshot refresh and is visibl
     const fromOtherSession: BookingLike = {
       id: "b-1",
       status: "checked-in",
-      hasBreakfast: true,
       numGuests: 2,
       breakfastSelections: { [key]: "Tapsilog" },
       breakfastServed: { [key]: true }
@@ -202,7 +204,6 @@ describe("BSP-02 (behavioral) — toggle survives snapshot refresh and is visibl
     const legacy: BookingLike = {
       id: "b-legacy",
       status: "checked-in",
-      hasBreakfast: true,
       numGuests: 1
     };
     const hydrated = hydrateBreakfastServed(legacy);

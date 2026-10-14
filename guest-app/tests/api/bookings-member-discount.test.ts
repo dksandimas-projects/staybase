@@ -239,7 +239,6 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
       checkIn: memberCheckIn,
       checkOut: memberCheckOut,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Maria",
         lastName: "Member",
@@ -273,7 +272,6 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
       checkIn: memberCheckIn,
       checkOut: memberCheckOut,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Maria",
         lastName: "Member",
@@ -303,7 +301,6 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
       checkIn: memberCheckIn,
       checkOut: memberCheckOut,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Maria",
         lastName: "Member",
@@ -341,7 +338,6 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
       checkIn: memberCheckIn,
       checkOut: memberCheckOut,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Anon",
         lastName: "Guest",
@@ -375,7 +371,6 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
       checkIn: memberCheckIn,
       checkOut: memberCheckOut,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Anon",
         lastName: "Guest",

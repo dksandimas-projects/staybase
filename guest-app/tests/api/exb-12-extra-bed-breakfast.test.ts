@@ -1,3 +1,15 @@
+// Per BR-08 (decision #238, 2026-10-14 — close-out): this
+// entire test file is `describe.skip`-ed because it tests
+// the legacy flat-rate breakfast behavior (the
+// `hasBreakfast: boolean` + `breakfastRate: number` +
+// `breakfastIncludesChildren: boolean` +
+// `extraBedBreakfast: boolean` shape). The close-out
+// deleted those fields + the `calculateBreakfastAddOn`
+// helper from `@spark-inn/shared`. The new meal-based
+// model is covered by `br-03-breakfast-selections-snapshotting.test.ts`
+// (the rich `breakfastSelections` shape). The file is
+// preserved as a BR-08 close-out audit trail.
+
 // Per EXB-12 (2026-08-06, per decision #199): source-text
 // regression tests for the extra-bed breakfast toggle on
 // the `/book` Step 1 room-type cards. The pre-EXB-12
@@ -71,7 +83,7 @@ const rateBreakdownSrc = readFileSync(
 );
 
 describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
-  it("the `BookingRoomCartItem` shape gains an optional `extraBedBreakfast: boolean` field", () => {
+  it.skip("the `BookingRoomCartItem` shape gains an optional `extraBedBreakfast: boolean` field", () => {
     // The pre-EXB-12 cart shape had no breakfast-for-extra-beds
     // field. EXB-12 adds it as optional (default `false`).
     expect(bookingRoomCartSrc).toMatch(
@@ -79,7 +91,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the `parseBookingRoomCart` helper preserves `extraBedBreakfast` from the URL", () => {
+  it.skip("the `parseBookingRoomCart` helper preserves `extraBedBreakfast` from the URL", () => {
     // The helper normalizes `extraBedBreakfast === true` (any
     // other value → `false`) so a stale URL with a non-boolean
     // value can't slip through. The server enforces the
@@ -89,7 +101,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the `calculateBreakfastAddOn` helper accepts `extraBedCount` + `extraBedBreakfast`", () => {
+  it.skip("the `calculateBreakfastAddOn` helper accepts `extraBedCount` + `extraBedBreakfast`", () => {
     // The helper interface gains two new optional fields.
     // When `extraBedBreakfast` is truthy, the helper counts
     // `extraBedCount` toward the breakfast total.
@@ -97,7 +109,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     expect(bookingAddOnsSrc).toMatch(/extraBedBreakfast\?: boolean \| null;/);
   });
 
-  it("the helper's `effectiveOccupancy` includes `extraBedCount` when `extraBedBreakfast` is truthy", () => {
+  it.skip("the helper's `effectiveOccupancy` includes `extraBedCount` when `extraBedBreakfast` is truthy", () => {
     // The post-EXB-12 effective occupancy is
     // `(numAdults + (includesChildren ? numChildren : 0)) + (extraBedBreakfast ? extraBedCount : 0)`.
     // The test matches the conditional + addition pattern.
@@ -106,7 +118,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the public booking schema accepts `extraBedBreakfast: z.boolean().optional()`", () => {
+  it.skip("the public booking schema accepts `extraBedBreakfast: z.boolean().optional()`", () => {
     // The public booking schema (CreateBookingSchema) gains
     // an optional boolean for the extra-bed breakfast toggle.
     // When absent, the server treats it as `false`.
@@ -115,7 +127,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the walkin schema also accepts `extraBedBreakfast` (admin consistency)", () => {
+  it.skip("the walkin schema also accepts `extraBedBreakfast` (admin consistency)", () => {
     // The walkin schema (WalkinRoomLineSchema) gains the
     // same field for admin consistency. A walk-in booking
     // can also opt in to breakfast for extra beds.
@@ -124,7 +136,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the booking room line type gains an `extraBedBreakfast?: boolean` field", () => {
+  it.skip("the booking room line type gains an `extraBedBreakfast?: boolean` field", () => {
     // The shared `BookingRoom` type (in `shared/types/index.ts`)
     // gains the field for storage + retrieval. The invariant
     // `extraBedBreakfast implies extraBedCount > 0` is
@@ -132,7 +144,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     expect(sharedTypesSrc).toMatch(/extraBedBreakfast\?: boolean;/);
   });
 
-  it("the BookingPage exposes an `updateExtraBedBreakfast` helper (per-type mirror)", () => {
+  it.skip("the BookingPage exposes an `updateExtraBedBreakfast` helper (per-type mirror)", () => {
     // The helper mirrors the user's pick onto every room of
     // the type (same per-type shape as the extra-bed count
     // + rate choice). When the extra-bed count is 0, the
@@ -142,7 +154,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the BookingPage's `breakfastTotal` passes `extraBedCount` + `extraBedBreakfast` to the helper", () => {
+  it.skip("the BookingPage's `breakfastTotal` passes `extraBedCount` + `extraBedBreakfast` to the helper", () => {
     // The client-side breakfast total includes the
     // extra-bed breakfast when the toggle is on. The
     // per-room `extraBedBreakfast` is read from the cart
@@ -152,7 +164,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the Extras IIFE renders an `Include breakfast for the extra beds` toggle (both branches)", () => {
+  it.skip("the Extras IIFE renders an `Include breakfast for the extra beds` toggle (both branches)", () => {
     // The toggle is added in both the checkbox branch
     // (`typeMaxExtraBeds === 1`) and the counter branch
     // (`typeMaxExtraBeds >= 2`). It carries the
@@ -167,7 +179,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the toggle only renders when the breakfast config is enabled", () => {
+  it.skip("the toggle only renders when the breakfast config is enabled", () => {
     // The toggle is gated on `breakfastConfig.isEnabled` —
     // no point offering breakfast for extra beds when
     // breakfast is globally off. Both branches have the
@@ -178,7 +190,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     expect(breakfastConfigGateMatches?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("the booking body passes `extraBedBreakfast` to the server (multi-room + single-room)", () => {
+  it.skip("the booking body passes `extraBedBreakfast` to the server (multi-room + single-room)", () => {
     // The create body's `rooms[]` and the single-room
     // `firstRoomSelection` both include the toggle. The
     // server reads it to count the extra beds toward the
@@ -189,7 +201,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     expect(bodyMatches?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("the server handler validates the invariant `extraBedBreakfast implies extraBedCount > 0`", () => {
+  it.skip("the server handler validates the invariant `extraBedBreakfast implies extraBedCount > 0`", () => {
     // The validatedRoomStays loop forces the toggle off
     // when `extraBedCount === 0` — a `true` toggle with 0
     // extra beds is a client bug (or stale URL). The
@@ -199,7 +211,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the server's `calculateBreakfastAddOn` call includes `extraBedCount` + `extraBedBreakfast`", () => {
+  it.skip("the server's `calculateBreakfastAddOn` call includes `extraBedCount` + `extraBedBreakfast`", () => {
     // The server's per-room pricing loop passes both fields
     // to the helper. The helper's effective occupancy now
     // includes `extraBedCount` when the toggle is on.
@@ -208,7 +220,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the server snapshots `extraBedBreakfast` onto the booking doc", () => {
+  it.skip("the server snapshots `extraBedBreakfast` onto the booking doc", () => {
     // The create body's per-room object includes
     // `extraBedBreakfast: pricingForRoom.extraBedBreakfast === true`.
     // Older booking docs without the field default to
@@ -218,7 +230,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
     );
   });
 
-  it("the rate-breakdown rebuild path passes `extraBedCount` + `extraBedBreakfast` to the helper", () => {
+  it.skip("the rate-breakdown rebuild path passes `extraBedCount` + `extraBedBreakfast` to the helper", () => {
     // The early-departure / reschedule rebuild reads
     // `booking.extraBedCount` + `booking.extraBedBreakfast`
     // from the booking doc and passes them to the helper.
@@ -244,7 +256,7 @@ describe("EXB-12 — extra-bed breakfast toggle on /book Step 1", () => {
 // would fail this test if the math changed. Catches the
 // "logic moved but contract preserved" class of bug.
 describe("EXB-12 — RUNTIME — calculateBreakfastAddOn gate behavior", () => {
-  it("the helper's `extraBedBreakfast` gate honors the opt-in toggle", async () => {
+  it.skip("the helper's `extraBedBreakfast` gate honors the opt-in toggle", async () => {
     // Dynamic import to keep the test hermetic — the
     // shared package's exports are already configured
     // for vitest's ESM resolution.

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -269,6 +269,7 @@ export function ReportsPage() {
   // (RPT-03, `firestore.rules:475`) — `LiabilityTab`
   // uses the same subscription.
   const [rawRefunds, setRawRefunds] = useState<RawReportPayment[]>([]);
+  const [breakfastPendingRefundTotal, setBreakfastPendingRefundTotal] = useState(0);
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [dailyCloses, setDailyCloses] = useState<any[]>([]);
@@ -389,8 +390,23 @@ export function ReportsPage() {
   // has it on every new-reservation refund.
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "refunds"), (snapshot) => {
-      setRawRefunds(snapshot.docs.map((refundDoc) => {
+      let pendingBreakfastRefundTotal = 0;
+      const docs = snapshot.docs.map((refundDoc) => {
         const data = refundDoc.data();
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the Sales → Breakfast sub-tab's "pending refund
+        // liability" metric. The refunds collectionGroup is
+        // filtered for `category: "breakfast"` +
+        // `status: "pending"`. The same filter is applied
+        // by `LiabilityTab` for the dashboard pending
+        // count — this metric surfaces the same total in
+        // the Reports workspace.
+        if (
+          String(data.category || "") === "breakfast" &&
+          String(data.status || "pending") === "pending"
+        ) {
+          pendingBreakfastRefundTotal += Math.abs(Number(data.amount) || 0);
+        }
         const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
         const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
         const bookingId = isReservationRefund
@@ -414,13 +430,37 @@ export function ReportsPage() {
           recordedBy: String(data.recordedBy || "staff"),
           recordedAt: toDate(data.recordedAt)
         };
-      }));
+      });
+      setBreakfastPendingRefundTotal(pendingBreakfastRefundTotal);
     }, (error) => {
       console.error("Failed to load refund ledger:", error);
       toast.error("Could not load refunds", "Collections totals remain available. Refresh to try again.");
     });
     return unsubscribe;
   }, [toast]);
+
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // Sales → Breakfast sub-tab's "late-change count" metric.
+  // The `breakfastAudit/{id}` collectionGroup reads every
+  // audit entry written by BR-04 (per-meal add / change /
+  // remove / serve / un-serve / override-*) across all
+  // bookings + reservations. The metric counts entries
+  // with `occurredAfterCutoff: true` — a single counter
+  // surfaced in the Reports workspace.
+  const [breakfastLateChangeCount, setBreakfastLateChangeCount] = useState(0);
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "breakfastAudit"), (snapshot) => {
+      let count = 0;
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data() as { occurredAfterCutoff?: unknown };
+        if (data.occurredAfterCutoff === true) count += 1;
+      });
+      setBreakfastLateChangeCount(count);
+    }, (error) => {
+      console.error("Failed to load breakfast audit ledger:", error);
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -720,7 +760,7 @@ export function ReportsPage() {
   }, [rangeBookings, periodStart, periodEnd]);
 
   const breakfastBookingsInRange = useMemo(
-    () => rangeBookings.filter(b => b.hasBreakfast),
+    () => rangeBookings.filter(b => (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0)),
     [rangeBookings]
   );
 
@@ -974,19 +1014,13 @@ export function ReportsPage() {
 
     rangeBookings.forEach((b) => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-      // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
-      // numNights` now routes through the shared
-      // `calculateBreakfastAddOn` helper. Byte-equivalent output.
-      // Per DSC (2026-07-31): the discount percentage steps and the
-      // clamped `afterSenior − voucher` subtraction now route through
-      // the shared `calculatePercentDiscount` + `calculateVoucherBase`
-      // helpers. Same product, same round, same clamp, same gates.
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: b.hasBreakfast,
-        breakfastRate: b.breakfastRate,
-        numGuests: b.numGuests,
-        numNights: b.numNights
-      });
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // breakfast total is the snapshotted `b.breakfastTotal`
+      // (computed by the BR-01 `calculateBreakfastMealsTotal`
+      // helper from `b.breakfastSelections[key].price`). The
+      // legacy flat-rate recomputation via
+      // `calculateBreakfastAddOn` is gone.
+      const breakfastTotal = Number(b.breakfastTotal) || 0;
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1052,12 +1086,12 @@ export function ReportsPage() {
       // Same chain as `discountsSummary` above — keep the per-booking
       // senior discount in lockstep with the Gross-to-Net bridge so
       // the VAT-exempt figure matches the senior deduction line.
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: b.hasBreakfast,
-        breakfastRate: b.breakfastRate,
-        numGuests: b.numGuests,
-        numNights: b.numNights
-      });
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the breakfast total is the snapshotted
+      // `b.breakfastTotal` (the per-meal catalog sum). The
+      // legacy flat-rate recomputation via
+      // `calculateBreakfastAddOn` is gone.
+      const breakfastTotal = Number(b.breakfastTotal) || 0;
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1314,7 +1348,7 @@ export function ReportsPage() {
 
   // ── Breakfast kitchen prep (existing) ──
   const breakfastBookings = useMemo(() =>
-    revenueBookings.filter(b => b.hasBreakfast),
+    revenueBookings.filter(b => (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0)),
     [revenueBookings]
   );
 
@@ -1330,9 +1364,26 @@ export function ReportsPage() {
         if (!dateMap[dateStr]) dateMap[dateStr] = {};
         for (let g = 1; g <= b.numGuests; g++) {
           const key = `${dateStr}-guest-${g}`;
-          const selection = b.breakfastSelections?.[key];
-          if (selection) {
-            dateMap[dateStr][selection] = (dateMap[dateStr][selection] || 0) + 1;
+          // Per BR-05 (2026-10-13): the booking doc's
+          // `breakfastSelections` may now be either the
+          // legacy `Record<string, string>` shape (meal
+          // name as the value) or the BR-01 rich shape
+          // (`{ mealId, mealName, price, ... }`). The
+          // legacy report counts the meal name (matches
+          // the pre-BR-05 inventory report); the rich
+          // shape needs the `mealName` extraction. The
+          // `key in selection` branch handles both.
+          const rawSelection: any = (b.breakfastSelections as any)?.[key];
+          if (rawSelection) {
+            const mealName =
+              typeof rawSelection === "string"
+                ? rawSelection
+                : typeof rawSelection?.mealName === "string"
+                ? rawSelection.mealName
+                : null;
+            if (mealName) {
+              dateMap[dateStr][mealName] = (dateMap[dateStr][mealName] || 0) + 1;
+            }
           }
         }
       }
@@ -1362,6 +1413,61 @@ export function ReportsPage() {
     ),
     [breakfastBookingsInRange, searchTerm]
   );
+
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // Sales → Breakfast sub-tab renders five metric cards
+  // instead of the legacy `SalesBreakfastTable` rows. The
+  // five metrics are:
+  //   1. total breakfast selections (sum of
+  //      `bookings/*/breakfastSelections/*.length`)
+  //   2. total breakfast revenue (sum of
+  //      `booking.breakfastTotal`)
+  //   3. top meals (by count of `mealId` across all
+  //      selections in the date range)
+  //   4. late-change count (audit entries with
+  //      `occurredAfterCutoff: true` from
+  //      `bookings/*/breakfastAudit/*`)
+  //   5. pending-refund liability total
+  //      (`bookings/*/refunds/*` with
+  //      `category: "breakfast"` + `status: "pending"`)
+  // The legacy `SalesBreakfastTable` (rendered below) is
+  // kept as a fallback for the per-booking detail view
+  // (it lists every booking that has any breakfast
+  // selections). The new metric cards are the primary
+  // surface; the per-booking list is a secondary view.
+  const breakfastMetrics = useMemo(() => {
+    let totalSelections = 0;
+    let totalRevenue = 0;
+    const mealCounts = new Map<string, { mealName: string; count: number; revenue: number }>();
+    for (const booking of breakfastBookingsInRange) {
+      const selections = booking.breakfastSelections || {};
+      const entries = Object.values(selections).filter(
+        (entry: any) => entry && entry.removedAt == null
+      );
+      totalSelections += entries.length;
+      totalRevenue += Number(booking.breakfastTotal) || 0;
+      for (const entry of entries) {
+        const mealId = String((entry as any).mealId || "unknown");
+        const mealName = String((entry as any).mealName || "Unknown meal");
+        const price = Number((entry as any).price) || 0;
+        const current = mealCounts.get(mealId) || { mealName, count: 0, revenue: 0 };
+        current.count += 1;
+        current.revenue += price;
+        mealCounts.set(mealId, current);
+      }
+    }
+    const topMeals = Array.from(mealCounts.entries())
+      .map(([mealId, data]) => ({ mealId, ...data }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    return {
+      totalSelections,
+      totalRevenue,
+      topMeals
+    };
+  }, [breakfastBookingsInRange]);
+  const breakfastLateChangeCountValue = breakfastLateChangeCount;
+  const breakfastPendingRefundTotalValue = breakfastPendingRefundTotal;
 
   const filteredStoreOrders = useMemo(() =>
     rangeStoreOrders.filter(o =>
@@ -1677,9 +1783,9 @@ export function ReportsPage() {
       Guests: occupancy.guests,
       Adults: occupancy.adults,
       Children: occupancy.children,
-      "Has Breakfast": b.hasBreakfast ? "Yes" : "No",
+      "Has Breakfast": (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0) ? "Yes" : "No",
       "Rate/Night": b.ratePerNight,
-      "Breakfast Rate": b.breakfastRate,
+      "Breakfast Rate": b.breakfastTotal || 0,
       "Discount Type": b.discountType,
       "Discount %": b.discountPct,
       "Discount Verified": b.discountVerified ? "Yes" : "No",
@@ -1945,12 +2051,10 @@ export function ReportsPage() {
       // scope-agnostic; the scope choice only affects which
       // components contribute to the senior discount, which the
       // chain above already computed correctly per DSC-01..05.
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: b.hasBreakfast,
-        breakfastRate: b.breakfastRate,
-        numGuests: b.numGuests,
-        numNights: b.numNights
-      });
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the breakfast total is the snapshotted
+      // `b.breakfastTotal` (the per-meal catalog sum).
+      const breakfastTotal = Number(b.breakfastTotal) || 0;
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1999,7 +2103,7 @@ export function ReportsPage() {
         toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
         toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
         b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.ratePerNight, roomSubtotal,
-        b.hasBreakfast ? "Yes" : "No", b.hasBreakfast ? b.breakfastRate : 0, breakfastTotal,
+        (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0) ? "Yes" : "No", (b.breakfastTotal || 0), breakfastTotal,
         b.discountType || "None", discountPct, seniorDiscount,
         b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
         subtotal, b.totalPrice,
@@ -2020,13 +2124,12 @@ export function ReportsPage() {
       return [
         b.bookingRef, b.guestName, b.roomNumber,
         toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
-        b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.breakfastRate,
-        calculateBreakfastAddOn({
-          hasBreakfast: b.hasBreakfast,
-          breakfastRate: b.breakfastRate,
-          numGuests: b.numGuests,
-          numNights: b.numNights
-        })
+        b.numNights, occupancy.guests, occupancy.adults, occupancy.children,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the CSV exports the snapshotted
+        // `b.breakfastTotal` (the per-meal catalog sum),
+        // not the legacy flat-rate recomputation.
+        Number(b.breakfastTotal) || 0
       ];
     });
 
@@ -2167,7 +2270,7 @@ export function ReportsPage() {
   }, [prevRangeBookings, prevPeriod]);
 
   const prevBreakfastRevenue = useMemo(() => {
-    return prevRangeBookings.filter(b => b.hasBreakfast).reduce((sum, b) => {
+    return prevRangeBookings.filter(b => (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0)).reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
       return sum + getBookingRevenueStreams(b).breakfastNet * fraction;
@@ -3779,12 +3882,10 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
             // through the shared `calculatePercentDiscount` +
             // `calculateVoucherBase` helpers. Same product, same round,
             // same clamp, same gates.
-            const breakfastTotal = calculateBreakfastAddOn({
-              hasBreakfast: b.hasBreakfast,
-              breakfastRate: b.breakfastRate,
-              numGuests: b.numGuests,
-              numNights: b.numNights
-            });
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the breakfast total is the snapshotted
+            // `b.breakfastTotal` (the per-meal catalog sum).
+            const breakfastTotal = Number(b.breakfastTotal) || 0;
             const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
             const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -3886,12 +3987,10 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
     return (
       <div className="space-y-3">
         {bookings.slice(0, 50).map(b => {
-          const total = calculateBreakfastAddOn({
-            hasBreakfast: b.hasBreakfast,
-            breakfastRate: b.breakfastRate,
-            numGuests: b.numGuests,
-            numNights: b.numNights
-          });
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // the per-booking breakfast total is the snapshotted
+          // `b.breakfastTotal` (the per-meal catalog sum).
+          const total = Number(b.breakfastTotal) || 0;
           return (
             <div key={b.id} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
               <div className="flex items-center justify-between gap-2">
@@ -3922,7 +4021,7 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
                   }
                   return <>{b.numGuests} guests</>;
                 })()}</span>
-                <span>Rate {formatPrice(b.breakfastRate)}</span>
+                <span>Rate {formatPrice(b.breakfastTotal || 0)}</span>
               </div>
               <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(total)}</p>
             </div>
@@ -3948,12 +4047,10 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
         </thead>
         <tbody className="divide-y divide-gray-100">
           {bookings.slice(0, 50).map(b => {
-            const total = calculateBreakfastAddOn({
-            hasBreakfast: b.hasBreakfast,
-            breakfastRate: b.breakfastRate,
-            numGuests: b.numGuests,
-            numNights: b.numNights
-          });
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the per-booking breakfast total is the snapshotted
+            // `b.breakfastTotal` (the per-meal catalog sum).
+            const total = Number(b.breakfastTotal) || 0;
             return (
               <tr key={b.id} className="hover:bg-gray-50/50">
                 <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>
@@ -3962,7 +4059,7 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
                 <td className="px-3 py-2.5 text-gray-600">{toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numNights}</td>
                 <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numGuests}</td>
-                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{formatPrice(b.breakfastRate)}</td>
+                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{formatPrice(b.breakfastTotal || 0)}</td>
                 <td className="px-3 py-2.5 text-right font-bold text-primary-dark">{formatPrice(total)}</td>
               </tr>
             );

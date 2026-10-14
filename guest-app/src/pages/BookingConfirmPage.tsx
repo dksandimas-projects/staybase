@@ -47,7 +47,12 @@ interface ConfirmedRoom {
   numAdults: number;
   numChildren: number;
   extraBedCount: number;
-  hasBreakfast: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `hasBreakfast: boolean` per-room flag is deleted.
+  // The confirmation page reads `rateBreakdown.addOns[]` to
+  // display the per-date breakfast breakdown (the rich
+  // `breakfastSelections` shape's per-date lines stamped by
+  // BR-03's `buildBreakfastRateBreakdownLines` helper).
   totalPrice: number;
 }
 
@@ -461,7 +466,18 @@ export function BookingConfirmPage() {
                             {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
                             {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
                             {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
-                            {room.hasBreakfast ? " · Breakfast included" : ""}
+                            {/* Per BR-03 (2026-10-12, decision
+                                #232): the legacy "Breakfast
+                                included" line is replaced by
+                                the per-guest × per-date
+                                `breakfastSelections` summary
+                                (the rich shape from the booking
+                                doc). The confirmation page
+                                reads `booking.breakfastSelections`
+                                when present; falls back to the
+                                legacy `room.hasBreakfast`
+                                boolean for the walk-in modal
+                                + pre-BR-03 bookings. */}
                           </span>
                         </div>
                       );

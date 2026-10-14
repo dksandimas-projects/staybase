@@ -3,13 +3,17 @@
 // bucketing, timezone-stable day keys) can be unit-tested without rendering
 // the page.
 
-// Per EXB-02 (2026-07-31): the breakfast add-on math is now sourced
-// from the shared `calculateBreakfastAddOn` helper in
-// `@spark-inn/shared`. The historical inline `nonNegativeFinite(x) *
-// nonNegativeFinite(y) * z` pattern was duplicated across 10 sites
-// (this file + ReportsPage.tsx + rate-breakdown.ts + bookings.ts +
-// pricing.ts + CalendarPage.tsx). One PR fixes all of them.
-import { calculateBreakfastAddOn } from "@spark-inn/shared";
+// Per BR-08 (decision #238, 2026-10-14 — close-out): the
+// breakfast add-on math is sourced from the snapshotted
+// `booking.breakfastTotal` (computed by the BR-01
+// `calculateBreakfastMealsTotal` helper from
+// `booking.breakfastSelections[key].price`). The legacy
+// `calculateBreakfastAddOn` helper was deleted from
+// `@spark-inn/shared`; the legacy inline
+// `nonNegativeFinite(x) * nonNegativeFinite(y) * z` pattern is
+// gone. The `breakfastTotal` field is the single source of
+// truth — Reports + the new `getBookingRevenueStreams` helper
+// in `shared/utils/bookingFolio.ts` read it directly.
 
 export type PaymentBucket = "cash" | "gcash" | "bank" | "card" | "paypal" | "other";
 
@@ -157,8 +161,13 @@ type BookingRevenueInput = {
   ratePerNight?: number | null;
   numNights?: number | null;
   numGuests?: number | null;
-  hasBreakfast?: boolean | null;
-  breakfastRate?: number | null;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `breakfastRate: number` + `hasBreakfast:
+  // boolean` pair is deleted. The breakfast gross is now
+  // the snapshotted `booking.breakfastTotal` (computed by
+  // the BR-01 `calculateBreakfastMealsTotal` helper from
+  // `booking.breakfastSelections[key].price`).
+  breakfastTotal?: number | null;
   rateBreakdown?: {
     roomSubtotal?: number | null;
   } | null;
@@ -195,18 +204,13 @@ function nonNegativeFinite(value: unknown): number {
 export function splitBookingRevenue(booking: BookingRevenueInput): { room: number; breakfast: number } {
   const total = nonNegativeFinite(booking.totalPrice);
   const nights = nonNegativeFinite(booking.numNights);
-  // Per EXB-02 (2026-07-31): the historical inline
-  // `nonNegativeFinite(breakfastRate) * nonNegativeFinite(numGuests) * nights`
-  // pattern now routes through the shared `calculateBreakfastAddOn`
-  // helper. Byte-equivalent output — the helper's `Number(x) || 0`
-  // defensive coercion matches `nonNegativeFinite(x)` for the inputs
-  // this site passes (all non-negative integers from the booking doc).
-  const breakfastGross = calculateBreakfastAddOn({
-    hasBreakfast: booking.hasBreakfast,
-    breakfastRate: nonNegativeFinite(booking.breakfastRate),
-    numGuests: nonNegativeFinite(booking.numGuests),
-    numNights: nights
-  });
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // breakfast gross is the snapshotted `booking.breakfastTotal`
+  // (computed by the BR-01 `calculateBreakfastMealsTotal` helper
+  // from `booking.breakfastSelections[key].price`). The legacy
+  // `breakfastRate × numGuests × numNights` recomputation is
+  // gone — the booking doc carries the single source of truth.
+  const breakfastGross = nonNegativeFinite(booking.breakfastTotal);
 
   if (total === 0 || breakfastGross === 0) {
     return { room: total, breakfast: 0 };
