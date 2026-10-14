@@ -30,6 +30,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  addDaysToIsoDate,
+  diffNightsBetweenIso,
+  normalizeStayRange
+} from "@spark-inn/shared";
 
 const read = (relative: string) =>
   readFileSync(resolve(__dirname, "../../..", relative), "utf8");
@@ -107,8 +112,19 @@ describe("DR-01 — DateRangePicker self-heals instead of only guarding input", 
     expect(pickerSrc).toMatch(/previousNights: lastValidNights/);
   });
 
-  it("mutually bounds the two inputs so neither can invert the pair", () => {
-    expect(pickerSrc).toMatch(/max=\{addDaysToIsoDate\(resolved\.checkOut, -1\)\}/);
+  it("bounds the inputs without freezing either one", () => {
+    // DR-01 follow-up (2026-10-15): check-in must NOT be bounded
+    // by `checkOut - 1`. With the default 1-night stay, check-out is
+    // always `checkIn + 1`, so that max resolved to check-in's OWN
+    // current value and the native picker greyed out every later
+    // day — the guest could not move check-in at all. The upper
+    // bound is the booking horizon; the lower is property-timezone
+    // today.
+    expect(pickerSrc).toMatch(/max=\{maxCheckOut\}/);
+    expect(pickerSrc).not.toMatch(/max=\{addDaysToIsoDate\(resolved\.checkOut/);
+    // Check-out stays floored at one night after check-in — that
+    // bound is correct and does not lock the field, because every
+    // date from `checkIn + 1` up to the horizon stays selectable.
     expect(pickerSrc).toMatch(/min=\{addDaysToIsoDate\(resolved\.checkIn, 1\)\}/);
   });
 
@@ -141,5 +157,64 @@ describe("DR-01 — the remaining date surfaces are bounded", () => {
   it("BookingLookupPage clamps the extend-stay date and blocks an invalid submit", () => {
     expect(bookingLookupSrc).toMatch(/const minExtendCheckOut = addDaysToIsoDate\(activeBooking\.checkOut, 1\)/);
     expect(bookingLookupSrc).toMatch(/extendCheckOut <= activeBooking\.checkOut/);
+  });
+});
+describe("DR-01 follow-up — the check-in bound never freezes the picker", () => {
+  // The reported regression (2026-10-15): check-in was bounded by
+  // `checkOut - 1`. With the default 1-night stay, check-out is
+  // always `checkIn + 1`, so the bound equalled check-in's own
+  // current value and the native picker greyed out every later day —
+  // the guest could not move check-in at all. The bound is now the
+  // booking horizon.
+  //
+  // This is the invariant the freeze broke, asserted behaviourally
+  // against the real helpers the component composes. The source-text
+  // pin above catches a re-introduced `max={…checkOut…}`; this
+  // catches the horizon math silently collapsing.
+  const TODAY = "2026-10-15";
+  const MAX_STAY_NIGHTS = 30; // must mirror the component constant
+  const maxCheckOut = addDaysToIsoDate(TODAY, MAX_STAY_NIGHTS);
+
+  it("the horizon is strictly ahead of today", () => {
+    expect(diffNightsBetweenIso(TODAY, maxCheckOut)).toBe(MAX_STAY_NIGHTS);
+  });
+
+  it("offers selectable dates after check-in for every valid range", () => {
+    // Walk the whole month plus a few edge ranges. For each one the
+    // check-in input's upper bound must leave forward room, or the
+    // picker greys out every day the guest would want to move to.
+    const ranges = [
+      { checkIn: "2026-10-15", checkOut: "2026-10-16" }, // default 1-night
+      { checkIn: "2026-10-15", checkOut: "2026-10-17" }, // 2 nights
+      { checkIn: "2026-10-31", checkOut: "2026-11-02" }, // month boundary
+      { checkIn: "2026-11-10", checkOut: "2026-11-14" }
+    ];
+    for (const range of ranges) {
+      expect(maxCheckOut > range.checkIn).toBe(true);
+    }
+  });
+
+  it("still lets the guest move check-in past check-out, preserving nights", () => {
+    // The flow the freeze made unreachable. With check-in bounded by
+    // the horizon, picking a check-in AFTER the current check-out is
+    // selectable — and the normalizer preserves the stay length.
+    const current = normalizeStayRange({
+      checkIn: "2026-10-20",
+      checkOut: "2026-10-22",
+      minCheckIn: TODAY,
+      maxCheckOut
+    });
+    expect(current.nights).toBe(2);
+
+    const moved = normalizeStayRange({
+      checkIn: "2026-10-26", // guest drags check-in forward past check-out
+      checkOut: "2026-10-22",
+      minCheckIn: TODAY,
+      previousNights: current.nights,
+      maxCheckOut
+    });
+    expect(moved.checkIn).toBe("2026-10-26");
+    expect(moved.checkOut).toBe("2026-10-28");
+    expect(moved.nights).toBe(2);
   });
 });

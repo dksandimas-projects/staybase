@@ -121,7 +121,18 @@ export function DateRangePicker({
           Check-in
           <input
             className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
-            max={addDaysToIsoDate(resolved.checkOut, -1)}
+            // DR-01 follow-up (2026-10-15): do NOT bound check-in
+            // by `checkOut - 1`. With the default 1-night stay,
+            // check-out is always `checkIn + 1`, so that max
+            // resolved to check-in's OWN current value and the
+            // native picker greyed out every day after it — the
+            // guest could not move check-in at all. The
+            // `nights-preserved` correction path exists precisely
+            // to handle check-in landing after check-out, so the
+            // bound has to leave that path reachable. The upper
+            // bound here is the booking horizon, not the other
+            // field.
+            max={maxCheckOut}
             min={todayIso}
             type="date"
             value={resolved.checkIn}
