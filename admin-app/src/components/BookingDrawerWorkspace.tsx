@@ -1722,6 +1722,9 @@ function MarkRefundPaidAdvancedForm({
         </button>
       </div>
     </form>
+  );
+}
+
 // Per EXT-01 (2026-01-27): the Stay History panel renders the
 // `rescheduleHistory[]` as a timeline in the "Activity & More"
 // drawer section. Entries with `kind: "extend"` show only the
