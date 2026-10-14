@@ -218,3 +218,101 @@ describe("DR-01 follow-up — the check-in bound never freezes the picker", () =
     expect(moved.nights).toBe(2);
   });
 });
+
+describe("DR-01 follow-up — the nights stepper makes the stay length visible", () => {
+  // Per the industry pattern (Agoda's "Nights" ticker, Booking.com's
+  // adjusting calendar), the stay LENGTH is a control the guest owns
+  // and can see. Two independent date fields plus a silent auto-move
+  // is the odd one out — it reads as arbitrary precisely because the
+  // number driving the move is invisible.
+  it("renders a Nights control between the dates", () => {
+    expect(pickerSrc).toMatch(/^\s*Nights$/m);
+    expect(pickerSrc).toMatch(/aria-label="Remove one night"/);
+    expect(pickerSrc).toMatch(/aria-label="Add one night"/);
+  });
+
+  it("shows the resolved night count, not a raw diff", () => {
+    expect(pickerSrc).toMatch(/\{resolved\.nights\} \{resolved\.nights === 1 \? "night" : "nights"\}/);
+  });
+
+  it("steps check-out off check-in rather than touching check-in", () => {
+    // check-in is the anchor; the stepper only moves check-out.
+    expect(pickerSrc).toMatch(
+      /onClick=\{\(\) => setNights\(resolved\.nights \+ 1\)\}/
+    );
+    expect(pickerSrc).toMatch(
+      /function setNights\(next: number\) \{[\s\S]*?onCheckOutChange\(addDaysToIsoDate\(resolved\.checkIn, next\)\)/
+    );
+  });
+
+  it("caps the stepper at 1 night and at the horizon measured from check-in", () => {
+    expect(pickerSrc).toMatch(/disabled=\{resolved\.nights <= 1\}/);
+    expect(pickerSrc).toMatch(
+      /maxNights = Math\.max\(\s*Math\.min\(MAX_STAY_NIGHTS, diffNightsBetweenIso\(resolved\.checkIn, maxCheckOut\)\),\s*1\s*\)/
+    );
+    expect(pickerSrc).toMatch(/disabled=\{resolved\.nights >= maxNights\}/);
+  });
+
+  it("keeps 44px touch targets on the stepper buttons", () => {
+    // Hard rule: all form fields minimum 44px touch height.
+    expect(pickerSrc.match(/flex h-11 w-11 items-center justify-center/g) || []).toHaveLength(2);
+  });
+
+  it("drops the nights-preserved hint, which the stepper now makes obvious", () => {
+    // The message existed to explain an invisible move. With the
+    // count on screen, check-out is visibly `check-in + nights`.
+    const match = pickerSrc.match(/case "nights-preserved":[\s\S]*?return ([^;]+);/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe("null");
+  });
+
+  it("still explains the corrections the guest cannot infer", () => {
+    expect(pickerSrc).toMatch(/Check-out must be at least one night after check-in\./);
+    expect(pickerSrc).toMatch(/Check-in can't be in the past/);
+    expect(pickerSrc).toMatch(/nights ahead, so check-out was capped\./);
+  });
+});
+
+describe("DR-01 — nights stepper arithmetic", () => {
+  const TODAY = "2026-10-15";
+  const HORIZON = addDaysToIsoDate(TODAY, 30);
+
+  it("moving check-in past check-out preserves the visible length", () => {
+    const r = normalizeStayRange({
+      checkIn: "2026-10-20",
+      checkOut: "2026-10-18", // inverted — guest dragged check-in
+      minCheckIn: TODAY,
+      previousNights: 3,
+      maxCheckOut: HORIZON
+    });
+    expect(r.nights).toBe(3);
+    expect(r.checkOut).toBe("2026-10-23");
+    // check-out is exactly check-in + nights, which the guest can see.
+    expect(r.checkOut).toBe(addDaysToIsoDate(r.checkIn, r.nights));
+  });
+
+  it("caps the stepper from the check-in, not from today", () => {
+    // Check-in 20 days out leaves only 10 nights inside a 30-night horizon.
+    const checkIn = "2026-11-04";
+    const maxNights = Math.max(Math.min(30, diffNightsBetweenIso(checkIn, HORIZON)), 1);
+    expect(maxNights).toBe(10);
+  });
+
+  it("stepping nights always keeps check-out within the horizon", () => {
+    for (let nights = 1; nights <= 30; nights += 1) {
+      const checkOut = addDaysToIsoDate(TODAY, nights);
+      expect(checkOut <= HORIZON).toBe(true);
+    }
+  });
+
+  it("never lets the stepper produce a zero-night stay", () => {
+    const r = normalizeStayRange({
+      checkIn: "2026-10-20",
+      checkOut: "2026-10-20", // 1 is the floor the stepper enforces
+      minCheckIn: TODAY,
+      previousNights: 1,
+      maxCheckOut: HORIZON
+    });
+    expect(r.nights).toBeGreaterThanOrEqual(1);
+  });
+});
