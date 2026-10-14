@@ -167,7 +167,22 @@ export function CorporateBookingPage() {
   // `useInFlowHold` hook stamps the server-side doc on
   // first read; the booking transaction consumes the
   // hold best-effort after the booking commits.
-  const [holdId] = useState(() => generateHoldId());
+  //
+  // Per IMT-01 (2026-10-13): the setter is now live, so
+  // `onPickNewRoom` re-rolls the id and the corporate
+  // flow gets the same dead-end fix as the public `/book`
+  // flow. Without it, an expired hold re-read as HTTP 200
+  // `status: "expired"`, the hook's 404 → `POST
+  // /api/holds/start` branch never fired, and returning
+  // to Step 1 re-added the SAME dead id — a red-banner
+  // loop escapable only with a hard reload.
+  //
+  // Re-rolling happens on an EXPLICIT guest action only,
+  // never on a plain re-entry — auto-reviving a dead hold
+  // would silently defeat the countdown. See
+  // `plan/features/BOOKING-FLOW.md §In-flow Hold` +
+  // `plan/project/ROADMAP.md §IMT`.
+  const [holdId, setHoldId] = useState(() => generateHoldId());
 
   // Per BI-01 (booking-intercom audit 2026-07-06): two REAL
   // Turnstile challenges. The gate widget covers
@@ -1587,6 +1602,13 @@ export function CorporateBookingPage() {
           turnstileToken: reviewTurnstile.token || undefined
         }}
         onPickNewRoom={() => {
+          // Per IMT-01 (2026-10-13): re-roll the hold id
+          // BEFORE rewriting the URL — `continueParams`
+          // reads `hold: holdId` on the next "Continue to
+          // Step 2" (`:1186`), so minting first lets the
+          // hook stamp a fresh hold instead of re-reading
+          // the expired one.
+          setHoldId(generateHoldId());
           const next = new URLSearchParams();
           next.set("step", "select-room");
           setSearchParams(next, { replace: true });

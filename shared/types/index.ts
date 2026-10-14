@@ -189,6 +189,22 @@ export interface RoomBlock {
   updatedAt: string;
   cancelledAt: string | null;
   cancelledBy: string | null;
+  batchId?: string | null;
+}
+
+export interface StaffInventoryHold {
+  id: string;
+  roomIds: string[];
+  roomNumbers: string[];
+  startDate: string;
+  endDate: string;
+  status: "active" | "consumed" | "released" | "expired";
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  releasedAt: string | null;
 }
 
 // Per MRB-01 (2026-08-02, per decision #159): the reservation
@@ -1598,4 +1614,119 @@ export interface AudioRouting {
   // wearing a headset. `null` = system default output.
   ringtoneOutputDeviceId: string | null;
   updatedAt?: Date;
+}
+
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12, decision
+// pending). A tier is the editable row in the Settings → Rewards
+// tab: a name, a stay-completion threshold, a room-rate discount
+// percentage, a points multiplier applied at earn time, and a free-
+// text perks blurb shown to the member on their rewards portal. The
+// `fromStays` is integer ≥ 0 and must be unique within the array
+// (one tier per threshold). The `id` is stable so admin can rename
+// the tier without breaking existing `members/{uid}.currentLevel`
+// caches. Decimals allowed on `pointsMultiplier` (e.g. 1.25, 1.5)
+// so admins can tune earn rate per tier.
+export interface LevelDef {
+  id: string;
+  name: string;                  // 1..24 chars
+  fromStays: number;             // integer ≥ 0, unique within the array
+  discountPct: number;           // 0..100
+  pointsMultiplier: number;      // > 0, decimals allowed
+  perks: string;                  // ≤ 280 chars, free-text
+}
+
+// Canonical `settings/rewardsConfig` document. Phase 1 fields are
+// required at read time (callers coalesce defaults when absent).
+// Phase 2 fields are all optional with safe defaults — admin can
+// leave them at "off" until they tune. The booking engine falls
+// back to `memberDiscountPct` for tier-less members (decision #,
+// 2026-10-12 — see DECISIONS-FEATURES.md). `welcomePoints` is
+// credited on `POST /api/members/register` (idempotency via
+// `pointsHistory` `type: "welcome"` row check). `minPointsToRedeem`
+// guards the redeem-points endpoint. `pointsCanPayUpToBillPct` caps
+// how much of a booking's subtotal can be paid with points (0..100,
+// `100` = no cap, default). `freeNightEvery` writes a voucher when
+// `completedStays % N === 0` at checkout.
+export interface RewardsConfig {
+  // Phase 1 fields:
+  pointsEnabled: boolean;
+  earningMode: "per-booking" | "per-spend";
+  pointsPerBooking: number;
+  pointsPerHundred: number;
+  memberDiscountEnabled: boolean;
+  memberDiscountPct: number;
+  pointsRedemptionRate: number;
+  earlyCheckInEnabled?: boolean;
+  updatedAt?: Date;
+  // Phase 2 fields (all optional, safe defaults):
+  welcomePoints?: number;            // 0 = off
+  minPointsToRedeem?: number;        // 0 = no minimum
+  pointsCanPayUpToBillPct?: number;  // 0..100, default 100 (no cap)
+  freeNightEvery?: number;           // integer, 0 = off
+  levels?: LevelDef[];               // ordered ascending by fromStays
+  // Per PR #9 (2026-10-13): admin opt-in toggle for member
+  // self-service points redemption at booking Step 3. Default false
+  // (front-desk-mediated). When true, the booking flow exposes an
+  // "Apply my points" input alongside the voucher code, and the
+  // member-authenticated /api/members/redeem-points-self endpoint
+  // is enabled. All 7 guards (min-redeem, bill cap, balance, one-
+  // per-booking, status pre-checkin, member match, booking exists)
+  // still run server-side.
+  allowMemberPointsRedemption?: boolean;
+}
+
+// Canonical `members/{memberId}` document. Same UID as
+// `guests/{userId}` — member accounts are guest accounts with the
+// Spark Rewards fields populated. All Phase 2 fields are optional
+// with safe defaults. `completedStays` is incremented at checkout
+// (in the same transaction as the points earn step, with a
+// cancellation clawback per the existing MRB-05 / CRL-02 pattern).
+// `currentLevel` is a cached snapshot — refreshed at checkout +
+// on settings save — and falls back to null for members who haven't
+// earned enough stays for the lowest configured tier.
+export interface Member {
+  memberNumber: string;        // e.g. "SR-10023"
+  uid: string;                 // Firebase Auth UID
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone?: string | null;
+  rewardsPoints: number;
+  status: "active" | "suspended";
+  // Phase 2 fields (all optional):
+  completedStays?: number;          // default 0
+  currentLevel?: LevelDef | null;   // cache, default null
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// Per Phase 2 (2026-10-12, decision pending): extended to cover
+// the new entry types wired up in subsequent PRs ("welcome" on
+// register, "free-night" when a tier promotion completes). Today
+// the live points ledger writes "earn" / "redeem" / "adjust" /
+// "clawback"; "welcome" and "free-night" join the union now so
+// the type is honest and downstream consumers (Reports, audit
+// logs) can render them without a TS cast.
+export type PointsHistoryType =
+  | "earn"
+  | "redeem"
+  | "adjust"
+  | "clawback"
+  | "welcome"        // Phase 2 — register bonus, wired in Phase 6
+  | "free-night";    // Phase 2 — tier reward, wired in Phase 5
+
+// Canonical `members/{memberId}/pointsHistory/{historyId}` entry.
+// The ledger is append-only — cancellations claw back via a
+// compensating entry of `type: "clawback"` rather than by
+// mutating the original row. `points` is signed: positive for
+// earn / welcome / free-night, negative for redeem / clawback.
+export interface PointsHistoryEntry {
+  id: string;
+  memberId: string;
+  type: PointsHistoryType;
+  points: number;
+  bookingRef?: string | null;
+  note?: string;
+  createdAt: Date;
+  createdBy?: string;        // staff uid for adjust / welcome / free-night
 }

@@ -65,6 +65,7 @@ export const config = {
   domain: "sparkinnbohol.com",
   adminDomain: "admin.sparkinnbohol.com",
   supportEmail: "sparkinn.dev@gmail.com",
+  intercomGuestAppId: "",
   facebookUrl: "https://www.facebook.com/sparkinnbohol",
   instagramUrl: "https://www.instagram.com/sparkinnbohol",
   twitterHandle: "",

@@ -7,6 +7,19 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 
 ---
 
+## Calendar Bulk Selection & Hold-to-Book (CAL-01)
+
+The booking calendar supports one contiguous date range across one or more physical rooms. Staff can add rooms by clicking open cells or using the room-row checkboxes; the toolbar shows the room list, number of nights, and total room-nights.
+
+- **Block dates:** requires a reason and opens a confirmation modal listing every room, the date range, and room-night total. Confirm creates one active `roomBlocks` document per room in a single transaction with a shared `batchId`. Any booking, block, or staff-hold conflict aborts the whole batch.
+- **Hold & book:** opens the same summary confirmation before creating a 15-minute hard inventory hold. Public availability and every ordinary booking/block transaction treat an unexpired staff hold as unavailable.
+- **Booking handoff:** after acquisition, the existing New Booking modal opens with the held rooms and dates locked. Guest, occupancy, payment, and other reservation details remain editable. A countdown and Extend action stay visible.
+- **Terminal behavior:** successful creation consumes the hold in the same transaction as the multi-room reservation. Cancelling the modal releases it. Expired holds are ignored immediately at read time even before the daily cleanup sweep updates their stored status.
+
+The confirmation and hold are group-scoped: the operation is all-or-nothing and never leaves a partially blocked or partially booked room set.
+
+---
+
 ## Workspace Layout & BDUX Contract
 
 The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
@@ -124,6 +137,51 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 - **Admin modal — "Add room to this reservation" button** in the Bookings drawer More actions section. Gates on `selectedBooking.reservationId && RESCHEDULABLE_STATUSES.includes(selectedBooking.status)` (hidden for legacy null-`reservationId` bookings — the add-room flow is a multi-room concept; hidden for in-stay bookings — the in-stay path is the reschedule handler). The button carries the `renderActionScope("reservation")` chip (MRB-07) so the desk knows the new room is part of the reservation. The modal collects room, occupancy, optional extra bed, optional discount + voucher; dates are not collected (read from the header server-side).
 - **Per-child dates UI when `actualDateRange.isDivergent === true`.** The Bookings table Dates column renders the divergent dates with a `data-testid="reservation-dates-divergent"` badge ("Jan 1 → Jan 8" + a "varies by room" pill) and a per-room tooltip listing each child's dates. The drawer reservation strip gains a third pill row (`data-testid="reservation-strip-actual-range"`) below the Total / Paid / Balance pills showing the actual range + "varies by room" + a per-room tooltip. The email `buildReservationEmailView` emits `actualDateRange` on the view and per-room `checkIn` / `checkOut` on `roomProjections`; the reservation branch in `bookingRows` reads `booking.actualDateRange?.isDivergent` and shows the actual range + "(varies by room)" + per-room dates when divergent. The receipt PDF's Stay card gains an "Actual range" line + per-room dates inline under each room label when divergent. N=1 + legacy null-`reservationId` paths stay byte-equivalent (no children to diverge, no header to read).
 - **Test coverage.** 6 pure-helper tests (`shared/__tests__/mrb-14-actual-date-range.test.ts`) + 5 source-text tests (`guest-app/tests/api/mrb-14-reschedule-preserves-header.test.ts`) + 11 endpoint tests (`guest-app/tests/api/mrb-14-add-room-endpoint.test.ts`) + 1 admin hydration test + 2 admin modal tests (in `mrb-12-admin-reservation-affordance.test.ts`) + 12 per-child-dates-UI source-text tests (`admin-app/src/__tests__/mrb-14-04-per-child-dates-ui.test.ts`) = **37 new tests** across 5 test files. The `firebase/tests/mrb-14-add-room.emulator.test.ts` round-trip is the Java-gated follow-up.
+
+---
+
+## Extend Stay (EXT-01)
+
+> Implementation: `feature/extend-stay-staff` (2026-01-27). All three deliverables shipped (EXT-01 staff + EXT-02 guest self-service + EXT-03 unavailable-room handoff). Commits `890aced` (EXT-01), `028570f` (EXT-02), `039fa42` (EXT-03 config), merged to dev @ `5712483`.
+
+### What ships in EXT-01
+
+**Server (`handleRescheduleBooking`):**
+- `RescheduleBookingSchema` gains `mode: z.enum(["extend"]).optional()`.
+- When `mode === "extend"`, the server enforces three invariants:
+  1. `roomId` must match the booking's current `roomId` — room cannot change.
+  2. `checkIn` must match the booking's current `checkIn` — check-in cannot change.
+  3. `checkOut` must be strictly after the booking's current `checkOut`.
+- The `rescheduleHistory[]` entry records `kind: "extend"` (vs `"move"` for a room change) so clients can render the timeline differently.
+
+**Client (`AdminContext.tsx`):**
+- `extendStayBooking({ bookingId, checkOut, reason })` — thin wrapper that POSTs to the existing `/api/bookings/reschedule` with `mode: "extend"`, sending `roomId: "__EXTEND_LOCKED__"` and `checkIn: "__EXTEND_LOCKED__"` as sentinel values. The server enforces the actual locking.
+
+**Admin Drawer — "Activity & More" section (`BookingsPage.tsx`):**
+- "Extend stay" button appears in the More-actions area for `RESCHEDULABLE_STATUSES` bookings (eligible: `payment-confirmed`, `confirmed`, `checked-in`; ineligible: `pending`, `payment-uploaded` — guest hasn't paid the original stay yet).
+- The Extend Stay workstation:
+  - Current room and check-in shown as locked read-only fields.
+  - Only the new check-out date is editable, with `min` set to the day after the current check-out.
+  - Optional reason field.
+  - Live nights-delta indicator when a valid future date is selected.
+  - "Need a different room? Move + extend instead" link prefills the Move/Upgrade form's check-out + reason and switches to that form.
+- "Move + extend instead" prefills the Move/Upgrade form's `checkOut` + reason (`"Move + extend"`) so staff can immediately adjust the room picker.
+
+**Stay History panel (`BookingDrawerWorkspace.tsx` → `StayHistory`):**
+- Renders `booking.rescheduleHistory[]` as a chronological timeline in the "Activity & More" section.
+- Each entry shows: who made the change, when, the price delta badge, and either:
+  - `"extend"` entries: check-out change with `+N nights` pill and line-through on the old check-out.
+  - `"move"` entries: room number change + date range.
+- Reason is shown in italic below the change summary.
+
+### Multi-room extend
+
+When a reservation has N rooms and staff extend one room, the extend form operates on the **selected room only**. The `rescheduleHistory[]` entry is per-booking (per-child room). Staff can extend each room independently by opening each room's drawer. This matches the MRB-14 "per-child" design principle.
+
+### What does NOT ship in EXT-01
+
+- **EXT-02** (guest self-service extend): the guest-facing "Extend stay" CTA on `/my-booking`. Guest can only extend if the current room is free for the new dates — no room-picking UI.
+- **EXT-03** (unavailable-room handoff): when the current room is not available for the new dates, the CTA bundle (Call / Chat / Email) routes the guest to staff instead of a room-picker.
 
 ---
 

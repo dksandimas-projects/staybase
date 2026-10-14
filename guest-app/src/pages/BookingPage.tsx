@@ -298,7 +298,31 @@ export function BookingPage() {
   // `useInFlowHold` hook stamps the server-side doc on
   // first read; the booking transaction consumes the
   // hold best-effort after the booking commits.
-  const [holdId] = useState(() => generateHoldId());
+  //
+  // Per IMT-01 (2026-10-13): the setter is now live. The
+  // `onPickNewRoom` callback re-rolls the id so that
+  // returning to Step 1 after the hold expires starts a
+  // genuinely fresh hold. Previously the id was minted
+  // once per page instance and never re-rolled, while
+  // `onPickNewRoom` only rewrote `?step=select-room` —
+  // so Step 1 re-added the SAME dead id via
+  // `continueParams`, `/api/holds/read` answered 200
+  // with `status: "expired"` (read-time evaluation), the
+  // hook's 404 → `POST /api/holds/start` branch therefore
+  // never fired, and the guest landed in a red-banner
+  // loop they could only escape with a hard reload.
+  //
+  // Re-rolling on an EXPLICIT guest action only. The id is
+  // deliberately NOT re-rolled on a plain re-entry (e.g.
+  // browser Back to Step 1): auto-reviving a dead hold
+  // would silently defeat the countdown, since a guest who
+  // sits on the expired banner and reloads would otherwise
+  // get a new window forever and the timer would stop
+  // meaning anything. An expired banner stays red until
+  // the guest asks for a new room or extends the hold
+  // (IMT-03). See `plan/features/BOOKING-FLOW.md
+  // §In-flow Hold` + `plan/project/ROADMAP.md §IMT`.
+  const [holdId, setHoldId] = useState(() => generateHoldId());
 
   // Dynamic config states loaded from Firestore
   // Per BR-03 (2026-10-12, decision #232) + BR-08 (decision
@@ -525,6 +549,25 @@ export function BookingPage() {
   const [voucherDiscountType, setVoucherDiscountType] = useState<"percent" | "flat">("flat");
   const [voucherError, setVoucherError] = useState("");
   const [isValidatingVoucher, setIsValidatingVoucher] = useState(false);
+
+  // Per PR #9 fix (2026-10-13): member self-service points redemption
+  // at booking creation. The Apply button does NOT call the API
+  // — it just stores the desired points amount in local state
+  // and shows the discount in the UI preview. On submit,
+  // `handleConfirmBooking` passes `pointsToRedeem` to the
+  // server's `handleCreateBooking`, which applies the redemption
+  // atomically inside the create transaction. The booking is
+  // written with the already-discounted totalPrice — no refunds,
+  // no credit tracking, no post-payment reconciliation. The
+  // client-side toggle gate (`allowMemberPointsRedemption`) is
+  // UX, not security — the server's ownership guard inside the
+  // create transaction is the real authorization.
+  const [selfPointsInput, setSelfPointsInput] = useState("");
+  const [pendingPointsToRedeem, setPendingPointsToRedeem] = useState(0);
+  const [selfPointsError, setSelfPointsError] = useState("");
+  const [selfPointsApplied, setSelfPointsApplied] = useState(false);
+  const memberSelfRedeemEnabled = rewardsConfig?.allowMemberPointsRedemption === true;
+  const memberAvailablePoints = Number(memberProfile?.rewardsPoints || 0);
 
   const [discountType, setDiscountType] = useState<"none" | "senior" | "pwd">("none");
   // Per BF-30 (booking-flow audit 2026-06-26): the previous
@@ -949,6 +992,23 @@ export function BookingPage() {
   const total = distributedRoomCart.length > 0
     ? Math.max(afterVoucher - memberDiscount, 0)
     : 0;
+  // Per PR #9 fix (2026-10-13): the member has queued
+  // `pendingPointsToRedeem` points for redemption at booking
+  // creation. Mirror the server's `Math.round(validation.value)`
+  // math (where `validation.value = (points / 100) *
+  // pointsRedemptionRate`) so the displayed total reflects the
+  // same number the server will subtract atomically at submit.
+  // Byte-equivalent when `pendingPointsToRedeem === 0`:
+  // `displayTotal === total`.
+  const pendingRedemptionValue = useMemo(() => {
+    if (pendingPointsToRedeem <= 0) return 0;
+    const rate = Number(rewardsConfig?.pointsRedemptionRate || 0);
+    if (rate <= 0) return 0;
+    return Math.round((pendingPointsToRedeem * rate) / 100);
+  }, [pendingPointsToRedeem, rewardsConfig?.pointsRedemptionRate]);
+  const displayTotal = distributedRoomCart.length > 0
+    ? Math.max(total - pendingRedemptionValue, 0)
+    : 0;
 
   const rateBreakdown = useMemo(() => {
     if (distributedRoomCart.length === 0) return null;
@@ -972,7 +1032,13 @@ export function BookingPage() {
       voucherApplied,
       voucherDiscount,
       memberDiscountPct,
-      finalTotal: total
+      finalTotal: displayTotal,
+      // Per PR #9 fix (2026-10-13): surface the pending points
+      // redemption as a deductions line so the member sees the
+      // breakdown match the queued discount. The server applies
+      // it at booking creation via `applyPointsRedemption`.
+      pendingRedemptionPoints: pendingPointsToRedeem,
+      pendingRedemptionValue
     });
   }, [
     distributedRoomCart,
@@ -988,7 +1054,10 @@ export function BookingPage() {
     voucherApplied,
     voucherDiscount,
     memberDiscountPct,
-    total
+    total,
+    displayTotal,
+    pendingPointsToRedeem,
+    pendingRedemptionValue
   ]);
 
   const continueParams = new URLSearchParams({
@@ -1741,6 +1810,15 @@ export function BookingPage() {
           additionalPreferences,
           additionalRequest: additionalRequest.trim(),
           expectedArrivalTime,
+          // Per PR #9 fix (2026-10-13): the member's pending
+          // points amount from the Step 3 control. `0` (the
+          // default) preserves pre-PR-9 behavior exactly. The
+          // server's `handleCreateBooking` applies the
+          // redemption atomically inside the create
+          // transaction — the booking is written with the
+          // already-discounted totalPrice so the member pays
+          // the lower amount.
+          pointsToRedeem: pendingPointsToRedeem,
           checkIn,
           checkOut,
           // Per BI-09 (booking-intercom audit 2026-07-06): the
@@ -1975,6 +2053,15 @@ export function BookingPage() {
           turnstileToken: turnstileToken || undefined
         }}
         onPickNewRoom={() => {
+          // Per IMT-01 (2026-10-13): re-roll the hold id
+          // BEFORE rewriting the URL. The id is what
+          // `continueParams` reads on the next "Continue to
+          // Step 2" (`hold: holdId`), so minting it first
+          // means the guest re-enters Step 2 with a fresh id
+          // that the hook's 404 → `POST /api/holds/start`
+          // branch can stamp — instead of re-reading the
+          // expired doc and getting an instantly-red banner.
+          setHoldId(generateHoldId());
           const next = new URLSearchParams();
           next.set("step", "select-room");
           setSearchParams(next, { replace: true });
@@ -2490,16 +2577,128 @@ export function BookingPage() {
               )}
             </div>
 
-            {/* Discount Section */}
-            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+            {/* Points Redemption Section (PR #9) — only renders when
+                the admin toggle is on AND the signed-in member has a
+                positive balance. Same 7 guards run server-side via the
+                shared `applyPointsRedemption` helper. */}
+            {memberSelfRedeemEnabled && memberAvailablePoints > 0 && (
+              <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+                <h3 className="text-lg font-semibold text-gray-950">Apply Your Points</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  You have <span className="font-bold text-primary">{memberAvailablePoints.toLocaleString()}</span> points available.
+                  {rewardsConfig?.pointsRedemptionRate ? (
+                    <> Each 100 points = ₱{Number(rewardsConfig.pointsRedemptionRate).toLocaleString()} off your booking total.</>
+                  ) : null}
+                </p>
+
+                {selfPointsApplied ? (
+                  <div className="mt-4 flex items-center justify-between rounded-lg bg-status-green-bg p-3 text-sm font-medium text-status-green-text">
+                    <span className="flex flex-col gap-0.5">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 size={16} />
+                        {pendingPointsToRedeem.toLocaleString()} points · ₱{pendingRedemptionValue.toLocaleString()} off
+                      </span>
+                      <span className="ml-6 text-xs font-normal text-status-green-text/80">
+                        New total ₱{displayTotal.toLocaleString()} — applied at booking submission
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingPointsToRedeem(0);
+                        setSelfPointsInput("");
+                        setSelfPointsApplied(false);
+                        setSelfPointsError("");
+                      }}
+                      className="rounded-lg border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-100"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Points to apply
+                      <input
+                        type="number"
+                        min={1}
+                        max={memberAvailablePoints}
+                        value={selfPointsInput}
+                        onChange={(e) => {
+                          setSelfPointsInput(e.target.value);
+                          setSelfPointsError("");
+                        }}
+                        className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
+                      />
+                      {(() => {
+                        const entered = Math.max(0, Math.floor(Number(selfPointsInput) || 0));
+                        const rate = Number(rewardsConfig?.pointsRedemptionRate || 0);
+                        const value = entered > 0 && rate > 0 ? Math.round((entered * rate) / 100) : 0;
+                        if (value <= 0) return null;
+                        return (
+                          <span className="font-normal text-gray-500">
+                            Preview: ₱{value.toLocaleString()} off ·{" "}
+                            {rewardsConfig?.minPointsToRedeem && entered < Number(rewardsConfig.minPointsToRedeem)
+                              ? `below the ${rewardsConfig.minPointsToRedeem}-point minimum`
+                              : `new total ₱${Math.max(0, total - value).toLocaleString()}`}
+                          </span>
+                        );
+                      })()}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={
+                        !selfPointsInput.trim() ||
+                        Number(selfPointsInput) <= 0 ||
+                        Number(selfPointsInput) > memberAvailablePoints
+                      }
+                      onClick={() => {
+                        const entered = Math.max(0, Math.floor(Number(selfPointsInput) || 0));
+                        if (entered <= 0) {
+                          setSelfPointsError("Enter a positive number of points to apply.");
+                          return;
+                        }
+                        if (entered > memberAvailablePoints) {
+                          setSelfPointsError(`You only have ${memberAvailablePoints.toLocaleString()} points available.`);
+                          return;
+                        }
+                        setPendingPointsToRedeem(entered);
+                        setSelfPointsApplied(true);
+                        setSelfPointsError("");
+                      }}
+                      className="min-h-11 rounded-lg bg-primary px-5 text-sm font-semibold text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Apply at Booking
+                    </button>
+                  </div>
+                )}
+
+                {selfPointsError && (
+                  <div className="mt-3 flex gap-2 rounded-lg bg-red-50 p-3 text-sm font-medium text-red-700">
+                    <Info size={16} className="mt-0.5 shrink-0" />
+                    <p>{selfPointsError}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Discount Section — rendered only while the online
+                Senior/PWD claim path is enabled
+                (`settings/hotelConfig.seniorPwdOnlineEnabled`).
+                Per owner request 2026-10-13 (decision #231): when
+                the toggle is off the whole card is dropped — no
+                heading, no selector, and no "claims unavailable"
+                note. The discount itself is unaffected: staff
+                still apply the 20% at the front desk when an
+                eligible guest presents a valid ID (RA 9994 /
+                RA 10754). */}
+            {seniorPwdOnlineEnabled && <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Discount Options</h3>
               <p className="mt-1 text-sm text-gray-600">
-                {seniorPwdOnlineEnabled
-                  ? "Select if you are eligible for government-mandated discounts. A valid ID must be uploaded."
-                  : "Senior/PWD online claims are currently unavailable. Eligible guests may present a valid ID at check-in to receive the mandated discount."}
+                Select if you are eligible for government-mandated discounts. A valid ID must be uploaded.
               </p>
-              
-              {seniorPwdOnlineEnabled && <div className="mt-4 grid gap-3 sm:grid-cols-3">
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 {(["none", "senior", "pwd"] as const).map((type) => {
                   // Per the per-individual discount guard:
                   // the senior / PWD buttons are disabled
@@ -2536,14 +2735,14 @@ export function BookingPage() {
                     </button>
                   );
                 })}
-              </div>}
-              {seniorPwdOnlineEnabled && cartIsMultiRoom && (
+              </div>
+              {cartIsMultiRoom && (
                 <p className="mt-3 text-xs text-amber-700">
                   Senior Citizen and PWD discounts are per-individual entitlements and apply to a single room. If you need a senior or PWD discount, please book that guest's room in a separate booking — the additional rooms can be added to the same reservation from the front desk at check-in.
                 </p>
               )}
 
-              {seniorPwdOnlineEnabled && discountType !== "none" && (
+              {discountType !== "none" && (
                 <div className="mt-5">
                   <p className="text-sm font-semibold text-gray-700">
                     {discountType === "senior" ? "Upload OSCA Card Photo" : "Upload PWD ID Card Photo"} <span className="text-red-500">*</span>
@@ -2605,7 +2804,7 @@ export function BookingPage() {
                   </div>
                   </div>
                 )}
-            </div>
+            </div>}
 
             {/* Payment Method Section — dynamic, per
                 `plan/features/SETTINGS.md §Payment Methods`. The
@@ -2703,7 +2902,7 @@ export function BookingPage() {
                         <div className="sm:col-span-3 p-5 flex flex-col justify-center">
                           <h4 className="font-semibold text-primary text-base">{currentPaymentMethod.label} Payment Details</h4>
                               <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(total)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
+                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(displayTotal)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
                               </p>
                           {currentPaymentMethod.accountNumber && (
                             <p className="mt-1 text-xs font-semibold text-gray-800">
@@ -2951,7 +3150,7 @@ export function BookingPage() {
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
             typeDescription={selectedTypeEntry?.description ?? ""}
-            total={total}
+            total={displayTotal}
             discountPct={discountPct}
             voucherDiscount={voucherDiscount}
             discountType={discountType}
@@ -3806,7 +4005,7 @@ export function BookingPage() {
               {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
             </p>
             <p className="text-2xl font-semibold text-gray-950">
-              {formatPrice(total)} <span className="text-sm font-normal text-gray-500">including selected options</span>
+              {formatPrice(displayTotal)} <span className="text-sm font-normal text-gray-500">including selected options</span>
             </p>
           </div>
 	          {cartIsReady ? (
@@ -3895,6 +4094,12 @@ function buildGuestRateBreakdown(input: {
   voucherDiscount: number;
   memberDiscountPct: number;
   finalTotal: number;
+  // Per PR #9 fix (2026-10-13): the queued points redemption the
+  // member applied via the BookingPage control. Surfaces as a
+  // deductions line so the breakdown matches the discount the
+  // server will subtract at booking creation.
+  pendingRedemptionPoints?: number;
+  pendingRedemptionValue?: number;
 }): BookingRateBreakdown {
   const addOns = [
     ...(input.breakfastTotal > 0
@@ -3913,6 +4118,8 @@ function buildGuestRateBreakdown(input: {
   const afterSeniorPwd = subtotal - seniorPwdDiscount;
   const afterVoucher = afterSeniorPwd - input.voucherDiscount;
   const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, input.memberDiscountPct));
+  const pendingPts = Number(input.pendingRedemptionPoints || 0);
+  const pendingVal = Number(input.pendingRedemptionValue || 0);
   const deductions = [
     ...(seniorPwdDiscount > 0
       ? [{
@@ -3925,6 +4132,19 @@ function buildGuestRateBreakdown(input: {
       : []),
     ...(memberDiscount > 0
       ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }]
+      : []),
+    // Per PR #9 fix (2026-10-13): the queued points redemption
+    // line. Same shape as the other deductions — label + amount
+    // — so the PriceBreakdown renders it consistently. Only
+    // surfaced when the member has actually applied points (both
+    // fields > 0); the rateBreakdown useMemo also depends on
+    // `pendingPointsToRedeem`, so removing the redemption clears
+    // this line.
+    ...(pendingPts > 0 && pendingVal > 0
+      ? [{
+          label: `Spark Rewards points (${pendingPts.toLocaleString()} pts)`,
+          amount: pendingVal
+        }]
       : [])
   ];
 

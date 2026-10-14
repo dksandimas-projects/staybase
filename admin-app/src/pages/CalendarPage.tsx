@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarClock, CalendarDays, Edit3, MessageSquareText, Plus, XCircle } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarClock, CalendarDays, Edit3, LockKeyhole, MessageSquareText, Plus, XCircle } from "lucide-react";
 // Per NBS-2026-08-08 (F1 + F8, booking-flow audit
 // 2026-08-08): the calendar create-booking path preallocates
 // a `bookingId` + `reservationId` pair (F1) and now threads
@@ -100,6 +100,7 @@ function isRangeEnd(endDate: string, date: Date) {
 }
 
 export function CalendarPage() {
+  const navigate = useNavigate();
   const {
     bookings,
     rooms,
@@ -109,8 +110,11 @@ export function CalendarPage() {
     dashboardLoading,
     roomBlocks,
     createRoomBlock,
+    createBulkRoomBlocks,
     updateRoomBlock,
     cancelRoomBlock,
+    staffInventoryHolds,
+    acquireStaffInventoryHold,
     addWalkinBooking,
     updateBookingStatus,
     paymentMethods,
@@ -134,7 +138,10 @@ export function CalendarPage() {
 
   const todayKey = toLocalDateKey(new Date());
   const [startDate, setStartDate] = useState(todayKey);
-  const [selection, setSelection] = useState<{ roomId: string; startDate: string; endDate: string } | null>(null);
+  const [selection, setSelection] = useState<{ roomId: string; roomIds: string[]; startDate: string; endDate: string } | null>(null);
+  const [confirmationAction, setConfirmationAction] = useState<"block" | "hold" | null>(null);
+  const [isSelectionSubmitting, setIsSelectionSubmitting] = useState(false);
+  const [staffHoldNow, setStaffHoldNow] = useState(() => Date.now());
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<RoomBlock | null>(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
@@ -259,7 +266,28 @@ export function CalendarPage() {
       }, {});
   }, [roomBlocks]);
 
+  const activeStaffHoldsByRoom = useMemo(() => {
+    return staffInventoryHolds
+      .filter((hold) => hold.status === "active" && new Date(hold.expiresAt).getTime() > staffHoldNow)
+      .reduce<Record<string, typeof staffInventoryHolds>>((acc, hold) => {
+        for (const roomId of hold.roomIds) {
+          acc[roomId] = acc[roomId] || [];
+          acc[roomId].push(hold);
+        }
+        return acc;
+      }, {});
+  }, [staffInventoryHolds, staffHoldNow]);
+
+  useEffect(() => {
+    if (staffInventoryHolds.length === 0) return;
+    const timer = window.setInterval(() => setStaffHoldNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [staffInventoryHolds.length]);
+
   const selectedRoom = selection ? rooms.find((room) => room.id === selection.roomId) || null : null;
+  const selectedRooms = selection
+    ? sortedRooms.filter((room) => selection.roomIds.includes(room.id))
+    : [];
   const selectedRoomType = selectedRoom ? roomTypes.find((type) => type.value === selectedRoom.type) || null : null;
   const selectedNights = selection ? getNumNights(selection.startDate, selection.endDate) : 0;
 
@@ -283,24 +311,70 @@ export function CalendarPage() {
     const dayKey = toDateKey(day);
     const nextDayKey = toDateKey(addDays(day, 1));
     if (!selection || selection.roomId !== room.id) {
-      setSelection({ roomId: room.id, startDate: dayKey, endDate: nextDayKey });
+      if (!selection) {
+        setSelection({ roomId: room.id, roomIds: [room.id], startDate: dayKey, endDate: nextDayKey });
+        return;
+      }
+      const start = parseDate(selection.startDate) < day ? selection.startDate : dayKey;
+      const end = parseDate(selection.endDate) > addDays(day, 1) ? selection.endDate : nextDayKey;
+      setSelection({
+        ...selection,
+        roomIds: selection.roomIds.includes(room.id) ? selection.roomIds : [...selection.roomIds, room.id],
+        startDate: start,
+        endDate: end
+      });
       return;
     }
 
     if (rangeIncludesDate(selection, day)) {
-      setSelection(null);
       return;
     }
 
     const start = parseDate(selection.startDate) < day ? selection.startDate : dayKey;
     const end = parseDate(selection.endDate) > addDays(day, 1) ? selection.endDate : nextDayKey;
-    setSelection({ roomId: room.id, startDate: start, endDate: end });
+    setSelection({ ...selection, startDate: start, endDate: end });
   };
+
+  const toggleSelectedRoom = (room: Room) => {
+    if (!selection) {
+      setSelection({ roomId: room.id, roomIds: [room.id], startDate: toDateKey(days[0]), endDate: toDateKey(addDays(days[0], 1)) });
+      return;
+    }
+    const selected = selection.roomIds.includes(room.id);
+    const roomIds = selected
+      ? selection.roomIds.filter((id) => id !== room.id)
+      : [...selection.roomIds, room.id];
+    if (roomIds.length === 0) {
+      setSelection(null);
+      return;
+    }
+    setSelection({ ...selection, roomIds, roomId: roomIds[0] });
+  };
+
+  const selectionConflicts = useMemo(() => {
+    if (!selection) return [] as string[];
+    return selectedRooms.flatMap((room) => {
+      const hasBooking = (bookingsByRoom[room.id] || []).some((booking) =>
+        parseDate(booking.checkIn) < parseDate(selection.endDate)
+        && parseDate(booking.checkOut) > parseDate(selection.startDate)
+      );
+      const hasBlock = (activeBlocksByRoom[room.id] || []).some((block) =>
+        parseDate(block.startDate) < parseDate(selection.endDate)
+        && parseDate(block.endDate) > parseDate(selection.startDate)
+      ) || legacyRoomBlockOverlapsRange(room, selection.startDate, selection.endDate);
+      const hasHold = (activeStaffHoldsByRoom[room.id] || []).some((hold) =>
+        parseDate(hold.startDate) < parseDate(selection.endDate)
+        && parseDate(hold.endDate) > parseDate(selection.startDate)
+      );
+      return hasBooking || hasBlock || hasHold ? [room.roomNumber] : [];
+    });
+  }, [selection, selectedRooms, bookingsByRoom, activeBlocksByRoom, activeStaffHoldsByRoom, sortedRooms]);
 
   const handleBlockSelection = async () => {
     if (!selection || !blockReason.trim()) return;
-    const result = await createRoomBlock({
-      roomId: selection.roomId,
+    setIsSelectionSubmitting(true);
+    const result = await createBulkRoomBlocks({
+      roomIds: selection.roomIds,
       startDate: selection.startDate,
       endDate: selection.endDate,
       reason: blockReason.trim(),
@@ -308,11 +382,39 @@ export function CalendarPage() {
     });
     if (!result.success) {
       toast.error("Dates not blocked", result.error || "Please try another range.");
+      setIsSelectionSubmitting(false);
       return;
     }
-    toast.success("Dates blocked", `${selection.startDate} to ${selection.endDate}`);
+    toast.success("Dates blocked", `${selection.roomIds.length} room${selection.roomIds.length === 1 ? "" : "s"} · ${selection.startDate} to ${selection.endDate}`);
     setSelection(null);
     setBlockNotes("");
+    setConfirmationAction(null);
+    setIsSelectionSubmitting(false);
+  };
+
+  const handleHoldAndBook = async () => {
+    if (!selection) return;
+    setIsSelectionSubmitting(true);
+    const result = await acquireStaffInventoryHold({
+      roomIds: selection.roomIds,
+      startDate: selection.startDate,
+      endDate: selection.endDate
+    });
+    if (!result.success || !result.hold) {
+      toast.error("Rooms not held", result.error || "Refresh the calendar and try again.");
+      setIsSelectionSubmitting(false);
+      return;
+    }
+    const params = new URLSearchParams({
+      newBooking: "1",
+      staffHoldId: result.hold.id,
+      holdExpiresAt: result.hold.expiresAt,
+      roomIds: result.hold.roomIds.join(","),
+      checkIn: result.hold.startDate,
+      checkOut: result.hold.endDate
+    });
+    toast.success("Rooms held for front desk", "Online booking is blocked for 15 minutes while you finish the reservation.");
+    navigate(`/bookings?${params.toString()}`);
   };
 
   const handleCreateBooking = async (e: React.FormEvent) => {
@@ -556,7 +658,7 @@ export function CalendarPage() {
       <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="font-heading text-3xl text-gray-950 lowercase">booking calendar</h1>
-          <p className="mt-1 text-xs text-gray-500">Click a start date and end date on one room, then block or book the selected range.</p>
+          <p className="mt-1 text-xs text-gray-500">Choose a date range, select one or more rooms, then block the dates or hold the rooms while creating a booking.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => moveWindow(-14)} className="inline-flex min-h-[40px] items-center gap-1 rounded-lg bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50">
@@ -574,18 +676,27 @@ export function CalendarPage() {
         <section className="rounded-card bg-white p-4 shadow-sm ring-1 ring-primary/20">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-bold text-gray-900">Room {selectedRoom.roomNumber} · {selection.startDate} to {selection.endDate}</p>
-              <p className="mt-1 text-[11px] text-gray-500">{selectedNights} night{selectedNights === 1 ? "" : "s"} · estimated room charge {formatPrice(selectedRoomTotal)}</p>
+              <p className="text-xs font-bold text-gray-900">
+                {selectedRooms.length} room{selectedRooms.length === 1 ? "" : "s"} · {selection.startDate} to {selection.endDate}
+              </p>
+              <p className="mt-1 text-[11px] text-gray-500">
+                Rooms {selectedRooms.map((room) => room.roomNumber).join(", ")} · {selectedNights} night{selectedNights === 1 ? "" : "s"} · {selectedRooms.length * selectedNights} room-night{selectedRooms.length * selectedNights === 1 ? "" : "s"}
+              </p>
+              {selectionConflicts.length > 0 && (
+                <p className="mt-2 text-[11px] font-semibold text-red-700">
+                  Remove or adjust conflicting room{selectionConflicts.length === 1 ? "" : "s"}: {selectionConflicts.join(", ")}.
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
-              <input value={blockReason} onChange={(e) => setBlockReason(e.target.value)} className="min-h-[40px] rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-800" placeholder="Block reason" />
-              <button type="button" onClick={handleBlockSelection} className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-gray-900 px-4 text-xs font-semibold text-white hover:bg-gray-800">
+              <input value={blockReason} onChange={(e) => setBlockReason(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-800" placeholder="Block reason" />
+              <button type="button" disabled={selectionConflicts.length > 0 || !blockReason.trim()} onClick={() => setConfirmationAction("block")} className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-gray-900 px-4 text-xs font-semibold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50">
                 <Ban size={14} /> Block dates
               </button>
-              <button type="button" onClick={() => setIsBookingModalOpen(true)} className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white hover:bg-primary-dark">
-                <Plus size={14} /> Book dates
+              <button type="button" disabled={selectionConflicts.length > 0} onClick={() => setConfirmationAction("hold")} className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50">
+                <LockKeyhole size={14} /> Hold &amp; book
               </button>
-              <button type="button" onClick={() => setSelection(null)} className="min-h-[40px] rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-700 hover:bg-gray-50">Clear</button>
+              <button type="button" onClick={() => setSelection(null)} className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-700 hover:bg-gray-50">Clear</button>
             </div>
           </div>
         </section>
@@ -601,6 +712,7 @@ export function CalendarPage() {
             <span className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700">Available</span>
             <span className="rounded-full bg-gray-950 px-2 py-1 text-white">Booked</span>
             <span className="rounded-full bg-gray-100 px-2 py-1 text-gray-700 line-through">Blocked</span>
+            <span className="rounded-full bg-blue-100 px-2 py-1 text-blue-800">Held</span>
           </div>
         </div>
 
@@ -614,14 +726,24 @@ export function CalendarPage() {
             {sortedRooms.map((room) => (
               <div key={room.id} className="grid min-h-[78px] border-b border-gray-100 last:border-b-0" style={{ gridTemplateColumns: `150px repeat(${days.length}, minmax(72px, 1fr))` }}>
                 <div className="sticky left-0 z-10 flex flex-col justify-center gap-1 bg-white px-3 py-3 shadow-[1px_0_0_#f3f4f6]">
-                  <span className="inline-flex items-center gap-1 text-sm font-bold text-gray-900"><BedDouble size={14} className="text-primary" />{room.roomNumber}</span>
+                  <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 text-sm font-bold text-gray-900">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selection?.roomIds.includes(room.id))}
+                      onChange={() => toggleSelectedRoom(room)}
+                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                      aria-label={`Select Room ${room.roomNumber}`}
+                    />
+                    <BedDouble size={14} className="text-primary" />{room.roomNumber}
+                  </label>
                   <span className="text-[10px] font-semibold text-gray-500">{roomTypeLabels[room.type] || room.type}</span>
                 </div>
                 {days.map((day) => {
                   const dateKey = toDateKey(day);
                   const booking = (bookingsByRoom[room.id] || []).find((item) => overlapsDate(item.checkIn, item.checkOut, day));
                   const block = (activeBlocksByRoom[room.id] || []).find((item) => overlapsDate(item.startDate, item.endDate, day));
-                  const selected = selection?.roomId === room.id && rangeIncludesDate(selection, day);
+                  const staffHold = (activeStaffHoldsByRoom[room.id] || []).find((item) => overlapsDate(item.startDate, item.endDate, day));
+                  const selected = Boolean(selection?.roomIds.includes(room.id) && rangeIncludesDate(selection, day));
 
                   if (booking) {
                     const left = isRangeStart(booking.checkIn, day);
@@ -699,6 +821,14 @@ export function CalendarPage() {
                     );
                   }
 
+                  if (staffHold) {
+                    return (
+                      <div key={`${room.id}-${dateKey}`} className="relative flex min-h-[78px] items-center justify-center border-l border-gray-100 bg-blue-50 px-2 py-2 text-blue-800">
+                        <span className="rounded-full bg-blue-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider">Held</span>
+                      </div>
+                    );
+                  }
+
                   return (
                     <button key={`${room.id}-${dateKey}`} type="button" onClick={() => handleOpenDateClick(room, day)} className={`flex min-h-[78px] flex-col items-center justify-center border-l border-gray-100 px-2 py-2 transition hover:bg-emerald-50 ${selected ? "bg-primary/10 ring-1 ring-inset ring-primary" : "bg-white"}`}>
                       <span className="text-xs font-bold text-gray-900">{dateKey.slice(8)}</span>
@@ -711,6 +841,51 @@ export function CalendarPage() {
           </div>
         </div>
       </section>
+
+      <Modal
+        title={confirmationAction === "block" ? "Confirm room block" : "Hold rooms for front desk"}
+        open={confirmationAction !== null}
+        onClose={() => !isSelectionSubmitting && setConfirmationAction(null)}
+        footer={selection ? (
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" disabled={isSelectionSubmitting} onClick={() => setConfirmationAction(null)} className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 disabled:opacity-50">Back</button>
+            <PrimaryButton
+              type="button"
+              disabled={isSelectionSubmitting || selectionConflicts.length > 0}
+              onClick={confirmationAction === "block" ? handleBlockSelection : handleHoldAndBook}
+            >
+              {isSelectionSubmitting
+                ? "Working..."
+                : confirmationAction === "block"
+                  ? `Block ${selectedRooms.length} room${selectedRooms.length === 1 ? "" : "s"}`
+                  : "Hold rooms & continue"}
+            </PrimaryButton>
+          </div>
+        ) : undefined}
+      >
+        {selection && (
+          <div className="space-y-4 text-sm">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="font-bold text-gray-950">{selectedRooms.length} room{selectedRooms.length === 1 ? "" : "s"} for {selectedNights} night{selectedNights === 1 ? "" : "s"}</p>
+              <p className="mt-1 text-xs text-gray-600">{selection.startDate} to {selection.endDate}</p>
+              <p className="mt-1 text-xs text-gray-600">Rooms {selectedRooms.map((room) => room.roomNumber).join(", ")}</p>
+              <p className="mt-1 text-xs text-gray-600">{selectedRooms.length * selectedNights} room-night{selectedRooms.length * selectedNights === 1 ? "" : "s"} total</p>
+            </div>
+            {confirmationAction === "block" ? (
+              <div className="space-y-3">
+                <p className="text-xs leading-relaxed text-gray-600">These rooms will remain unavailable until the blocks are cancelled.</p>
+                <p className="text-xs font-semibold text-gray-800">Reason: {blockReason.trim()}</p>
+                <label className="block text-xs font-semibold text-gray-700">
+                  Notes (optional)
+                  <textarea value={blockNotes} onChange={(event) => setBlockNotes(event.target.value)} rows={3} maxLength={500} className="mt-2 min-h-[88px] w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal" />
+                </label>
+              </div>
+            ) : (
+              <p className="text-xs leading-relaxed text-gray-600">Online booking will be blocked immediately for 15 minutes. The hold is consumed atomically when the front-desk reservation is created; closing the booking form releases it.</p>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Modal title="Create Calendar Booking" open={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)}>
         <form onSubmit={handleCreateBooking} className="space-y-4 text-xs">
@@ -924,4 +1099,11 @@ function roomBlockedOnLegacy(room: Room, date: Date) {
   if (room.status !== "blocked") return false;
   if (!room.blockedFrom || !room.blockedTo) return true;
   return parseDate(room.blockedFrom) < addDays(date, 1) && parseDate(room.blockedTo) > date;
+}
+
+function legacyRoomBlockOverlapsRange(room: Room, startDate: string, endDate: string) {
+  if (room.status !== "blocked") return false;
+  if (!room.blockedFrom || !room.blockedTo) return true;
+  return parseDate(room.blockedFrom) < parseDate(endDate)
+    && parseDate(room.blockedTo) > parseDate(startDate);
 }

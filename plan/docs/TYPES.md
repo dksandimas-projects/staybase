@@ -13,6 +13,79 @@ Types are derived from Zod schemas where validation is needed — use `z.infer<t
 
 ---
 
+## Spark Rewards — Phase 2 types
+
+> Added 2026-10-12 as part of the Spark Rewards tier-system rollout. Source-of-truth TypeScript interfaces live in `shared/types/index.ts` (canonical, not duplicated). The Zod validation schemas live in `shared/schemas/rewardsConfig.ts` and are re-exported from `@spark-inn/shared/schemas/rewardsConfig`. The `RewardsConfigSchema.safeParse(payload)` call is the write-path validation gate on the Settings save route.
+
+```
+LevelDef {
+  id: string                  // stable across renames; survives member cache
+  name: string                 // 1..24 chars
+  fromStays: number            // integer ≥ 0, unique within levels[]
+  discountPct: number          // 0..100, applied to tier-aware members
+  pointsMultiplier: number     // > 0, decimals allowed (1, 1.25, 1.5, 2)
+  perks: string                // ≤ 280 chars, free-text shown in member portal
+}
+
+RewardsConfig {
+  // Phase 1 fields (required):
+  pointsEnabled: boolean
+  earningMode: "per-booking" | "per-spend"
+  pointsPerBooking: number
+  pointsPerHundred: number
+  memberDiscountEnabled: boolean
+  memberDiscountPct: number
+  pointsRedemptionRate: number
+  earlyCheckInEnabled?: boolean
+  // Phase 2 fields (all optional, safe defaults):
+  welcomePoints?: number            // 0 = off; credit on POST /api/members/register
+  minPointsToRedeem?: number        // 0 = no minimum
+  pointsCanPayUpToBillPct?: number  // 0..100; default 100 = no cap
+  freeNightEvery?: number           // integer; 0 = off; award a voucher when completedStays % N === 0
+  levels?: LevelDef[]               // ordered ascending by fromStays; ≥1 base tier (fromStays=0)
+}
+
+Member {
+  memberNumber: string       // e.g. "SR-10023"
+  uid: string                // Firebase Auth UID; same key as guests/{uid}
+  email: string
+  firstName: string
+  lastName: string
+  phone?: string | null
+  rewardsPoints: number
+  status: "active" | "suspended"
+  // Phase 2 fields (all optional):
+  completedStays?: number          // counter; default 0
+  currentLevel?: LevelDef | null   // cached snapshot; refreshed at checkout + register
+  createdAt?: Date
+  updatedAt?: Date
+}
+
+PointsHistoryType = "earn" | "redeem" | "adjust" | "clawback" | "welcome" | "free-night"
+  // "welcome" and "free-night" are Phase 2 additions to the union
+  // so downstream consumers (Reports, audit logs) can render them
+  // without a TS cast. Live writers are wired in Phases 5 + 6.
+
+PointsHistoryEntry {
+  id: string
+  memberId: string
+  type: PointsHistoryType
+  points: number                  // signed: +earn/welcome/free-night, -redeem/clawback
+  bookingRef?: string | null
+  note?: string
+  createdAt: Date
+  createdBy?: string              // staff uid for adjust/welcome/free-night entries
+}
+```
+
+### Phase 2 derivation rules
+
+- `resolveCurrentLevel(levels, completedStays)` (`shared/utils/points.ts`) returns the tier with the highest `fromStays ≤ completedStays`. Returns `null` for empty input, no match, or non-finite `completedStays`. Defensively sorts input ascending even though the Settings UI saves in ascending order — hand-edited configs don't break the booking flow.
+- `calculatePointsWithMultiplier(basePoints, multiplier)` rounds to the nearest integer (matches the existing `pointsHistory.points` convention). Multiplier ≤ 0 / null / undefined is coerced to 1 (defense-in-depth; the Zod schema rejects ≤ 0 at write time).
+- Tier discount takes precedence over `memberDiscountPct` for tier-aware members; the global field remains as a fallback for tier-less members (decision pending — see DECISIONS-FEATURES.md entry).
+
+---
+
 ## Room
 
 ```
@@ -87,6 +160,7 @@ SeasonalRateOverride {
 
 RoomBlock {
   id: string
+  batchId?: string | null        // shared by blocks from one bulk Calendar confirmation
   roomId: string
   roomNumber: string
   roomType: string
@@ -505,9 +579,20 @@ BookingHold {
   expiresAt: Date                         // Hold deadline; stamped from `IN_FLOW_HOLD_MINUTES` (15 by default)
   status: "active" | "consumed" | "expired"
   holdMinutes: number                     // Snapshot of `IN_FLOW_HOLD_MINUTES` at start time
+  extensionCount: number                  // Per IMT-02: times `/api/holds/extend` has fired; absent on pre-IMT docs (reads as 0). Gates `MAX_IN_FLOW_HOLD_EXTENSIONS = 3`
   createdAt: Date
+  updatedAt?: Date                        // Stamped by the consume, sweep, and extend paths
 }
 ```
+
+Request/response schemas for the hold routes (all in `shared/schemas/booking.ts`):
+
+```
+StartBookingHoldInput   // POST /api/holds/start  — holdId, reservationId, roomType, checkIn, checkOut, numNights. .strict()
+ExtendBookingHoldInput  // POST /api/holds/extend — holdId, reservationId ONLY. .strict()
+```
+
+`ExtendBookingHoldInput` is deliberately two fields. There is no `minutes` / `holdMinutes` / `extraMinutes`: the extension window is read from the hold doc's own `holdMinutes` snapshot, so a client cannot request a longer window than the hotel configured. `.strict()` makes that enforceable — any extra key is a 400, which is pinned by a runtime Zod test. The shared helpers behind the semantics live in `shared/utils/bookingInFlowHold.ts`: `canExtendInFlowHold` (status + cap gate), `computeExtendedInFlowHoldExpiresAt` (additive from `max(now, expiresAt)`), and the `MAX_IN_FLOW_HOLD_EXTENSIONS` / `IN_FLOW_HOLD_EXTENSION_STATUSES` constants.
 
 The `Booking` doc also carries two optional fields stamped at create time (when the create request includes a `holdId`):
 
@@ -515,6 +600,31 @@ The `Booking` doc also carries two optional fields stamped at create time (when 
 - `inFlowHoldMinutes: number | null` — snapshot of `IN_FLOW_HOLD_MINUTES` at create time, so future reports can attribute expired holds to a specific window even if the constant changes
 
 Both fields are `null` for walk-in bookings (no in-flow hold — the desk has the keys) and for legacy pre-hold-banner callers.
+
+---
+
+## Staff Inventory Hold
+
+Hard inventory lock created by the admin Calendar's **Hold & book** action. It is not interchangeable with the public soft `BookingHold` above.
+
+```
+StaffInventoryHold {
+  id: string
+  roomIds: string[]
+  roomNumbers: string[]
+  startDate: string                       // YYYY-MM-DD, inclusive
+  endDate: string                         // YYYY-MM-DD, exclusive
+  status: "active" | "consumed" | "released" | "expired"
+  createdBy: string                       // staff Firebase Auth UID
+  createdAt: string
+  updatedAt: string
+  expiresAt: string                       // ISO timestamp; 15-minute window
+  consumedAt: string | null
+  releasedAt: string | null
+}
+```
+
+The server may additionally stamp `reservationId` when consumption succeeds. Admin clients receive the serialized ISO-date shape; Firestore stores date fields as timestamps.
 
 ---
 

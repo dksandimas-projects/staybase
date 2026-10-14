@@ -62,3 +62,10 @@ export * from "./utils/breakfastTotal";
 // guest app's Step 2 UI.
 export * from "./utils/breakfastConfig";
 
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+// decision pending): Zod schema + inferred types for the
+// `settings/rewardsConfig` document + `LevelDef` row. Used by
+// the Settings save route to validate admin edits before
+// writing to Firestore.
+export * from "./schemas/rewardsConfig";
+

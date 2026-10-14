@@ -29,6 +29,18 @@ vi.mock("../../server/lib/firebase-admin", () => {
         })
       };
     }
+    // Per Phase 6 (2026-10-13): the register handler reads
+    // `settings/rewardsConfig` pre-transaction (welcomePoints +
+    // currentLevel snapshot). The mock returns an empty doc by
+    // default — `welcomePoints` defaults to 0 (no welcome credit)
+    // so the existing tests' expectations stay valid.
+    if (collectionName === "settings") {
+      return {
+        doc: vi.fn().mockReturnValue({
+          get: vi.fn().mockResolvedValue({ exists: false, data: vi.fn() })
+        })
+      };
+    }
     return { doc: vi.fn() };
   });
 

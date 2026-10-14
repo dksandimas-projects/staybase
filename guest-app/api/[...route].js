@@ -181579,6 +181579,7 @@ var init_hotel_config = __esm({
       domain: "sparkinnbohol.com",
       adminDomain: "admin.sparkinnbohol.com",
       supportEmail: "sparkinn.dev@gmail.com",
+      intercomGuestAppId: "",
       facebookUrl: "https://www.facebook.com/sparkinnbohol",
       instagramUrl: "https://www.instagram.com/sparkinnbohol",
       twitterHandle: "",
@@ -221218,8 +221219,12 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
+<<<<<<< HEAD
     "use strict";
     VERSION2 = "1.15.0";
+=======
+    VERSION2 = "1.22.1";
+>>>>>>> origin/dev
   }
 });
 
@@ -221524,6 +221529,27 @@ function computeInFlowHoldExpiresAt(minutes, now = /* @__PURE__ */ new Date()) {
   }
   return new Date(now.getTime() + Number(minutes) * 60 * 1e3);
 }
+function computeExtendedInFlowHoldExpiresAt(minutes, currentExpiresAt, now = /* @__PURE__ */ new Date()) {
+  let base = now;
+  if (currentExpiresAt) {
+    const parsed2 = currentExpiresAt instanceof Date ? currentExpiresAt : new Date(currentExpiresAt);
+    if (!isNaN(parsed2.getTime()) && parsed2.getTime() > now.getTime()) {
+      base = parsed2;
+    }
+  }
+  return computeInFlowHoldExpiresAt(minutes, base);
+}
+function canExtendInFlowHold(hold) {
+  if (!hold) return false;
+  if (!IN_FLOW_HOLD_EXTENSION_STATUSES.includes(
+    String(hold.status)
+  )) {
+    return false;
+  }
+  const count = Number(hold.extensionCount ?? 0);
+  if (!Number.isFinite(count) || count < 0) return false;
+  return count < MAX_IN_FLOW_HOLD_EXTENSIONS;
+}
 function normalizeInFlowHoldMinutes(raw) {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_IN_FLOW_HOLD_MINUTES;
@@ -221550,7 +221576,7 @@ function generateHoldId() {
     return v6.toString(16);
   });
 }
-var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, HOLD_ID_REGEX;
+var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, MAX_IN_FLOW_HOLD_EXTENSIONS, IN_FLOW_HOLD_EXTENSION_STATUSES, HOLD_ID_REGEX;
 var init_bookingInFlowHold = __esm({
   "../shared/utils/bookingInFlowHold.ts"() {
     "use strict";
@@ -221559,12 +221585,18 @@ var init_bookingInFlowHold = __esm({
     MAX_IN_FLOW_HOLD_MINUTES = 30;
     DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
     IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"];
+    MAX_IN_FLOW_HOLD_EXTENSIONS = 3;
+    IN_FLOW_HOLD_EXTENSION_STATUSES = ["active", "expired"];
     HOLD_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   }
 });
 
 // ../shared/schemas/booking.ts
+<<<<<<< HEAD
 var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema;
+=======
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, ExtendBookingHoldSchema;
+>>>>>>> origin/dev
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     "use strict";
@@ -221699,6 +221731,7 @@ var init_booking = __esm({
       // so a future walk-in client that does preallocate can
       // ride the same idempotency contract.
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      staffHoldId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/).optional(),
       // Per MRB-11 (2026-08-03, per decision #177): the
       // optional revenue allocation. Per the 2026-08-03
       // design call, the server always computes this before
@@ -221728,7 +221761,12 @@ var init_booking = __esm({
       // server auto-mints one if `body.reservationId` is
       // explicitly provided — a defensive path for a
       // future migration tool).
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      // Per EXT-01 (2026-01-27): the `mode: "extend"` discriminator
+      // locks `roomId` and `checkIn` to the booking's current values,
+      // allowing only `checkOut` to be extended. The server enforces
+      // the lock; the client pre-fills both fields as read-only hints.
+      mode: external_exports.enum(["extend"]).optional()
     }).strict();
     SetLouReceivedSchema = external_exports.object({
       bookingId: external_exports.string().trim().min(1).max(64),
@@ -221765,6 +221803,7 @@ var init_booking = __esm({
       message: "Check-out must be after check-in",
       path: ["checkOut"]
     });
+<<<<<<< HEAD
     BreakfastMealSchema = external_exports.object({
       id: external_exports.string().min(1).max(64),
       name: external_exports.string().min(1).max(80),
@@ -221840,6 +221879,12 @@ var init_booking = __esm({
       mealName: external_exports.string().min(1),
       priceSnapshot: external_exports.number().min(0)
     });
+=======
+    ExtendBookingHoldSchema = external_exports.object({
+      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
+    }).strict();
+>>>>>>> origin/dev
   }
 });
 
@@ -223061,6 +223106,22 @@ function validatePointsRedemption(pointsToRedeem, availablePoints, pointsRedempt
     error: ""
   };
 }
+function resolveCurrentLevel(levels, completedStays) {
+  if (!levels || levels.length === 0) return null;
+  if (!Number.isFinite(completedStays) || completedStays < 0) return null;
+  const sorted = [...levels].filter((l3) => Number.isFinite(l3.fromStays) && l3.fromStays >= 0).sort((a, b3) => a.fromStays - b3.fromStays);
+  let current = null;
+  for (const level of sorted) {
+    if (level.fromStays <= completedStays) current = level;
+    else break;
+  }
+  return current;
+}
+function calculatePointsWithMultiplier(basePoints, multiplier) {
+  if (!Number.isFinite(basePoints) || basePoints <= 0) return 0;
+  const m2 = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  return Math.max(0, Math.round(basePoints * m2));
+}
 var init_points = __esm({
   "../shared/utils/points.ts"() {
     "use strict";
@@ -223640,6 +223701,17 @@ function calculateVoucherDiscount(voucher, subtotal) {
 function applyVoucherDiscount(voucher, subtotal) {
   return Math.max(subtotal - calculateVoucherDiscount(voucher, subtotal), 0);
 }
+function isRewardVoucher(voucher) {
+  return voucher.kind === "reward";
+}
+function isFreeNightVoucher(voucher) {
+  return voucher.kind === "reward" && voucher.valueType === "free-night";
+}
+function generateFreeNightVoucherCode(memberNumber, completedStays) {
+  const safeMember = String(memberNumber || "MEMBER").replace(/[^A-Z0-9_-]/gi, "");
+  const safeStays = Math.max(0, Math.floor(Number(completedStays) || 0));
+  return `FREENIGHT-${safeMember}-${safeStays}`;
+}
 var init_vouchers = __esm({
   "../shared/utils/vouchers.ts"() {
     "use strict";
@@ -224188,6 +224260,7 @@ var init_bookingPreferences = __esm({
   }
 });
 
+<<<<<<< HEAD
 // ../shared/utils/breakfastCutoff.ts
 function parseServiceDateUtc(value) {
   if (typeof value !== "string") return null;
@@ -224349,6 +224422,74 @@ var init_breakfastConfig = __esm({
       "updatedBy",
       "updatedAt"
     ]);
+=======
+// ../shared/schemas/rewardsConfig.ts
+var LevelDefSchema, RewardsConfigSchema;
+var init_rewardsConfig = __esm({
+  "../shared/schemas/rewardsConfig.ts"() {
+    init_zod();
+    LevelDefSchema = external_exports.object({
+      id: external_exports.string().min(1).max(64),
+      name: external_exports.string().trim().min(1, "Tier name is required").max(24, "Tier name must be 24 characters or fewer"),
+      fromStays: external_exports.number().int("Threshold must be a whole number of stays").min(0, "Threshold cannot be negative"),
+      discountPct: external_exports.number().min(0, "Discount cannot be negative").max(100, "Discount cannot exceed 100%"),
+      pointsMultiplier: external_exports.number().min(0.01, "Multiplier must be greater than zero"),
+      perks: external_exports.string().trim().max(280, "Perks blurb must be 280 characters or fewer")
+    });
+    RewardsConfigSchema = external_exports.object({
+      // Phase 1 fields (required, matching seed defaults):
+      pointsEnabled: external_exports.boolean(),
+      earningMode: external_exports.enum(["per-booking", "per-spend"]),
+      pointsPerBooking: external_exports.number().int().min(0),
+      pointsPerHundred: external_exports.number().int().min(0),
+      memberDiscountEnabled: external_exports.boolean(),
+      memberDiscountPct: external_exports.number().min(0).max(100),
+      pointsRedemptionRate: external_exports.number().int().min(1, "Redemption rate must be at least 1"),
+      earlyCheckInEnabled: external_exports.boolean().optional(),
+      updatedAt: external_exports.unknown().optional(),
+      // Phase 2 fields (all optional, "off" by default):
+      welcomePoints: external_exports.number().int().min(0).max(1e5).optional(),
+      minPointsToRedeem: external_exports.number().int().min(0).max(1e6).optional(),
+      pointsCanPayUpToBillPct: external_exports.number().min(0, "Bill cap cannot be negative").max(100, "Bill cap cannot exceed 100%").optional(),
+      freeNightEvery: external_exports.number().int().min(0, "Free-night-every cannot be negative").max(365).optional(),
+      levels: external_exports.array(LevelDefSchema).optional(),
+      // Per PR #9 (2026-10-13): admin opt-in toggle for member
+      // self-service points redemption at booking checkout. Defaults
+      // to `false` so existing deployments preserve the front-desk-
+      // mediated redemption model. When `true`, the booking Step 3
+      // panel exposes an "Apply my points" input (member-authenticated
+      // endpoint). The server still owns all 7 redemption guards
+      // (min-redeem, bill cap, balance, one-per-booking, status
+      // pre-checkin, member match, booking exists) — the toggle only
+      // changes WHO clicks Apply, not WHICH guards run.
+      allowMemberPointsRedemption: external_exports.boolean().optional()
+    }).superRefine((value, ctx) => {
+      const levels = value.levels;
+      if (!levels || levels.length === 0) {
+        return;
+      }
+      const seen = /* @__PURE__ */ new Map();
+      levels.forEach((level, index) => {
+        const prior = seen.get(level.fromStays);
+        if (prior !== void 0) {
+          ctx.addIssue({
+            code: external_exports.ZodIssueCode.custom,
+            path: ["levels", index, "fromStays"],
+            message: `Duplicate threshold \u2014 also used on tier #${prior + 1}`
+          });
+        }
+        seen.set(level.fromStays, index);
+      });
+      const hasBase = levels.some((l3) => l3.fromStays === 0);
+      if (!hasBase) {
+        ctx.addIssue({
+          code: external_exports.ZodIssueCode.custom,
+          path: ["levels"],
+          message: "At least one tier must have a 0-stay threshold (the base tier)"
+        });
+      }
+    });
+>>>>>>> origin/dev
   }
 });
 
@@ -224394,20 +224535,24 @@ __export(shared_exports, {
   DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
   DEFAULT_VAT_CONFIG: () => DEFAULT_VAT_CONFIG,
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
+  ExtendBookingHoldSchema: () => ExtendBookingHoldSchema,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
   GuestDetailsSchema: () => GuestDetailsSchema,
   HOLD_ID_REGEX: () => HOLD_ID_REGEX,
   HOUSEKEEPING_STATUSES: () => HOUSEKEEPING_STATUSES,
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
+  IN_FLOW_HOLD_EXTENSION_STATUSES: () => IN_FLOW_HOLD_EXTENSION_STATUSES,
   IN_FLOW_HOLD_MINUTES: () => IN_FLOW_HOLD_MINUTES,
   IN_FLOW_HOLD_STATUSES: () => IN_FLOW_HOLD_STATUSES,
   KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
   LEGACY_PAYMENT_METHOD_LABELS: () => LEGACY_PAYMENT_METHOD_LABELS,
   LegacyPaymentMethodConfigSchema: () => LegacyPaymentMethodConfigSchema,
+  LevelDefSchema: () => LevelDefSchema,
   MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
   MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
   MAX_FEATURED_TYPES: () => MAX_FEATURED_TYPES,
+  MAX_IN_FLOW_HOLD_EXTENSIONS: () => MAX_IN_FLOW_HOLD_EXTENSIONS,
   MAX_IN_FLOW_HOLD_MINUTES: () => MAX_IN_FLOW_HOLD_MINUTES,
   MAX_PAYMENT_HOLD_WINDOW_HOURS: () => MAX_PAYMENT_HOLD_WINDOW_HOURS,
   MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
@@ -224430,6 +224575,7 @@ __export(shared_exports, {
   RESERVATION_REF_REGEX: () => RESERVATION_REF_REGEX,
   ROOM_STATUSES: () => ROOM_STATUSES,
   RescheduleBookingSchema: () => RescheduleBookingSchema,
+  RewardsConfigSchema: () => RewardsConfigSchema,
   RewardsContentSchema: () => RewardsContentSchema,
   RoomStatusEnum: () => RoomStatusEnum,
   STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
@@ -224464,11 +224610,13 @@ __export(shared_exports, {
   calculateExtraBedAddOn: () => calculateExtraBedAddOn,
   calculatePercentDiscount: () => calculatePercentDiscount,
   calculatePointsRedemptionValue: () => calculatePointsRedemptionValue,
+  calculatePointsWithMultiplier: () => calculatePointsWithMultiplier,
   calculateSeasonalAwareRoomBreakdown: () => calculateSeasonalAwareRoomBreakdown,
   calculateSeasonalAwareRoomTotal: () => calculateSeasonalAwareRoomTotal,
   calculateVatBreakdown: () => calculateVatBreakdown,
   calculateVoucherBase: () => calculateVoucherBase,
   calculateVoucherDiscount: () => calculateVoucherDiscount,
+  canExtendInFlowHold: () => canExtendInFlowHold,
   checkExtraBedInventory: () => checkExtraBedInventory,
   clampIntegerInRange: () => clampIntegerInRange,
   clearCache: () => clearCache,
@@ -224478,6 +224626,7 @@ __export(shared_exports, {
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
   computeBreakfastCutoffState: () => computeBreakfastCutoffState,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
+  computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
   computeRequestFingerprint: () => computeRequestFingerprint,
@@ -224497,6 +224646,7 @@ __export(shared_exports, {
   fadeIn: () => fadeIn,
   fadeUp: () => fadeUp,
   generateBookingRef: () => generateBookingRef,
+  generateFreeNightVoucherCode: () => generateFreeNightVoucherCode,
   generateHoldId: () => generateHoldId,
   generateLookupToken: () => generateLookupToken,
   generateMemberNumber: () => generateMemberNumber,
@@ -224520,8 +224670,10 @@ __export(shared_exports, {
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
+  isFreeNightVoucher: () => isFreeNightVoucher,
   isInFlowHoldActive: () => isInFlowHoldActive,
   isPaymentVerified: () => isPaymentVerified,
+  isRewardVoucher: () => isRewardVoucher,
   isValidBookingRef: () => isValidBookingRef,
   isValidLookupToken: () => isValidLookupToken,
   isValidReservationId: () => isValidReservationId,
@@ -224546,6 +224698,7 @@ __export(shared_exports, {
   recomputeBreakfastTotal: () => recomputeBreakfastTotal,
   recordSweepResult: () => recordSweepResult,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
+  resolveCurrentLevel: () => resolveCurrentLevel,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   runBackfill: () => runBackfill,
   scaleIn: () => scaleIn,
@@ -224608,9 +224761,13 @@ var init_shared = __esm({
     init_cancellation();
     init_uploads();
     init_bookingPreferences();
+<<<<<<< HEAD
     init_breakfastCutoff();
     init_breakfastTotal();
     init_breakfastConfig();
+=======
+    init_rewardsConfig();
+>>>>>>> origin/dev
   }
 });
 
@@ -228540,19 +228697,23 @@ function toIsoOrNull(value) {
   }
   return null;
 }
-function serializeHold(snap) {
-  const data = snap.data() ?? {};
+function serializeHold(docId, data) {
+  const raw = data ?? {};
   return {
-    id: snap.id,
-    reservationId: String(data.reservationId ?? ""),
-    roomType: String(data.roomType ?? ""),
-    checkIn: String(data.checkIn ?? ""),
-    checkOut: String(data.checkOut ?? ""),
-    numNights: Number(data.numNights ?? 0),
-    expiresAt: toIsoOrNull(data.expiresAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
-    status: data.status === "consumed" || data.status === "expired" ? data.status : "active",
-    createdAt: toIsoOrNull(data.createdAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
-    holdMinutes: Number(data.holdMinutes ?? IN_FLOW_HOLD_MINUTES)
+    id: docId,
+    reservationId: String(raw.reservationId ?? ""),
+    roomType: String(raw.roomType ?? ""),
+    checkIn: String(raw.checkIn ?? ""),
+    checkOut: String(raw.checkOut ?? ""),
+    numNights: Number(raw.numNights ?? 0),
+    expiresAt: toIsoOrNull(raw.expiresAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    status: raw.status === "consumed" || raw.status === "expired" ? raw.status : "active",
+    createdAt: toIsoOrNull(raw.createdAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    holdMinutes: Number(raw.holdMinutes ?? IN_FLOW_HOLD_MINUTES),
+    // Per IMT-04: exposed so the banner can hide the "I need more
+    // time" CTA once the cap is reached, instead of letting the guest
+    // click a button the server is going to reject.
+    extensionCount: Number(raw.extensionCount ?? 0)
   };
 }
 async function handleStartInFlowHold(req, res) {
@@ -228602,7 +228763,7 @@ async function handleStartInFlowHold(req, res) {
       }
       return res.status(200).json({
         success: true,
-        data: serializeHold(existing),
+        data: serializeHold(existing.id, existing.data()),
         idempotentReplay: true
       });
     }
@@ -228627,7 +228788,7 @@ async function handleStartInFlowHold(req, res) {
     const fresh = await ref.get();
     return res.status(201).json({
       success: true,
-      data: serializeHold(fresh)
+      data: serializeHold(fresh.id, fresh.data())
     });
   } catch (err) {
     return res.status(500).json({
@@ -228659,7 +228820,7 @@ async function handleReadInFlowHold(req, res) {
       status: data.status,
       expiresAt
     });
-    const payload = serializeHold(snap);
+    const payload = serializeHold(snap.id, snap.data());
     if (payload.status === "active" && !activeNow) {
       payload.status = "expired";
     }
@@ -228696,7 +228857,92 @@ async function handleConsumeInFlowHold(holdId, reservationId, now = /* @__PURE__
     return { ok: false, reason: "expired" };
   }
   await ref.update({ status: "consumed", updatedAt: Timestamp.fromDate(now) });
-  return { ok: true, hold: serializeHold(snap) };
+  return { ok: true, hold: serializeHold(snap.id, snap.data()) };
+}
+async function handleExtendInFlowHold(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = ExtendBookingHoldSchema.safeParse(req.body);
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid hold extension request.",
+      details: parsed2.error.flatten()
+    });
+  }
+  const input = parsed2.data;
+  if (!HOLD_ID_REGEX.test(input.holdId)) {
+    return res.status(400).json({ success: false, error: "Invalid hold id format." });
+  }
+  const ref = adminDb.collection(HOLDS_COLLECTION).doc(input.holdId);
+  const now = /* @__PURE__ */ new Date();
+  let responseData = null;
+  let failure = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists) {
+        failure = { status: 404, error: "Hold not found." };
+        return;
+      }
+      const data = snap.data() ?? {};
+      if (data.reservationId && data.reservationId !== input.reservationId) {
+        failure = { status: 409, error: "Hold does not match this reservation." };
+        return;
+      }
+      if (!canExtendInFlowHold({ status: data.status, extensionCount: data.extensionCount })) {
+        const atCap = data.status === "consumed" || Number(data.extensionCount ?? 0) >= MAX_IN_FLOW_HOLD_EXTENSIONS;
+        failure = atCap ? {
+          status: 409,
+          error: data.status === "consumed" ? "This hold was already used by a confirmed booking." : "This hold has reached its extension limit."
+        } : { status: 409, error: "This hold can no longer be extended." };
+        return;
+      }
+      const holdMinutes = normalizeInFlowHoldMinutes(data.holdMinutes);
+      if (holdMinutes < MIN_IN_FLOW_HOLD_MINUTES || holdMinutes > MAX_IN_FLOW_HOLD_MINUTES) {
+        failure = { status: 500, error: "Hold window is misconfigured." };
+        return;
+      }
+      const nextExpiresAt = computeExtendedInFlowHoldExpiresAt(
+        holdMinutes,
+        toIsoOrNull(data.expiresAt),
+        now
+      );
+      if (!nextExpiresAt) {
+        failure = { status: 500, error: "Failed to compute hold deadline." };
+        return;
+      }
+      const nextExtensionCount = Number(data.extensionCount ?? 0) + 1;
+      transaction.update(ref, {
+        // Revive on the expired path — the literal "I need more
+        // time" moment. Safe because the hold is soft.
+        status: "active",
+        expiresAt: Timestamp.fromDate(nextExpiresAt),
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        // Per the IMT CVQ-04 answer (staff do not see extensions), no
+        // dedicated `extendedAt` field was added: `updatedAt` is the
+        // field the consume + sweep paths already stamp, so a second
+        // timestamp would have been write-only weight with no reader.
+        updatedAt: Timestamp.fromDate(now)
+      });
+      responseData = serializeHold(snap.id, {
+        ...data,
+        status: "active",
+        expiresAt: nextExpiresAt,
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        updatedAt: now
+      });
+    });
+    if (failure) {
+      return res.status(failure.status).json({ success: false, error: failure.error });
+    }
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to extend hold." });
+  }
 }
 var SWEEP_BATCH_SIZE = 200;
 async function handleSweepInFlowHolds(req, res, options = {}) {
@@ -228719,31 +228965,30 @@ async function handleSweepInFlowHolds(req, res, options = {}) {
   let swept = 0;
   let scanned = 0;
   try {
-    const expiredSnapshot = await adminDb.collection(HOLDS_COLLECTION).where("status", "==", "active").where("expiresAt", "<", Timestamp.fromDate(now)).orderBy("expiresAt", "asc").limit(SWEEP_BATCH_SIZE).get();
-    scanned = expiredSnapshot.size;
-    for (const doc of expiredSnapshot.docs) {
-      try {
-        await adminDb.runTransaction(async (transaction) => {
-          const freshDoc = await transaction.get(doc.ref);
-          if (!freshDoc.exists) return;
-          const freshData = freshDoc.data() ?? {};
-          if (freshData.status === "consumed") return;
-          if (freshData.status === "expired") return;
-          const expiresAt = toIsoOrNull(freshData.expiresAt);
-          if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
-            return;
-          }
-          transaction.update(doc.ref, {
-            status: "expired",
-            updatedAt: Timestamp.fromDate(now)
+    for (const collectionName of [HOLDS_COLLECTION, "staffInventoryHolds"]) {
+      const expiredSnapshot = await adminDb.collection(collectionName).where("status", "==", "active").where("expiresAt", "<", Timestamp.fromDate(now)).orderBy("expiresAt", "asc").limit(SWEEP_BATCH_SIZE).get();
+      scanned += expiredSnapshot.size;
+      for (const doc of expiredSnapshot.docs) {
+        try {
+          await adminDb.runTransaction(async (transaction) => {
+            const freshDoc = await transaction.get(doc.ref);
+            if (!freshDoc.exists) return;
+            const freshData = freshDoc.data() ?? {};
+            if (freshData.status === "consumed") return;
+            if (freshData.status === "expired") return;
+            const expiresAt = toIsoOrNull(freshData.expiresAt);
+            if (isInFlowHoldActive({ status: freshData.status, expiresAt }, now)) {
+              return;
+            }
+            transaction.update(doc.ref, {
+              status: "expired",
+              updatedAt: Timestamp.fromDate(now)
+            });
           });
-        });
-        swept += 1;
-      } catch (err) {
-        console.error(
-          `In-flow hold sweep failed for ${doc.id}:`,
-          err
-        );
+          swept += 1;
+        } catch (err) {
+          console.error(`Hold sweep failed for ${collectionName}/${doc.id}:`, err);
+        }
       }
     }
     return {
@@ -228753,6 +228998,201 @@ async function handleSweepInFlowHolds(req, res, options = {}) {
     };
   } catch (err) {
     return { ok: false, status: 500, error: "Failed to sweep in-flow holds." };
+  }
+}
+
+// server/handlers/staff-inventory-holds.ts
+init_firestore();
+init_zod();
+init_shared();
+init_firebase_admin();
+var STAFF_HOLD_MINUTES = 15;
+var holdRangeSchema = external_exports.object({
+  roomIds: external_exports.array(external_exports.string().trim().min(1).max(80)).min(1).max(50),
+  startDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/)
+}).strict();
+var holdIdSchema = external_exports.object({
+  holdId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/)
+}).strict();
+function parseRange(startDate, endDate) {
+  const start = /* @__PURE__ */ new Date(`${startDate}T00:00:00Z`);
+  const end = /* @__PURE__ */ new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    throw new Error("End date must be after start date.");
+  }
+  return { start, end };
+}
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+function staffUid(req) {
+  return String(req.staff?.uid || "").trim();
+}
+function isActiveStaffInventoryHold(data, now = /* @__PURE__ */ new Date()) {
+  const expiresAt = toDateOrNull(data?.expiresAt);
+  return data?.status === "active" && Boolean(expiresAt && expiresAt > now);
+}
+function serializeStaffInventoryHold(id, data, now = /* @__PURE__ */ new Date()) {
+  const expiresAt = toDateOrNull(data.expiresAt);
+  const status = data.status === "active" && (!expiresAt || expiresAt <= now) ? "expired" : data.status;
+  return {
+    id,
+    roomIds: Array.isArray(data.roomIds) ? data.roomIds.map(String) : [],
+    roomNumbers: Array.isArray(data.roomNumbers) ? data.roomNumbers.map(String) : [],
+    startDate: toDateOrNull(data.startDate)?.toISOString().slice(0, 10) || "",
+    endDate: toDateOrNull(data.endDate)?.toISOString().slice(0, 10) || "",
+    status,
+    expiresAt: expiresAt?.toISOString() || (/* @__PURE__ */ new Date(0)).toISOString(),
+    createdBy: String(data.createdBy || ""),
+    createdAt: toDateOrNull(data.createdAt)?.toISOString() || "",
+    updatedAt: toDateOrNull(data.updatedAt)?.toISOString() || "",
+    consumedAt: toDateOrNull(data.consumedAt)?.toISOString() || null,
+    releasedAt: toDateOrNull(data.releasedAt)?.toISOString() || null
+  };
+}
+async function hasActiveStaffInventoryHoldConflict(transaction, roomId, start, end, excludeHoldId) {
+  const snapshot = await transaction.get(
+    adminDb.collection("staffInventoryHolds").where("roomIds", "array-contains", roomId).where("status", "==", "active")
+  );
+  const now = /* @__PURE__ */ new Date();
+  return snapshot.docs.some((doc) => {
+    if (excludeHoldId && doc.id === excludeHoldId) return false;
+    const data = doc.data();
+    if (!isActiveStaffInventoryHold(data, now)) return false;
+    const holdStart = toDateOrNull(data.startDate);
+    const holdEnd = toDateOrNull(data.endDate);
+    return Boolean(holdStart && holdEnd && rangesOverlap(holdStart, holdEnd, start, end));
+  });
+}
+async function handleAcquireStaffInventoryHold(req, res) {
+  const parsed2 = holdRangeSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Choose valid rooms and dates." });
+  }
+  const roomIds = Array.from(new Set(parsed2.data.roomIds));
+  if (roomIds.length !== parsed2.data.roomIds.length) {
+    return res.status(400).json({ success: false, error: "Each room can only be selected once." });
+  }
+  try {
+    const { start, end } = parseRange(parsed2.data.startDate, parsed2.data.endDate);
+    const holdRef = adminDb.collection("staffInventoryHolds").doc();
+    const now = /* @__PURE__ */ new Date();
+    const expiresAt = new Date(now.getTime() + STAFF_HOLD_MINUTES * 6e4);
+    let roomNumbers = [];
+    await adminDb.runTransaction(async (transaction) => {
+      const rooms = [];
+      for (const roomId of roomIds) {
+        const roomSnap = await transaction.get(adminDb.collection("rooms").doc(roomId));
+        if (!roomSnap.exists) throw new Error("One of the selected rooms no longer exists.");
+        const room = roomSnap.data() || {};
+        if (room.isActive === false) throw new Error(`Room ${room.roomNumber || roomId} is inactive.`);
+        rooms.push({ id: roomId, data: room });
+      }
+      for (const room of rooms) {
+        const bookingsSnapshot = await transaction.get(
+          adminDb.collection("bookings").where("roomId", "==", room.id).where("status", "in", BOOKING_OCCUPYING_STATUSES)
+        );
+        const bookingConflict = bookingsSnapshot.docs.some((doc) => {
+          const data = doc.data();
+          if (!isBookingOccupyingRoom({ status: data.status, holdExpiresAt: data.holdExpiresAt }, now)) return false;
+          const checkIn = toDateOrNull(data.checkIn);
+          const checkOut = toDateOrNull(data.checkOut);
+          return Boolean(checkIn && checkOut && rangesOverlap(checkIn, checkOut, start, end));
+        });
+        if (bookingConflict) throw new Error(`Room ${room.data.roomNumber || room.id} was just booked for those dates.`);
+        const blocksSnapshot = await transaction.get(
+          adminDb.collection("roomBlocks").where("roomId", "==", room.id).where("status", "==", "active")
+        );
+        const blockConflict = blocksSnapshot.docs.some((doc) => {
+          const data = doc.data();
+          const blockStart = toDateOrNull(data.startDate);
+          const blockEnd = toDateOrNull(data.endDate);
+          return Boolean(blockStart && blockEnd && rangesOverlap(blockStart, blockEnd, start, end));
+        });
+        if (blockConflict) throw new Error(`Room ${room.data.roomNumber || room.id} is blocked for those dates.`);
+        if (await hasActiveStaffInventoryHoldConflict(transaction, room.id, start, end)) {
+          throw new Error(`Room ${room.data.roomNumber || room.id} is already held by another front-desk booking.`);
+        }
+      }
+      roomNumbers = rooms.map((room) => String(room.data.roomNumber || room.id));
+      transaction.set(holdRef, {
+        roomIds,
+        roomNumbers,
+        startDate: Timestamp.fromDate(start),
+        endDate: Timestamp.fromDate(end),
+        status: "active",
+        createdBy: staffUid(req),
+        createdAt: Timestamp.fromDate(now),
+        updatedAt: Timestamp.fromDate(now),
+        expiresAt: Timestamp.fromDate(expiresAt),
+        consumedAt: null,
+        releasedAt: null
+      });
+    });
+    return res.status(201).json({
+      success: true,
+      data: serializeStaffInventoryHold(holdRef.id, {
+        roomIds,
+        roomNumbers,
+        startDate: start,
+        endDate: end,
+        status: "active",
+        createdBy: staffUid(req),
+        createdAt: now,
+        updatedAt: now,
+        expiresAt,
+        consumedAt: null,
+        releasedAt: null
+      })
+    });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Could not hold those rooms." });
+  }
+}
+async function handleReleaseStaffInventoryHold(req, res) {
+  const parsed2 = holdIdSchema.safeParse(req.body || {});
+  if (!parsed2.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
+  try {
+    const ref = adminDb.collection("staffInventoryHolds").doc(parsed2.data.holdId);
+    await adminDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists) throw new Error("Hold not found.");
+      const data = snap.data() || {};
+      if (data.createdBy !== staffUid(req)) throw new Error("This hold belongs to another staff member.");
+      if (data.status !== "active") return;
+      const now = /* @__PURE__ */ new Date();
+      transaction.update(ref, {
+        status: "released",
+        releasedAt: Timestamp.fromDate(now),
+        updatedAt: Timestamp.fromDate(now)
+      });
+    });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Could not release the hold." });
+  }
+}
+async function handleExtendStaffInventoryHold(req, res) {
+  const parsed2 = holdIdSchema.safeParse(req.body || {});
+  if (!parsed2.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
+  try {
+    const ref = adminDb.collection("staffInventoryHolds").doc(parsed2.data.holdId);
+    let responseData = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists) throw new Error("Hold not found.");
+      const data = snap.data() || {};
+      if (data.createdBy !== staffUid(req)) throw new Error("This hold belongs to another staff member.");
+      if (!isActiveStaffInventoryHold(data)) throw new Error("This hold has expired. Return to the calendar and hold the rooms again.");
+      const now = /* @__PURE__ */ new Date();
+      const expiresAt = new Date(now.getTime() + STAFF_HOLD_MINUTES * 6e4);
+      transaction.update(ref, { expiresAt: Timestamp.fromDate(expiresAt), updatedAt: Timestamp.fromDate(now) });
+      responseData = serializeStaffInventoryHold(snap.id, { ...data, expiresAt, updatedAt: now });
+    });
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Could not extend the hold." });
   }
 }
 
@@ -228960,6 +229400,7 @@ function applyReservationScopePaymentTransition(transaction, adminDb2, bookingRe
 
 // server/handlers/bookings.ts
 init_booking();
+init_shared();
 init_shared();
 init_zod();
 init_hotel_config();
@@ -229684,7 +230125,7 @@ function calculateCheckoutPoints(totalPrice, rewardsConfig) {
   const pointsPerHundred = Math.max(Number(rewardsConfig.pointsPerHundred || 0), 0);
   return Math.max(Math.floor(Math.max(totalPrice, 0) / 100 * pointsPerHundred), 0);
 }
-function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+function rangesOverlap2(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
 }
 function dateKeyFromDate(date) {
@@ -229734,7 +230175,7 @@ function getOccupancyConflictReason(input) {
   const existingCheckIn = toDateOrNull(input.bookingData.checkIn);
   const existingCheckOut = toDateOrNull(input.bookingData.checkOut);
   if (!existingCheckIn || !existingCheckOut) return null;
-  if (rangesOverlap(existingCheckIn, existingCheckOut, input.requestedCheckIn, input.requestedCheckOut)) {
+  if (rangesOverlap2(existingCheckIn, existingCheckOut, input.requestedCheckIn, input.requestedCheckOut)) {
     return "overlap";
   }
   if (hasLingeringCheckedInConflict({
@@ -229749,15 +230190,23 @@ function getOccupancyConflictReason(input) {
   }
   return null;
 }
-async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate) {
+async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate, allowedStaffHoldId) {
   const blocksQuery = adminDb.collection("roomBlocks").where("roomId", "==", roomId).where("status", "==", "active");
   const blocksSnapshot = await transaction.get(blocksQuery);
-  return blocksSnapshot.docs.some((doc) => {
+  const hasRoomBlock = blocksSnapshot.docs.some((doc) => {
     const data = doc.data();
     const start = toDateOrNull(data.startDate);
     const end = toDateOrNull(data.endDate);
-    return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
+    return Boolean(start && end && rangesOverlap2(start, end, checkInDate, checkOutDate));
   });
+  if (hasRoomBlock) return true;
+  return hasActiveStaffInventoryHoldConflict(
+    transaction,
+    roomId,
+    checkInDate,
+    checkOutDate,
+    allowedStaffHoldId
+  );
 }
 var lookupSchema = external_exports.preprocess(
   (body) => {
@@ -229954,6 +230403,15 @@ var createBookingSchema = external_exports.object({
   corporateCode: external_exports.string().trim().max(120).optional().default(""),
   corporateFlatRate: external_exports.boolean().optional().default(false),
   linkedInquiryId: external_exports.string().trim().max(160).nullable().optional().default(null),
+  // Per PR #9 fix (2026-10-13): the optional points amount a
+  // signed-in member wants to apply at booking creation time.
+  // The server applies the redemption atomically inside the
+  // create transaction via the shared `applyPointsRedemption`
+  // helper (passes `skipBookingUpdate: true` so the caller writes
+  // the booking with the discounted totalPrice). Default 0 =
+  // no points applied. Max bounded to prevent accidental
+  // underflow (real-world redemptions are < 100,000 points).
+  pointsToRedeem: external_exports.coerce.number().int().min(0).max(1e6).optional().default(0),
   // Per MRB-06 (2026-08-02, per decision #159): the N>1
   // generalization. The client requests N rooms of the
   // same `roomType`; the server assigns N DISTINCT
@@ -230147,6 +230605,7 @@ async function handleCreateBooking(req, res) {
     // omit the field and stay green.
     holdId
   } = body;
+  const pointsToRedeem = body.pointsToRedeem || 0;
   const guestDetails = rawGuestDetails;
   const normalizedRoomSelections = requestedRoomSelections?.length ? requestedRoomSelections.map((selection, index) => ({
     bookingId: index === 0 ? bookingId : selection.bookingId || adminDb.collection("bookings").doc().id,
@@ -230499,7 +230958,7 @@ async function handleCreateBooking(req, res) {
             if (isExpiredPendingHold(bookingData2)) {
               const existingCheckIn = toDateOrNull(bookingData2.checkIn);
               const existingCheckOut = toDateOrNull(bookingData2.checkOut);
-              const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+              const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
               if (dateOverlaps) {
                 expiredHoldRetirements.push({
                   ref: doc.ref,
@@ -230842,11 +231301,17 @@ async function handleCreateBooking(req, res) {
       }
       let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
+        const memberRef = adminDb.doc(`members/${detectedMemberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists ? memberDocInTx.data()?.currentLevel : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct)) ? Math.max(0, Math.floor(Number(memberTier.discountPct))) : null;
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data();
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -230956,6 +231421,84 @@ async function handleCreateBooking(req, res) {
         transaction.update(counterRef, { count: sequence + assignedRooms.length - 1 });
       } else {
         transaction.set(counterRef, { count: assignedRooms.length });
+      }
+      let selfRedeemedPoints = 0;
+      let selfRedeemedValue = 0;
+      let selfRedeemedBy = null;
+      let selfRedeemedAt = null;
+      if (pointsToRedeem > 0) {
+        if (!detectedMemberId) {
+          throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
+        }
+        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
+        const selfRcSnap = await transaction.get(selfRcRef);
+        const selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
+        if (selfRcData?.allowMemberPointsRedemption !== true) {
+          throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
+        }
+        const selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
+        const selfMemberDoc = await transaction.get(selfMemberRef);
+        if (!selfMemberDoc.exists) {
+          throw new Error("Member not found.");
+        }
+        const selfMemberData = selfMemberDoc.data();
+        if (selfMemberData.isActive === false || selfMemberData.isMember === false) {
+          throw new Error("Member account is not active.");
+        }
+        const pointsRedemptionRate = Number(selfRcData?.pointsRedemptionRate || 0);
+        if (pointsRedemptionRate <= 0) {
+          throw new Error("Points redemption is not configured.");
+        }
+        const minPointsToRedeem = Number(selfRcData?.minPointsToRedeem || 0);
+        const billPct = Number(selfRcData?.pointsCanPayUpToBillPct ?? 100);
+        if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+          throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+        }
+        if (Number.isFinite(billPct) && billPct < 100) {
+          const reservationTotal = finalTotalPrice;
+          const maxRedeemableCurrency = Math.floor(reservationTotal * Math.max(0, billPct) / 100);
+          const maxRedeemablePoints = Math.floor(maxRedeemableCurrency * 100 / pointsRedemptionRate);
+          if (pointsToRedeem > maxRedeemablePoints) {
+            throw new Error(
+              `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+            );
+          }
+        }
+        const validation = validatePointsRedemption(
+          pointsToRedeem,
+          Number(selfMemberData.rewardsPoints || 0),
+          pointsRedemptionRate
+        );
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+        const redemptionValue = Math.round(validation.value);
+        if (redemptionValue <= 0 || redemptionValue > finalTotalPrice) {
+          throw new Error("Points redemption value exceeds the booking total.");
+        }
+        finalTotalPrice = Math.max(finalTotalPrice - redemptionValue, 0);
+        if (rateBreakdown) {
+          rateBreakdown.finalTotal = finalTotalPrice;
+          rateBreakdown.pointsRedeemedValue = redemptionValue;
+        }
+        selfRedeemedPoints = pointsToRedeem;
+        selfRedeemedValue = redemptionValue;
+        selfRedeemedBy = `self:${detectedMemberId}`;
+        selfRedeemedAt = now;
+        transaction.update(selfMemberRef, {
+          rewardsPoints: Number(selfMemberData.rewardsPoints || 0) - pointsToRedeem,
+          updatedAt: now
+        });
+        const historyRef = adminDb.collection(`members/${detectedMemberId}/pointsHistory`).doc();
+        transaction.set(historyRef, {
+          type: "redeem",
+          points: -pointsToRedeem,
+          description: `Redeemed at booking creation ${bookingId}`,
+          reason: "Points redeemed by member at checkout",
+          bookingId,
+          by: selfRedeemedBy,
+          at: now
+        });
       }
       const guestName2 = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       const newBooking = {
@@ -231277,10 +231820,18 @@ async function handleCreateBooking(req, res) {
         // room of the same `roomType` + same dates +
         // same guest inputs, so the sum is
         // `roomCount * per-room value`).
+        // Per PR #9 fix (2026-10-13): when points are applied
+        // at booking creation, `totalPrice` carries the post-
+        // redemption amount (the per-room writes below carry
+        // the same discounted total). For non-redemption
+        // bookings this is byte-equivalent to the previous
+        // `totalPrice: totalPrice` reference — `finalTotalPrice`
+        // stays equal to `totalPrice` when the redemption block
+        // doesn't execute.
         originalSubtotal: subtotal,
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal,
-        totalPrice,
+        totalPrice: finalTotalPrice,
         // Per MRB-11 (2026-08-03, per decision #177):
         // the aggregate of every child booking's
         // `revenueAllocation`. Reports reads this for
@@ -231370,6 +231921,17 @@ async function handleCreateBooking(req, res) {
           latestCheckOut: checkOutDate,
           isDivergent: false
         },
+        // Per PR #9 fix (2026-10-13): the reservation-level
+        // mirror of the per-room redemption. Both fields are
+        // populated ONLY when the member applied points at
+        // booking creation (pre-Phase-9 reservations stay
+        // byte-equivalent with both fields absent).
+        ...selfRedeemedPoints > 0 ? {
+          pointsRedeemed: selfRedeemedPoints,
+          pointsRedeemedValue: selfRedeemedValue,
+          pointsRedeemedBy: selfRedeemedBy,
+          pointsRedeemedAt: selfRedeemedAt
+        } : {},
         createdAt: now,
         updatedAt: now,
         createdBy: "guest"
@@ -231834,7 +232396,8 @@ async function handleCreateWalkin(req, res) {
     // the same pattern as the public `/api/bookings/create`
     // path. When present, the server uses it as the
     // canonical idempotency key for the create transaction.
-    reservationId: requestedReservationId
+    reservationId: requestedReservationId,
+    staffHoldId: requestedStaffHoldId
   } = parsedWalkin.data;
   const walkinRoomLines = Array.isArray(requestedRooms) && requestedRooms.length > 0 ? requestedRooms.map((line) => ({
     roomId: String(line.roomId).trim(),
@@ -231963,6 +232526,30 @@ async function handleCreateWalkin(req, res) {
       }
       const roomRef = walkinAssignedRooms[0].ref;
       const roomData = walkinAssignedRooms[0].data;
+      let staffHoldRef = null;
+      if (requestedStaffHoldId) {
+        staffHoldRef = adminDb.collection("staffInventoryHolds").doc(requestedStaffHoldId);
+        const staffHoldSnap = await transaction.get(staffHoldRef);
+        if (!staffHoldSnap.exists) throw new Error("Front-desk room hold was not found.");
+        const staffHold = staffHoldSnap.data() || {};
+        if (String(staffHold.createdBy || "") !== String(req.staff?.uid || "")) {
+          throw new Error("This front-desk room hold belongs to another staff member.");
+        }
+        const consumedBySameReservation = staffHold.status === "consumed" && String(staffHold.reservationId || "") === effectiveReservationId;
+        if (!isActiveStaffInventoryHold(staffHold) && !consumedBySameReservation) {
+          throw new Error("Front-desk room hold has expired. Return to the calendar and hold the rooms again.");
+        }
+        const heldStart = toDateOrNull(staffHold.startDate);
+        const heldEnd = toDateOrNull(staffHold.endDate);
+        if (!heldStart || !heldEnd || heldStart.getTime() !== checkInDate.getTime() || heldEnd.getTime() !== checkOutDate.getTime()) {
+          throw new Error("Booking dates no longer match the front-desk room hold.");
+        }
+        const heldRoomIds = Array.isArray(staffHold.roomIds) ? staffHold.roomIds.map(String).sort() : [];
+        const requestedRoomIds = walkinAssignedRooms.map((room) => room.roomId).sort();
+        if (heldRoomIds.length !== requestedRoomIds.length || heldRoomIds.some((id, index) => id !== requestedRoomIds[index])) {
+          throw new Error("Selected rooms no longer match the front-desk room hold.");
+        }
+      }
       const walkinFingerprintRoomLines = walkinAssignedRooms.map((assigned) => ({
         type: String(assigned.data.type || "").trim(),
         quantity: 1,
@@ -232072,7 +232659,7 @@ async function handleCreateWalkin(req, res) {
           if (isExpiredPendingHold(bookingData2, now)) {
             const existingCheckIn = toDateOrNull(bookingData2.checkIn);
             const existingCheckOut = toDateOrNull(bookingData2.checkOut);
-            const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+            const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
             if (dateOverlaps) {
               expiredHoldRetirements.push({
                 ref: doc.ref,
@@ -232103,7 +232690,13 @@ async function handleCreateWalkin(req, res) {
         if (sawConflict) {
           throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, assigned.roomId, checkInDate, checkOutDate);
+        const hasBlockConflict = await hasActiveRoomBlockConflict(
+          transaction,
+          assigned.roomId,
+          checkInDate,
+          checkOutDate,
+          requestedStaffHoldId
+        );
         if (hasBlockConflict) {
           throw new Error("Room no longer available");
         }
@@ -232585,6 +233178,14 @@ async function handleCreateWalkin(req, res) {
         transaction.set(counterRef, { count: walkinRoomCount });
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      if (staffHoldRef) {
+        transaction.update(staffHoldRef, {
+          status: "consumed",
+          consumedAt: now,
+          updatedAt: now,
+          reservationId: effectiveReservationId
+        });
+      }
       for (let lineIdx = 0; lineIdx < walkinRoomCount; lineIdx++) {
         const assigned = walkinAssignedRooms[lineIdx];
         const lineFinancials = walkinRoomStayFinancials[lineIdx];
@@ -232784,13 +233385,13 @@ async function handleApplyBookingDiscount(req, res) {
         pointsRedeemedValue: pointsValue,
         finalTotal: totalPrice
       });
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const updates = {
         originalTotalPrice: subtotal,
         discountType,
         discountPct,
         discountVerified: Boolean(discountType),
-        discountVerifiedBy: discountType ? staffUid : null,
+        discountVerifiedBy: discountType ? staffUid2 : null,
         discountRejected: false,
         discountRejectedBy: null,
         discountRejectionReason: "",
@@ -232824,7 +233425,7 @@ async function handleApplyReservationDiscount(req, res) {
   if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
     return res.status(400).json({ success: false, error: "Invalid government discount type." });
   }
-  const staffUid = String(req.staff?.uid || "staff");
+  const staffUid2 = String(req.staff?.uid || "staff");
   let childRefs = [];
   try {
     const childSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationId).get();
@@ -232931,7 +233532,7 @@ async function handleApplyReservationDiscount(req, res) {
           discountType,
           discountPct,
           discountVerified: Boolean(discountType),
-          discountVerifiedBy: discountType ? staffUid : null,
+          discountVerifiedBy: discountType ? staffUid2 : null,
           discountRejected: false,
           discountRejectedBy: null,
           discountRejectionReason: "",
@@ -232975,7 +233576,7 @@ async function handleRemoveVoucher(req, res) {
   if (bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Invalid booking id." });
   }
-  const staffUid = String(req.staff?.uid || "staff");
+  const staffUid2 = String(req.staff?.uid || "staff");
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -233037,7 +233638,7 @@ async function handleRemoveVoucher(req, res) {
       const updates = {
         voucherCode: "",
         voucherDiscount: 0,
-        staffRemovedVoucherBy: staffUid,
+        staffRemovedVoucherBy: staffUid2,
         staffRemovedVoucherReason: reason,
         staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
         totalPrice: restoredTotalPrice,
@@ -233154,13 +233755,13 @@ async function handleSetLouReceived(req, res) {
       if (booking.paymentMethod !== "pay-at-hotel") {
         throw new Error("LOU flag only applies to chargeback bookings (paymentMethod: 'pay-at-hotel').");
       }
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const now = /* @__PURE__ */ new Date();
       const updates = {
         louReceived,
         ...louReceived ? {
           louReceivedAt: now,
-          louReceivedBy: staffUid
+          louReceivedBy: staffUid2
         } : {
           louReceivedAt: null,
           louReceivedBy: null
@@ -233202,12 +233803,12 @@ async function handleSetSpecialRequests(req, res) {
       if (!bookingSnap.exists) {
         throw new Error("Booking not found.");
       }
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const now = /* @__PURE__ */ new Date();
       const updates = {
         specialRequests: trimmedValue,
         specialRequestsUpdatedAt: now,
-        specialRequestsUpdatedBy: staffUid,
+        specialRequestsUpdatedBy: staffUid2,
         updatedAt: now
       };
       transaction.update(bookingRef2, updates);
@@ -233987,7 +234588,7 @@ async function handleAddPayment(req, res) {
   }
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
-  const staffUid = req.staff?.uid || "staff";
+  const staffUid2 = req.staff?.uid || "staff";
   const paymentRecord = {
     type: "payment",
     amount: numericAmount,
@@ -233996,7 +234597,7 @@ async function handleAddPayment(req, res) {
     transactionReference: safeTransactionReference,
     reason: null,
     approvedBy: null,
-    recordedBy: staffUid,
+    recordedBy: staffUid2,
     recordedAt: /* @__PURE__ */ new Date()
   };
   if (!safeTransactionReference) delete paymentRecord.transactionReference;
@@ -234084,7 +234685,7 @@ async function handleAddPayment(req, res) {
               write: {
                 status: "payment-confirmed",
                 paymentConfirmedAt: now,
-                handledBy: staffUid,
+                handledBy: staffUid2,
                 updatedAt: now
               },
               newStatus: "payment-confirmed"
@@ -234108,7 +234709,7 @@ async function handleAddPayment(req, res) {
         const updatedAt = now;
         Object.assign(bookingUpdates, {
           status: "payment-confirmed",
-          handledBy: staffUid,
+          handledBy: staffUid2,
           paymentConfirmedAt: now,
           updatedAt
         });
@@ -234139,7 +234740,7 @@ async function handleAddPayment(req, res) {
           bookingId,
           bookingRef: bookingData2.bookingRef,
           description: `Settled Stay Earnings (${bookingData2.bookingRef})`,
-          by: staffUid,
+          by: staffUid2,
           createdAt: awardedAt
         });
       }
@@ -234612,7 +235213,7 @@ async function handleVerifyAndRecordPayment(req, res) {
   const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const paymentNote = safeNote || "Verified payment proof";
-  const staffUid = req.staff?.uid || "staff";
+  const staffUid2 = req.staff?.uid || "staff";
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     let bookingData2 = null;
@@ -234693,7 +235294,7 @@ async function handleVerifyAndRecordPayment(req, res) {
               write: {
                 status: "payment-confirmed",
                 paymentConfirmedAt: now,
-                handledBy: staffUid,
+                handledBy: staffUid2,
                 updatedAt: now
               },
               newStatus: "payment-confirmed"
@@ -234715,7 +235316,7 @@ async function handleVerifyAndRecordPayment(req, res) {
         transactionReference: safeTransactionReference,
         reason: null,
         approvedBy: null,
-        recordedBy: staffUid,
+        recordedBy: staffUid2,
         recordedAt: /* @__PURE__ */ new Date()
       };
       if (!safeTransactionReference) delete paymentRecord.transactionReference;
@@ -234726,7 +235327,7 @@ async function handleVerifyAndRecordPayment(req, res) {
       };
       if (targetPostStatus !== data.status) {
         bookingUpdates.status = targetPostStatus;
-        bookingUpdates.handledBy = staffUid;
+        bookingUpdates.handledBy = staffUid2;
         bookingUpdates.paymentConfirmedAt = now;
       }
       if (Object.keys(bookingUpdates).length > 0) {
@@ -234779,7 +235380,7 @@ async function handleVerifyAndRecordPayment(req, res) {
         amount: numericAmount,
         method,
         transactionReference: safeTransactionReference,
-        recordedBy: staffUid,
+        recordedBy: staffUid2,
         totalCollected,
         status: fullyPaid ? "payment-confirmed" : "payment-uploaded",
         fullyPaid,
@@ -235172,6 +235773,8 @@ async function handleCheckoutBooking(req, res) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
     }
+    const memberCurrentLevelBefore = memberDoc?.exists && resolveCurrentLevel ? resolveCurrentLevel(rewardsConfig?.levels, Number(memberDoc.data()?.completedStays || 0)) : null;
+    const memberTierMultiplier = memberCurrentLevelBefore?.pointsMultiplier ?? 1;
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef2);
       if (!freshBookingDoc.exists) {
@@ -235190,7 +235793,8 @@ async function handleCheckoutBooking(req, res) {
       const collectedTotal = folioSnapshot.collectedTotal;
       const checkoutFolioTotal = folioSnapshot.folioTotal;
       checkedOutWithBalance = folioSnapshot.computedBalance;
-      eligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      const baseEligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      eligiblePoints = calculatePointsWithMultiplier(baseEligiblePoints, memberTierMultiplier);
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
         throw new Error("UNPAID_REASON_REQUIRED");
       }
@@ -235277,22 +235881,73 @@ async function handleCheckoutBooking(req, res) {
           updatedAt: now
         });
       }
-      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
-        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
-        transaction.update(memberRef, {
-          rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: now
-        });
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
-        transaction.set(historyRef, {
-          type: "earn",
-          points: pointsAwarded,
-          bookingId,
-          bookingRef: bookingData2.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
-          by: checkedOutBy,
-          createdAt: /* @__PURE__ */ new Date()
-        });
+      if (canAwardPoints && memberId && memberRef && memberDocInTransaction?.exists) {
+        const priorCompletedStays = Number(memberDocInTransaction.data()?.completedStays || 0);
+        const nextCompletedStays = priorCompletedStays + 1;
+        const nextCurrentLevel = resolveCurrentLevel(rewardsConfig?.levels, nextCompletedStays);
+        if (awardNow) {
+          const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData2.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: /* @__PURE__ */ new Date()
+          });
+        } else {
+          transaction.update(memberRef, {
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+        }
+        const freeNightEvery = Number(rewardsConfig?.freeNightEvery || 0);
+        if (freeNightEvery > 0 && nextCompletedStays > 0 && nextCompletedStays % freeNightEvery === 0) {
+          const memberNumber = memberDocInTransaction.data()?.memberNumber || `M${memberId.slice(0, 8)}`;
+          const freeNightCode = `FREENIGHT-${memberNumber}-${nextCompletedStays}`;
+          const freeNightVoucherRef = adminDb.collection("vouchers").doc(freeNightCode);
+          const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1e3);
+          transaction.set(freeNightVoucherRef, {
+            code: freeNightCode,
+            // Phase 5 discriminator — pre-Phase-5 promo vouchers
+            // are missing these (treated as "promo" + valueType =
+            // discountType on read).
+            kind: "reward",
+            valueType: "free-night",
+            // Backward-compat with the existing percent/flat
+            // discount math — `discountType: "percent"` +
+            // `discountValue: 100` produces a 100% off discount.
+            // `calculateVoucherDiscount` caps at subtotal so any
+            // over-discount rounds to 0.
+            discountType: "percent",
+            discountValue: 100,
+            usageCap: 1,
+            usageCount: 0,
+            expiresAt,
+            // Empty array = applies to all room types (per
+            // VOU-03 all-or-none rule).
+            applicableRoomTypes: [],
+            isActive: true,
+            guestEmail: memberDocInTransaction.data()?.email || null,
+            // Phase 5 back-link fields for member portal display
+            // + admin "Reward vouchers" filter.
+            memberId,
+            memberNumber,
+            rewardSource: "free-night-tier",
+            createdBy: checkedOutBy || "system",
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+        }
       }
     });
     try {
@@ -235779,7 +236434,7 @@ async function handleRescheduleBooking(req, res) {
       error: "Booking, room, check-in, and check-out are required."
     });
   }
-  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId, mode } = parsedReschedule.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
@@ -235802,6 +236457,20 @@ async function handleRescheduleBooking(req, res) {
       const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+      if (mode === "extend") {
+        const currentRoomId = String(booking.roomId || "");
+        const currentCheckIn = toDateOrNull(booking.checkIn);
+        if (String(roomId) !== currentRoomId) {
+          throw new Error("Extend stay cannot change the assigned room.");
+        }
+        if (!currentCheckIn || checkInDate.getTime() !== currentCheckIn.getTime()) {
+          throw new Error("Extend stay cannot change the check-in date.");
+        }
+        const currentCheckOut = toDateOrNull(booking.checkOut);
+        if (!currentCheckOut || checkOutDate.getTime() <= currentCheckOut.getTime()) {
+          throw new Error("Extended check-out must be after the current check-out date.");
+        }
+      }
       bookingReservationId2 = (() => {
         const stored = String(booking.reservationId || "").trim();
         if (stored.length > 0) return stored;
@@ -235846,7 +236515,7 @@ async function handleRescheduleBooking(req, res) {
       if (room.status === "blocked") {
         const blockedFrom = toDateOrNull(room.blockedFrom);
         const blockedTo = toDateOrNull(room.blockedTo);
-        const windowActive = blockedFrom && blockedTo ? rangesOverlap(blockedFrom, blockedTo, checkInDate, checkOutDate) : true;
+        const windowActive = blockedFrom && blockedTo ? rangesOverlap2(blockedFrom, blockedTo, checkInDate, checkOutDate) : true;
         if (windowActive) throw new Error("Target room is blocked for those dates.");
       }
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
@@ -235863,7 +236532,7 @@ async function handleRescheduleBooking(req, res) {
         if (isExpiredPendingHold(docData, now)) {
           const existingCheckIn = toDateOrNull(docData.checkIn);
           const existingCheckOut = toDateOrNull(docData.checkOut);
-          const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
+          const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
           if (dateOverlaps) {
             expiredHoldRetirements.push({
               ref: doc.ref,
@@ -236029,11 +236698,17 @@ async function handleRescheduleBooking(req, res) {
       }
       let appliedMemberDiscountPct = 0;
       if (booking.memberId) {
+        const memberRef = adminDb.doc(`members/${booking.memberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists ? memberDocInTx.data()?.currentLevel : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct)) ? Math.max(0, Math.floor(Number(memberTier.discountPct))) : null;
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data();
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -236091,7 +236766,13 @@ async function handleRescheduleBooking(req, res) {
         by: req.staff?.uid || req.staff?.email || "staff",
         at: (/* @__PURE__ */ new Date()).toISOString(),
         pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
-        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0),
+        // Per EXT-01 (2026-01-27): the `kind` field distinguishes
+        // an extend-stay reschedule from a room move. Both write
+        // the same `rescheduleHistory[]` array; clients render
+        // them differently (extend shows a timeline entry with
+        // only the check-out change; move shows room + dates).
+        kind: mode === "extend" ? "extend" : "move"
       };
       updatedBooking = {
         roomId: String(roomId),
@@ -236315,6 +236996,69 @@ async function handleRescheduleBooking(req, res) {
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
   }
 }
+var GUEST_EXTEND_STATUSES = ["payment-confirmed", "confirmed", "checked-in"];
+async function handleExtendStay(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const {
+    bookingId,
+    bookingRef,
+    guestEmail,
+    token: token2,
+    checkOut,
+    reason
+  } = req.body || {};
+  if (!bookingRef || !guestEmail && !token2 || !checkOut) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking reference, email or token, and new check-out date are required."
+    });
+  }
+  try {
+    const parsed2 = guestCancelSchema.safeParse(req.body || {});
+    if (!parsed2.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a valid booking reference and email or lookup token."
+      });
+    }
+    const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
+    const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      return res.status(404).json({
+        success: false,
+        error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+      });
+    }
+    const bookingDocumentRef = snapshot.docs[0].ref;
+    const bookingData2 = snapshot.docs[0].data();
+    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData2.status || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "EXTEND_NOT_ELIGIBLE"
+      });
+    }
+    const extendReq = {
+      ...req,
+      body: {
+        bookingId: snapshot.docs[0].id,
+        roomId: bookingData2.roomId,
+        // locked — transaction enforces
+        checkIn: bookingData2.checkIn,
+        // locked — transaction enforces
+        checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        mode: "extend"
+      }
+    };
+    return await handleRescheduleBooking(extendReq, res);
+  } catch (err) {
+    console.error("[handleExtendStay]", err?.message);
+    return res.status(500).json({ success: false, error: "An unexpected error occurred." });
+  }
+}
 async function handleAddRoomToReservation(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -236381,7 +237125,7 @@ async function handleAddRoomToReservation(req, res) {
       if (targetRoom.status === "blocked") {
         const blockedFrom = toDateOrNull(targetRoom.blockedFrom);
         const blockedTo = toDateOrNull(targetRoom.blockedTo);
-        const windowActive = blockedFrom && blockedTo ? rangesOverlap(blockedFrom, blockedTo, headerCheckIn, headerCheckOut) : true;
+        const windowActive = blockedFrom && blockedTo ? rangesOverlap2(blockedFrom, blockedTo, headerCheckIn, headerCheckOut) : true;
         if (windowActive) {
           throw new Error("Target room is blocked for those dates.");
         }
@@ -236833,6 +237577,7 @@ async function handleRoomAvailability(req, res) {
   try {
     const overlapSnapshot = await adminDb.collection("bookings").where("status", "in", ACTIVE_STATUSES).where("checkIn", "<", reqEnd).get();
     const blocksSnapshot = await adminDb.collection("roomBlocks").where("status", "==", "active").where("startDate", "<", reqEnd).get();
+    const staffHoldsSnapshot = await adminDb.collection("staffInventoryHolds").where("status", "==", "active").where("startDate", "<", reqEnd).get();
     const bookedRanges = [];
     overlapSnapshot.forEach((docSnap) => {
       const data = docSnap.data();
@@ -236860,6 +237605,20 @@ async function handleRoomAvailability(req, res) {
       const bEnd = /* @__PURE__ */ new Date(`${endIso}T00:00:00Z`);
       if (bStart < reqEnd && bEnd > reqStart) {
         bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "blocked" });
+      }
+    });
+    staffHoldsSnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (!isActiveStaffInventoryHold(data)) return;
+      const startIso = toIsoDate(data.startDate);
+      const endIso = toIsoDate(data.endDate);
+      const roomIds = Array.isArray(data.roomIds) ? data.roomIds.map(String) : [];
+      if (!startIso || !endIso || roomIds.length === 0) return;
+      const holdStart = /* @__PURE__ */ new Date(`${startIso}T00:00:00Z`);
+      const holdEnd = /* @__PURE__ */ new Date(`${endIso}T00:00:00Z`);
+      if (!(holdStart < reqEnd && holdEnd > reqStart)) return;
+      for (const roomId of roomIds) {
+        bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "staff-hold" });
       }
     });
     return res.status(200).json({
@@ -236895,6 +237654,13 @@ var updateBlockSchema = blockSchema.extend({
 var cancelBlockSchema = external_exports.object({
   blockId: external_exports.string().trim().min(1).max(80)
 });
+var bulkBlockSchema = external_exports.object({
+  roomIds: external_exports.array(external_exports.string().trim().min(1).max(80)).min(1).max(50),
+  startDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: external_exports.string().trim().min(1).max(120),
+  notes: external_exports.string().trim().max(500).optional().default("")
+}).strict();
 function parseStayRange(startDate, endDate) {
   const start = /* @__PURE__ */ new Date(`${startDate}T00:00:00Z`);
   const end = /* @__PURE__ */ new Date(`${endDate}T00:00:00Z`);
@@ -236932,6 +237698,61 @@ async function assertRoomIsFreeForBlock(transaction, roomId, start, end, exclude
   });
   if (blockConflict) {
     throw new Error("These dates already overlap another active block.");
+  }
+  if (await hasActiveStaffInventoryHoldConflict(transaction, roomId, start, end)) {
+    throw new Error("These dates are temporarily held for a front-desk booking.");
+  }
+}
+async function handleCreateBulkRoomBlocks(req, res) {
+  const parsed2 = bulkBlockSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Please choose rooms, valid dates, and a reason." });
+  }
+  const roomIds = Array.from(new Set(parsed2.data.roomIds));
+  if (roomIds.length !== parsed2.data.roomIds.length) {
+    return res.status(400).json({ success: false, error: "Each room can only be selected once." });
+  }
+  try {
+    const { start, end } = parseStayRange(parsed2.data.startDate, parsed2.data.endDate);
+    const batchId = adminDb.collection("roomBlockBatches").doc().id;
+    const blockIds = [];
+    await adminDb.runTransaction(async (transaction) => {
+      const resolvedRooms = [];
+      for (const roomId of roomIds) {
+        const roomDoc = await transaction.get(adminDb.collection("rooms").doc(roomId));
+        if (!roomDoc.exists) throw new Error("One of the selected rooms was not found.");
+        const room = roomDoc.data() || {};
+        if (room.isActive === false) throw new Error(`Room ${room.roomNumber || roomId} is inactive.`);
+        resolvedRooms.push({ id: roomId, data: room });
+      }
+      for (const room of resolvedRooms) {
+        await assertRoomIsFreeForBlock(transaction, room.id, start, end);
+      }
+      const now = /* @__PURE__ */ new Date();
+      for (const room of resolvedRooms) {
+        const blockRef = adminDb.collection("roomBlocks").doc();
+        blockIds.push(blockRef.id);
+        transaction.set(blockRef, {
+          batchId,
+          roomId: room.id,
+          roomNumber: String(room.data.roomNumber || ""),
+          roomType: String(room.data.type || ""),
+          startDate: Timestamp.fromDate(start),
+          endDate: Timestamp.fromDate(end),
+          reason: parsed2.data.reason,
+          notes: parsed2.data.notes || "",
+          status: "active",
+          createdBy: req.staff?.uid || req.staff?.email || "staff",
+          createdAt: now,
+          updatedAt: now,
+          cancelledAt: null,
+          cancelledBy: null
+        });
+      }
+    });
+    return res.status(200).json({ success: true, batchId, blockIds });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: error.message || "Failed to block dates." });
   }
 }
 async function handleCreateRoomBlock(req, res) {
@@ -237743,6 +238564,10 @@ var redeemPointsSchema = external_exports.object({
   memberId: external_exports.string().trim().max(120).optional().default(""),
   pointsToRedeem: external_exports.coerce.number().int().min(1)
 }).strict();
+var selfRedeemSchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(1).max(120),
+  pointsToRedeem: external_exports.coerce.number().int().min(1).max(1e6)
+}).strict();
 var undoRedemptionSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(120)
 }).strict();
@@ -237935,6 +238760,22 @@ async function handleRegisterMember(req, res) {
       }
       const fullName = parsed2.data.fullName || authUser.name || email.split("@")[0];
       const photoUrl = parsed2.data.photoUrl || authUser.picture || "";
+      const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
+      const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
+      const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
+      const welcomePoints = Math.max(0, Math.floor(Number(rewardsCfg?.welcomePoints || 0)));
+      let welcomeHistoryRef = null;
+      let welcomeAlreadyCredited = false;
+      let welcomeAmount = 0;
+      if (welcomePoints > 0) {
+        welcomeHistoryRef = adminDb.collection(`members/${uid}/pointsHistory`).doc("welcome");
+        const welcomeDocSnap = await transaction.get(welcomeHistoryRef);
+        welcomeAlreadyCredited = welcomeDocSnap.exists;
+        if (!welcomeAlreadyCredited) {
+          welcomeAmount = welcomePoints;
+        }
+      }
+      const initialRewardsPoints = (Number(existingMember?.rewardsPoints) || 0) + welcomeAmount;
       transaction.set(memberRef, {
         fullName,
         email,
@@ -237944,12 +238785,27 @@ async function handleRegisterMember(req, res) {
         memberNumber,
         isMember: true,
         memberSince: now,
-        rewardsPoints: existingMember?.rewardsPoints || 0,
+        rewardsPoints: initialRewardsPoints,
+        // Per Phase 2 (2026-10-12): initialize the stay-counter
+        // + tier cache. Absent on legacy pre-Phase-2 docs — readers
+        // must coalesce missing values to 0 / null.
+        completedStays: Number(existingMember?.completedStays || 0),
+        currentLevel: existingMember?.currentLevel ?? baseCurrentLevel,
         tier: existingMember?.tier || "standard",
         isActive: existingMember?.isActive !== false,
         createdAt: existingMember?.createdAt || now,
         updatedAt: now
       }, { merge: true });
+      if (welcomeAmount > 0 && welcomeHistoryRef) {
+        transaction.set(welcomeHistoryRef, {
+          type: "welcome",
+          points: welcomeAmount,
+          memberId: uid,
+          note: `Welcome bonus (${welcomeAmount} points)`,
+          createdAt: now,
+          createdBy: "system"
+        });
+      }
     });
     const emailIsVerified = authUser.email_verified === true;
     const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed2.data.bookingId || void 0) : 0;
@@ -237994,8 +238850,8 @@ async function handleRedeemMemberPoints(req, res) {
     });
   }
   try {
-    const now = /* @__PURE__ */ new Date();
     const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed2.data;
+<<<<<<< HEAD
     let responseData = {};
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
@@ -238062,20 +238918,175 @@ async function handleRedeemMemberPoints(req, res) {
         points: -pointsToRedeem,
         description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
         reason: "Points redeemed by staff",
+=======
+    const result = await adminDb.runTransaction(async (transaction) => {
+      return applyPointsRedemption(transaction, {
+>>>>>>> origin/dev
         bookingId,
-        by: staff.uid,
-        at: now
+        memberId: requestedMemberId,
+        pointsToRedeem,
+        appliedBy: staff.uid,
+        appliedByLabel: "staff"
       });
-      responseData = {
-        bookingId,
-        memberId,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        totalPrice: nextTotalPrice,
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
-      };
     });
-    return res.status(200).json({ success: true, data: responseData });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "We could not redeem points for this booking."
+    });
+  }
+}
+async function applyPointsRedemption(transaction, args) {
+  const now = /* @__PURE__ */ new Date();
+  const { bookingId, memberId: requestedMemberId, pointsToRedeem, appliedBy, appliedByLabel } = args;
+  const bookingRef = adminDb.collection("bookings").doc(bookingId);
+  const bookingDoc = await transaction.get(bookingRef);
+  if (!bookingDoc.exists) {
+    throw new Error("Booking not found.");
+  }
+  const booking = bookingDoc.data();
+  if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
+    throw new Error("Points can only be redeemed before check-in.");
+  }
+  if ((booking.pointsRedeemed || 0) > 0) {
+    throw new Error("This booking already has a points redemption.");
+  }
+  const memberId = requestedMemberId || booking.memberId;
+  if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
+    throw new Error("Booking is not linked to this member.");
+  }
+  const memberRef = adminDb.collection("members").doc(memberId);
+  const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
+  const memberDoc = await transaction.get(memberRef);
+  const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
+  if (!memberDoc.exists) {
+    throw new Error("Member not found.");
+  }
+  const member = memberDoc.data();
+  if (member.isActive === false || member.isMember === false) {
+    throw new Error("Member account is not active.");
+  }
+  const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
+  if (pointsRedemptionRate <= 0) {
+    throw new Error("Points redemption is not configured.");
+  }
+  const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
+  const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
+  const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
+  if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+    throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+  }
+  if (Number.isFinite(billPct) && billPct < 100) {
+    const bookingSubtotal = Number(booking.totalPrice || 0);
+    const maxRedeemableCurrency = Math.floor(bookingSubtotal * Math.max(0, billPct) / 100);
+    const maxRedeemablePoints = Math.floor(maxRedeemableCurrency * 100 / pointsRedemptionRate);
+    if (pointsToRedeem > maxRedeemablePoints) {
+      throw new Error(
+        `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+      );
+    }
+  }
+  const validation = validatePointsRedemption(
+    pointsToRedeem,
+    Number(member.rewardsPoints || 0),
+    pointsRedemptionRate
+  );
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+  const redemptionValue = Math.round(validation.value);
+  if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
+    throw new Error("Points redemption value exceeds the booking total.");
+  }
+  const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+  const rateBreakdown = rebuildRateBreakdown(booking, {
+    pointsRedeemedValue: redemptionValue,
+    finalTotal: nextTotalPrice
+  });
+  const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+  const historyReason = appliedByLabel === "staff" ? "Points redeemed by staff" : "Points redeemed by member at checkout";
+  transaction.update(bookingRef, {
+    memberId,
+    totalPrice: nextTotalPrice,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    pointsRedeemedBy: appliedBy,
+    pointsRedeemedAt: now,
+    ...rateBreakdown ? { rateBreakdown } : {},
+    updatedAt: now
+  });
+  transaction.update(memberRef, {
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
+    updatedAt: now
+  });
+  transaction.set(historyRef, {
+    type: "redeem",
+    points: -pointsToRedeem,
+    description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
+    reason: historyReason,
+    bookingId,
+    by: appliedBy,
+    at: now
+  });
+  return {
+    bookingId,
+    memberId,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    totalPrice: nextTotalPrice,
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
+  };
+}
+async function handleRedeemPointsSelf(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const authHeader = req.headers.authorization || "";
+  const token2 = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  if (!token2) {
+    return res.status(401).json({ success: false, error: "Sign in is required to redeem points." });
+  }
+  let authUser;
+  try {
+    authUser = await adminAuth.verifyIdToken(token2);
+  } catch {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+  if (!authUser?.uid) {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+  const parsed2 = selfRedeemSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the points redemption details and try again."
+    });
+  }
+  try {
+    const { bookingId, pointsToRedeem } = parsed2.data;
+    const rewardsConfigSnap = await adminDb.collection("settings").doc("rewardsConfig").get();
+    const rewardsCfgData = rewardsConfigSnap.exists ? rewardsConfigSnap.data() : null;
+    if (rewardsCfgData?.allowMemberPointsRedemption !== true) {
+      return res.status(403).json({
+        success: false,
+        error: "Self-service points redemption is not enabled. Please contact the front desk."
+      });
+    }
+    const result = await adminDb.runTransaction(async (transaction) => {
+      return applyPointsRedemption(transaction, {
+        bookingId,
+        // Force memberId = authenticated UID. The helper's
+        // member-match guard rejects when this doesn't equal
+        // booking.memberId — the auth UID is the only input
+        // accepted for the self path (clients cannot spoof).
+        memberId: authUser.uid,
+        pointsToRedeem,
+        appliedBy: `self:${authUser.uid}`,
+        appliedByLabel: "self"
+      });
+    });
+    return res.status(200).json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -239115,13 +240126,13 @@ async function handleDeliverStoreOrder(req, res) {
         throw new Error("INVALID_ORDER_TOTAL");
       }
       const deliveredAt = /* @__PURE__ */ new Date();
-      const staffUid = req.staff?.uid || "staff";
+      const staffUid2 = req.staff?.uid || "staff";
       const isDirectPaid = order.paymentMethod !== "add-to-bill";
       transaction.update(orderRef, {
         status: "delivered",
         deliveredAt,
         updatedAt: deliveredAt,
-        handledBy: staffUid
+        handledBy: staffUid2
       });
       if (isDirectPaid) {
         const tenderRef = orderRef.collection("payments").doc("delivery-tender");
@@ -239132,7 +240143,7 @@ async function handleDeliverStoreOrder(req, res) {
           note: `Direct store payment for ${String(order.orderRef || orderId)}`.slice(0, 500),
           reason: null,
           approvedBy: null,
-          recordedBy: staffUid,
+          recordedBy: staffUid2,
           recordedAt: deliveredAt,
           source: "store-order",
           sourceId: orderId,
@@ -239379,7 +240390,7 @@ async function handleConfirmStoreOrder(req, res) {
   if (orderRef.length === 0 || orderRef.length > MAX_ORDER_REF_LENGTH) {
     return res.status(400).json({ success: false, error: "Invalid order reference." });
   }
-  const staffUid = String(req.staff?.uid || "staff");
+  const staffUid2 = String(req.staff?.uid || "staff");
   try {
     let confirmedOrder = null;
     await adminDb.runTransaction(async (transaction) => {
@@ -239425,7 +240436,7 @@ async function handleConfirmStoreOrder(req, res) {
       transaction.update(orderRefDoc, {
         status: "confirmed",
         stockDecrementedAt: /* @__PURE__ */ new Date(),
-        handledBy: staffUid,
+        handledBy: staffUid2,
         updatedAt: /* @__PURE__ */ new Date()
       });
       confirmedOrder = { ...orderData, status: "confirmed", stockDecrementedAt: /* @__PURE__ */ new Date() };
@@ -239442,7 +240453,7 @@ async function handleConfirmStoreOrder(req, res) {
         await sendStoreOrderTrigger("store-order-confirmed", {
           ...confirmedOrder,
           guestEmail,
-          handledBy: staffUid
+          handledBy: staffUid2
         });
       } catch (emailErr) {
         console.error("Failed to send store confirmation email:", emailErr);
@@ -242567,7 +243578,7 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleAddRoomToReservation(req, res);
   }
-  if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
+  if (domain === "room-blocks" && ["create", "create-bulk", "update", "cancel"].includes(action) && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`room-blocks-${action}:${ip}`, 60, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many room block requests. Please try again in a minute." });
     }
@@ -242577,8 +243588,22 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     if (action === "create") return await handleCreateRoomBlock(req, res);
+    if (action === "create-bulk") return await handleCreateBulkRoomBlocks(req, res);
     if (action === "update") return await handleUpdateRoomBlock(req, res);
     return await handleCancelRoomBlock(req, res);
+  }
+  if (domain === "staff-inventory-holds" && ["acquire", "extend", "release"].includes(action) && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staff-inventory-holds-${action}:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many room hold requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    if (action === "acquire") return await handleAcquireStaffInventoryHold(req, res);
+    if (action === "extend") return await handleExtendStaffInventoryHold(req, res);
+    return await handleReleaseStaffInventoryHold(req, res);
   }
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkout:${ip}`, 30, 6e4)) {
@@ -242635,6 +243660,22 @@ async function handler(req, res) {
     }
     req.staff = authResult.success ? authResult : null;
     return await handleCancelPreview(req, res);
+  }
+  if (domain === "bookings" && action === "extend-stay" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-extend-stay:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many extend requests. Please try again in a minute." });
+    }
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        return res.status(403).json({ success: false, error: "Staff authentication is not accepted on this endpoint." });
+      }
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleExtendStay(req, res);
   }
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-lookup:${ip}`, 10, 6e4)) {
@@ -242875,6 +243916,9 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleRedeemMemberPoints(req, res);
+  }
+  if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
+    return await handleRedeemPointsSelf(req, res);
   }
   if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
@@ -243152,6 +244196,12 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many hold read requests. Please try again in a minute." });
     }
     return await handleReadInFlowHold(req, res);
+  }
+  if (domain === "holds" && action === "extend" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-extend:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many hold extension requests. Please try again in a minute." });
+    }
+    return await handleExtendInFlowHold(req, res);
   }
   if (domain === "holds" && action === "sweep" && (req.method === "POST" || req.method === "GET")) {
     const result = await handleSweepInFlowHolds(req, res);

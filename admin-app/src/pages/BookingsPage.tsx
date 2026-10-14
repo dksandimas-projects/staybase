@@ -66,6 +66,7 @@ import {
   BookingDrawerSectionPanel,
   BookingDrawerWorkspaceHeader,
   BookingSpecialRequestsEditor,
+  StayHistory,
   type BookingDrawerSection
 } from "../components/BookingDrawerWorkspace";
 import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
@@ -632,6 +633,8 @@ export function BookingsPage() {
     grantEarlyCheckin,
     addOnsitePayment,
     addWalkinBooking,
+    extendStaffInventoryHold,
+    releaseStaffInventoryHold,
     resendBookingEmail,
     storeOrders,
     updateStoreOrderStatus,
@@ -649,6 +652,7 @@ export function BookingsPage() {
     rewardsConfig,
     members,
     rescheduleBooking,
+    extendStayBooking,
     vouchers,
     corporateCodes,
     paymentMethods,
@@ -1070,6 +1074,12 @@ export function BookingsPage() {
   const [moveReason, setMoveReason] = useState("");
   const [moveIsSubmitting, setMoveIsSubmitting] = useState(false);
 
+  // Extend Stay Form States (EXT-01)
+  const [showExtendForm, setShowExtendForm] = useState(false);
+  const [extendCheckOut, setExtendCheckOut] = useState("");
+  const [extendReason, setExtendReason] = useState("");
+  const [extendIsSubmitting, setExtendIsSubmitting] = useState(false);
+
   // Sync Move states when selectedBooking changes
   useEffect(() => {
     if (selectedBooking) {
@@ -1085,6 +1095,10 @@ export function BookingsPage() {
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [activeStaffHoldId, setActiveStaffHoldId] = useState("");
+  const [activeStaffHoldExpiresAt, setActiveStaffHoldExpiresAt] = useState("");
+  const [staffHoldNow, setStaffHoldNow] = useState(() => Date.now());
+  const [isStaffHoldUpdating, setIsStaffHoldUpdating] = useState(false);
 
   // Per NBS-2026-08-08 (F1, booking-flow audit 2026-08-08):
   // the modal-session preallocations of the `bookingId`
@@ -1179,6 +1193,74 @@ export function BookingsPage() {
     tomorrow.setDate(tomorrow.getDate() + 1);
     return formatDateInput(tomorrow);
   });
+
+  const processedStaffHoldRef = useRef("");
+  useEffect(() => {
+    const holdId = searchParams.get("staffHoldId") || "";
+    const roomIds = (searchParams.get("roomIds") || "").split(",").filter(Boolean);
+    const requestedCheckIn = searchParams.get("checkIn") || "";
+    const requestedCheckOut = searchParams.get("checkOut") || "";
+    if (searchParams.get("newBooking") !== "1" || !holdId || roomIds.length === 0) return;
+    if (processedStaffHoldRef.current === holdId || rooms.length === 0) return;
+    const selectedRooms = roomIds.map((id) => rooms.find((room) => room.id === id)).filter(Boolean) as typeof rooms;
+    if (selectedRooms.length !== roomIds.length) return;
+    processedStaffHoldRef.current = holdId;
+    setWalkinRoomStays(selectedRooms.map((room) => ({
+      ...createWalkinRoomStay(room.type),
+      roomNumber: room.roomNumber
+    })));
+    setCheckInDate(requestedCheckIn);
+    setCheckOutDate(requestedCheckOut);
+    setActiveStaffHoldId(holdId);
+    setActiveStaffHoldExpiresAt(searchParams.get("holdExpiresAt") || "");
+    setStaffHoldNow(Date.now());
+    setIsModalOpen(true);
+  }, [searchParams, rooms]);
+
+  useEffect(() => {
+    if (!activeStaffHoldId) return;
+    const timer = window.setInterval(() => setStaffHoldNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeStaffHoldId]);
+
+  const staffHoldSecondsRemaining = activeStaffHoldExpiresAt
+    ? Math.max(0, Math.ceil((new Date(activeStaffHoldExpiresAt).getTime() - staffHoldNow) / 1000))
+    : 0;
+  const staffHoldCountdown = `${String(Math.floor(staffHoldSecondsRemaining / 60)).padStart(2, "0")}:${String(staffHoldSecondsRemaining % 60).padStart(2, "0")}`;
+
+  const clearStaffHoldParams = () => {
+    const next = new URLSearchParams(searchParams);
+    for (const key of ["newBooking", "staffHoldId", "holdExpiresAt", "roomIds", "checkIn", "checkOut"]) next.delete(key);
+    setSearchParams(next, { replace: true });
+  };
+
+  const handleCloseWalkinModal = async () => {
+    if (isWalkinSubmitting || isStaffHoldUpdating) return;
+    if (activeStaffHoldId) {
+      setIsStaffHoldUpdating(true);
+      const result = await releaseStaffInventoryHold(activeStaffHoldId);
+      if (!result.success) toast.error("Hold not released", result.error || "The hold will expire automatically.");
+      setIsStaffHoldUpdating(false);
+      setActiveStaffHoldId("");
+      setActiveStaffHoldExpiresAt("");
+      clearStaffHoldParams();
+    }
+    setIsModalOpen(false);
+  };
+
+  const handleExtendStaffHold = async () => {
+    if (!activeStaffHoldId) return;
+    setIsStaffHoldUpdating(true);
+    const result = await extendStaffInventoryHold(activeStaffHoldId);
+    if (result.success && result.hold) {
+      setActiveStaffHoldExpiresAt(result.hold.expiresAt);
+      setStaffHoldNow(Date.now());
+      toast.success("Hold extended", "The rooms are protected from online booking for another 15 minutes.");
+    } else {
+      toast.error("Hold not extended", result.error || "Return to the calendar and hold the rooms again.");
+    }
+    setIsStaffHoldUpdating(false);
+  };
   // Per EXB-07 (2026-08-01, per decision #155): the walk-in
   // modal gains the same adult/child split + extra bed steppers
   // the guest `/book` page already has. The split is
@@ -4106,6 +4188,46 @@ export function BookingsPage() {
     }
   };
 
+  // EXT-01: extend stay handler
+  const handleExtendSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || !extendCheckOut) return;
+
+    setExtendIsSubmitting(true);
+    try {
+      const result = await extendStayBooking({
+        bookingId: selectedBooking.id,
+        checkOut: extendCheckOut,
+        reason: extendReason || "Extend stay"
+      });
+      if (result.success) {
+        toast.success("Stay extended", "The guest's check-out date has been updated.");
+        const newCheckOutISO = `${extendCheckOut}T00:00:00Z`;
+        const newNumNights = Math.max(
+          Math.round((new Date(newCheckOutISO).getTime() - new Date(`${selectedBooking.checkIn}T00:00:00Z`).getTime()) / 86400000),
+          1
+        );
+        setSelectedBooking((previous) => previous ? {
+          ...previous,
+          checkOut: extendCheckOut,
+          numNights: newNumNights,
+          totalPrice: result.data?.totalPrice ?? previous.totalPrice,
+          rateBreakdown: result.data?.rateBreakdown ?? previous.rateBreakdown,
+          originalTotalPrice: result.data?.originalTotalPrice ?? previous.originalTotalPrice,
+          voucherDiscount: result.data?.voucherDiscount ?? previous.voucherDiscount
+        } : null);
+        setShowExtendForm(false);
+      } else {
+        toast.error("Failed to extend stay", result.error || "Please try a different check-out date.");
+      }
+    } catch (err: any) {
+      console.error("Extend stay failed:", err);
+      toast.error("Failed to extend stay", err.message || "An unexpected error occurred.");
+    } finally {
+      setExtendIsSubmitting(false);
+    }
+  };
+
   const createSelectedLedgerEntryId = (kind: "payment" | "refund") => {
     if (!selectedBooking) return "";
     if (selectedBooking.reservationId) {
@@ -4364,6 +4486,7 @@ export function BookingsPage() {
         // → 200 replay) instead of creating a duplicate.
         preallocatedBookingId: walkinPreallocatedBookingId,
         preallocatedReservationId: walkinPreallocatedReservationId,
+        staffHoldId: activeStaffHoldId || undefined,
         roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
         roomNumber,
         roomType,
@@ -4536,6 +4659,9 @@ export function BookingsPage() {
         // rotation is what makes the "book another guest"
         // path safe.
         setWalkinPreallocKey((key) => key + 1);
+        setActiveStaffHoldId("");
+        setActiveStaffHoldExpiresAt("");
+        clearStaffHoldParams();
         setIsModalOpen(false);
         toast.success(
           submittedRoomStays.length > 1 ? "Reservation created" : "Walk-in booking created",
@@ -5556,6 +5682,127 @@ export function BookingsPage() {
                   </div>
                 </form>
               </div>
+            )}
+
+            {/* EXT-01: Extend stay form */}
+            {selectedBooking && showExtendForm && (
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <BedDouble size={14} className="text-primary" aria-hidden="true" />
+                  Extend Stay Workstation
+                </h3>
+                <form onSubmit={handleExtendSubmit} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4 text-xs">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {/* Current room (locked) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Current Room
+                      <input
+                        type="text"
+                        value={`Room ${selectedBooking.roomNumber} (${selectedBooking.roomType})`}
+                        readOnly
+                        className="min-h-[38px] rounded border border-gray-100 bg-gray-50 px-2 text-xs text-gray-500 cursor-not-allowed"
+                      />
+                    </label>
+
+                    {/* Current check-in (locked) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Check-In Date
+                      <input
+                        type="date"
+                        value={selectedBooking.checkIn}
+                        readOnly
+                        className="min-h-[38px] rounded border border-gray-100 bg-gray-50 px-2 text-xs text-gray-500 cursor-not-allowed"
+                      />
+                    </label>
+
+                    {/* New check-out (editable) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      New Check-Out Date
+                      <input
+                        type="date"
+                        required
+                        min={(() => {
+                          // min = day after current check-out
+                          const d = new Date(`${selectedBooking.checkOut}T00:00:00Z`);
+                          d.setDate(d.getDate() + 1);
+                          return d.toISOString().slice(0, 10);
+                        })()}
+                        value={extendCheckOut}
+                        onChange={(e) => setExtendCheckOut(e.target.value)}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                    Reason for Extending
+                    <input
+                      type="text"
+                      value={extendReason}
+                      onChange={(e) => setExtendReason(e.target.value)}
+                      placeholder="e.g. Guest requested 1 more night"
+                      className="min-h-[38px] rounded border border-gray-200 px-3 text-xs text-gray-800"
+                    />
+                  </label>
+
+                  {/* Nights delta */}
+                  {extendCheckOut && (() => {
+                    const currentCO = new Date(`${selectedBooking.checkOut}T00:00:00Z`);
+                    const newCO = new Date(`${extendCheckOut}T00:00:00Z`);
+                    const extraNights = Math.round((newCO.getTime() - currentCO.getTime()) / 86400000);
+                    if (extraNights <= 0) return null;
+                    return (
+                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[10px] leading-relaxed text-primary-dark">
+                        <p className="font-bold">Extension adds {extraNights} night{extraNights === 1 ? "" : "s"}</p>
+                        <p className="mt-1 opacity-80">The guest will be charged for the additional night{extraNights === 1 ? "" : "s"} at the current rate. Any rate recalculation happens automatically.</p>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowExtendForm(false)}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg border border-gray-200 px-4 font-semibold text-gray-700 hover:bg-gray-50 active:scale-95"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={extendIsSubmitting || !extendCheckOut}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg bg-primary px-4 font-semibold text-white hover:bg-primary-dark disabled:opacity-50 active:scale-95"
+                    >
+                      {extendIsSubmitting ? "Extending..." : "Confirm Extension"}
+                    </button>
+                  </div>
+
+                  {/* Per EXT-01: if the guest wants to move rooms AND extend,
+                      prefill the move form's check-out with the extend date. */}
+                  {extendCheckOut && (
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowExtendForm(false);
+                          setMoveCheckOut(extendCheckOut);
+                          setMoveReason("Move + extend");
+                          setShowMoveForm(true);
+                        }}
+                        className="text-[10px] text-primary underline hover:text-primary-dark"
+                      >
+                        Need a different room? Move + extend instead
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </div>
+            )}
+
+            {/* Per EXT-01 (2026-01-27): the Stay History timeline
+                renders the booking's `rescheduleHistory[]` inside the
+                "Activity & More" section, after the action forms. */}
+            {selectedBooking && (selectedBooking.rescheduleHistory?.length ?? 0) > 0 && (
+              <StayHistory entries={selectedBooking.rescheduleHistory ?? []} />
             )}
             </BookingDrawerSectionPanel>
 
@@ -6785,6 +7032,32 @@ export function BookingsPage() {
                 </button>
               )}
 
+              {/* Per EXT-01 (2026-01-27): the "Extend stay" action.
+                  Only shown for eligible statuses (not pending/payment-uploaded).
+                  The form locks the room + check-in to the booking's current
+                  values and only accepts a new, later check-out date. */}
+              {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showExtendForm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Default extend check-out to the day after current check-out
+                    const currentCO = selectedBooking.checkOut;
+                    if (currentCO) {
+                      const d = new Date(`${currentCO}T00:00:00Z`);
+                      d.setDate(d.getDate() + 1);
+                      setExtendCheckOut(d.toISOString().slice(0, 10));
+                    }
+                    setExtendReason("");
+                    setShowExtendForm(true);
+                  }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                >
+                  <BedDouble size={15} className="text-primary" aria-hidden="true" />
+                  Extend stay
+                  {renderActionScope("room")}
+                </button>
+              )}
+
               {/*
                 Per MRB-14 (2026-08-03, per decision #180 —
                 proposed): the "Add room to this
@@ -7239,13 +7512,14 @@ export function BookingsPage() {
       <Modal
         title="Create New Booking"
         open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => { void handleCloseWalkinModal(); }}
         footer={
           <div className="flex gap-3 justify-end">
             <button
               type="button"
               form="walkin-form"
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => { void handleCloseWalkinModal(); }}
+              disabled={isStaffHoldUpdating || isWalkinSubmitting}
               className="min-h-[44px] px-5 rounded-lg border border-gray-250 text-xs font-semibold text-gray-700 hover:bg-gray-50"
             >
               Cancel
@@ -7257,7 +7531,7 @@ export function BookingsPage() {
               // stay must name a vacant room and fit its own type's
               // caps — all of them are server rejects, so the desk is
               // stopped before the round trip rather than after it.
-              disabled={!walkinReservationIsValid || isWalkinSubmitting}
+              disabled={!walkinReservationIsValid || isWalkinSubmitting || isStaffHoldUpdating || Boolean(activeStaffHoldId && staffHoldSecondsRemaining <= 0)}
               className="min-w-[150px]"
             >
               {isWalkinSubmitting
@@ -7271,6 +7545,31 @@ export function BookingsPage() {
       >
         <form onSubmit={handleWalkinSubmit} id="walkin-form" className="space-y-4 text-sm">
           <span className="sr-only">Confirm Reservation</span>
+          {activeStaffHoldId && (
+            <div className={`rounded-xl border p-4 ${staffHoldSecondsRemaining > 0 ? "border-blue-200 bg-blue-50" : "border-red-200 bg-red-50"}`}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className={`text-xs font-bold ${staffHoldSecondsRemaining > 0 ? "text-blue-900" : "text-red-900"}`}>
+                    {staffHoldSecondsRemaining > 0 ? "Held from online booking" : "Room hold expired"}
+                  </p>
+                  <p className={`mt-1 text-sm font-bold tabular-nums ${staffHoldSecondsRemaining > 0 ? "text-blue-800" : "text-red-800"}`}>
+                    {staffHoldCountdown} remaining
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { void handleExtendStaffHold(); }}
+                  disabled={isStaffHoldUpdating || staffHoldSecondsRemaining <= 0}
+                  className="min-h-[44px] rounded-lg border border-blue-200 bg-white px-4 text-xs font-bold text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Extend 15 minutes
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-gray-600">
+                The selected rooms cannot be booked online. Confirming this reservation consumes the hold atomically; cancelling this form releases it.
+              </p>
+            </div>
+          )}
           {/* Per fix/walkin-split-name (2026-07-25): walk-in
               now mirrors the guest `/book` page and collects
               first + last name separately. We use a flex
@@ -7343,6 +7642,7 @@ export function BookingsPage() {
               required
               value={checkInDate}
               onChange={(e) => setCheckInDate(e.target.value)}
+              disabled={Boolean(activeStaffHoldId)}
               className="min-h-[44px] w-full rounded-lg border border-gray-255 bg-white py-2 px-3 text-xs"
             />
           </label>
@@ -7354,6 +7654,7 @@ export function BookingsPage() {
               required
               value={checkOutDate}
               onChange={(e) => setCheckOutDate(e.target.value)}
+              disabled={Boolean(activeStaffHoldId)}
               className="min-h-[44px] w-full rounded-lg border border-gray-255 bg-white py-2 px-3 text-xs"
             />
           </label>
@@ -7407,7 +7708,7 @@ export function BookingsPage() {
                   key={stay.key}
                   className="space-y-2 rounded-xl border border-gray-200 bg-gray-50/40 p-3"
                 >
-                  {walkinRoomStays.length > 1 && (
+                  {walkinRoomStays.length > 1 && !activeStaffHoldId && (
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold text-gray-600">
                         Room {stayIndex + 1} of {walkinRoomStays.length}
@@ -7429,6 +7730,7 @@ export function BookingsPage() {
                     Room Type
                     <select
                       value={stay.roomType}
+                      disabled={Boolean(activeStaffHoldId)}
                       onChange={(e) => {
                         const nextType = e.target.value;
                         const claimed = new Set(
@@ -7464,6 +7766,7 @@ export function BookingsPage() {
                     Select Available Room Number
                     <select
                       value={stay.roomNumber}
+                      disabled={Boolean(activeStaffHoldId)}
                       onChange={(e) => updateWalkinRoomStay(stayIndex, { roomNumber: e.target.value })}
                       className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
                       required
@@ -7582,9 +7885,10 @@ export function BookingsPage() {
             <button
               type="button"
               onClick={addWalkinRoomStay}
+              disabled={Boolean(activeStaffHoldId)}
               className="min-h-[44px] w-full rounded-lg border border-dashed border-gray-300 text-xs font-semibold text-gray-600 hover:border-primary hover:text-primary"
             >
-              + Add another room
+              {activeStaffHoldId ? "Rooms locked by calendar hold" : "+ Add another room"}
             </button>
           </div>
 

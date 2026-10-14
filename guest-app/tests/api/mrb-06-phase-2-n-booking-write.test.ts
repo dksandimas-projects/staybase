@@ -90,7 +90,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // byte-equivalent to the pre-MRB-06
       // single-room value.
       expect(handlers).toMatch(
-        /subtotal,\s*\n\s*totalPrice,/
+        /subtotal,\s*\n\s*totalPrice:\s*finalTotalPrice,/
       );
     });
 
@@ -109,7 +109,7 @@ describe("MRB-06 Phase 2 — N booking write loop + group totals + N>1 response"
       // post-discount `subtotal` aggregates
       // across the N rooms.
       expect(handlers).toMatch(
-        /discountScopeSnapshot: snapshottedDiscountScope,\s*\n\s*subtotal,\s*\n\s*totalPrice,/
+        /discountScopeSnapshot: snapshottedDiscountScope,\s*\n\s*subtotal,\s*\n\s*totalPrice:\s*finalTotalPrice,/
       );
     });
   });

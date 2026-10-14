@@ -46,3 +46,6 @@ yarn-error.log*
 output/
 outputs/
 tmp/
+
+# Embedded worktrees / stray repos accidentally cloned inside the main repo
+staybase-breakfast-redesign/

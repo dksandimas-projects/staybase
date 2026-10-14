@@ -231,7 +231,7 @@ Block specced → items ship (`⬜` → `✅`) → when every item is done, move
 
 ### Block code registry
 
-Keep codes unique. In use as of 2026-07-31 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
+Keep codes unique. In use as of 2026-10-14 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL` `CRT`. **Shipped blocks still listed here:** `IMT` (guest hold extension — IMT-01..06 complete, decision #237). Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
 
 ---
 

@@ -7,6 +7,7 @@ import { hashToken } from "./test-runs";
 // See `server/handlers/in-flow-hold.ts` for the full
 // lifecycle + the start / read public endpoints.
 import { handleConsumeInFlowHold } from "./in-flow-hold";
+import { hasActiveStaffInventoryHoldConflict, isActiveStaffInventoryHold } from "./staff-inventory-holds";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger, buildReservationEmailView } from "./email";
 import { writeNotification } from "../lib/notifications";
@@ -240,6 +241,13 @@ import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/bookin
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
 import { computeServerFolioTotals, computeReservationActualDateRange, generateBookingRef, recomputeBreakfastTotal } from "@spark-inn/shared";
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+// decision pending): `resolveCurrentLevel` + `calculatePointsWithMultiplier`
+// are the canonical tier-derivation + multiplier helpers. Both
+// are defensive (null/undefined inputs return safe defaults) so
+// they don't crash on legacy `rewardsConfig` docs that pre-date
+// the Phase 2 fields.
+import { resolveCurrentLevel, calculatePointsWithMultiplier, validatePointsRedemption } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -927,18 +935,27 @@ async function hasActiveRoomBlockConflict(
   transaction: FirebaseFirestore.Transaction,
   roomId: string,
   checkInDate: Date,
-  checkOutDate: Date
+  checkOutDate: Date,
+  allowedStaffHoldId?: string
 ) {
   const blocksQuery = adminDb.collection("roomBlocks")
     .where("roomId", "==", roomId)
     .where("status", "==", "active");
   const blocksSnapshot = await transaction.get(blocksQuery);
-  return blocksSnapshot.docs.some((doc) => {
+  const hasRoomBlock = blocksSnapshot.docs.some((doc) => {
     const data = doc.data();
     const start = toDateOrNull(data.startDate);
     const end = toDateOrNull(data.endDate);
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
+  if (hasRoomBlock) return true;
+  return hasActiveStaffInventoryHoldConflict(
+    transaction,
+    roomId,
+    checkInDate,
+    checkOutDate,
+    allowedStaffHoldId
+  );
 }
 
 // Per BF-21 (booking-flow audit 2026-06-26): the public
@@ -1309,6 +1326,15 @@ export const createBookingSchema = z.object({
   corporateCode: z.string().trim().max(120).optional().default(""),
   corporateFlatRate: z.boolean().optional().default(false),
   linkedInquiryId: z.string().trim().max(160).nullable().optional().default(null),
+  // Per PR #9 fix (2026-10-13): the optional points amount a
+  // signed-in member wants to apply at booking creation time.
+  // The server applies the redemption atomically inside the
+  // create transaction via the shared `applyPointsRedemption`
+  // helper (passes `skipBookingUpdate: true` so the caller writes
+  // the booking with the discounted totalPrice). Default 0 =
+  // no points applied. Max bounded to prevent accidental
+  // underflow (real-world redemptions are < 100,000 points).
+  pointsToRedeem: z.coerce.number().int().min(0).max(1_000_000).optional().default(0),
   // Per MRB-06 (2026-08-02, per decision #159): the N>1
   // generalization. The client requests N rooms of the
   // same `roomType`; the server assigns N DISTINCT
@@ -1518,6 +1544,13 @@ export async function handleCreateBooking(req: any, res: any) {
     // omit the field and stay green.
     holdId
   } = body;
+
+  // Per PR #9 fix (2026-10-13): the member's desired points
+  // amount to apply at booking creation. Default 0. The actual
+  // redemption happens later in the create transaction via the
+  // shared `applyPointsRedemption` helper — this is just the
+  // validated + coerced value.
+  const pointsToRedeem = body.pointsToRedeem || 0;
 
   const guestDetails: GuestDetails = rawGuestDetails;
 
@@ -2936,11 +2969,42 @@ export async function handleCreateBooking(req: any, res: any) {
       // distinct from the in-scope variable.
       let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): the tier discount takes precedence over
+        // the global `memberDiscountPct` for tier-aware members.
+        // The tier comes from the member's `currentLevel` cache
+        // (refreshed at checkout + register by the handler in
+        // Phase 3 PR). The global fallback is the existing legacy
+        // path — tier-less members still get the configured
+        // `memberDiscountPct`. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        //
+        // Decision (2026-10-12): a tier with `discountPct: 0` does
+        // NOT fall back to the global — the admin set 0
+        // deliberately. The "tier takes precedence" rule is
+        // honored even when the tier's discount is 0 (which means
+        // "no member discount for this tier", e.g. a future
+        // "Points-only" tier).
+        const memberRef = adminDb.doc(`members/${detectedMemberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            // Tier-aware member: tier discount wins (even when
+            // tier says 0 — admin's deliberate choice).
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
+            // Tier-less member: fall back to the global.
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -3143,9 +3207,114 @@ export async function handleCreateBooking(req: any, res: any) {
         transaction.set(counterRef, { count: assignedRooms.length });
       }
 
+      // Per PR #9 fix (2026-10-13): member self-service points
+      // redemption applied at booking creation. Universal across
+      // N=1 and MRB-06 multi-room bookings — the subtraction
+      // applies to the reservation total; per-room subtotals
+      // stay per-room (the discount surfaces on the reservation
+      // header + the FIRST room's `pointsRedeemed*` fields).
+      // The redemption happens atomically inside the create
+      // transaction — booking is written with the already-
+      // discounted totalPrice, so the member pays the lower
+      // amount. No refunds, no credit tracking, no post-payment
+      // reconciliation.
+      //
+      // Why here (before the newReservation + newBooking
+      // builds): the reservation header's `totalPrice` reads
+      // from `finalTotalPrice` (overridden below), and the
+      // per-room writes inherit the redemption metadata via the
+      // `newBooking` spread. Running the redemption here means
+      // `finalTotalPrice` is discounted before ANY booking doc
+      // is constructed — atomic with the existing writes.
+      let selfRedeemedPoints = 0;
+      let selfRedeemedValue = 0;
+      let selfRedeemedBy: string | null = null;
+      let selfRedeemedAt: Date | null = null;
+      if (pointsToRedeem > 0) {
+        if (!detectedMemberId) {
+          throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
+        }
+        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
+        const selfRcSnap = await transaction.get(selfRcRef);
+        const selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
+        if (selfRcData?.allowMemberPointsRedemption !== true) {
+          throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
+        }
+        const selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
+        const selfMemberDoc = await transaction.get(selfMemberRef);
+        if (!selfMemberDoc.exists) {
+          throw new Error("Member not found.");
+        }
+        const selfMemberData = selfMemberDoc.data()!;
+        if (selfMemberData.isActive === false || selfMemberData.isMember === false) {
+          throw new Error("Member account is not active.");
+        }
+        const pointsRedemptionRate = Number(selfRcData?.pointsRedemptionRate || 0);
+        if (pointsRedemptionRate <= 0) {
+          throw new Error("Points redemption is not configured.");
+        }
+        const minPointsToRedeem = Number(selfRcData?.minPointsToRedeem || 0);
+        const billPct = Number(selfRcData?.pointsCanPayUpToBillPct ?? 100);
+        if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+          throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+        }
+        if (Number.isFinite(billPct) && billPct < 100) {
+          const reservationTotal = finalTotalPrice;
+          const maxRedeemableCurrency = Math.floor((reservationTotal * Math.max(0, billPct)) / 100);
+          const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
+          if (pointsToRedeem > maxRedeemablePoints) {
+            throw new Error(
+              `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+            );
+          }
+        }
+        const validation = validatePointsRedemption(
+          pointsToRedeem,
+          Number(selfMemberData.rewardsPoints || 0),
+          pointsRedemptionRate
+        );
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+        const redemptionValue = Math.round(validation.value);
+        if (redemptionValue <= 0 || redemptionValue > finalTotalPrice) {
+          throw new Error("Points redemption value exceeds the booking total.");
+        }
+        // Discount the reservation total. The newReservation
+        // header below reads `finalTotalPrice` (already
+        // overridden), and each per-room booking write carries
+        // the same discounted total via the `newBooking` spread.
+        finalTotalPrice = Math.max(finalTotalPrice - redemptionValue, 0);
+        if (rateBreakdown) {
+          rateBreakdown.finalTotal = finalTotalPrice;
+          (rateBreakdown as any).pointsRedeemedValue = redemptionValue;
+        }
+        selfRedeemedPoints = pointsToRedeem;
+        selfRedeemedValue = redemptionValue;
+        selfRedeemedBy = `self:${detectedMemberId}`;
+        selfRedeemedAt = now;
+        // Update member's `rewardsPoints` + write negative
+        // `pointsHistory` row. Both atomic with the booking
+        // write — a transaction retry replays both safely.
+        transaction.update(selfMemberRef, {
+          rewardsPoints: Number(selfMemberData.rewardsPoints || 0) - pointsToRedeem,
+          updatedAt: now
+        });
+        const historyRef = adminDb.collection(`members/${detectedMemberId}/pointsHistory`).doc();
+        transaction.set(historyRef, {
+          type: "redeem",
+          points: -pointsToRedeem,
+          description: `Redeemed at booking creation ${bookingId}`,
+          reason: "Points redeemed by member at checkout",
+          bookingId,
+          by: selfRedeemedBy,
+          at: now
+        });
+      }
+
       // 10. Prepare Document Fields
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
-      
+
       const newBooking = {
         bookingRef,
         roomId,
@@ -3496,10 +3665,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // room of the same `roomType` + same dates +
         // same guest inputs, so the sum is
         // `roomCount * per-room value`).
+        // Per PR #9 fix (2026-10-13): when points are applied
+        // at booking creation, `totalPrice` carries the post-
+        // redemption amount (the per-room writes below carry
+        // the same discounted total). For non-redemption
+        // bookings this is byte-equivalent to the previous
+        // `totalPrice: totalPrice` reference — `finalTotalPrice`
+        // stays equal to `totalPrice` when the redemption block
+        // doesn't execute.
         originalSubtotal: subtotal,
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal,
-        totalPrice,
+        totalPrice: finalTotalPrice,
         // Per MRB-11 (2026-08-03, per decision #177):
         // the aggregate of every child booking's
         // `revenueAllocation`. Reports reads this for
@@ -3595,6 +3772,19 @@ export async function handleCreateBooking(req: any, res: any) {
           latestCheckOut: checkOutDate,
           isDivergent: false
         },
+        // Per PR #9 fix (2026-10-13): the reservation-level
+        // mirror of the per-room redemption. Both fields are
+        // populated ONLY when the member applied points at
+        // booking creation (pre-Phase-9 reservations stay
+        // byte-equivalent with both fields absent).
+        ...(selfRedeemedPoints > 0
+          ? {
+              pointsRedeemed: selfRedeemedPoints,
+              pointsRedeemedValue: selfRedeemedValue,
+              pointsRedeemedBy: selfRedeemedBy,
+              pointsRedeemedAt: selfRedeemedAt
+            }
+          : {}),
         createdAt: now,
         updatedAt: now,
         createdBy: "guest"
@@ -3758,6 +3948,7 @@ export async function handleCreateBooking(req: any, res: any) {
       for (const { ref: writeRef, data: writeData } of bookingWriteRefs) {
         transaction.set(writeRef, writeData);
       }
+
       finalRooms = bookingWriteRefs.map((write, index) => {
         const assigned = assignedRooms[index];
         const pricing = childPricing[index];
@@ -4219,7 +4410,8 @@ export async function handleCreateWalkin(req: any, res: any) {
     // the same pattern as the public `/api/bookings/create`
     // path. When present, the server uses it as the
     // canonical idempotency key for the create transaction.
-    reservationId: requestedReservationId
+    reservationId: requestedReservationId,
+    staffHoldId: requestedStaffHoldId
   } = parsedWalkin.data;
 
   // Per MRB-07 (2026-08-02, per decision #159): resolve the canonical
@@ -4438,6 +4630,33 @@ export async function handleCreateWalkin(req: any, res: any) {
       // confirmation email) keeps reading the first room.
       const roomRef = walkinAssignedRooms[0].ref;
       const roomData = walkinAssignedRooms[0].data;
+      let staffHoldRef: FirebaseFirestore.DocumentReference | null = null;
+      if (requestedStaffHoldId) {
+        staffHoldRef = adminDb.collection("staffInventoryHolds").doc(requestedStaffHoldId);
+        const staffHoldSnap = await transaction.get(staffHoldRef);
+        if (!staffHoldSnap.exists) throw new Error("Front-desk room hold was not found.");
+        const staffHold = staffHoldSnap.data() || {};
+        if (String(staffHold.createdBy || "") !== String(req.staff?.uid || "")) {
+          throw new Error("This front-desk room hold belongs to another staff member.");
+        }
+        const consumedBySameReservation = staffHold.status === "consumed"
+          && String(staffHold.reservationId || "") === effectiveReservationId;
+        if (!isActiveStaffInventoryHold(staffHold) && !consumedBySameReservation) {
+          throw new Error("Front-desk room hold has expired. Return to the calendar and hold the rooms again.");
+        }
+        const heldStart = toDateOrNull(staffHold.startDate);
+        const heldEnd = toDateOrNull(staffHold.endDate);
+        if (!heldStart || !heldEnd || heldStart.getTime() !== checkInDate.getTime() || heldEnd.getTime() !== checkOutDate.getTime()) {
+          throw new Error("Booking dates no longer match the front-desk room hold.");
+        }
+        const heldRoomIds = Array.isArray(staffHold.roomIds)
+          ? staffHold.roomIds.map(String).sort()
+          : [];
+        const requestedRoomIds = walkinAssignedRooms.map((room) => room.roomId).sort();
+        if (heldRoomIds.length !== requestedRoomIds.length || heldRoomIds.some((id, index) => id !== requestedRoomIds[index])) {
+          throw new Error("Selected rooms no longer match the front-desk room hold.");
+        }
+      }
       // 2. Per MRB-02.x (2026-08-02, per decision #164):
       // the reservation-level idempotency check runs
       // after the room read (so the fingerprint has the
@@ -4711,7 +4930,13 @@ export async function handleCreateWalkin(req: any, res: any) {
         if (sawConflict) {
           throw new Error(sawLingering ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
         }
-        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, assigned.roomId, checkInDate, checkOutDate);
+        const hasBlockConflict = await hasActiveRoomBlockConflict(
+          transaction,
+          assigned.roomId,
+          checkInDate,
+          checkOutDate,
+          requestedStaffHoldId
+        );
         if (hasBlockConflict) {
           throw new Error("Room no longer available");
         }
@@ -5433,6 +5658,14 @@ export async function handleCreateWalkin(req: any, res: any) {
         transaction.set(counterRef, { count: walkinRoomCount });
       }
       if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      if (staffHoldRef) {
+        transaction.update(staffHoldRef, {
+          status: "consumed",
+          consumedAt: now,
+          updatedAt: now,
+          reservationId: effectiveReservationId
+        });
+      }
       // Per MRB-07 (2026-08-02, per decision #159): write one
       // `bookings/{id}` doc per room stay. The first room uses the
       // client's preallocated `bookingId` (the historical contract);
@@ -10393,6 +10626,26 @@ export async function handleCheckoutBooking(req: any, res: any) {
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
     }
 
+    // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+    // decision pending): at checkout, derive the member's current
+    // tier from the live `rewardsConfig.levels[]` + the member's
+    // stored `completedStays`. The tier's `pointsMultiplier` is
+    // applied to the base eligible-points so the credit matches
+    // the tier displayed on the rewards portal. The
+    // `completedStays++` and `currentLevel` cache refresh happen
+    // inside the same transaction as the points credit — the
+    // three writes are atomic so a retry can't double-count.
+    // The multiplier applies to BOTH the `awardNow` and the
+    // `pendingLoyaltyPoints` paths — when the outstanding payment
+    // settles later (the `settlesCheckedOutFolio` branch in
+    // handleAddPayment), the same multiplied value is credited
+    // (the checkout-time `pendingLoyaltyPoints` snapshot is the
+    // source of truth — no recomputation needed at settle time).
+    const memberCurrentLevelBefore = memberDoc?.exists && resolveCurrentLevel
+      ? resolveCurrentLevel(rewardsConfig?.levels, Number(memberDoc.data()?.completedStays || 0))
+      : null;
+    const memberTierMultiplier = memberCurrentLevelBefore?.pointsMultiplier ?? 1;
+
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef);
       if (!freshBookingDoc.exists) {
@@ -10417,9 +10670,19 @@ export async function handleCheckoutBooking(req: any, res: any) {
       const collectedTotal = folioSnapshot.collectedTotal;
       const checkoutFolioTotal = folioSnapshot.folioTotal;
       checkedOutWithBalance = folioSnapshot.computedBalance;
-      eligiblePoints = memberId
+      // Per Phase 2 (2026-10-12): the base `eligiblePoints` is
+      // multiplied by the member's CURRENT tier (read pre-
+      // transaction from `rewardsConfig.levels[]` + member's
+      // pre-checkout `completedStays`). The multiplied value is
+      // what gets credited (or stored as `pendingLoyaltyPoints`
+      // if the guest has an outstanding balance). The multiplier
+      // is applied here once — the settled-credit branch at
+      // line 8109 reads `pendingLoyaltyPoints` as-is so no
+      // double-multiplication occurs.
+      const baseEligiblePoints = memberId
         ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
         : 0;
+      eligiblePoints = calculatePointsWithMultiplier(baseEligiblePoints, memberTierMultiplier);
 
       // UCO-02: require reason for unpaid checkout
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
@@ -10605,23 +10868,134 @@ export async function handleCheckoutBooking(req: any, res: any) {
         });
       }
 
-      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
-        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
-        transaction.update(memberRef, {
-          rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: now
-        });
+      if (canAwardPoints && memberId && memberRef && memberDocInTransaction?.exists) {
+        // Per Phase 2 (2026-10-12): atomic increment of the
+        // member's stay-completion counter + refresh of the
+        // `currentLevel` cache to the new tier (post-increment).
+        // Both writes share the same `transaction.update` so a
+        // transaction retry can't double-count or leave the
+        // cache out of sync. The tier is re-derived using the
+        // post-increment `completedStays` so the cached snapshot
+        // reflects what the next booking will see.
+        //
+        // The increment runs on BOTH paths (immediate credit
+        // AND pending-payment deferral) — the stay IS completed
+        // either way, and the tier progress should be visible
+        // to the member immediately even if the points lag
+        // behind. The settle-payment branch (line 8109+) only
+        // touches `rewardsPoints` + writes the `pointsHistory`
+        // entry; it does NOT touch `completedStays` or
+        // `currentLevel` so no double-increment.
+        const priorCompletedStays = Number(memberDocInTransaction.data()?.completedStays || 0);
+        const nextCompletedStays = priorCompletedStays + 1;
+        const nextCurrentLevel = resolveCurrentLevel(rewardsConfig?.levels, nextCompletedStays);
 
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
-        transaction.set(historyRef, {
-          type: "earn",
-          points: pointsAwarded,
-          bookingId,
-          bookingRef: bookingData.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
-          by: checkedOutBy,
-          createdAt: new Date()
-        });
+        if (awardNow) {
+          // Immediate-credit path: increment rewardsPoints +
+          // write the pointsHistory entry.
+          const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: new Date()
+          });
+        } else {
+          // Deferred-credit path (guest has an outstanding
+          // balance): only bump the stay counter + refresh the
+          // tier cache. The `pendingLoyaltyPoints` snapshot on
+          // the booking + the settle-payment branch handle the
+          // actual credit when the balance clears.
+          transaction.update(memberRef, {
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+        }
+
+        // Per Phase 5 of the Spark Rewards tier system
+        // (2026-10-12, decision pending): free-night reward
+        // voucher. When `rewardsConfig.freeNightEvery > 0` AND
+        // `completedStays % freeNightEvery === 0`, write a
+        // single-use 100%-off voucher (canonical reward voucher
+        // shape: `kind: "reward"`, `valueType: "free-night"`)
+        // valid for 90 days. The voucher write lives INSIDE the
+        // existing transaction so a retry can't double-award —
+        // the nextCompletedStays computation already happened,
+        // so the trigger condition is stable across retries.
+        // The voucher code is deterministic from the
+        // memberNumber + nextCompletedStays so the member can
+        // find it on the rewards portal (Phase 7).
+        //
+        // Decision (2026-10-12): the trigger fires for BOTH the
+        // immediate-credit and the deferred-credit paths — the
+        // stay IS completed either way. If the booking is
+        // later cancelled post-settlement (the MRB-05 path),
+        // the voucher stays valid (cancelled stays still count
+        // toward free-night per Phase 3's clawback philosophy).
+        // Per EC-02 (2026-08-21) pattern: the trigger is gated
+        // on `nextCompletedStays > 0` to avoid the "0 % N === 0"
+        // false-positive when freeNightEvery > 0 and the member
+        // has 0 stays.
+        const freeNightEvery = Number(rewardsConfig?.freeNightEvery || 0);
+        if (
+          freeNightEvery > 0 &&
+          nextCompletedStays > 0 &&
+          nextCompletedStays % freeNightEvery === 0
+        ) {
+          const memberNumber =
+            memberDocInTransaction.data()?.memberNumber ||
+            `M${memberId.slice(0, 8)}`;
+          const freeNightCode = `FREENIGHT-${memberNumber}-${nextCompletedStays}`;
+          const freeNightVoucherRef = adminDb.collection("vouchers").doc(freeNightCode);
+          // 90-day expiry — long enough for a member to plan a
+          // future stay, short enough that abandoned rewards
+          // don't accumulate indefinitely. Matches the
+          // spec copy "Free night every N stays" intent.
+          const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+          transaction.set(freeNightVoucherRef, {
+            code: freeNightCode,
+            // Phase 5 discriminator — pre-Phase-5 promo vouchers
+            // are missing these (treated as "promo" + valueType =
+            // discountType on read).
+            kind: "reward",
+            valueType: "free-night",
+            // Backward-compat with the existing percent/flat
+            // discount math — `discountType: "percent"` +
+            // `discountValue: 100` produces a 100% off discount.
+            // `calculateVoucherDiscount` caps at subtotal so any
+            // over-discount rounds to 0.
+            discountType: "percent",
+            discountValue: 100,
+            usageCap: 1,
+            usageCount: 0,
+            expiresAt,
+            // Empty array = applies to all room types (per
+            // VOU-03 all-or-none rule).
+            applicableRoomTypes: [],
+            isActive: true,
+            guestEmail: memberDocInTransaction.data()?.email || null,
+            // Phase 5 back-link fields for member portal display
+            // + admin "Reward vouchers" filter.
+            memberId,
+            memberNumber,
+            rewardSource: "free-night-tier",
+            createdBy: checkedOutBy || "system",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
       }
     });
 
@@ -11432,7 +11806,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       error: "Booking, room, check-in, and check-out are required."
     });
   }
-  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId, mode } = parsedReschedule.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
@@ -11473,6 +11847,27 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+
+      // Per EXT-01 (2026-01-27): when `mode: "extend"` is set,
+      // the room and check-in are locked to the booking's current
+      // values — only check-out can be extended. The server enforces
+      // this invariant so a client cannot bypass it. The new
+      // check-out must also be strictly after the current check-out.
+      if (mode === "extend") {
+        const currentRoomId = String(booking.roomId || "");
+        const currentCheckIn = toDateOrNull(booking.checkIn);
+        if (String(roomId) !== currentRoomId) {
+          throw new Error("Extend stay cannot change the assigned room.");
+        }
+        if (!currentCheckIn || checkInDate.getTime() !== currentCheckIn.getTime()) {
+          throw new Error("Extend stay cannot change the check-in date.");
+        }
+        const currentCheckOut = toDateOrNull(booking.checkOut);
+        if (!currentCheckOut || checkOutDate.getTime() <= currentCheckOut.getTime()) {
+          throw new Error("Extended check-out must be after the current check-out date.");
+        }
+      }
+
       // Per MRB-02.x (2026-08-02, per decision #164): the
       // canonical reservation id for this reschedule. The
       // reschedule re-uses the existing booking's
@@ -11857,11 +12252,30 @@ export async function handleRescheduleBooking(req: any, res: any) {
 
       let appliedMemberDiscountPct = 0;
       if (booking.memberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): same tier-precedence rule as
+        // `handleCreateBooking` — the tier's `discountPct` wins
+        // over the global `memberDiscountPct` for tier-aware
+        // members. See the comment in handleCreateBooking for the
+        // decision rationale. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        const memberRef = adminDb.doc(`members/${booking.memberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -11932,7 +12346,13 @@ export async function handleRescheduleBooking(req: any, res: any) {
         by: req.staff?.uid || req.staff?.email || "staff",
         at: new Date().toISOString(),
         pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
-        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0),
+        // Per EXT-01 (2026-01-27): the `kind` field distinguishes
+        // an extend-stay reschedule from a room move. Both write
+        // the same `rescheduleHistory[]` array; clients render
+        // them differently (extend shows a timeline entry with
+        // only the check-out change; move shows room + dates).
+        kind: mode === "extend" ? "extend" : "move"
       };
 
       updatedBooking = {
@@ -12261,6 +12681,103 @@ export async function handleRescheduleBooking(req: any, res: any) {
 // path + the per-child voucher rule). One
 // `booking-rescheduled` email fires after the commit (the
 // reservation-scope view carries the new room).
+
+// Per EXT-02 (2026-01-27): guest self-service extend stay.
+// Thin wrapper around handleRescheduleBooking with mode:"extend".
+// The booking is locked to its current room + check-in; only
+// check-out can be extended. The existing reschedule transaction
+// enforces the room-availability check — if the room is occupied
+// in the new window the transaction throws and we surface that
+// as a user-friendly error.
+//
+// Auth: same bookingRef + (guestEmail | lookupToken) credential
+// as handleCancelBooking. No staff auth on this endpoint.
+const GUEST_EXTEND_STATUSES = ["payment-confirmed", "confirmed", "checked-in"];
+
+export async function handleExtendStay(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const {
+    bookingId,
+    bookingRef,
+    guestEmail,
+    token,
+    checkOut,
+    reason
+  } = req.body || {};
+
+  if (!bookingRef || (!guestEmail && !token) || !checkOut) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking reference, email or token, and new check-out date are required."
+    });
+  }
+
+  try {
+    // ── Guest credential check (same as cancel) ────────────────────────
+    const parsed = guestCancelSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a valid booking reference and email or lookup token."
+      });
+    }
+
+    const compositeFilter = parsed.data.token
+      ? { field: "lookupToken" as const, value: String(parsed.data.token).toLowerCase() }
+      : { field: "guestEmail" as const, value: parsed.data.guestEmail };
+
+    const query = adminDb.collection("bookings")
+      .where("bookingRef", "==", parsed.data.bookingRef)
+      .where(compositeFilter.field, "==", compositeFilter.value)
+      .limit(1);
+
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      return res.status(404).json({
+        success: false,
+        error: parsed.data.token
+          ? "Booking not found with matching token."
+          : "Booking not found with matching email."
+      });
+    }
+
+    const bookingDocumentRef = snapshot.docs[0].ref;
+    const bookingData = snapshot.docs[0].data();
+
+    // ── Status gate: only confirmed / checked-in can self-extend ────────
+    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData.status || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "EXTEND_NOT_ELIGIBLE"
+      });
+    }
+
+    // ── Delegate to the reschedule transaction with mode:"extend" ───────
+    // Pass through the req so handleRescheduleBooking reads req.staff
+    // (always null/undefined on this guest-only path) and writes the
+    // rescheduleHistory[] entry with kind:"extend".
+    const extendReq = {
+      ...req,
+      body: {
+        bookingId: snapshot.docs[0].id,
+        roomId: bookingData.roomId,   // locked — transaction enforces
+        checkIn: bookingData.checkIn, // locked — transaction enforces
+        checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        mode: "extend"
+      }
+    };
+
+    return await handleRescheduleBooking(extendReq, res);
+  } catch (err: any) {
+    console.error("[handleExtendStay]", err?.message);
+    return res.status(500).json({ success: false, error: "An unexpected error occurred." });
+  }
+}
+
 export async function handleAddRoomToReservation(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });

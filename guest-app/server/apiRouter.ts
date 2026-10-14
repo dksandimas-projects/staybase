@@ -2,15 +2,16 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment, handleExtendStay } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
-import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
+import { handleCancelRoomBlock, handleCreateBulkRoomBlocks, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
+import { handleAcquireStaffInventoryHold, handleExtendStaffInventoryHold, handleReleaseStaffInventoryHold } from "./handlers/staff-inventory-holds";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRedeemPointsSelf, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
@@ -30,7 +31,7 @@ import { handleMarkRefundPaidStandalone } from "./handlers/refunds";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
-import { handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
+import { handleExtendInFlowHold, handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
@@ -835,7 +836,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleAddRoomToReservation(req, res);
   }
 
-  if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
+  if (domain === "room-blocks" && ["create", "create-bulk", "update", "cancel"].includes(action) && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`room-blocks-${action}:${ip}`, 60, 60000)) {
       return res.status(429).json({ success: false, error: "Too many room block requests. Please try again in a minute." });
     }
@@ -847,8 +848,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
 
     if (action === "create") return await handleCreateRoomBlock(req, res);
+    if (action === "create-bulk") return await handleCreateBulkRoomBlocks(req, res);
     if (action === "update") return await handleUpdateRoomBlock(req, res);
     return await handleCancelRoomBlock(req, res);
+  }
+
+  if (domain === "staff-inventory-holds" && ["acquire", "extend", "release"].includes(action) && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staff-inventory-holds-${action}:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many room hold requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    if (action === "acquire") return await handleAcquireStaffInventoryHold(req, res);
+    if (action === "extend") return await handleExtendStaffInventoryHold(req, res);
+    return await handleReleaseStaffInventoryHold(req, res);
   }
 
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {
@@ -934,6 +950,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult.success ? authResult : null;
     return await handleCancelPreview(req, res);
+  }
+
+  // Per EXT-02 (2026-01-27): guest self-service extend stay.
+  // Same bookingRef + (email | token) credential as cancel.
+  // Turnstile gates the guest path; staff auth is NOT accepted
+  // on this endpoint (staff use handleRescheduleBooking directly
+  // via the admin API router).
+  if (domain === "bookings" && action === "extend-stay" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-extend-stay:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many extend requests. Please try again in a minute." });
+    }
+
+    // Staff token → reject (guest-only endpoint)
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        return res.status(403).json({ success: false, error: "Staff authentication is not accepted on this endpoint." });
+      }
+    }
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleExtendStay(req, res);
   }
 
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
@@ -1445,8 +1487,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleRedeemMemberPoints(req, res);
+  }
+
+  if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
+    // Per PR #9 (2026-10-13): the member-self-service redemption
+    // endpoint. NOT staff-authenticated — the handler does its own
+    // Firebase ID token verification + the toggle check +
+    // ownership guard (booking.memberId === authUser.uid) inside
+    // `applyPointsRedemption`.
+    return await handleRedeemPointsSelf(req, res);
   }
 
   if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
@@ -1880,6 +1931,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleReadInFlowHold(req, res);
+  }
+
+  // Per IMT-02 (2026-10-14, `plan/project/ROADMAP.md §IMT`): the "I
+  // need more time" endpoint. Adds a window to an active hold, or
+  // revives an expired one — the explicit-action-only counterpart to
+  // IMT-01's "Pick a new room" fresh-hold path.
+  //
+  // Rate limit is 10/IP/min, deliberately TIGHTER than start's 30.
+  // Start is a one-per-booking-attempt call; extend is the one that
+  // extends doc lifetime, so it gets the tighter budget. Combined with
+  // the server-side `MAX_IN_FLOW_HOLD_EXTENSIONS` cap, the two bound
+  // how long a doc can sit in `"active"`.
+  //
+  // No Turnstile gate, same reason as start: the banner renders on
+  // Steps 2 + 3 and fires before the Step-3-only Turnstile widget has
+  // loaded a token, so gating here would break the exact surface the
+  // button lives on (see `fix/holds-start-turnstile`). Extending a
+  // SOFT hold unlocks nothing — the authoritative boundary stays the
+  // Turnstile-gated `/api/bookings/create`.
+  if (domain === "holds" && action === "extend" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-extend:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many hold extension requests. Please try again in a minute." });
+    }
+
+    return await handleExtendInFlowHold(req, res);
   }
 
   // Per the IFH-01 follow-up: the daily Janitor sweep

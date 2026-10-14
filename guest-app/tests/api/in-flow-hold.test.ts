@@ -46,10 +46,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { StartBookingHoldSchema } from "@spark-inn/shared";
+import { StartBookingHoldSchema, ExtendBookingHoldSchema } from "@spark-inn/shared";
 import {
   HOLD_ID_REGEX,
   IN_FLOW_HOLD_MINUTES,
+  MAX_IN_FLOW_HOLD_EXTENSIONS,
   MAX_IN_FLOW_HOLD_MINUTES,
   MIN_IN_FLOW_HOLD_MINUTES,
   clampIntegerInRange,
@@ -369,6 +370,598 @@ describe("IFH-01 — Source-text pins", () => {
 
   it("the consume is idempotent on a replayed request (a second consume returns `already-consumed`)", () => {
     expect(handlerSrc).toMatch(/reason: "already-consumed"/);
+  });
+});
+
+// Per IMT-01 (2026-10-13, `plan/project/ROADMAP.md §IMT`): an expired
+// in-flow hold was an unrecoverable dead end. `holdId` was minted once
+// per page instance and never re-rolled, `onPickNewRoom` only rewrote
+// `?step=select-room`, Step 1's `continueParams` therefore re-added the
+// SAME dead id, `/api/holds/read` answered HTTP 200 with
+// `status: "expired"` (read-time evaluation), the hook's 404 →
+// `POST /api/holds/start` branch therefore never fired — and the guest
+// landed in a red-banner loop escapable only with a hard reload.
+//
+// The fix is narrow by design: re-roll the id on the EXPLICIT
+// "Pick a new room" action only. Auto-reviving a dead hold on a plain
+// re-entry would silently defeat the countdown (a guest who reloads the
+// expired banner would get a fresh window forever), so the id must NOT
+// be re-rolled from any other call site. The negative pin at the end of
+// this block is what enforces that.
+describe("IMT-01 — Expired-hold dead end fix (`holdId` re-roll)", () => {
+  const statePattern = /const \[holdId, setHoldId\] = useState\(\(\) => generateHoldId\(\)\)/;
+
+  // Pull the `onPickNewRoom` callback body out of a page source so the
+  // ordering assertion can't be satisfied by a match elsewhere in the
+  // file (both pages also call `generateHoldId` in the useState init).
+  function onPickNewRoomBody(src: string): string {
+    const marker = "onPickNewRoom={() => {";
+    const start = src.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    return src.slice(start, start + 700);
+  }
+
+  it("both flows destructure the SETTER alongside `holdId`", () => {
+    expect(bookingPageSrc).toMatch(statePattern);
+    expect(corporatePageSrc).toMatch(statePattern);
+  });
+
+  it("BookingPage.onPickNewRoom re-rolls the id BEFORE rewriting the URL", () => {
+    const body = onPickNewRoomBody(bookingPageSrc);
+    const rollAt = body.indexOf("setHoldId(generateHoldId())");
+    const navAt = body.indexOf("setSearchParams(");
+    expect(rollAt).toBeGreaterThan(-1);
+    expect(navAt).toBeGreaterThan(-1);
+    // Ordering is load-bearing: `continueParams` is rebuilt from the
+    // `holdId` state on the next render, so rolling after the
+    // navigation would still ship the dead id in the URL.
+    expect(rollAt).toBeLessThan(navAt);
+  });
+
+  it("CorporateBookingPage.onPickNewRoom re-rolls the id BEFORE rewriting the URL", () => {
+    const body = onPickNewRoomBody(corporatePageSrc);
+    const rollAt = body.indexOf("setHoldId(generateHoldId())");
+    const navAt = body.indexOf("setSearchParams(");
+    expect(rollAt).toBeGreaterThan(-1);
+    expect(navAt).toBeGreaterThan(-1);
+    expect(rollAt).toBeLessThan(navAt);
+  });
+
+  it("`continueParams` reads `hold: holdId` in both flows, so the re-roll reaches the URL", () => {
+    // Without this the whole fix is inert — the fresh id would never
+    // travel to Step 2, and the hook would keep re-reading the dead doc.
+    expect(bookingPageSrc).toMatch(/hold: holdId/);
+    expect(corporatePageSrc).toMatch(/hold: holdId/);
+  });
+
+  it("`continueParams` is NOT memoized (a memo would strand the re-roll behind a stale closure)", () => {
+    // Both pages build it as a render-body statement. A `useMemo` with a
+    // dep array missing `holdId` would keep the OLD id in the URL and
+    // silently reinstate the dead end.
+    expect(bookingPageSrc).not.toMatch(
+      /useMemo\([^)]*new URLSearchParams/
+    );
+    expect(corporatePageSrc).not.toMatch(
+      /useMemo\([^)]*new URLSearchParams/
+    );
+  });
+
+  it("the recovery action still exists on the expired state in the banner", () => {
+    // IMT-01 changes WHO mints the id, not WHETHER the guest can recover.
+    expect(bannerSrc).toMatch(/onPickNewRoom/);
+    expect(bookingPageSrc).toMatch(/onPickNewRoom=\{\(\) =>/);
+    expect(corporatePageSrc).toMatch(/onPickNewRoom=\{\(\) =>/);
+  });
+
+  it("NEGATIVE: `setHoldId` is called from exactly ONE site per page (explicit action only)", () => {
+    // If a future change adds a second call site — e.g. an effect that
+    // re-rolls whenever the hold reads as expired — the countdown becomes
+    // unexpirable and the whole timer becomes decorative. This pin is the
+    // enforcement mechanism for that design decision.
+    expect((bookingPageSrc.match(/setHoldId\(/g) ?? []).length).toBe(1);
+    expect((corporatePageSrc.match(/setHoldId\(/g) ?? []).length).toBe(1);
+  });
+
+  it("NEGATIVE: `useInFlowHold` still auto-stamps ONLY on a 404 (no auto-revive of a terminal hold)", () => {
+    // The server-side counterpart to the pin above. If a future change
+    // makes the hook POST /api/holds/start when the read reports a
+    // terminal status, an expired hold silently revives on every remount
+    // and the 15-minute window stops meaning anything.
+    expect(hookSrc).toMatch(/readResponse\.status === 404 && startInput/);
+    expect(hookSrc).not.toMatch(/status === "expired"/);
+  });
+});
+
+// Per IMT-02 (2026-10-14): the `POST /api/holds/extend` request body.
+// Runtime Zod coverage (not a source-text pin) because the whole point
+// of the two-field shape is what it REJECTS — a pin on the schema's
+// source text would pass happily while the object accepted a
+// client-supplied `minutes`.
+describe("IMT-02 — ExtendBookingHoldSchema (shared/schemas/booking.ts)", () => {
+  const validHoldId = generateHoldId();
+  const validReservationId = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+  it("accepts the minimal valid body (holdId + reservationId only)", () => {
+    const parsed = ExtendBookingHoldSchema.safeParse({
+      holdId: validHoldId,
+      reservationId: validReservationId
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("REJECTS a client-supplied duration — the window must come from the hold doc", () => {
+    // The load-bearing security property. A caller-supplied `minutes`
+    // would be an unauthenticated way to pin a doc in "active" for as
+    // long as they liked, defeating MAX_IN_FLOW_HOLD_EXTENSIONS.
+    for (const key of ["minutes", "holdMinutes", "extraMinutes", "extendBy"]) {
+      const parsed = ExtendBookingHoldSchema.safeParse({
+        holdId: validHoldId,
+        reservationId: validReservationId,
+        [key]: 999
+      });
+      expect(parsed.success, `accepted a client-supplied \`${key}\``).toBe(false);
+    }
+  });
+
+  it("REJECTS unknown keys (`.strict()` is what makes the above enforceable)", () => {
+    const parsed = ExtendBookingHoldSchema.safeParse({
+      holdId: validHoldId,
+      reservationId: validReservationId,
+      status: "active",
+      expiresAt: "2026-10-14T12:00:00.000Z"
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("REJECTS a missing holdId / reservationId", () => {
+    expect(
+      ExtendBookingHoldSchema.safeParse({ reservationId: validReservationId }).success
+    ).toBe(false);
+    expect(
+      ExtendBookingHoldSchema.safeParse({ holdId: validHoldId }).success
+    ).toBe(false);
+  });
+
+  it("REJECTS a non-UUIDv4 holdId / reservationId", () => {
+    expect(
+      ExtendBookingHoldSchema.safeParse({
+        holdId: "not-a-uuid",
+        reservationId: validReservationId
+      }).success
+    ).toBe(false);
+    expect(
+      ExtendBookingHoldSchema.safeParse({
+        holdId: validHoldId,
+        reservationId: "also-not-a-uuid"
+      }).success
+    ).toBe(false);
+  });
+
+  it("does NOT require roomType / dates — an extension changes time, not the hold", () => {
+    const parsed = ExtendBookingHoldSchema.safeParse({
+      holdId: validHoldId,
+      reservationId: validReservationId
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(Object.keys(parsed.data).sort()).toEqual(["holdId", "reservationId"]);
+    }
+  });
+});
+
+describe("IMT-02 — `POST /api/holds/extend` handler + route", () => {
+  it("the extend handler is registered on the existing catch-all (no new Vercel function)", () => {
+    expect(routerSrc).toMatch(
+      /domain === "holds" && action === "extend" && req\.method === "POST"/
+    );
+    expect(routerSrc).toMatch(/handleExtendInFlowHold/);
+  });
+
+  it("rate-limited at 10/IP/min — tighter than start's 30", () => {
+    // Extend is the call that extends doc lifetime, so it gets the
+    // tighter budget. Pin the exact limiter so a future copy-paste of
+    // start's 30 has to be deliberate.
+    expect(routerSrc).toMatch(/isRateLimited\(`holds-extend:\$\{ip\}`, 10, 60000\)/);
+  });
+
+  it("is NOT Turnstile-gated (same reason as start — the token is not available on Step 2)", () => {
+    // Extend must never grow a `verifyTurnstile` call. The hook fires
+    // on Steps 2 + 3 before the Step-3-only widget has a token; see
+    // `fix/holds-start-turnstile`.
+    //
+    // Two separate places a gate could appear, both checked: the route
+    // branch in apiRouter, and the handler body itself. (The route
+    // slice must start at the extend `if`, not before it — the start
+    // route directly above discusses Turnstile at length in its
+    // comments, which is the correct historical record and must not
+    // fail this assertion.)
+    const routeStart = routerSrc.indexOf(
+      'if (domain === "holds" && action === "extend"'
+    );
+    const routeBlock = routerSrc.slice(
+      routeStart,
+      routerSrc.indexOf("handleExtendInFlowHold(req, res)")
+    );
+    expect(routeStart).toBeGreaterThan(-1);
+    expect(routeBlock).not.toMatch(/verifyTurnstile/);
+
+    const handlerStart = handlerSrc.indexOf(
+      "export async function handleExtendInFlowHold"
+    );
+    const handlerBody = handlerSrc.slice(
+      handlerStart,
+      handlerSrc.indexOf("\n}", handlerStart)
+    );
+    expect(handlerBody).not.toMatch(/verifyTurnstile/);
+  });
+
+  it("reads the window from the doc's own holdMinutes, never from the request", () => {
+    expect(handlerSrc).toMatch(
+      /normalizeInFlowHoldMinutes\(data\.holdMinutes\)/
+    );
+    expect(handlerSrc).not.toMatch(/input\.(minutes|holdMinutes|extraMinutes)/);
+  });
+
+  it("validates with ExtendBookingHoldSchema and rejects non-POST", () => {
+    expect(handlerSrc).toMatch(/ExtendBookingHoldSchema\.safeParse\(req\.body\)/);
+    expect(handlerSrc).toMatch(/req\.method !== "POST"/);
+  });
+
+  it("all transaction reads complete BEFORE any write (GOTCHAS FOL-03)", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    const readAt = body.indexOf("await transaction.get(ref)");
+    const writeAt = body.indexOf("transaction.update(ref");
+    expect(readAt).toBeGreaterThan(-1);
+    expect(writeAt).toBeGreaterThan(-1);
+    // EXACTLY ONE read, and it precedes the write. Counting rather
+    // than position-checking matters: the FOL-03 class is "ANY read
+    // after ANY write", so an assertion that only checks where the
+    // FIRST read sits passes happily when a second read is appended
+    // after the update — which is precisely the antipattern this is
+    // meant to catch.
+    const reads = body.match(/await transaction\.get\(/g) ?? [];
+    expect(reads.length).toBe(1);
+    expect(readAt).toBeLessThan(writeAt);
+    // No bare `ref.get()` / `ref.update()` shortcut either — both
+    // bypass the transaction and reintroduce the read-modify-write
+    // race on `extensionCount`.
+    expect(body).not.toMatch(/(?<!transaction\.)ref\.get\(/);
+    expect(body).not.toMatch(/(?<!transaction\.)ref\.update\(/);
+  });
+
+  it("gates on `canExtendInFlowHold` (the single authority for status + cap)", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    expect(body).toMatch(/canExtendInFlowHold\(\{/);
+    // The gate must not be re-implemented inline alongside it.
+    expect(body).not.toMatch(/extensionCount >|extensionCount >=|status === "consumed" &&/);
+  });
+
+  it("revives an expired hold to 'active' and stamps the counter + updatedAt", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    expect(body).toMatch(/status: "active"/);
+    expect(body).toMatch(/extensionCount: nextExtensionCount/);
+    expect(body).toMatch(/updatedAt: Timestamp\.fromDate\(now\)/);
+    // Per the CVQ-04 answer, no dedicated timestamp field was added.
+    expect(body).not.toMatch(/extendedAt:/);
+  });
+
+  it("uses the additive window helper (never a reset-from-now inline)", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    expect(body).toMatch(/computeExtendedInFlowHoldExpiresAt\(/);
+    expect(body).not.toMatch(/now\.getTime\(\) \+ holdMinutes/);
+  });
+
+  it("`serializeHold` takes (docId, data) so post-update state can be constructed in JS", () => {
+    // A transaction cannot observe the doc it just wrote (FOL-03), so
+    // the extended handler must serialize a JS-built shape.
+    expect(handlerSrc).toMatch(/function serializeHold\(\s*docId: string,/);
+    expect(handlerSrc).toMatch(/extensionCount: Number\(raw\.extensionCount \?\? 0\)/);
+  });
+
+  it("`serializeHold` callers were all migrated to the new signature", () => {
+    // Guards the refactor: a stale single-arg call is a compile error
+    // today, but this pin documents that all four sites were visited.
+    expect(handlerSrc).toMatch(/serializeHold\(existing\.id, existing\.data\(\)\)/);
+    expect(handlerSrc).toMatch(/serializeHold\(fresh\.id, fresh\.data\(\)\)/);
+    expect(handlerSrc).toMatch(/serializeHold\(snap\.id, snap\.data\(\)\)/);
+  });
+
+  it("the cap constant is exported from shared (never hardcoded in the handler)", () => {
+    expect(handlerSrc).toMatch(/MAX_IN_FLOW_HOLD_EXTENSIONS/);
+    expect(handlerSrc).not.toMatch(/extensionCount >= 3/);
+    expect(MAX_IN_FLOW_HOLD_EXTENSIONS).toBe(3);
+  });
+});
+
+describe("IMT-02 — no new Vercel function / no Firestore rules change", () => {
+  it("the holds routes stay inside the single catch-all function", () => {
+    // Every holds/* route is a branch in the existing router, so the
+    // Hobby plan's 12-function cap is untouched by IMT-02.
+    expect(routerSrc).toMatch(/domain === "holds" && action === "start"/);
+    expect(routerSrc).toMatch(/domain === "holds" && action === "read"/);
+    expect(routerSrc).toMatch(/domain === "holds" && action === "extend"/);
+  });
+
+  it("bookingHolds still has NO Firestore rules block (default-deny, Admin-SDK only)", () => {
+    // The extend handler writes through the Admin SDK, which bypasses
+    // rules. If a `match /bookingHolds/{id}` block ever appears, this
+    // pin forces a re-review of the client trust model.
+    const rulesSrc = read("firebase/firestore.rules");
+    expect(rulesSrc).not.toMatch(/match \/bookingHolds/);
+    expect(rulesSrc).toMatch(/match \/staffInventoryHolds/);
+  });
+});
+
+// Per IMT-03 (2026-10-14): the "I need more time" UI. The endpoint
+// exists as of IMT-02; this block pins that the guest can actually
+// reach it, that the CTA respects the cap instead of letting them tap
+// a 409, and that the announcement channel is not the ticking
+// countdown.
+describe("IMT-03 — `extendHold()` in useInFlowHold", () => {
+  it("the hook exposes extendHold + the in-flight / error / canExtend state", () => {
+    expect(hookSrc).toMatch(/extendHold: \(\) => Promise<ExtendHoldResult>/);
+    expect(hookSrc).toMatch(/isExtending/);
+    expect(hookSrc).toMatch(/extendError/);
+    expect(hookSrc).toMatch(/canExtend/);
+  });
+
+  it("posts ONLY holdId + reservationId to /api/holds/extend", () => {
+    // The endpoint's schema is `.strict()` — anything else is a 400.
+    // Most importantly no duration: the window is server-derived.
+    expect(hookSrc).toMatch(/"\/api\/holds\/extend"/);
+    const body = hookSrc.slice(
+      hookSrc.indexOf('"/api/holds/extend"'),
+      hookSrc.indexOf('"/api/holds/extend"') + 700
+    );
+    expect(body).toMatch(/holdId,/);
+    expect(body).toMatch(/reservationId: hold\.reservationId/);
+    expect(body).not.toMatch(/minutes/i);
+  });
+
+  it("adopts the server's authoritative hold wholesale (no client-side timer restart)", () => {
+    // The hook owns no separate countdown — it reads `hold.expiresAt`.
+    // Pushing the server's shape in is what makes the existing 1s tick
+    // and 30s resync carry over unchanged.
+    expect(hookSrc).toMatch(/setHold\(json\.data as InFlowHoldView\)/);
+    expect(hookSrc).toMatch(/setNow\(Date\.now\(\)\)/);
+  });
+
+  it("does NOT clobber the running countdown on failure", () => {
+    // A failed extend must leave `hold` alone so the guest keeps their
+    // remaining time and can still submit.
+    const fn = hookSrc.slice(
+      hookSrc.indexOf("const extendHold = useCallback"),
+      hookSrc.indexOf("}, [holdId, hold, isExtending]);")
+    );
+    expect(fn).toMatch(/setExtendError\(message\)/);
+    expect(fn).toMatch(/return \{ ok: false, error: message \}/);
+    // No setHold on any failure branch: the only setHold in the
+    // callback is inside the success path guarded by a success check.
+    const setHoldAt = fn.indexOf("setHold(");
+    const okGuardAt = fn.indexOf("if (!response.ok || !json || json.success !== true)");
+    expect(setHoldAt).toBeGreaterThan(okGuardAt);
+  });
+
+  it("guards against a double-submit burning two extensions from one tap", () => {
+    // The cap is finite (3), so a double-tap must not consume two.
+    expect(hookSrc).toMatch(/if \(isExtending\) \{/);
+  });
+
+  it("NEGATIVE: the hook never calls its OWN extendHold — revival stays explicit", () => {
+    // The server-side never-auto-revive rule (GOTCHAS) has a client
+    // half: nothing inside the hook may invoke the extension. The only
+    // legitimate call site is the banner CTA's onClick handler.
+    //
+    // Counted as a hard zero rather than pattern-matched: the
+    // declaration is `const extendHold = useCallback(...)` (no paren
+    // after the name) and the return object lists `extendHold,`, so
+    // any `extendHold(` inside the hook body IS an invocation.
+    const hookBody = hookSrc.slice(hookSrc.indexOf("export function useInFlowHold"));
+    expect((hookBody.match(/extendHold\(\)/g) ?? []).length).toBe(0);
+    // And no effect may reach for it either, whatever the shape.
+    expect(hookBody).not.toMatch(/status === "expired"/);
+  });
+
+  it("delegates the cap gate to the shared helper instead of reimplementing it", () => {
+    expect(hookSrc).toMatch(/import \{ canExtendInFlowHold \} from "@spark-inn\/shared"/);
+    expect(hookSrc).toMatch(/canExtendInFlowHold\(\{/);
+  });
+});
+
+describe("IMT-03 — HoldCountdownBanner extend CTA", () => {
+  it("renders `hold-extend-cta` on BOTH the active and the expired state", () => {
+    // Two distinct branches, so the count must be 2 — one is a
+    // regression guard against the button silently existing only on
+    // one of them.
+    const matches = bannerSrc.match(/data-testid="hold-extend-cta"/g) ?? [];
+    expect(matches.length).toBe(2);
+  });
+
+  it("disables the CTA in flight and exposes the state for tests", () => {
+    expect(bannerSrc).toMatch(/disabled=\{isExtending\}/);
+    expect(bannerSrc).toMatch(/data-state=\{isExtending \? "extending" : "idle"\}/);
+  });
+
+  it("meets the hard UI rules: 8px radius + 44px touch height", () => {
+    // CLAUDE.md: no sharp corners (8px buttons), 44px minimum touch
+    // height. `min-h-11` is the guest app's dominant convention.
+    expect(bannerSrc).toMatch(/rounded-lg/);
+    expect(bannerSrc).toMatch(/min-h-11/);
+  });
+
+  it("hides the CTA at the cap instead of letting the guest tap a 409", () => {
+    expect(bannerSrc).toMatch(/\{canExtend \? \(/);
+    expect(bannerSrc).toMatch(/canExtend/);
+  });
+
+  it("NEGATIVE: the cap number is NOT hardcoded in the banner", () => {
+    // The component must consume `canExtend` from the hook, which
+    // delegates to shared `canExtendInFlowHold`.
+    expect(bannerSrc).not.toMatch(/MAX_IN_FLOW_HOLD_EXTENSIONS/);
+    expect(bannerSrc).not.toMatch(/extensionCount >= \d/);
+  });
+
+  it("demotes 'Pick a new room' on the expired state and gives extend the primary slot", () => {
+    // A guest watching the timer hit 0:00 wants to continue, not
+    // restart — emphasis, not removal. Both CTAs stay reachable.
+    expect(bannerSrc).toMatch(/data-testid="hold-pick-new-room-cta"/);
+    const expired = bannerSrc.slice(
+      bannerSrc.indexOf('data-state="expired"'),
+      bannerSrc.indexOf("// Active state")
+    );
+    expect(expired).toMatch(/data-testid="hold-extend-cta"/);
+    expect(expired).toMatch(/data-testid="hold-pick-new-room-cta"/);
+    // The expired branch no longer promises an extension it may not
+    // honour — the copy switches on `canExtend`.
+    expect(expired).toMatch(/canExtend \?/);
+  });
+
+  it("shows honest inline copy when the server refuses (extendError)", () => {
+    expect(bannerSrc).toMatch(/data-testid="hold-extend-error"/);
+    expect(bannerSrc).toMatch(/extendError \?/);
+  });
+
+  it("the banner's CTA handler is the ONE call site of extendHold()", () => {
+    expect(bannerSrc).toMatch(/const handleExtend = useCallback/);
+    expect(bannerSrc).toMatch(/await extendHold\(\)/);
+    // Both CTA branches route through the same handler rather than
+    // inlining their own fetch.
+    expect((bannerSrc.match(/onClick=\{handleExtend\}/g) ?? []).length).toBe(2);
+  });
+
+  it("announces through a dedicated sr-only live region, NOT the ticking banner", () => {
+    expect(bannerSrc).toMatch(/className="sr-only" role="status" aria-live="polite"/);
+    expect(bannerSrc).toMatch(/data-testid="hold-announcement"/);
+  });
+
+  it("NEGATIVE: the ticking active-state CONTAINER is not an aria-live region", () => {
+    // Pre-existing defect, fixed in IMT-03: the banner carried
+    // `role="status" aria-live="polite"` around a subtree that
+    // re-renders every second, i.e. one screen-reader announcement per
+    // second. It is now a plain `region`.
+    //
+    // Scoped to the container's OPENING TAG on purpose — the branch
+    // also contains the deliberate `sr-only` announcement region,
+    // which IS a live region and must stay one.
+    const active = bannerSrc.slice(
+      bannerSrc.indexOf("// Active state"),
+      bannerSrc.length
+    );
+    const openingTag = active.slice(0, active.indexOf(">"));
+    expect(openingTag).toMatch(/role="region"/);
+    expect(openingTag).toMatch(/aria-label="Room hold status"/);
+    expect(openingTag).not.toMatch(/aria-live/);
+    expect(openingTag).not.toMatch(/role="status"/);
+    // The pill keeps its own label for on-demand reading.
+    expect(active).toMatch(/aria-label=\{`Time left:/);
+  });
+
+  it("all React hooks run before the early returns (no conditional-hook order break)", () => {
+    const lastHook = bannerSrc.lastIndexOf("useCallback(");
+    const firstReturn = bannerSrc.indexOf("if (!holdId) return null;");
+    expect(lastHook).toBeGreaterThan(-1);
+    expect(firstReturn).toBeGreaterThan(-1);
+    expect(lastHook).toBeLessThan(firstReturn);
+  });
+});
+
+// Per IMT-05 (2026-10-14): the banner must be brand-rebrandable.
+// White-label is the whole point of `hotel.config.ts` — a hotel that
+// changes `colors.primary` and gets a Spark-orange booking banner still
+// is not rebranded.
+describe("IMT-05 — banner uses brand tokens, not a hardcoded palette", () => {
+  /**
+   * Strip comments before running class-name pins.
+   *
+   * This codebase's house style is extremely verbose explanatory
+   * comments, and those comments legitimately QUOTE class names to
+   * explain them (e.g. "`bg-red-600` the established danger action").
+   * Without this, every pin below would eventually fail on prose rather
+   * than on code — and the obvious "fix" would be to delete the
+   * explanation, which is backwards. Class pins read code; the
+   * documentation pin (below) deliberately reads the comments.
+   */
+  const code = bannerSrc
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1"))
+    .join("\n");
+
+  it("NEGATIVE: no indigo classes remain — indigo was the one-off", () => {
+    // Verified before the change: indigo appeared in ZERO other
+    // guest-app components. Every indigo class in the codebase lived
+    // in this file, so it was an unbranded orphan rather than a house
+    // convention.
+    expect(code).not.toMatch(/indigo-\d/);
+  });
+
+  it("the active state is brand-tinted via the `primary` tokens", () => {
+    expect(code).toMatch(/bg-primary-light/);
+    expect(code).toMatch(/border-primary/);
+    // Body copy stays gray: `text-primary` on `primary-light` is
+    // 2.35:1 and would fail AA for the heading and sub-copy.
+    expect(code).toMatch(/text-gray-900/);
+    expect(code).toMatch(/text-gray-700/);
+  });
+
+  it("brand color is only ever carried by DECORATIVE elements, never reading text", () => {
+    // Measured: #EA8A1A on #FEF3E2 is 2.35:1 — unusable for copy.
+    // Brand color may appear as an accent (icon, border, button fill),
+    // but any element using `text-primary` must be aria-hidden, i.e.
+    // purely decorative and invisible to assistive tech.
+    const brandTextLines = code
+      .split("\n")
+      .filter((line) => /text-primary(?!-)/.test(line));
+    expect(brandTextLines.length).toBeGreaterThan(0);
+    for (const line of brandTextLines) {
+      expect(line).toMatch(/aria-hidden/);
+    }
+  });
+
+  it("the PRIMARY CTA uses the brand token, not a palette color", () => {
+    // This was the real hard-rule violation: after IMT-03 the
+    // primary action on the expired state was `bg-red-600`.
+    expect(code).toMatch(/bg-primary[^\"]*font-semibold text-gray-900/);
+    expect(code).toMatch(/hover:bg-primary-dark/);
+    expect(code).not.toMatch(/bg-red-600/);
+  });
+
+  it("CTAs use `text-gray-900`, NOT the app-wide `text-white` convention", () => {
+    // Measured: #EA8A1A + white = 2.58:1 (fails AA).
+    // #EA8A1A + gray-900 = 6.88:1 (passes). The rest of the app
+    // still ships the 2.58:1 version — see the IMT-05 roadmap note.
+    expect(code).not.toMatch(/bg-primary[^\"]*text-white/);
+    expect(code).toMatch(/bg-primary[^\"]*text-gray-900/);
+  });
+
+  it("the danger + warning SURFACES stay semantic (not rebranded)", () => {
+    // Deliberate. "Your hold expired" must not turn orange when a
+    // client changes their brand color — it would destroy the signal.
+    // These match the established app patterns: `border-amber-200
+    // bg-amber-50` (11 uses) and `bg-red-600` danger actions (5 uses).
+    expect(code).toMatch(/border-amber-200 bg-amber-50/);
+    expect(code).toMatch(/border-red-300 bg-red-50/);
+  });
+
+  it("the countdown pill keeps semantic urgency tiers, with no brand color in the normal tier", () => {
+    // A normal countdown in brand orange would compete with the
+    // urgency signal; amber (<=3min) and red (<=1min) stay.
+    expect(code).toMatch(/text-amber-700 ring-amber-200/);
+    expect(code).toMatch(/text-red-700 ring-red-200/);
+    expect(code).toMatch(/text-gray-700 ring-gray-200/);
+  });
+
+  it("documents the colour policy in the component header (so it survives the next refactor)", () => {
+    // Reads the COMMENTS on purpose — this pin is about the reasoning
+    // surviving, not about any class name.
+    expect(bannerSrc).toMatch(/COLOR POLICY \(IMT-05\)/);
+    expect(bannerSrc).toMatch(/semantic state signals, not brand/);
+    // The stale "blue/indigo" description is gone.
+    expect(bannerSrc).not.toMatch(/blue\/indigo banner/);
   });
 });
 

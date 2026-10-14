@@ -51,6 +51,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | Field | Type | Notes |
 |---|---|---|
 | `roomId` / `roomNumber` / `roomType` | string | Room identification |
+| `batchId` | string \| null | Shared id for blocks created by one bulk Calendar confirmation; absent on legacy/single blocks |
 | `startDate` / `endDate` | timestamp | Inclusive start / exclusive end date |
 | `reason` / `notes` | string | Reason and optional staff note |
 | `status` | string | `"active"` \| `"cancelled"` |
@@ -71,10 +72,30 @@ Ephemeral hold stamp that powers the public booking flow's Steps 2 + 3 countdown
 | `expiresAt` | timestamp | The hold deadline. Server-stamped from `IN_FLOW_HOLD_MINUTES` (15 by default; range 5–30) at start time; never refreshed. |
 | `status` | string | `"active"` (banner ticks), `"consumed"` (booking succeeded), `"expired"` (past `expiresAt`). Set by the consume path on Confirm; the Janitor sweep will eventually mark stale `"active"` holds as `"expired"`. |
 | `holdMinutes` | number | Snapshot of `settings/hotelConfig.inFlowHoldMinutes` (per IFH-01.2) at start time. Falls back to `IN_FLOW_HOLD_MINUTES = 15` for legacy settings (no field) + hand-edited Firestore docs outside the 5..30 range. Future reports can attribute expired holds to a specific window even if the per-hotel setting changes. |
-| `createdAt` / `updatedAt` | timestamp | Audit timestamps. |
+| `extensionCount` | number | Per IMT-02 (2026-10-14): how many times `/api/holds/extend` has fired. Absent on pre-IMT docs, which read as `0`. Gates `MAX_IN_FLOW_HOLD_EXTENSIONS = 3`. **Functionally required, not analytics** — the server enforces the cap from it and the guest banner reads it to hide the CTA, so the guest never clicks a button the server would reject. Per the CVQ-04 answer (staff do not see extensions) there is deliberately **no** staff-facing surface and no dedicated extension timestamp; `updatedAt` already records the last change. |
+| `createdAt` / `updatedAt` | timestamp | Audit timestamps. `createdAt` is the ORIGINAL stamp — an extension extends the window, it does not restart the attempt's history. |
 
-> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. The hourly Janitor sweep (`/api/holds/sweep`, registered in `vercel.json §crons` as `0 * * * *`) transitions `"active" → "expired"` for holds past their `expiresAt` using a per-doc Firestore transaction with a recheck (a hold consumed by a booking between the coarse query and the per-doc write is NOT re-marked `"expired"`). Idempotent — a re-fire of the same cron tick finds zero matches.
-> **Firestore rules:** `bookingHolds/{id}` is denied for guest reads + writes (the guest client never touches this collection directly — the `useInFlowHold` hook uses the `/api/holds/read` + `/api/holds/start` Vercel routes). Admin reads are open for debugging.
+> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. **Per IMT-02, the extend endpoint (`/api/holds/extend`) may push `"expired" → "active"`** — revival is the literal "I need more time" moment, and it is safe precisely because the hold is soft (nothing consults this collection for availability). It is additive from `max(now, expiresAt)`: an active hold keeps its remaining time and gains a window on top; an expired hold restarts from now. `"consumed"` is **never** extendable, and a status outside `"active" | "expired"` is refused fail-closed. The daily Janitor sweep (`/api/holds/sweep`, registered in `vercel.json §crons` as `0 2 * * *`) transitions stale guest and staff holds from `"active" → "expired"` using a per-doc Firestore transaction with a recheck. Idempotent — a re-fire of the same cron tick finds zero matches. It tombstones rather than deletes (`in-flow-hold.ts:313-315`), so `extensionCount` stays queryable indefinitely.
+> **Firestore rules:** `bookingHolds/{id}` has **no `match` block at all** — the collection is default-deny for every client, including staff and admins. The guest client never touches it directly (the `useInFlowHold` hook uses the `/api/holds/read` + `/api/holds/start` + `/api/holds/extend` Vercel routes), and every write goes through the Admin SDK, which bypasses rules. Any debugging view of this collection goes through the Admin SDK / console, not a client SDK. **Correction (2026-10-14):** this line previously claimed "Admin reads are open for debugging", which was never true in the deployed rules. A source-text pin in `guest-app/tests/api/in-flow-hold.test.ts` now asserts `match /bookingHolds` is absent, so adding a rules block forces a re-review of the client trust model.
+
+---
+
+### `staffInventoryHolds/{holdId}` *(front-desk hard inventory hold)*
+
+Short-lived, staff-created lock used by Calendar **Hold & book**. It is authoritative for inventory until consumed, released, or expired; it is separate from the public soft `bookingHolds` lifecycle.
+
+| Field | Type | Notes |
+|---|---|---|
+| `roomIds` / `roomNumbers` | string[] | Exact physical room set protected by the hold |
+| `startDate` / `endDate` | timestamp | Inclusive start / exclusive end |
+| `status` | string | `"active"` \| `"consumed"` \| `"released"` \| `"expired"` |
+| `createdBy` | string | Firebase Auth UID; only this staff member may extend, release, or consume it |
+| `expiresAt` | timestamp | 15-minute deadline; read-time checks ignore the hold after this instant |
+| `reservationId` | string \| null | Added when the walk-in transaction consumes the hold |
+| `createdAt` / `updatedAt` | timestamp | Audit timestamps |
+| `consumedAt` / `releasedAt` | timestamp \| null | Terminal lifecycle timestamps |
+
+Clients may read this collection only when authenticated as staff. All writes go through staff-authenticated API routes. Required composite indexes cover active range reads, room membership conflict checks, and expiry cleanup.
 
 ---
 
@@ -230,7 +251,7 @@ Single-document collections holding dynamic configuration:
 - `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`.
 - `settings/websiteContent`: Editable homepage, about, corporate, and legal page copy.
 - `settings/breakfastConfig`: Silog menu items & daily prep settings.
-- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage.
+- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage, **Phase 2 (2026-10-12)**: `welcomePoints`, `minPointsToRedeem`, `pointsCanPayUpToBillPct`, `freeNightEvery`, `levels[]` (tier program — name, fromStays, discountPct, pointsMultiplier, perks), **PR #9 (2026-10-13)**: `allowMemberPointsRedemption` (admin opt-in toggle for member self-service points redemption at booking Step 3 — default `false` so existing deployments preserve the front-desk-mediated model; when `true`, the booking flow exposes an "Apply Your Points" input alongside the voucher code, and the member-authenticated `POST /api/members/redeem-points-self` endpoint is enabled). See `shared/schemas/rewardsConfig.ts` for the validation contract and `plan/features/SPARK-REWARDS.md §Phase 2 PR #9` for the rollout detail.
 
 ---
 
@@ -287,6 +308,11 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/project/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
 | `createdBy` | string | Audit — staff UID |
 | `createdAt` / `updatedAt` | timestamp | Audit |
+| `kind` | `"promo"` \| `"reward"` | **Phase 5 (2026-10-12)**: voucher discriminator. `"promo"` is the legacy default (admin-created discount). `"reward"` is system-issued from the tier program (currently `"free-night-tier"`; `"welcome"` reserved for Phase 6). Absent = treat as `"promo"`. |
+| `valueType` | `"percent"` \| `"flat"` \| `"free-night"` | **Phase 5 (2026-10-12)**: canonical reward type. For `"reward"` vouchers, this is `"free-night"` (uses `discountType: "percent"` + `discountValue: 100` to produce a 100% off discount). For pre-Phase-5 promo vouchers, absent = treated as `discountType`. |
+| `memberId` | string \| null | **Phase 5 (2026-10-12)**: back-link to `members/{uid}` for reward vouchers. Null for promo vouchers. Used by the member portal (Phase 7) to surface available free-night vouchers. |
+| `memberNumber` | string \| null | **Phase 5 (2026-10-12)**: denormalized `SR-XXXXX` for display. Null for promo vouchers. |
+| `rewardSource` | `"free-night-tier"` \| `"welcome"` \| null | **Phase 5 (2026-10-12)**: which Phase 2 feature created the voucher. `"free-night-tier"` is wired by `handleCheckoutBooking` when `completedStays % freeNightEvery === 0` (canonical Phase 5 voucher shape). `"welcome"` reserved for Phase 6 (not yet wired). |
 
 The doc ID is the code string by convention. The validate + create handlers both honour a `code`-field fallback for codes whose Firestore doc ID differs from the public `code` field (BI-10). Public reads go through `POST /api/validate/voucher` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, discountType, discountValue }` — never `usageCount`, `usageCap`, `expiresAt`, or `applicableRoomTypes`. The validator at `shared/utils/vouchers.ts:11` enforces the `isActive` / `expiresAt` / `usageCap` / `applicableRoomTypes` checks. Firestore rules: read/write staff-only — see `plan/docs/SECURITY.md §vouchers`.
 
@@ -330,9 +356,11 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `email` / `firstName` / `lastName` / `phone` | string | Member profile data |
 | `rewardsPoints` | number | Current points balance |
 | `status` | string | `"active"` \| `"suspended"` |
+| `completedStays` | number | **Phase 2 (2026-10-12)**: counter incremented atomically at checkout (same `runTransaction` as the points credit, per FOL-03 read-before-write). The increment runs on both the immediate-credit and the pending-payment-deferral paths — the stay IS completed either way. Not decremented on post-settlement cancellation (MRB-05 philosophy: "stay happened, financial reversal is separate"). Absent = 0 (legacy / pre-Phase-2). |
+| `currentLevel` | object \| null | **Phase 2 (2026-10-12)**: cached `LevelDef` snapshot — refreshed at checkout (post-`completedStays++`) + at member registration (initial base-tier snapshot via `resolveCurrentLevel(levels, 0)`). Null for members below the lowest configured tier's threshold OR for deployments without tiers configured (legacy / off state). The booking engine falls back to the legacy global `memberDiscountPct` for tier-less members. |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
-Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points.
+Subcollection: `members/{memberId}/pointsHistory/{historyId}` — Append-only ledger of earned, redeemed, adjusted, and clawed-back points. **Phase 6 (2026-10-13)**: a single deterministic doc ID `welcome` is reserved for the member-onboarding credit (one-shot, written by `handleRegisterMember` when `rewardsConfig.welcomePoints > 0`). The deterministic ID enables a single `.get()` idempotency check inside the transaction — no query fan-out.
 
 ---
 

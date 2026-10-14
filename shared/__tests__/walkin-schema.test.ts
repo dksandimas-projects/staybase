@@ -52,4 +52,14 @@ describe("WalkinBookingSchema", () => {
   test("rejects unexpected top-level fields", () => {
     expect(WalkinBookingSchema.safeParse({ ...validWalkin, totalPrice: 123 }).success).toBe(false);
   });
+
+  test("accepts a server-issued staff inventory hold id", () => {
+    const parsed = WalkinBookingSchema.parse({
+      ...validWalkin,
+      staffHoldId: "staffhold12345"
+    });
+
+    expect(parsed.staffHoldId).toBe("staffhold12345");
+    expect(WalkinBookingSchema.safeParse({ ...validWalkin, staffHoldId: "bad/id" }).success).toBe(false);
+  });
 });

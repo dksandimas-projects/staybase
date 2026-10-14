@@ -92,6 +92,7 @@ import {
   type ProtectedPaymentMethod,
   type Reservation,
   type RoomBlock,
+  type StaffInventoryHold,
   type RoomTypeEntry,
   type SeasonalRateOverride,
   type TestRun,
@@ -500,7 +501,7 @@ export interface Booking {
   } | null;
 }
 
-export type { RoomBlock };
+export type { RoomBlock, StaffInventoryHold };
 
 export interface PointsLog {
   id: string;
@@ -546,6 +547,17 @@ export interface Voucher {
   // voucher-issued email is fired (server-rendered, with the
   // code in a large monospace block).
   guestEmail: string | null;
+  // Per Phase 5 of the Spark Rewards tier system (2026-10-12,
+  // decision pending): reward voucher discriminator + Phase 2
+  // back-link fields. Pre-Phase-5 promo vouchers are missing
+  // these (treated as `kind: "promo"`, `valueType:
+  // discountType` on read) — non-breaking for existing
+  // deployments.
+  kind?: "promo" | "reward";
+  valueType?: "percent" | "flat" | "free-night";
+  memberId?: string | null;
+  memberNumber?: string | null;
+  rewardSource?: "free-night-tier" | "welcome" | null;
 }
 
 export interface CorporateCode {
@@ -747,6 +759,8 @@ export interface AdminContextType {
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   grantEarlyCheckin: (bookingId: string, confirmedTime: string, staffNote?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
+  // Per EXT-01 (2026-01-27): the extend-stay path locks roomId + checkIn to the booking's current values.
+  extendStayBooking: (input: { bookingId: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
   // Per BR-05 (2026-10-13, decision #234): the staff
   // breakfast admin-context wrappers. Each wraps the
@@ -805,6 +819,7 @@ export interface AdminContextType {
       // the retry-after-uncertain-response contract.
       preallocatedBookingId?: string;
       preallocatedReservationId?: string;
+      staffHoldId?: string;
     }
   ) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
@@ -841,8 +856,13 @@ export interface AdminContextType {
   confirmBookingWithBalance: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; thresholdExceeded?: boolean; threshold?: number; balance?: number }>;
   roomBlocks: RoomBlock[];
   createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
+  createBulkRoomBlocks: (input: { roomIds: string[]; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockIds?: string[] }>;
   updateRoomBlock: (input: { blockId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string }>;
   cancelRoomBlock: (blockId: string) => Promise<{ success: boolean; error?: string }>;
+  staffInventoryHolds: StaffInventoryHold[];
+  acquireStaffInventoryHold: (input: { roomIds: string[]; startDate: string; endDate: string }) => Promise<{ success: boolean; error?: string; hold?: StaffInventoryHold }>;
+  extendStaffInventoryHold: (holdId: string) => Promise<{ success: boolean; error?: string; hold?: StaffInventoryHold }>;
+  releaseStaffInventoryHold: (holdId: string) => Promise<{ success: boolean; error?: string }>;
 
   // Vouchers & Corporate Rates
   vouchers: Voucher[];
@@ -2327,6 +2347,47 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     return unsubscribe;
   }, [currentUser]);
 
+  const [staffInventoryHolds, setStaffInventoryHolds] = useState<StaffInventoryHold[]>([]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setStaffInventoryHolds([]);
+      return;
+    }
+    const toIso = (value: any) => {
+      if (!value) return "";
+      if (typeof value.toDate === "function") return value.toDate().toISOString();
+      if (value instanceof Date) return value.toISOString();
+      return String(value);
+    };
+    const unsubscribe = onSnapshot(
+      query(collection(db, "staffInventoryHolds"), where("status", "==", "active")),
+      (snapshot) => {
+        setStaffInventoryHolds(snapshot.docs.map((snap) => {
+          const data = snap.data();
+          const expiresAt = toIso(data.expiresAt);
+          const expired = data.status === "active" && expiresAt && new Date(expiresAt).getTime() <= Date.now();
+          return {
+            id: snap.id,
+            roomIds: Array.isArray(data.roomIds) ? data.roomIds.map(String) : [],
+            roomNumbers: Array.isArray(data.roomNumbers) ? data.roomNumbers.map(String) : [],
+            startDate: toIso(data.startDate).slice(0, 10),
+            endDate: toIso(data.endDate).slice(0, 10),
+            status: expired ? "expired" : (data.status || "active"),
+            createdBy: String(data.createdBy || ""),
+            createdAt: toIso(data.createdAt),
+            updatedAt: toIso(data.updatedAt),
+            expiresAt,
+            consumedAt: data.consumedAt ? toIso(data.consumedAt) : null,
+            releasedAt: data.releasedAt ? toIso(data.releasedAt) : null
+          } satisfies StaffInventoryHold;
+        }));
+      },
+      (error) => console.error("Error listening to staffInventoryHolds collection:", error)
+    );
+    return unsubscribe;
+  }, [currentUser]);
+
   const resolveEarlyCheckin = async (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
@@ -2393,6 +2454,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
+  // Per EXT-01 (2026-01-27): the extend-stay path re-uses the
+  // reschedule endpoint with `mode: "extend"`. The room and
+  // check-in are locked to the booking's current values; only
+  // the check-out can be extended. The server enforces the lock.
+  const extendStayBooking = async (input: { bookingId: string; checkOut: string; reason?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/reschedule`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId: input.bookingId,
+          // Locked to current room + check-in by the server (mode: "extend")
+          roomId: "__EXTEND_LOCKED__",
+          checkIn: "__EXTEND_LOCKED__",
+          checkOut: input.checkOut,
+          reason: input.reason || "Extend stay",
+          mode: "extend"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to extend stay." };
+      }
+      return { success: true, data: data.data };
+    } catch (err: any) {
+      console.error("extendStayBooking failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
   const createRoomBlock = async (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
@@ -2411,6 +2506,70 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true, blockId: data.blockId as string | undefined };
     } catch (err: any) {
       console.error("createRoomBlock failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const createBulkRoomBlocks = async (input: { roomIds: string[]; startDate: string; endDate: string; reason: string; notes?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/room-blocks/create-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": token ? `Bearer ${token}` : "" },
+        body: JSON.stringify(input)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) return { success: false, error: data.error || "Failed to block dates." };
+      return { success: true, blockIds: Array.isArray(data.blockIds) ? data.blockIds : [] };
+    } catch (err: any) {
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const acquireStaffInventoryHold = async (input: { roomIds: string[]; startDate: string; endDate: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/staff-inventory-holds/acquire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": token ? `Bearer ${token}` : "" },
+        body: JSON.stringify(input)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) return { success: false, error: data.error || "Failed to hold rooms." };
+      return { success: true, hold: data.data as StaffInventoryHold };
+    } catch (err: any) {
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const extendStaffInventoryHold = async (holdId: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/staff-inventory-holds/extend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": token ? `Bearer ${token}` : "" },
+        body: JSON.stringify({ holdId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) return { success: false, error: data.error || "Failed to extend hold." };
+      return { success: true, hold: data.data as StaffInventoryHold };
+    } catch (err: any) {
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const releaseStaffInventoryHold = async (holdId: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/staff-inventory-holds/release`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": token ? `Bearer ${token}` : "" },
+        body: JSON.stringify({ holdId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) return { success: false, error: data.error || "Failed to release hold." };
+      return { success: true };
+    } catch (err: any) {
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -2812,6 +2971,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       // caller that does not preallocate).
       preallocatedBookingId?: string;
       preallocatedReservationId?: string;
+      staffHoldId?: string;
     }
   ): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -2861,6 +3021,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           // default for any caller that does not
           // preallocate.
           ...(reservationId ? { reservationId } : {}),
+          ...(input.staffHoldId ? { staffHoldId: input.staffHoldId } : {}),
           roomId: input.roomId,
           // Per MRB-07 (2026-08-02, per decision #159): the New Booking
           // modal can create a reservation covering N rooms. When
@@ -3149,6 +3310,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             createdBy: data.createdBy || "",
             createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
             guestEmail: data.guestEmail || null,
+            // Per Phase 5 (2026-10-12): reward voucher fields.
+            // Pre-Phase-5 promo vouchers are missing these —
+            // treat as the legacy "promo" kind with valueType
+            // matching their discountType.
+            kind: data.kind || "promo",
+            valueType: data.valueType || data.discountType || "flat",
+            memberId: data.memberId || null,
+            memberNumber: data.memberNumber || null,
+            rewardSource: data.rewardSource || null,
           });
         });
 
@@ -7554,6 +7724,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         resolveEarlyCheckin,
         grantEarlyCheckin,
         rescheduleBooking,
+        extendStayBooking,
         addOnsitePayment,
         staffUpdateBreakfast,
         markBreakfastServed,
@@ -7567,8 +7738,13 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         confirmBookingWithBalance,
         roomBlocks,
         createRoomBlock,
+        createBulkRoomBlocks,
         updateRoomBlock,
         cancelRoomBlock,
+        staffInventoryHolds,
+        acquireStaffInventoryHold,
+        extendStaffInventoryHold,
+        releaseStaffInventoryHold,
         vouchers,
         addVoucher,
         updateVoucher,
