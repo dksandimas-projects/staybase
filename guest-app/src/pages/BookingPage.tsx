@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  ArrowRight,
   BedDouble,
   CalendarDays,
   Check,
@@ -124,7 +125,60 @@ import {
   type BookingRoomCartItem
 } from "../utils/bookingRoomCart";
 
-const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
+// Per BR-09 (2026-10-14): the booking flow renders five
+// steps instead of four. The breakfast add-on (formerly
+// embedded in the old Step 2 "Guest Details") now has
+// its own dedicated "Add-ons" step BEFORE the guest
+// details step. The label is forward-thinking ("Add-ons"
+// not "Breakfast") so future per-stay add-ons (spa,
+// parking, etc.) share the same step without a rename.
+const steps = ["Select Room", "Add-ons", "Guest Details", "Review & Pay", "Confirmation"];
+// Per BR-09: the URL step-key contract. The legacy
+// numeric `?step=N` values (1-4 from the pre-BR-09
+// flow) are mapped to the new string keys in
+// `normalizeStepKey` below so old share-links still
+// land in the closest equivalent step. The `5` value
+// is the new "confirmation" affordance for pre-BR-09
+// links that explicitly numbered the confirmation page.
+const STEP_KEYS = {
+  selectRoom: "select-room",
+  addOns: "add-ons",
+  guestDetails: "guest-details",
+  review: "review",
+  confirmation: "confirmation"
+} as const;
+
+// Per BR-09: the soft backward-compat map for
+// pre-BR-09 numeric `?step=N` deep-links. The legacy
+// contract used `?step=2` for Guest Details, `?step=3`
+// for Review, `?step=4` for Confirmation. After the
+// refactor those numeric values land in the closest
+// equivalent step (1 → rooms, 2 → add-ons,
+// 3 → guest details, 4 → review, 5 → confirmation).
+// Users typically need to re-do the in-cart data —
+// documented in the spec change (BR-09 decision).
+function normalizeStepKey(rawStep: string | null): string {
+  if (!rawStep) return STEP_KEYS.selectRoom;
+  // Legacy numeric shape (?step=1..5).
+  if (rawStep === "1") return STEP_KEYS.selectRoom;
+  if (rawStep === "2") return STEP_KEYS.addOns;
+  if (rawStep === "3") return STEP_KEYS.guestDetails;
+  if (rawStep === "4") return STEP_KEYS.review;
+  if (rawStep === "5") return STEP_KEYS.confirmation;
+  // New string shape (?step=select-room|add-ons|
+  // guest-details|review|confirmation) — pass through.
+  if (
+    rawStep === STEP_KEYS.selectRoom ||
+    rawStep === STEP_KEYS.addOns ||
+    rawStep === STEP_KEYS.guestDetails ||
+    rawStep === STEP_KEYS.review ||
+    rawStep === STEP_KEYS.confirmation
+  ) {
+    return rawStep;
+  }
+  // Unknown value — fall back to Step 1.
+  return STEP_KEYS.selectRoom;
+}
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const DISCOUNT_ID_COMPRESSION_OPTIONS = {
@@ -266,9 +320,11 @@ export function BookingPage() {
   // read is retired. The contact hook is still used
   // for `hotelCheckInTime` (the arrival-time dropdown).
   const { hotelCheckInTime } = usePublicSiteContent();
-  const currentStepKey = searchParams.get("step") ?? "select-room";
-  const isGuestDetailsStep = currentStepKey === "guest-details";
-  const isReviewStep = currentStepKey === "review";
+  const currentStepKey = normalizeStepKey(searchParams.get("step"));
+  const isAddOnsStep = currentStepKey === STEP_KEYS.addOns;
+  const isGuestDetailsStep = currentStepKey === STEP_KEYS.guestDetails;
+  const isReviewStep = currentStepKey === STEP_KEYS.review;
+  const isConfirmationStep = currentStepKey === STEP_KEYS.confirmation;
 
   // Spark Rewards member discount: the value is read from settings/rewardsConfig
   // and applied server-side in handleCreateBooking (per W2.2 / decision #90).
@@ -777,6 +833,21 @@ export function BookingPage() {
     () => distributedRoomCart.reduce((sum, room) => sum + (room.extraBedCount || 0), 0),
     [distributedRoomCart]
   );
+  // Per BR-09 (2026-10-14, decision #239): the soft
+  // `?step=2` backward-compat (the old numeric shape
+  // for "Guest Details") lands on the new "Add-ons"
+  // step. If the user arrives with no valid rooms in
+  // the cart (a stale share-link), bounce to Step 1 so
+  // they start fresh instead of staring at an empty
+  // Add-ons step. Same guard mirrors the pre-existing
+  // Step 3 / Step 4 fall-through logic.
+  useEffect(() => {
+    if (!isAddOnsStep) return;
+    if (distributedRoomCart.length > 0) return;
+    const fallback = new URLSearchParams(searchParams);
+    fallback.delete("step");
+    setSearchParams(fallback, { replace: true });
+  }, [isAddOnsStep, distributedRoomCart, searchParams, setSearchParams]);
   const cartDistributionComplete =
     distributedRoomCart.length > 0
     && cartDistribution.unassignedAdults === 0
@@ -1061,7 +1132,13 @@ export function BookingPage() {
   ]);
 
   const continueParams = new URLSearchParams({
-    step: "guest-details",
+    // Per BR-09 (2026-10-14): the Step 1 "Continue"
+    // button now routes to the new "Add-ons" step
+    // (Step 2 in the 5-step flow). The breakfast
+    // add-on was extracted from the old Step 2
+    // "Guest Details" and gets its own dedicated step
+    // before the guest details form.
+    step: STEP_KEYS.addOns,
     checkIn,
     checkOut,
     // Per CHD-11.5: the picker URL is `?adults=N&children=N`
@@ -1090,8 +1167,14 @@ export function BookingPage() {
     hold: holdId
   });
   continueParams.set("rooms", serializeBookingRoomCart(distributedRoomCart));
-  const reviewParams = new URLSearchParams(continueParams);
-  reviewParams.set("step", "review");
+  // Per BR-09: the Add-ons "Continue" routes to the
+  // guest details step. The Step 2 → Step 3 transition
+  // is always allowed (the user can skip breakfast and
+  // proceed — see the state machine in the spec).
+  const guestDetailsParams = new URLSearchParams(continueParams);
+  guestDetailsParams.set("step", STEP_KEYS.guestDetails);
+  const reviewParams = new URLSearchParams(guestDetailsParams);
+  reviewParams.set("step", STEP_KEYS.review);
   reviewParams.set("firstName", guestDetails.firstName);
   reviewParams.set("lastName", guestDetails.lastName);
   reviewParams.set("email", guestDetails.email);
@@ -2021,9 +2104,20 @@ export function BookingPage() {
 
   const getBackToPath = () => {
     if (isReviewStep) {
-      return `/book?${continueParams.toString()}`;
+      // Per BR-09 (2026-10-14): the back button on the
+      // Review step (new Step 4) returns to Guest Details
+      // (new Step 3) instead of jumping straight to Step 1.
+      return `/book?${guestDetailsParams.toString()}`;
     }
     if (isGuestDetailsStep) {
+      // Per BR-09: back from the new Step 3 ("Guest
+      // Details") returns to the new Step 2 ("Add-ons").
+      return `/book?${continueParams.toString()}`;
+    }
+    if (isAddOnsStep) {
+      // Per BR-09: back from the new Step 2 ("Add-ons")
+      // drops the `step=` param so the URL defaults to
+      // Step 1 (the room picker).
       const step1Params = new URLSearchParams(continueParams);
       step1Params.delete("step");
       return `/book?${step1Params.toString()}`;
@@ -2043,7 +2137,7 @@ export function BookingPage() {
           to Step 1 with a fresh holdId so the cycle
           restarts cleanly. */}
       <HoldCountdownBanner
-        holdId={isGuestDetailsStep || isReviewStep ? searchParams.get("hold") : null}
+        holdId={isAddOnsStep || isGuestDetailsStep || isReviewStep ? searchParams.get("hold") : null}
         startInput={{
           reservationId,
           roomType: selectedTypeEntry?.value ?? "",
@@ -2098,7 +2192,184 @@ export function BookingPage() {
     );
   }
 
-  if (isGuestDetailsStep) {
+  // Per BR-09 (2026-10-14): the breakfast `motion.div`
+  // was extracted from the old Step 2 into its own
+  // dedicated "Add-ons" step (new Step 2 in the
+  // 5-step flow). The same rendering block is reused
+  // — the only change is the surrounding step header
+  // + the sticky "Continue to guest details" footer.
+  const renderBreakfastSection = () => (
+    /* Per BR-03 (2026-10-12, decision #232): the
+        new "Breakfast" section. Renders ONLY when
+        `breakfastConfig.isEnabled === true`. For
+        each breakfast date in the stay (N dates for
+        N nights) × each guest slot (lead +
+        companions + per-room occupancy), shows a
+        `<select>` of active meals. Selecting a
+        meal populates `breakfastSelections[key]`
+        via `recomputeBreakfastTotal`. Locked
+        dates render a disabled dropdown +
+        "Ordering closed" label. The server is
+        authoritative — a clock-mismatched client
+        is still rejected at create time (per open
+        item #7). */
+    breakfastConfig.isEnabled ? (() => {
+      const dates = enumerateBreakfastDates(checkIn, checkOut);
+      const slots = enumerateGuestSlots(distributedRoomCart);
+      if (dates.length === 0 || slots.length === 0) return null;
+      return (
+        <motion.div className="mb-6 rounded-card border border-primary/20 bg-primary/5 p-5" variants={staggerChild}>
+          <h2 className="font-heading text-xl text-gray-950">Breakfast</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            {breakfastConfig.defaultMealInstructions || "Pick a meal for each guest on each day, or skip the day entirely."}
+          </p>
+          <div className="mt-4 space-y-4">
+            {dates.map((date) => {
+              const cutoff = computeBreakfastCutoffState({
+                serviceDate: date,
+                now: new Date(),
+                cutoffTime: breakfastConfig.cutoffTime || "20:00",
+                timezone: breakfastConfig.cutoffTimezone || "Asia/Manila"
+              });
+              return (
+                <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
+                    <p className="text-xs text-gray-600">
+                      {cutoff.isLocked
+                        ? "Ordering closed"
+                        : `Order by ${formatStayDate(date)}`}
+                    </p>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {slots.map((slot) => {
+                      const key = `${date}-${slot.id}`;
+                      const selected = breakfastSelections[key]?.mealId || "";
+                      return (
+                        <div key={key} className="flex items-center gap-3">
+                          <label className="min-w-[160px] text-sm text-gray-700" htmlFor={`bf-${key}`}>
+                            {slot.label}
+                          </label>
+                          <select
+                            id={`bf-${key}`}
+                            data-testid={`breakfast-select-${key}`}
+                            className="h-11 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                            value={selected}
+                            disabled={cutoff.isLocked}
+                            onChange={(event) => {
+                              const mealId = event.target.value;
+                              setBreakfastSelections((prev) => {
+                                const next = { ...prev };
+                                if (!mealId) {
+                                  delete next[key];
+                                } else {
+                                  const meal = (breakfastConfig.meals || []).find((m) => m.id === mealId);
+                                  if (!meal) return prev;
+                                  // Per BR-01 (2026-10-12, decision
+                                  // #231): the `serviceDate` and
+                                  // `guestSlot` live in the
+                                  // composite KEY (`${date}-${slot.id}`),
+                                  // NOT in the entry. The entry
+                                  // carries the snapshot
+                                  // (`mealId` + `mealName` +
+                                  // `price`) + the audit fields.
+                                  // The server parses the date +
+                                  // slot from the key when it
+                                  // validates / recomputes.
+                                  const nowIso = new Date().toISOString();
+                                  next[key] = {
+                                    mealId: meal.id,
+                                    mealName: meal.name,
+                                    price: meal.price,
+                                    addedBy: "guest",
+                                    addedAt: nowIso,
+                                    lastModifiedAt: nowIso,
+                                    lastModifiedBy: "guest",
+                                    removedAt: null,
+                                    removedBy: null,
+                                    overrideCutoff: false,
+                                    overrideReason: null
+                                  };
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            <option value="">No meal — skip breakfast for this guest on this day</option>
+                            {(breakfastConfig.meals || []).map((meal) => (
+                              <option key={meal.id} value={meal.id}>
+                                {meal.name} — {formatPrice(meal.price)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+      );
+    })() : null
+  );
+
+  // Per BR-09: the muted per-guest label replacing
+  // the legacy bold "Number of guests" input. The
+  // label reads from the per-room `numAdults` +
+  // `numChildren` so the user always sees the
+  // current cart shape (no editable input). When
+  // the cart is empty the line still renders as a
+  // muted hint so the layout doesn't shift. The
+  // derived `guestDetails.guestCount` field is
+  // still maintained by `setOccupancy` (the create
+  // payload uses it) — only the bold input UI is
+  // gone.
+  const renderGuestCountLabel = () => {
+    const totalAdults = distributedRoomCart.reduce(
+      (sum, room) => sum + Math.max(0, Number(room.numAdults) || 0),
+      0
+    );
+    const totalChildren = distributedRoomCart.reduce(
+      (sum, room) => sum + Math.max(0, Number(room.numChildren) || 0),
+      0
+    );
+    const totalGuests = totalAdults + totalChildren;
+    if (totalGuests === 0) {
+      return (
+        <p className="text-xs text-gray-500" data-testid="guest-count-label">
+          Pick a room to see the guest breakdown.
+        </p>
+      );
+    }
+    const parts: string[] = [];
+    parts.push(`${totalAdults} adult${totalAdults === 1 ? "" : "s"}`);
+    if (totalChildren > 0) {
+      parts.push(`${totalChildren} child${totalChildren === 1 ? "" : "ren"}`);
+    }
+    parts.push(`(${totalGuests} total)`);
+    const roomsLabel = distributedRoomCart.length === 1
+      ? "1 room"
+      : `${distributedRoomCart.length} rooms`;
+    return (
+      <p className="text-xs text-gray-500" data-testid="guest-count-label">
+        {roomsLabel} · {parts.join(" · ")}
+      </p>
+    );
+  };
+
+  if (isAddOnsStep) {
+    // Per BR-09 (2026-10-14): the new Step 2
+    // ("Add-ons"). Hosts the breakfast per-date ×
+    // per-guest meal grid extracted from the old
+    // Step 2. The step is forward-thinking — the
+    // label is "Add-ons" (not "Breakfast") so
+    // future per-stay add-ons (spa, parking, etc.)
+    // share the same step without a rename. When
+    // `breakfastConfig.isEnabled === false`, the
+    // section renders a friendly empty card so the
+    // step still flows the user to Guest Details.
     return bookingShell(
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
@@ -2106,7 +2377,126 @@ export function BookingPage() {
             <StepIndicator steps={steps} currentStep={2} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 4</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 5</p>
+            <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
+            <p className="mt-4 max-w-2xl leading-7 text-gray-600">
+              Optional extras for your stay. Today the only add-on is breakfast — pick a meal for each guest on each day, or skip the day entirely.
+            </p>
+          </div>
+        </section>
+
+        <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
+          <motion.form
+            animate="visible"
+            className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
+            initial={shouldReduceMotion ? false : "hidden"}
+            variants={staggerContainer}
+          >
+            {breakfastConfig.isEnabled ? renderBreakfastSection() : (
+              <motion.div className="rounded-card border border-gray-200 bg-gray-50 p-5" variants={staggerChild}>
+                <h2 className="font-heading text-xl text-gray-950">No add-ons available</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  The hotel hasn&apos;t configured any optional add-ons for this stay. Continue to guest details.
+                </p>
+              </motion.div>
+            )}
+          </motion.form>
+
+          <BookingReviewAside
+            checkIn={checkIn}
+            checkOut={checkOut}
+            guests={guests}
+            nights={nights}
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast` +
+            // `breakfastIncludesChildren` +
+            // `setBreakfastIncludesChildren` +
+            // `breakfastRate` props are gone. The sidebar
+            // reads the new `breakfastSelections` rich
+            // shape only. The adult/child split
+            // (`numAdults` + `numChildren`) stays so the
+            // per-room summary can render the split.
+            numAdults={numAdults}
+            numChildren={numChildren}
+            // Per EXB-11 (2026-08-04, per decision #186): the
+            // per-cart total extra-bed count (sum of each
+            // room's `extraBedCount`). Replaces the old single
+            // `extraBedCount` state — the user now toggles the
+            // count per type on the room-type card, and the
+            // cart is the source of truth.
+            extraBedCount={totalExtraBeds}
+            extraBedRate={extraBedRate}
+            typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
+            roomSummary={distributedRoomCart.map((room, index) => ({
+              label: roomTypes.find((type) => type.value === room.roomType)?.label || room.roomType,
+              position: index + 1,
+              numAdults: room.numAdults,
+              numChildren: room.numChildren,
+              extraBedCount: room.extraBedCount,
+              // Per BR-08 (decision #238, 2026-10-14 — close-out):
+              // the legacy `hasBreakfast: boolean` per-room
+              // flag is gone. The per-meal breakdown (rendered
+              // below the room summary) shows the meal count for
+              // the whole stay.
+              breakfastCount: Object.keys(breakfastSelections || {}).length > 0
+                ? Math.ceil(Object.keys(breakfastSelections).length / Math.max(distributedRoomCart.length, 1))
+                : 0
+            }))}
+            typeValue={selectedTypeEntry?.value ?? ""}
+            typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
+            typeRates={selectedRoomRates}
+            typeDescription={selectedTypeEntry?.description ?? ""}
+            total={total}
+            seasonalRateOverrides={seasonalRateOverrides}
+            discountPct={discountPct}
+            discountType={discountType}
+            voucherDiscount={voucherDiscount}
+            voucherApplied={voucherApplied}
+            memberDiscountPct={memberDiscountPct}
+            isMember={!!memberProfile}
+            rateBreakdown={rateBreakdown}
+            // Per BR-03 (2026-10-12, decision #232):
+            // thread the new `breakfastSelections` rich
+            // shape into the Step 3 review sidebar
+            // (same pattern as the Step 2 sidebar
+            // above). The Step 3 page reads the same
+            // cart state, so the per-date breakdown
+            // is identical.
+            breakfastSelections={breakfastSelections}
+          />
+        </section>
+
+        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Add-ons</p>
+              <p className="text-lg font-semibold text-gray-950">
+                Continue to guest details when you&apos;re ready — breakfast is optional.
+              </p>
+            </div>
+            {/* Per BR-09: the Add-ons step always allows
+                proceeding to Guest Details (the user can
+                skip breakfast entirely). The button
+                copy says "Continue to guest details" so
+                the destination step is unambiguous. */}
+            <PrimaryButton to={`/book?${guestDetailsParams.toString()}`} className="sm:min-w-56">
+              Continue to guest details <ArrowRight size={16} />
+            </PrimaryButton>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (isGuestDetailsStep) {
+    return bookingShell(
+      <>
+        <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl">
+            <StepIndicator steps={steps} currentStep={3} />
+          </div>
+          <div className="mt-10">
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Guest details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Add the guest information for this stay. Required fields show inline validation once touched.
@@ -2121,121 +2511,20 @@ export function BookingPage() {
             initial={shouldReduceMotion ? false : "hidden"}
             variants={staggerContainer}
           >
-            {/* Per BR-03 (2026-10-12, decision #232): the
-                new "Breakfast" section. Renders ONLY when
-                `breakfastConfig.isEnabled === true`. For
-                each breakfast date in the stay (N dates for
-                N nights) × each guest slot (lead +
-                companions + per-room occupancy), shows a
-                `<select>` of active meals. Selecting a
-                meal populates `breakfastSelections[key]`
-                via `recomputeBreakfastTotal`. Locked
-                dates render a disabled dropdown +
-                "Ordering closed" label. The server is
-                authoritative — a clock-mismatched client
-                is still rejected at create time (per open
-                item #7). */}
-            {breakfastConfig.isEnabled ? (() => {
-              const dates = enumerateBreakfastDates(checkIn, checkOut);
-              const slots = enumerateGuestSlots(distributedRoomCart);
-              if (dates.length === 0 || slots.length === 0) return null;
-              return (
-                <motion.div className="mb-6 rounded-card border border-primary/20 bg-primary/5 p-5" variants={staggerChild}>
-                  <h2 className="font-heading text-xl text-gray-950">Breakfast</h2>
-                  <p className="mt-1 text-sm text-gray-600">
-                    {breakfastConfig.defaultMealInstructions || "Pick a meal for each guest on each day, or skip the day entirely."}
-                  </p>
-                  <div className="mt-4 space-y-4">
-                    {dates.map((date) => {
-                      const cutoff = computeBreakfastCutoffState({
-                        serviceDate: date,
-                        now: new Date(),
-                        cutoffTime: breakfastConfig.cutoffTime || "20:00",
-                        timezone: breakfastConfig.cutoffTimezone || "Asia/Manila"
-                      });
-                      return (
-                        <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
-                          <div className="flex items-center justify-between">
-                            <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
-                            <p className="text-xs text-gray-600">
-                              {cutoff.isLocked
-                                ? "Ordering closed"
-                                : `Order by ${formatStayDate(date)}`}
-                            </p>
-                          </div>
-                          <div className="mt-3 space-y-2">
-                            {slots.map((slot) => {
-                              const key = `${date}-${slot.id}`;
-                              const selected = breakfastSelections[key]?.mealId || "";
-                              return (
-                                <div key={key} className="flex items-center gap-3">
-                                  <label className="min-w-[160px] text-sm text-gray-700" htmlFor={`bf-${key}`}>
-                                    {slot.label}
-                                  </label>
-                                  <select
-                                    id={`bf-${key}`}
-                                    data-testid={`breakfast-select-${key}`}
-                                    className="h-11 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                                    value={selected}
-                                    disabled={cutoff.isLocked}
-                                    onChange={(event) => {
-                                      const mealId = event.target.value;
-                                      setBreakfastSelections((prev) => {
-                                        const next = { ...prev };
-                                        if (!mealId) {
-                                          delete next[key];
-                                        } else {
-                                          const meal = (breakfastConfig.meals || []).find((m) => m.id === mealId);
-                                          if (!meal) return prev;
-                                          // Per BR-01 (2026-10-12, decision
-                                          // #231): the `serviceDate` and
-                                          // `guestSlot` live in the
-                                          // composite KEY (`${date}-${slot.id}`),
-                                          // NOT in the entry. The entry
-                                          // carries the snapshot
-                                          // (`mealId` + `mealName` +
-                                          // `price`) + the audit fields.
-                                          // The server parses the date +
-                                          // slot from the key when it
-                                          // validates / recomputes.
-                                          const nowIso = new Date().toISOString();
-                                          next[key] = {
-                                            mealId: meal.id,
-                                            mealName: meal.name,
-                                            price: meal.price,
-                                            addedBy: "guest",
-                                            addedAt: nowIso,
-                                            lastModifiedAt: nowIso,
-                                            lastModifiedBy: "guest",
-                                            removedAt: null,
-                                            removedBy: null,
-                                            overrideCutoff: false,
-                                            overrideReason: null
-                                          };
-                                        }
-                                        return next;
-                                      });
-                                    }}
-                                  >
-                                    <option value="">No meal — skip breakfast for this guest on this day</option>
-                                    {(breakfastConfig.meals || []).map((meal) => (
-                                      <option key={meal.id} value={meal.id}>
-                                        {meal.name} — {formatPrice(meal.price)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </motion.div>
-              );
-            })() : null}
-            <motion.div className="grid gap-5 sm:grid-cols-2" variants={staggerChild}>
+            {/* Per BR-09: the per-guest count is now a
+                MUTED label (text-xs text-gray-500) instead
+                of the legacy bold "Number of guests"
+                input. The summary line ("X adults + Y
+                children + Z total") is gone — the cart is
+                the single source of truth for occupancy
+                (changed on Step 1 via the room picker +
+                adult/child steppers). The internal
+                `guestDetails.guestCount` is still derived
+                by `setOccupancy` so the create payload +
+                the booking-write validation stay
+                unchanged. */}
+            {renderGuestCountLabel()}
+            <motion.div className="mt-4 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
               <TextField
                 error={touchedFields.firstName ? guestErrors.firstName : ""}
                 icon={<UserRound size={17} />}
@@ -2316,24 +2605,11 @@ export function BookingPage() {
               />
             </motion.div>
 
-            <motion.div className="mt-5 grid items-start gap-5 sm:grid-cols-[220px_1fr]" variants={staggerChild}>
-              <TextField
-                error={touchedFields.guestCount ? guestErrors.guestCount : ""}
-                icon={<Users size={17} />}
-                label="Number of guests"
-                onBlur={() => markTouched("guestCount")}
-                onChange={(value) => updateGuestDetail("guestCount", value)}
-                placeholder="2"
-                required
-                type="number"
-                value={guestDetails.guestCount}
-                id="guestCount"
-                name="guestCount"
-              />
+            <motion.div className="mt-5" variants={staggerChild}>
               {/* Per SR-01..05 (2026-10-12): the special-requests
                   block. Replaces the `feat/special-requests-redirect`
                   card (which is retired in SR-05). The block is
-                  always rendered on Step 2 — the bed set-up section
+                  always rendered on Step 3 — the bed set-up section
                   renders only when the picked room type offers
                   choices; the additional preferences are gated by
                   the (admin-configured) catalog being non-empty. */}
@@ -2467,12 +2743,18 @@ export function BookingPage() {
               </p>
             </div>
             {canContinueToReview ? (
+              // Per BR-09 (2026-10-14): the step-3 →
+              // step-4 transition copy uses the
+              // destination step name ("review"), not a
+              // numbered "Step N" reference, so the
+              // 5-step refactor doesn't leave stale
+              // numbering in the CTA.
               <PrimaryButton to={`/book?${reviewParams.toString()}`} className="sm:min-w-56">
-                Continue to Step 3
+                Continue to review
               </PrimaryButton>
             ) : (
               <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Continue to Step 3
+                Continue to review
               </PrimaryButton>
             )}
           </div>
@@ -2508,10 +2790,10 @@ export function BookingPage() {
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={3} />
+            <StepIndicator steps={steps} currentStep={4} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 4</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 4 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & Pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Review your details, select a discount or enter a voucher, and choose your payment method.
@@ -3205,7 +3487,7 @@ export function BookingPage() {
               disabled={!canConfirm || isSubmitting || uploadingDiscountId || uploadingPaymentProof}
               className="flex min-h-11 items-center justify-center rounded-lg bg-primary text-white font-semibold px-6 hover:bg-primary-dark transition disabled:bg-gray-300 disabled:text-gray-500 sm:min-w-56"
             >
-              {isSubmitting ? "Processing..." : "Confirm Booking"}
+              {isSubmitting ? "Processing..." : "Place booking"}
             </button>
           </div>
         </div>
@@ -3221,7 +3503,7 @@ export function BookingPage() {
         </div>
         <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 4</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select your stay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Choose dates, guests, and a room option. We will show room types available for your stay.
@@ -4009,8 +4291,15 @@ export function BookingPage() {
             </p>
           </div>
 	          {cartIsReady ? (
+	            // Per BR-09 (2026-10-14): the Step 1 →
+	            // Step 2 transition copy now uses the
+	            // destination step name ("add-ons"), not a
+	            // numbered "Step N" reference. The
+	            // `continueParams` URL stamp already points
+	            // at `step=add-ons` (see `continueParams`
+	            // above).
 	            <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
-	              Continue to Step 2
+	              Continue to add-ons
 	            </PrimaryButton>
 	          ) : (
 	            <PrimaryButton

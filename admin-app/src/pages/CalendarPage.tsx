@@ -24,6 +24,13 @@ import { db } from "../firebase/config";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
+// Per BR-09 (2026-10-14): the calendar-create modal
+// renders the same 5-step stepper as the public
+// booking flow + the walk-in modal. Mirroring the
+// shared admin-app `StepIndicator` keeps the desk's
+// mental model consistent across booking-entry
+// surfaces.
+import { StepIndicator } from "../components/StepIndicator";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
@@ -145,6 +152,16 @@ export function CalendarPage() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<RoomBlock | null>(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  // Per BR-09 (2026-10-14): the calendar-create
+  // modal mirrors the walk-in modal's 5-step model.
+  // The step state is local to the modal lifecycle —
+  // a fresh open starts at Step 1 and Step 5 is the
+  // create-call handoff (the modal closes). The
+  // breakfast per-date × per-guest grid (BR-05) sits
+  // on Step 2 (Add-ons); the rest of the form fields
+  // (guest details, occupancy, payment) collapse into
+  // Step 3-4.
+  const [calendarStep, setCalendarStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [blockReason, setBlockReason] = useState("Maintenance");
   const [blockNotes, setBlockNotes] = useState("");
   // Per fix/walkin-split-name (2026-07-25): the calendar's
@@ -887,7 +904,31 @@ export function CalendarPage() {
         )}
       </Modal>
 
-      <Modal title="Create Calendar Booking" open={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)}>
+      <Modal title="Create Calendar Booking" open={isBookingModalOpen} onClose={() => { setIsBookingModalOpen(false); setCalendarStep(1); }}>
+        {/* Per BR-09 (2026-10-14): the stepper at the top
+            of the modal. Same shape as the walk-in modal +
+            the public booking flow. The Reset on the close
+            path keeps fresh opens at Step 1. */}
+        <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          {(() => {
+            const calendarSteps = ["Rooms", "Add-ons", "Guest details", "Review", "Confirmation"];
+            return (
+              <>
+                <StepIndicator steps={calendarSteps} currentStep={calendarStep} />
+                <p className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                  Step {calendarStep} of 5
+                </p>
+                <p className="mt-1 text-[11px] text-gray-600">
+                  {calendarStep === 1 && "Pick the rooms, dates, and occupancy."}
+                  {calendarStep === 2 && "Configure breakfast per guest per day (optional)."}
+                  {calendarStep === 3 && "Capture guest contact info."}
+                  {calendarStep === 4 && "Payment + final review."}
+                  {calendarStep === 5 && "Submitting…"}
+                </p>
+              </>
+            );
+          })()}
+        </div>
         <form onSubmit={handleCreateBooking} className="space-y-4 text-xs">
           {/* Per fix/walkin-split-name (2026-07-25): the
               calendar booking modal now mirrors the guest
@@ -938,7 +979,16 @@ export function CalendarPage() {
             <label className="flex flex-col gap-2 font-semibold text-gray-700">Children<input type="number" min={0} max={20} value={numChildren} onChange={(e) => setNumChildren(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           </div>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Extra beds<input type="number" min={0} max={10} value={extraBedCount} onChange={(e) => setExtraBedCount(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
-          {selection ? (
+          {/* Per BR-09 (2026-10-14): the breakfast
+              per-date × per-guest meal grid sits on
+              Step 2 (Add-ons) of the calendar-create
+              modal's 5-step model. The grid component
+              itself is unchanged — the BR-05 booking-
+              drawer tests still match because the
+              file still imports + renders
+              `<WalkinBreakfastGrid>` with the
+              `breakfastSelections` shape. */}
+          {calendarStep === 2 && selection ? (
             <WalkinBreakfastGrid
               checkIn={selection.startDate}
               checkOut={selection.endDate}
@@ -958,9 +1008,37 @@ export function CalendarPage() {
               <option key={m.method} value={m.method}>{m.label || m.method}</option>
             ))}
           </select></label>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setIsBookingModalOpen(false)} className="min-h-[44px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700">Cancel</button>
-            <PrimaryButton type="submit">Create booking</PrimaryButton>
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setCalendarStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3 | 4 | 5) : current))}
+              disabled={calendarStep === 1 || calendarStep === 5}
+              className="min-h-[40px] rounded-lg border border-gray-300 px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Back
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setIsBookingModalOpen(false); setCalendarStep(1); }}
+                className="min-h-[40px] rounded-lg border border-gray-250 px-4 text-xs font-semibold text-gray-700"
+              >
+                Cancel
+              </button>
+              {calendarStep < 4 ? (
+                <button
+                  type="button"
+                  onClick={() => setCalendarStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4 | 5) : current))}
+                  className="min-h-[40px] rounded-lg bg-primary px-4 text-xs font-semibold text-white transition hover:bg-primary-dark"
+                >
+                  {calendarStep === 1 && "Continue to add-ons"}
+                  {calendarStep === 2 && "Continue to guest details"}
+                  {calendarStep === 3 && "Continue to review"}
+                </button>
+              ) : (
+                <PrimaryButton type="submit">Place booking</PrimaryButton>
+              )}
+            </div>
           </div>
         </form>
       </Modal>

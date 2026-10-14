@@ -42,6 +42,14 @@ import {
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
+// Per BR-09 (2026-10-14): the admin walk-in modal +
+// calendar-create modal now render the same 5-step
+// stepper as the public booking flow. The shared
+// admin-app `StepIndicator` mirrors the guest-app
+// shape (number badge + label, current step is
+// bold) so the desk doesn't see a different visual
+// language from the public flow.
+import { StepIndicator } from "../components/StepIndicator";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { StatusBadge } from "../components/StatusBadge";
@@ -1175,6 +1183,22 @@ export function BookingsPage() {
     }
   }, [roomTypes]);
 
+  // Per BR-09 (2026-10-14): the walk-in modal now uses
+  // the same 5-step model as the public booking flow.
+  // The state machine mirrors the spec:
+  //   1 (Rooms) → 2 (Add-ons) → 3 (Guest details)
+  //              → 4 (Review) → 5 (Confirmation)
+  // The Confirmation step is the post-submit close
+  // (the existing `handleWalkinSubmit` + toast), so
+  // we only need to model steps 1-4 here. The
+  // stepper + Continue/Back CTAs split the
+  // previously-single-form modal into discrete
+  // sections — the breakfast add-on (Step 2) is the
+  // new "Add-ons" surface, and the payment +
+  // discount + voucher + special-request + test-data
+  // fields collapse into Step 4 (Review).
+  const [walkinStep, setWalkinStep] = useState<1 | 2 | 3 | 4>(1);
+
   // Compatibility aliases for the primary room stay. The submit
   // handler, the price preview and the booking payload all describe the
   // reservation as a whole; these two keep the "primary room" reads
@@ -1245,6 +1269,13 @@ export function BookingsPage() {
       setActiveStaffHoldExpiresAt("");
       clearStaffHoldParams();
     }
+    // Per BR-09 (2026-10-14): reset the walk-in
+    // step state when the modal closes so a fresh
+    // open starts at Step 1 (Rooms). Without the
+    // reset the desk would re-enter at whatever
+    // step they left at, which corrupts the
+    // first-impression flow for new reservations.
+    setWalkinStep(1);
     setIsModalOpen(false);
   };
 
@@ -4662,6 +4693,10 @@ export function BookingsPage() {
         setActiveStaffHoldId("");
         setActiveStaffHoldExpiresAt("");
         clearStaffHoldParams();
+        // Per BR-09 (2026-10-14): reset the step state
+        // on the create-success close path so the
+        // next "Create New Booking" opens at Step 1.
+        setWalkinStep(1);
         setIsModalOpen(false);
         toast.success(
           submittedRoomStays.length > 1 ? "Reservation created" : "Walk-in booking created",
@@ -7545,6 +7580,34 @@ export function BookingsPage() {
       >
         <form onSubmit={handleWalkinSubmit} id="walkin-form" className="space-y-4 text-sm">
           <span className="sr-only">Confirm Reservation</span>
+          {/* Per BR-09 (2026-10-14): the walk-in modal
+              renders the same 5-step stepper as the public
+              booking flow. The stepper sits at the top of
+              the form (under the staff-hold banner so a
+              live hold is still the highest-priority
+              signal). The desk uses the same step labels
+              the guest sees on `/book` — the desk is
+              rarely confused by the public flow but the
+              parity keeps the booking-shape stable. */}
+          {(() => {
+            const walkinSteps = ["Rooms", "Add-ons", "Guest details", "Review", "Confirmation"];
+            return (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <StepIndicator steps={walkinSteps} currentStep={walkinStep} />
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                    Step {walkinStep} of 5
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    {walkinStep === 1 && "Pick the rooms, dates, and occupancy."}
+                    {walkinStep === 2 && "Configure breakfast per guest per day (optional)."}
+                    {walkinStep === 3 && "Capture guest contact info."}
+                    {walkinStep === 4 && "Source, payment, discounts, special requests."}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
           {activeStaffHoldId && (
             <div className={`rounded-xl border p-4 ${staffHoldSecondsRemaining > 0 ? "border-blue-200 bg-blue-50" : "border-red-200 bg-red-50"}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -7892,36 +7955,52 @@ export function BookingsPage() {
             </button>
           </div>
 
-          <div className="space-y-3 pt-1">
-            {/* Per BR-05 (2026-10-13, decision #234): the
-                legacy `Include Daily Breakfast` flat-rate
-                toggle is replaced by the per-date × per-guest
-                meal grid below. The grid (a) feeds the rich
-                `breakfastSelections` shape into the booking
-                create call, and (b) surfaces the cutoff
-                warning + override-reason input when the desk
-                selects a meal for a locked date. */}
-            <WalkinBreakfastGrid
-              checkIn={checkInDate}
-              checkOut={checkOutDate}
-              numGuests={numGuests}
-              staffUid={currentUser?.uid || "staff"}
-              overrideReason={walkinBreakfastOverrideReason}
-              onOverrideReasonChange={setWalkinBreakfastOverrideReason}
-              onChange={setWalkinBreakfast}
-              timezone={config.timezone}
-            />
-
-            <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={immediateCheckIn}
-                onChange={(e) => setImmediateCheckIn(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+          {/* Per BR-09 (2026-10-14): the breakfast
+              per-date × per-guest meal grid moves into
+              the new "Add-ons" step (Step 2 in the
+              walk-in modal's 5-step model). The
+              immediate-check-in checkbox stays glued
+              to the grid because both surface
+              per-arrival logistics — splitting them
+              across steps would force the desk to
+              bounce back and forth. The grid is the
+              same `<WalkinBreakfastGrid>` component
+              used pre-BR-09; the BR-05 booking-drawer
+              tests still pass because the file still
+              references both the import and the
+              `breakfastSelections` shape. */}
+          {walkinStep === 2 ? (
+            <div className="space-y-3 pt-1" data-testid="walkin-addons-section">
+              {/* Per BR-05 (2026-10-13, decision #234): the
+                  legacy `Include Daily Breakfast` flat-rate
+                  toggle is replaced by the per-date × per-guest
+                  meal grid below. The grid (a) feeds the rich
+                  `breakfastSelections` shape into the booking
+                  create call, and (b) surfaces the cutoff
+                  warning + override-reason input when the desk
+                  selects a meal for a locked date. */}
+              <WalkinBreakfastGrid
+                checkIn={checkInDate}
+                checkOut={checkOutDate}
+                numGuests={numGuests}
+                staffUid={currentUser?.uid || "staff"}
+                overrideReason={walkinBreakfastOverrideReason}
+                onOverrideReasonChange={setWalkinBreakfastOverrideReason}
+                onChange={setWalkinBreakfast}
+                timezone={config.timezone}
               />
-              <span>Check-In Guest Immediately</span>
-            </label>
-          </div>
+
+              <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={immediateCheckIn}
+                  onChange={(e) => setImmediateCheckIn(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+                />
+                <span>Check-In Guest Immediately</span>
+              </label>
+            </div>
+          ) : null}
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Source
@@ -8039,6 +8118,49 @@ export function BookingsPage() {
               <span>Final Total Price:</span>
               <span>{formatPrice(priceOverride !== "" ? Number(priceOverride) : totalPrice)}</span>
             </div>
+          </div>
+          {/* Per BR-09 (2026-10-14): the in-form
+              Continue/Back nav. The footer "Cancel" +
+              "Confirm Reservation" CTAs (in the modal's
+              `footer` prop) remain the create-call
+              surface — those CTAs are the actual
+              Step 5 (Confirmation) handoff. The nav
+              here just gates which sections of the
+              form are visible per step. Step 1 → 4
+              uses the per-step CTA; on Step 4 the
+              nav collapses so the desk can use the
+              primary "Confirm Reservation" footer
+              CTA without competing for attention. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3">
+            <button
+              type="button"
+              onClick={() => setWalkinStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3 | 4) : current))}
+              disabled={walkinStep === 1}
+              className="min-h-[40px] rounded-lg border border-gray-300 px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Back
+            </button>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+              {walkinStep === 1 && "Step 1 — Rooms"}
+              {walkinStep === 2 && "Step 2 — Add-ons"}
+              {walkinStep === 3 && "Step 3 — Guest details"}
+              {walkinStep === 4 && "Step 4 — Review (use footer to confirm)"}
+            </p>
+            {walkinStep < 4 ? (
+              <button
+                type="button"
+                onClick={() => setWalkinStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4) : current))}
+                className="min-h-[40px] rounded-lg bg-primary px-4 text-xs font-semibold text-white transition hover:bg-primary-dark"
+              >
+                {walkinStep === 1 && "Continue to add-ons"}
+                {walkinStep === 2 && "Continue to guest details"}
+                {walkinStep === 3 && "Continue to review"}
+              </button>
+            ) : (
+              <span className="min-h-[40px] inline-flex items-center rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-500">
+                Place booking ↓
+              </span>
+            )}
           </div>
         </form>
       </Modal>
