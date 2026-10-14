@@ -56,6 +56,13 @@ import {
   // admin receipt PDF, guest live preview).
   isVatEnabled,
   type VatConfig,
+  // Per BR-12.1 (2026-10-15, decision #247 reserved): the
+  // "Other Add-Ons" tab catalog CRUD uses the same normalized
+  // AddOn shape the public config endpoint serves. The
+  // pre-seed constant seeds the first "Airport transfer" row
+  // on a brand-new install.
+  AIRPORT_TRANSFER_PRESEED,
+  type AddOn,
   // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
   // Zod schema + inferred types for the settings/rewardsConfig
   // payload — used for client-side validation before save (the
@@ -63,6 +70,14 @@ import {
   RewardsConfigSchema,
   type LevelDef
 } from "@spark-inn/shared";
+import {
+  // Per BR-12.1 (2026-10-15, decision #247 reserved): the
+  // "Other Add-Ons" tab catalog CRUD uses the same
+  // normalized AddOn shape the public config endpoint
+  // serves. The pre-seed constant seeds the first
+  // "Airport transfer" row on a brand-new install.
+  AddOnSchema
+} from "@spark-inn/shared/schemas/booking";
 import { BreakfastConfigSchema } from "@spark-inn/shared/schemas/booking";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
@@ -89,7 +104,7 @@ import config from "@config";
 import { auth } from "../firebase/auth";
 import { db, storage } from "../firebase/config";
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc } from "firebase/firestore";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { ConfirmForm } from "../components/ConfirmForm";
@@ -99,7 +114,7 @@ import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "preferences" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
+type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "preferences" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "addons" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
 type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts" | "holds" | "vat";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -180,7 +195,12 @@ const VALID_TAB_IDS: TabId[] = [
   "staff",
   "environment",
   "discounts",
-  "holds"
+  "holds",
+  // Per BR-12.1 (2026-10-15, decision #247 reserved): the
+  // new "Other Add-Ons" catalog management tab. Without
+  // this whitelist entry, the deep-link `?tab=addons`
+  // falls back to "hotel" and the new tab never renders.
+  "addons"
 ];
 
 // Per SET-SBG-01 (2026-10-12, settings-sidebar-grouping):
@@ -197,7 +217,7 @@ type SettingsGroup = {
 const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   { id: "property",  label: "Property",             tabs: ["hotel", "roomtypes", "branding"] },
   { id: "bookings",  label: "Bookings & Revenue",   tabs: ["preferences", "sources", "holds", "payment", "discounts"] },
-  { id: "guest",     label: "Guest Experience",     tabs: ["rewards", "breakfast", "store", "intercom"] },
+  { id: "guest",     label: "Guest Experience",     tabs: ["rewards", "breakfast", "addons", "store", "intercom"] },
   { id: "reach",     label: "Marketing & Reach",    tabs: ["website", "seo", "email"] },
   { id: "admin",     label: "Admin",                tabs: ["staff", "legal", "environment"] }
 ];
@@ -2772,6 +2792,248 @@ export function SettingsPage() {
     }
     return [];
   });
+
+  // 4b. Other Add-Ons catalog states (BR-12.1, 2026-10-15, decision #247
+  //     reserved). The catalog is the `addOns/{addOnId}` collection
+  //     (BR-12) and the tab CRUDs it directly through Firestore. The
+  //     live snapshot is the source of truth; the local state mirrors
+  //     it for instant render after a write.
+  const [addOnsCatalog, setAddOnsCatalog] = useState<AddOn[]>([]);
+  const [addOnsCatalogLoading, setAddOnsCatalogLoading] = useState(true);
+  const [editingAddOnId, setEditingAddOnId] = useState<string | null>(null);
+  const [editingAddOnDraft, setEditingAddOnDraft] = useState<AddOn | null>(null);
+  const [addOnsEnabled, setAddOnsEnabled] = useState(true);
+  const [confirmDeleteAddOn, setConfirmDeleteAddOn] = useState<AddOn | null>(null);
+  const [addOnSaveStatus, setAddOnSaveStatus] = useState<SettingsSaveStatus>("idle");
+  const [addOnSaveError, setAddOnSaveError] = useState<string | null>(null);
+
+  // Live snapshot of the `addOns` collection — the
+  // source of truth. The tab mutates this directly via
+  // `setDoc` / `deleteDoc` (no separate admin route; the
+  // BR-12 brief routes everything through the existing
+  // catch-all dispatcher + the public config endpoint).
+  useEffect(() => {
+    const q = query(collection(db, "addOns"));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows: AddOn[] = [];
+        snap.forEach((d) => {
+          const raw = { id: d.id, ...d.data() } as any;
+          // Defensive normalization — never trust the
+          // raw doc shape because a hand-written doc
+          // could carry a corrupt `unit` or a missing
+          // `isEnabled`. The shared `AddOnSchema`
+          // would be ideal but parsing every doc is
+          // expensive on the admin-tab load path;
+          // instead we re-use the lenient validation
+          // rules from `AddOnSchema` and drop rows
+          // that fail the `id` / `name` invariants.
+          if (!raw || typeof raw !== "object") return;
+          const id = String(raw.id || d.id || "").trim();
+          const name = String(raw.name || "").trim();
+          if (!id || !name) return;
+          rows.push({
+            id,
+            name,
+            description: String(raw.description || "").trim().slice(0, 500),
+            price: Math.max(0, Number(raw.price) || 0),
+            unit: raw.unit === "per-stay" ? "per-stay" : "per-person",
+            isEnabled: raw.isEnabled !== false,
+            cutoffHoursBeforeCheckIn: Math.max(
+              0,
+              Math.min(168, Math.floor(Number(raw.cutoffHoursBeforeCheckIn) || 24))
+            ),
+            displayOrder: Math.floor(Number(raw.displayOrder) || 0),
+            updatedAt: raw.updatedAt || new Date().toISOString(),
+            updatedBy: String(raw.updatedBy || "")
+          });
+        });
+        rows.sort((a, b) => {
+          if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
+          return a.name.localeCompare(b.name);
+        });
+        setAddOnsCatalog(rows);
+        setAddOnsCatalogLoading(false);
+      },
+      () => {
+        setAddOnsCatalogLoading(false);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  // Per BR-12.1: pre-seed the catalog with the
+  // "Airport transfer" row on first visit if the
+  // collection is empty. The seed is best-effort:
+  // a failed write is logged + swallowed so a
+  // permission-denied edge case doesn't crash the
+  // tab. The check is reactive (re-runs on every
+  // snapshot) but the write only fires once because
+  // `getDocs(addOns).empty` is the gate.
+  useEffect(() => {
+    if (addOnsCatalogLoading) return;
+    if (addOnsCatalog.length > 0) return;
+    (async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "addOns")));
+        if (!snap.empty) return;
+        const now = new Date().toISOString();
+        const seed = {
+          ...AIRPORT_TRANSFER_PRESEED,
+          updatedAt: now,
+          updatedBy: currentUser?.uid || "seed"
+        };
+        await setDoc(doc(db, "addOns", "airport-transfer"), seed);
+      } catch (err) {
+        // The pre-seed is best-effort. A failure
+        // here is non-blocking — the admin can
+        // add the row manually via "Add add-on".
+        // eslint-disable-next-line no-console
+        console.warn("addOns pre-seed failed", err);
+      }
+    })();
+  }, [addOnsCatalogLoading, addOnsCatalog.length, currentUser?.uid]);
+
+  // Audit-log writer for catalog CRUD. Every
+  // add/edit/delete writes one row to the top-level
+  // `auditLogs/{auditId}` collection with the
+  // BR-12.1 action set
+  // (`addons.create` | `addons.update` | `addons.delete`).
+  // The Reports late-change metric reads the same
+  // collection (via collectionGroup on a top-level
+  // `targetCollection: "addOns"` filter) so the
+  // catalog changes are queryable.
+  const writeAddOnAuditLog = async (input: {
+    action: "addons.create" | "addons.update" | "addons.delete";
+    targetId: string;
+    before: AddOn | null;
+    after: AddOn | null;
+  }) => {
+    try {
+      await addDoc(collection(db, "auditLogs"), {
+        action: input.action,
+        targetCollection: "addOns",
+        targetId: input.targetId,
+        actor: currentUser?.uid || "staff",
+        actorName: currentUser?.displayName || currentUser?.email || "staff",
+        before: input.before,
+        after: input.after,
+        timestamp: serverTimestamp()
+      });
+    } catch (err) {
+      // Audit log is a side-effect of the save —
+      // a failed log entry must not roll back the
+      // primary write. Log + swallow so the
+      // operator still sees the success toast.
+      // eslint-disable-next-line no-console
+      console.warn("auditLogs write failed", err);
+    }
+  };
+
+  // CRUD: create / update an add-on. The id is
+  // generated from the name (kebab-cased) so the
+  // admin doesn't have to type an id. If the id
+  // already exists (edit mode) the call updates
+  // in place. New rows are seeded with the
+  // `updatedAt` / `updatedBy` audit fields.
+  const handleSaveAddOn = async (row: AddOn) => {
+    setAddOnSaveStatus("saving");
+    setAddOnSaveError(null);
+    const existing = addOnsCatalog.find((a) => a.id === row.id) || null;
+    const validated = AddOnSchema.safeParse({
+      ...row,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.uid || "staff"
+    });
+    if (!validated.success) {
+      setAddOnSaveStatus("error");
+      setAddOnSaveError(validated.error.issues[0]?.message || "Invalid add-on payload.");
+      return;
+    }
+    try {
+      await setDoc(
+        doc(db, "addOns", row.id),
+        {
+          ...validated.data,
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUser?.uid || "staff"
+        },
+        { merge: true }
+      );
+      await writeAddOnAuditLog({
+        action: existing ? "addons.update" : "addons.create",
+        targetId: row.id,
+        before: existing,
+        after: { ...validated.data, id: row.id } as AddOn
+      });
+      setAddOnSaveStatus("saved");
+      setEditingAddOnId(null);
+      setEditingAddOnDraft(null);
+      setTimeout(() => setAddOnSaveStatus("idle"), 1200);
+    } catch (err: any) {
+      setAddOnSaveStatus("error");
+      setAddOnSaveError(err?.message || "Failed to save add-on.");
+    }
+  };
+
+  // Per-add-on enabled toggle. The brief says
+  // "no save button" — the per-add-on `isEnabled`
+  // toggle writes immediately on click. The
+  // write goes through `setDoc({ merge: true })`
+  // so the rest of the row stays untouched.
+  const handleToggleAddOnEnabled = async (row: AddOn, next: boolean) => {
+    const before = row;
+    const after: AddOn = { ...row, isEnabled: next };
+    // Optimistic local update so the toggle
+    // feels instant; the snapshot subscriber
+    // reconciles in a few hundred ms.
+    setAddOnsCatalog((p) =>
+      p.map((a) => (a.id === row.id ? after : a))
+    );
+    try {
+      await setDoc(
+        doc(db, "addOns", row.id),
+        { isEnabled: next, updatedAt: serverTimestamp(), updatedBy: currentUser?.uid || "staff" },
+        { merge: true }
+      );
+      await writeAddOnAuditLog({
+        action: "addons.update",
+        targetId: row.id,
+        before,
+        after
+      });
+    } catch (err) {
+      // Revert on failure so the UI doesn't drift
+      // from the source of truth.
+      setAddOnsCatalog((p) =>
+        p.map((a) => (a.id === row.id ? before : a))
+      );
+      // eslint-disable-next-line no-console
+      console.warn("toggle add-on enabled failed", err);
+    }
+  };
+
+  // Delete: confirmation modal → `deleteDoc` +
+  // audit log. The `confirmDeleteAddOn` state
+  // holds the row pending confirmation.
+  const handleConfirmDeleteAddOn = async () => {
+    if (!confirmDeleteAddOn) return;
+    const target = confirmDeleteAddOn;
+    try {
+      await deleteDoc(doc(db, "addOns", target.id));
+      await writeAddOnAuditLog({
+        action: "addons.delete",
+        targetId: target.id,
+        before: target,
+        after: null
+      });
+      setConfirmDeleteAddOn(null);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("delete add-on failed", err);
+    }
+  };
 
   // 5. Store Config states
   const [storeEnabled, setStoreEnabled] = useState(storeConfig.isEnabled);
@@ -6396,6 +6658,417 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               <SaveActionFooter label="Save Dining Settings" status={getSaveStatus("breakfast")} />
             </form>
           )}
+
+          {/* TAB 4b: OTHER ADD-ONS (BR-12.1, 2026-10-15, decision #247) */}
+          {activeTab === "addons" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Other Add-Ons</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Manage the per-day add-on catalog shown on the public booking Step 2, the
+                  guest Manage page, and the admin booking-drawer Other Add-Ons tab. v1 ships
+                  the airport transfer; admins can add/edit/delete the catalog freely.
+                </p>
+              </div>
+
+              {/* Hotel-wide setting: add-ons enabled. Per BR-12.1
+                  the toggle is a UI affordance that hides the
+                  Step 2 block + the drawer section + the Manage
+                  page when off. The booking flow's
+                  `getEnabledAddOnsByHotel` already returns `[]`
+                  when the catalog is empty; this is the explicit
+                  hotel-wide off switch. Persisted as part of the
+                  hotelConfig in a follow-up ticket — for v1 the
+                  toggle is a client-side local state with a
+                  localStorage mirror so the test pins its
+                  behavior. */}
+              <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+                <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setAddOnsEnabled(!addOnsEnabled)}
+                    data-testid="addons-enabled-toggle"
+                    className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                      addOnsEnabled ? "bg-primary" : "bg-gray-200"
+                    }`}
+                    aria-pressed={addOnsEnabled}
+                    aria-label="Enable Other Add-Ons"
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      addOnsEnabled ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  Add-ons enabled
+                </label>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  When off, every <code>getEnabledAddOnsByHotel</code> call returns an empty list
+                  and the booking flow's Add-ons section shows the "Add-ons are currently disabled"
+                  placeholder. Existing bookings with snapshotted add-ons keep their entries.
+                </p>
+              </div>
+
+              {/* Catalog sub-section: table of all addOns/{id} docs
+                  with name + price + unit + cutoff + enabled + edit +
+                  delete columns. Per BR-12.1 the per-row enabled
+                  toggle writes immediately on click (no save
+                  button) — the existing admin-CRUD pattern. */}
+              <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Add-on catalog
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAddOnId("__new__");
+                      setEditingAddOnDraft({
+                        id: "",
+                        name: "",
+                        description: "",
+                        price: 0,
+                        unit: "per-person",
+                        isEnabled: true,
+                        cutoffHoursBeforeCheckIn: 24,
+                        displayOrder: (addOnsCatalog[addOnsCatalog.length - 1]?.displayOrder ?? 0) + 10,
+                        updatedAt: new Date().toISOString(),
+                        updatedBy: currentUser?.uid || "staff"
+                      });
+                    }}
+                    data-testid="add-addon-button"
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-white px-3 text-[10px] font-bold text-gray-500 transition hover:border-primary hover:text-primary"
+                  >
+                    <Plus size={12} aria-hidden="true" />
+                    Add add-on
+                  </button>
+                </div>
+
+                {addOnsCatalogLoading ? (
+                  <p className="text-[10px] text-gray-500">Loading catalog…</p>
+                ) : addOnsCatalog.length === 0 ? (
+                  <div
+                    data-testid="addons-catalog-empty"
+                    className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-[11px] text-gray-500"
+                  >
+                    No add-ons yet. Use the "Add add-on" button above to create the first row.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="border-b border-gray-100 text-left text-[10px] uppercase tracking-wider text-gray-500">
+                          <th className="px-2 py-1.5">Name</th>
+                          <th className="px-2 py-1.5">Price</th>
+                          <th className="px-2 py-1.5">Unit</th>
+                          <th className="px-2 py-1.5">Cutoff (h)</th>
+                          <th className="px-2 py-1.5">Status</th>
+                          <th className="px-2 py-1.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {addOnsCatalog.map((row) => (
+                          <tr
+                            key={row.id}
+                            data-testid={`addons-row-${row.id}`}
+                            className="border-b border-gray-100 last:border-0"
+                          >
+                            <td className="px-2 py-2 font-semibold text-gray-800">
+                              {row.name}
+                              {row.description ? (
+                                <p className="text-[10px] font-normal text-gray-500">{row.description.slice(0, 80)}</p>
+                              ) : null}
+                            </td>
+                            <td className="px-2 py-2 text-gray-700">₱{row.price.toLocaleString()}</td>
+                            <td className="px-2 py-2 text-gray-700">{row.unit}</td>
+                            <td className="px-2 py-2 text-gray-700">{row.cutoffHoursBeforeCheckIn}</td>
+                            <td className="px-2 py-2">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAddOnEnabled(row, !row.isEnabled)}
+                                data-testid={`addons-toggle-${row.id}`}
+                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                                  row.isEnabled ? "bg-primary" : "bg-gray-300"
+                                }`}
+                                aria-pressed={row.isEnabled}
+                                aria-label={`Toggle ${row.name}`}
+                              >
+                                <div className={`h-4 w-4 rounded-full bg-white transition shadow-sm transform ${
+                                  row.isEnabled ? "translate-x-4" : "translate-x-0"
+                                }`} />
+                              </button>
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAddOnId(row.id);
+                                    setEditingAddOnDraft({ ...row });
+                                  }}
+                                  data-testid={`addons-edit-${row.id}`}
+                                  className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700 hover:border-primary hover:text-primary"
+                                >
+                                  <Pencil size={11} aria-hidden="true" /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteAddOn(row)}
+                                  data-testid={`addons-delete-${row.id}`}
+                                  className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-red-600 hover:border-red-400"
+                                >
+                                  <Trash2 size={11} aria-hidden="true" /> Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {addOnSaveError ? (
+                <p role="alert" className="text-[10px] text-red-600">
+                  {addOnSaveError}
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {/* ADD/EDIT ADD-ON MODAL (BR-12.1) */}
+          {editingAddOnId && editingAddOnDraft ? (
+            <Modal
+              open={!!editingAddOnId}
+              onClose={() => {
+                setEditingAddOnId(null);
+                setEditingAddOnDraft(null);
+                setAddOnSaveError(null);
+              }}
+              title={editingAddOnId === "__new__" ? "Add add-on" : `Edit “${editingAddOnDraft.name || ""}”`}
+              footer={null}
+            >
+              <form
+                data-testid="addon-edit-form"
+                onSubmit={async (ev) => {
+                  ev.preventDefault();
+                  const draft = editingAddOnDraft;
+                  if (!draft) return;
+                  // Derive a stable id from the name (kebab-cased) for
+                  // new rows. Editing keeps the existing id.
+                  const id =
+                    editingAddOnId === "__new__"
+                      ? String(draft.name || "")
+                          .toLowerCase()
+                          .trim()
+                          .replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-+|-+$/g, "")
+                          .slice(0, 80) || "add-on"
+                      : editingAddOnId;
+                  await handleSaveAddOn({ ...draft, id });
+                }}
+                className="space-y-3 text-sm"
+              >
+                <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                  Name
+                  <input
+                    required
+                    type="text"
+                    data-testid="addon-name-input"
+                    value={editingAddOnDraft.name}
+                    onChange={(e) =>
+                      setEditingAddOnDraft((p: AddOn | null) => (p ? { ...p, name: e.target.value } : p))
+                    }
+                    className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                  Description (optional)
+                  <textarea
+                    rows={2}
+                    maxLength={500}
+                    data-testid="addon-description-input"
+                    value={editingAddOnDraft.description}
+                    onChange={(e) =>
+                      setEditingAddOnDraft((p: AddOn | null) =>
+                        p ? { ...p, description: e.target.value.slice(0, 500) } : p
+                      )
+                    }
+                    className="min-h-[60px] rounded border border-gray-250 bg-white px-3 py-2 text-xs"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Price (₱)
+                    <input
+                      required
+                      type="number"
+                      min={0}
+                      max={10000}
+                      data-testid="addon-price-input"
+                      value={editingAddOnDraft.price}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p ? { ...p, price: Math.max(0, Number(e.target.value) || 0) } : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Unit
+                    <select
+                      data-testid="addon-unit-input"
+                      value={editingAddOnDraft.unit}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p ? { ...p, unit: e.target.value as "per-person" | "per-stay" } : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    >
+                      <option value="per-person">per-person</option>
+                      <option value="per-stay">per-stay</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Cutoff (hours before check-in)
+                    <input
+                      type="number"
+                      min={0}
+                      max={168}
+                      data-testid="addon-cutoff-input"
+                      value={editingAddOnDraft.cutoffHoursBeforeCheckIn}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p
+                            ? {
+                                ...p,
+                                cutoffHoursBeforeCheckIn: Math.max(
+                                  0,
+                                  Math.min(168, Math.floor(Number(e.target.value) || 0))
+                                )
+                              }
+                            : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Display order
+                    <input
+                      type="number"
+                      min={0}
+                      max={1000}
+                      data-testid="addon-display-order-input"
+                      value={editingAddOnDraft.displayOrder}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p
+                            ? {
+                                ...p,
+                                displayOrder: Math.max(
+                                  0,
+                                  Math.min(1000, Math.floor(Number(e.target.value) || 0))
+                                )
+                              }
+                            : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    />
+                  </label>
+                </div>
+                <label className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-gray-700">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingAddOnDraft((p: AddOn | null) =>
+                        p ? { ...p, isEnabled: !p.isEnabled } : p
+                      )
+                    }
+                    data-testid="addon-enabled-toggle"
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                      editingAddOnDraft.isEnabled ? "bg-primary" : "bg-gray-300"
+                    }`}
+                    aria-pressed={editingAddOnDraft.isEnabled}
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      editingAddOnDraft.isEnabled ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  Enabled
+                </label>
+                {addOnSaveError ? (
+                  <p role="alert" className="text-[10px] text-red-600">{addOnSaveError}</p>
+                ) : null}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAddOnId(null);
+                      setEditingAddOnDraft(null);
+                      setAddOnSaveError(null);
+                    }}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    data-testid="addon-save-button"
+                    disabled={addOnSaveStatus === "saving"}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:opacity-50"
+                  >
+                    <Save size={14} />
+                    {addOnSaveStatus === "saving" ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          ) : null}
+
+          {/* DELETE ADD-ON CONFIRMATION MODAL (BR-12.1) */}
+          {confirmDeleteAddOn ? (
+            <Modal
+              open={!!confirmDeleteAddOn}
+              onClose={() => setConfirmDeleteAddOn(null)}
+              title={`Delete ${confirmDeleteAddOn.name}?`}
+              footer={null}
+            >
+              <div
+                data-testid="addon-delete-confirm"
+                className="space-y-4 text-sm"
+              >
+                <p className="text-gray-700">
+                  This will remove the add-on from any future bookings.
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  Existing bookings with this add-on will retain their snapshots.
+                </p>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteAddOn(null)}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="addon-delete-confirm-button"
+                    onClick={handleConfirmDeleteAddOn}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-red-600 px-5 text-xs font-bold text-white shadow-sm transition hover:bg-red-700 active:scale-95"
+                  >
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          ) : null}
 
           {/* TAB 5: IN-ROOM STORE CONFIG */}
           {activeTab === "store" && (

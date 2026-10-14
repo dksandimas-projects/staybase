@@ -19,6 +19,12 @@ import {
 // booking-entry surface for the rich `breakfastSelections`
 // shape — identical between both modals.
 import { WalkinBreakfastGrid, type WalkinBreakfastSelections } from "../components/breakfast/WalkinBreakfastGrid";
+// Per BR-12.1 (2026-10-15, decision #247): the
+// calendar-create modal's parallel "Other add-ons"
+// grid. Mirrors the walk-in modal's mount in
+// `BookingsPage.tsx` — both share the same Step 2
+// "Add-ons" step from the BR-09 step-flow refactor.
+import { WalkinOtherAddOnGrid, type WalkinOtherAddOnSelections } from "../components/otherAddOns/WalkinOtherAddOnGrid";
 import { collection, doc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
@@ -196,6 +202,13 @@ export function CalendarPage() {
   // create call via `addWalkinBooking`.
   const [calendarBreakfast, setCalendarBreakfast] = useState<WalkinBreakfastSelections | null>(null);
   const [calendarBreakfastOverrideReason, setCalendarBreakfastOverrideReason] = useState("");
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // calendar-create modal's other-add-ons state.
+  // Mirrors the walk-in modal's `walkinOtherAddOns`
+  // exactly — the same component (`<WalkinOtherAddOnGrid>`)
+  // feeds the rich `otherAddOnSelections` + `otherAddOnTotal`
+  // + `hasAnyOtherAddOns` to the create call.
+  const [calendarOtherAddOns, setCalendarOtherAddOns] = useState<WalkinOtherAddOnSelections | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("pay-at-hotel");
   // Per feat/staff-special-requests-capture (2026-08-21):
   // the calendar-create modal captures requests at booking
@@ -562,6 +575,20 @@ export function CalendarPage() {
         breakfastSelections: calendarBreakfast.breakfastSelections,
         breakfastTotal: calendarBreakfast.breakfastTotal
       } : {}),
+      // Per BR-12.1 (2026-10-15, decision #247): the
+      // calendar-create modal's other-add-ons grid feeds
+      // the rich `otherAddOnSelections` + `otherAddOnTotal`
+      // + `hasAnyOtherAddOns` through to the create call.
+      // When the desk hasn't picked any add-ons (or the
+      // catalog is empty / disabled), the spread is omitted
+      // so the doc carries no empty keys.
+      ...(calendarOtherAddOns && calendarOtherAddOns.hasAnyOtherAddOns
+        ? {
+          otherAddOnSelections: calendarOtherAddOns.otherAddOnSelections,
+          otherAddOnTotal: calendarOtherAddOns.otherAddOnTotal,
+          hasAnyOtherAddOns: true
+        }
+        : {}),
       reminderSentAt: null,
       guestIdPhotoUrl: null,
       handledBy: "",
@@ -591,6 +618,9 @@ export function CalendarPage() {
     // a useState — the reset clears the rich shape).
     setCalendarBreakfast(null);
     setCalendarBreakfastOverrideReason("");
+    // Per BR-12.1: clear the other-add-ons state alongside
+    // breakfast so a fresh modal open starts clean.
+    setCalendarOtherAddOns(null);
     // Per feat/staff-special-requests-capture (2026-08-21):
     // reset the staff-captured special request alongside the
     // other fields so the next modal open starts clean.
@@ -998,6 +1028,21 @@ export function CalendarPage() {
               onOverrideReasonChange={setCalendarBreakfastOverrideReason}
               onChange={setCalendarBreakfast}
               timezone={config.timezone}
+            />
+          ) : null}
+          {/* Per BR-12.1 (2026-10-15, decision #247):
+              the calendar-create modal's parallel other
+              add-ons grid. Renders below the breakfast grid
+              when the modal is on Step 2. When the catalog
+              is empty / disabled the grid renders the
+              "Add-ons are currently disabled" placeholder. */}
+          {calendarStep === 2 && selection ? (
+            <WalkinOtherAddOnGrid
+              checkIn={selection.startDate}
+              checkOut={selection.endDate}
+              numGuests={numAdults + numChildren}
+              staffUid=""
+              onChange={setCalendarOtherAddOns}
             />
           ) : null}
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm">

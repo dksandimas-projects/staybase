@@ -58,6 +58,12 @@ import { StatusBadge } from "../components/StatusBadge";
 // + the calendar-create modal's breakfast section —
 // identical per-date × per-guest grid in both spots.
 import { WalkinBreakfastGrid, type WalkinBreakfastSelections } from "../components/breakfast/WalkinBreakfastGrid";
+// Per BR-12.1 (2026-10-15, decision #247): the
+// per-day × per-add-on grid for other add-ons (airport
+// transfer + future seaport transfer). Mirrors
+// `WalkinBreakfastGrid` for breakfast — see Surface 3
+// in the BR-12.1 ticket.
+import { WalkinOtherAddOnGrid, type WalkinOtherAddOnSelections } from "../components/otherAddOns/WalkinOtherAddOnGrid";
 // Per BR-05: the new Breakfast tab inside the booking
 // drawer. Imported here so the booking drawer can
 // render the tab alongside the existing overview /
@@ -1340,6 +1346,15 @@ export function BookingsPage() {
   // bypasses the cutoff window.
   const [walkinBreakfast, setWalkinBreakfast] = useState<WalkinBreakfastSelections | null>(null);
   const [walkinBreakfastOverrideReason, setWalkinBreakfastOverrideReason] = useState("");
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // walk-in modal Step 2's other-add-ons grid state.
+  // The grid (`<WalkinOtherAddOnGrid>`) feeds back the
+  // rich `otherAddOnSelections` map + denormalized
+  // `otherAddOnTotal` + `hasAnyOtherAddOns` flag — the
+  // create call writes them straight onto the booking
+  // doc. No override flow: write-time modals allow any
+  // edit (the front desk can always pick a locked date).
+  const [walkinOtherAddOns, setWalkinOtherAddOns] = useState<WalkinOtherAddOnSelections | null>(null);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
   const [priceOverride, setPriceOverride] = useState("");
   const [walkinDiscountType, setWalkinDiscountType] = useState<"" | "senior" | "pwd">("");
@@ -4643,6 +4658,21 @@ export function BookingsPage() {
             breakfastTotal: walkinBreakfast.breakfastTotal
           }
           : {}),
+        // Per BR-12.1 (2026-10-15, decision #247): the
+        // walk-in modal Step 2's other-add-ons grid feeds
+        // the rich `otherAddOnSelections` map +
+        // `otherAddOnTotal` + `hasAnyOtherAddOns` flag
+        // through to the create call. When the desk hasn't
+        // picked any add-ons (or the catalog is empty /
+        // disabled), the spread is omitted so the doc
+        // carries no empty keys.
+        ...(walkinOtherAddOns && walkinOtherAddOns.hasAnyOtherAddOns
+          ? {
+            otherAddOnSelections: walkinOtherAddOns.otherAddOnSelections,
+            otherAddOnTotal: walkinOtherAddOns.otherAddOnTotal,
+            hasAnyOtherAddOns: true
+          }
+          : {}),
         guestIdPhotoUrl: null,
         handledBy: currentUser?.uid || "staff",
         cancellationReason: "",
@@ -4660,6 +4690,10 @@ export function BookingsPage() {
         // retired with the close-out).
         setWalkinBreakfast(null);
         setWalkinBreakfastOverrideReason("");
+        // Per BR-12.1: clear the other-add-ons state
+        // alongside breakfast so a fresh modal open
+        // starts clean.
+        setWalkinOtherAddOns(null);
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
         setWalkinSpecialRequests("");
@@ -7997,6 +8031,23 @@ export function BookingsPage() {
                 onOverrideReasonChange={setWalkinBreakfastOverrideReason}
                 onChange={setWalkinBreakfast}
                 timezone={config.timezone}
+              />
+
+              {/* Per BR-12.1 (2026-10-15, decision #247):
+                  the parallel "Other add-ons" grid for the
+                  walk-in modal Step 2. Renders below the
+                  breakfast grid; both share the Step 2
+                  "Add-ons" step. The grid feeds the rich
+                  `otherAddOnSelections` + `otherAddOnTotal` +
+                  `hasAnyOtherAddOns` to the create call —
+                  when null/empty the create call omits the
+                  fields so the booking stays slim. */}
+              <WalkinOtherAddOnGrid
+                checkIn={checkInDate}
+                checkOut={checkOutDate}
+                numGuests={numGuests}
+                staffUid={currentUser?.uid || "staff"}
+                onChange={setWalkinOtherAddOns}
               />
 
               <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">

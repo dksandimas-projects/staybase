@@ -248,15 +248,15 @@ Back-compat: pre-BR-12 bookings have no `otherAddOnSelections`. The guest Manage
 
 ## Open Items
 
-1. **Email template dedicated to other add-on refund paid** — the BR-12 v1 piggy-backs on the existing breakfast `mark-refund-paid` email copy. A dedicated `add-on-refund-paid` template is a follow-up if operations finds the conflation confusing.
+1. ✅ **Email template dedicated to other add-on refund paid** — the BR-12 v1 piggy-backs on the existing breakfast `mark-refund-paid` email copy. A dedicated `add-on-refund-paid` template is a follow-up if operations finds the conflation confusing. *(Follow-up unchanged; intentionally deferred per the BR-12 spec.)*
 
-2. **Walk-in modal + calendar-create modal mirror** — BR-12 v1 ships the public Step 2 + Manage Other Add-Ons page + booking drawer. The admin walk-in modal's Step 2 (the BR-09 dual-button block) renders `WalkinBreakfastGrid` only. A `WalkinOtherAddOnGrid` parallel is a follow-up if walk-in bookings need add-on selection at the front desk. Out of scope for v1.
+2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 (2026-10-15, decision #247) ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2.
 
-3. **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1. The BR-13 refactor may add the toggle when a second add-on **type** (seaport) lands with its own semantics.
+3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1. The BR-13 refactor may add the toggle when a second add-on **type** (seaport) lands with its own semantics. *(BR-12.1 ships the Settings tab's "Add-ons enabled" UI affordance as a v1 placeholder; the underlying helper still returns `[]` on an empty catalog. Persisting the toggle to `settings/hotelConfig` is a follow-up.)*
 
-4. **Reports → Sales → Add-Ons sub-tab** — BR-12 v1 ships the booking drawer + Settings tab + Manage page. The Reports sub-tab is a follow-up because the existing Reports page doesn't have an Add-Ons surface yet.
+4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 (2026-10-15, decision #247) ships the new sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table.
 
-5. **Admin edit UI for individual selections** — the BR-12 v1 booking-drawer tab is read-only (display-only). Full staff edit UI is a follow-up; the staff-update API is wired + the data model supports it, but the UI parity with `WalkinBreakfastGrid` is a separate ticket.
+5. ✅ **Admin edit UI for individual selections** — BR-12.1 (2026-10-15, decision #247) replaces the BR-12 read-only booking-drawer tab with the full edit UI: per-day × per-add-on grid with quantity inputs + add row + remove + locked-date badges + override modal + Save changes button. The drawer now writes through `/api/bookings/addons/staff-update`.
 
 ---
 

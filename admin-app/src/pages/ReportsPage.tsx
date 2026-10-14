@@ -38,7 +38,7 @@ import { useToast } from "../components/Toast";
 import { LiabilityTab } from "../components/LiabilityTab";
 
 type ReportTab = "performance" | "sales" | "daily-close" | "liability";
-type SalesSubTab = "bookings" | "breakfast" | "store" | "charges";
+type SalesSubTab = "bookings" | "breakfast" | "addons" | "store" | "charges";
 
 interface ReportCharge {
   id: string;
@@ -407,6 +407,21 @@ export function ReportsPage() {
         ) {
           pendingBreakfastRefundTotal += Math.abs(Number(data.amount) || 0);
         }
+        // Per BR-12.1 (2026-10-15, decision #247): the
+        // Reports → Add-Ons sub-tab's "pending refund
+        // liability total" — same refunds collectionGroup
+        // the breakfast metric uses, filtered for
+        // `category: "otherAddOn"`. The unified
+        // `markRefundPaid` helper stamps this category
+        // when a staff-edit removes a paid add-on.
+        if (
+          String(data.category || "") === "otherAddOn" &&
+          String(data.status || "pending") === "pending"
+        ) {
+          // We re-use the same callback to also bump the
+          // add-ons pending total — done below to keep
+          // the single-pass iteration.
+        }
         const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
         const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
         const bookingId = isReservationRefund
@@ -432,6 +447,23 @@ export function ReportsPage() {
         };
       });
       setBreakfastPendingRefundTotal(pendingBreakfastRefundTotal);
+      // Per BR-12.1 (2026-10-15, decision #247): the
+      // Reports → Add-Ons sub-tab's "pending refund
+      // liability total" — same single-pass iteration
+      // as the breakfast pending-refund total above.
+      // Counts any `category: "otherAddOn"` refund row
+      // with `status: "pending"`.
+      let pendingOtherAddOnRefundTotal = 0;
+      snapshot.docs.forEach((refundDoc) => {
+        const data = refundDoc.data() as { category?: unknown; status?: unknown; amount?: unknown };
+        if (
+          String(data.category || "") === "otherAddOn" &&
+          String(data.status || "pending") === "pending"
+        ) {
+          pendingOtherAddOnRefundTotal += Math.abs(Number(data.amount) || 0);
+        }
+      });
+      setOtherAddOnPendingRefundTotal(pendingOtherAddOnRefundTotal);
     }, (error) => {
       console.error("Failed to load refund ledger:", error);
       toast.error("Could not load refunds", "Collections totals remain available. Refresh to try again.");
@@ -448,6 +480,19 @@ export function ReportsPage() {
   // with `occurredAfterCutoff: true` — a single counter
   // surfaced in the Reports workspace.
   const [breakfastLateChangeCount, setBreakfastLateChangeCount] = useState(0);
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Sales → Add-Ons sub-tab's "late-change
+  // count" metric. Mirrors the breakfast listener
+  // (`bookings/*/breakfastAudit/*` with
+  // `occurredAfterCutoff: true`) but queries the
+  // BR-12 `bookings/*/otherAddOnAudit/*` subcollection
+  // for the same fields.
+  const [otherAddOnLateChangeCount, setOtherAddOnLateChangeCount] = useState(0);
+  // Per BR-12.1: the Reports → Add-Ons sub-tab's
+  // "pending refund liability total" metric. Mirrors
+  // the breakfast pending-refund sum but filters for
+  // `category: "otherAddOn"`.
+  const [otherAddOnPendingRefundTotal, setOtherAddOnPendingRefundTotal] = useState(0);
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "breakfastAudit"), (snapshot) => {
       let count = 0;
@@ -458,6 +503,29 @@ export function ReportsPage() {
       setBreakfastLateChangeCount(count);
     }, (error) => {
       console.error("Failed to load breakfast audit ledger:", error);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Add-Ons sub-tab's "late-change count"
+  // metric. Subscribes to the BR-12
+  // `bookings/*/otherAddOnAudit/*` subcollection +
+  // filters for `occurredAfterCutoff: true` — same
+  // shape as the breakfast listener above. The
+  // metric is the per-booking sum across the entire
+  // audit log (no date-range filter here; the
+  // date range lives on the parent Reports page).
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "otherAddOnAudit"), (snapshot) => {
+      let count = 0;
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data() as { occurredAfterCutoff?: unknown };
+        if (data.occurredAfterCutoff === true) count += 1;
+      });
+      setOtherAddOnLateChangeCount(count);
+    }, (error) => {
+      console.error("Failed to load other-add-on audit ledger:", error);
     });
     return unsubscribe;
   }, []);
@@ -761,6 +829,18 @@ export function ReportsPage() {
 
   const breakfastBookingsInRange = useMemo(
     () => rangeBookings.filter(b => (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0)),
+    [rangeBookings]
+  );
+
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Sales → Add-Ons sub-tab's input bookings
+  // — every booking with any live `otherAddOnSelections`
+  // entry in the date range. The filter mirrors the
+  // `breakfastBookingsInRange` shape (date-range-bounded
+  // by the parent `rangeBookings` memo) but reads
+  // `hasAnyOtherAddOns === true` as the signal.
+  const otherAddOnsBookingsInRange = useMemo(
+    () => rangeBookings.filter((b: any) => b.hasAnyOtherAddOns === true),
     [rangeBookings]
   );
 
@@ -1468,6 +1548,52 @@ export function ReportsPage() {
   }, [breakfastBookingsInRange]);
   const breakfastLateChangeCountValue = breakfastLateChangeCount;
   const breakfastPendingRefundTotalValue = breakfastPendingRefundTotal;
+
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Add-Ons sub-tab's 5 metrics. Mirrors
+  // the breakfast metric shape exactly:
+  //   1. total selections (count of live
+  //      `OtherAddOnSelectionEntry` rows across all
+  //      `bookings/*/otherAddOnSelections/*`)
+  //   2. total revenue (sum of `b.otherAddOnTotal`)
+  //   3. top add-ons (top-5 by revenue, name + count)
+  //   4. late-change count (audit entries with
+  //      `occurredAfterCutoff: true` from
+  //      `bookings/*/otherAddOnAudit/*`)
+  //   5. pending refund liability total (from
+  //      `bookings/*/refunds/*` with
+  //      `category: "otherAddOn"` + `status: "pending"`)
+  const otherAddOnsMetrics = useMemo(() => {
+    let totalSelections = 0;
+    let totalRevenue = 0;
+    const addOnCounts = new Map<string, { name: string; count: number; revenue: number }>();
+    for (const booking of otherAddOnsBookingsInRange) {
+      const selections = (booking as any).otherAddOnSelections || {};
+      const dates = Object.values(selections) as Array<Array<any>>;
+      for (const list of dates) {
+        for (const entry of list) {
+          if (!entry || entry.removedAt != null) continue;
+          totalSelections += 1;
+          const addOnId = String(entry.addOnId || "unknown");
+          const name = String(entry.nameSnapshot || addOnId);
+          const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+          const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+          const row = addOnCounts.get(addOnId) || { name, count: 0, revenue: 0 };
+          row.count += qty;
+          row.revenue += price * qty;
+          addOnCounts.set(addOnId, row);
+        }
+      }
+      totalRevenue += Number((booking as any).otherAddOnTotal) || 0;
+    }
+    const topAddOns = Array.from(addOnCounts.entries())
+      .map(([addOnId, data]) => ({ addOnId, ...data }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+    return { totalSelections, totalRevenue, topAddOns };
+  }, [otherAddOnsBookingsInRange]);
+  const otherAddOnLateChangeCountValue = otherAddOnLateChangeCount;
+  const otherAddOnPendingRefundTotalValue = otherAddOnPendingRefundTotal;
 
   const filteredStoreOrders = useMemo(() =>
     rangeStoreOrders.filter(o =>
@@ -2601,6 +2727,12 @@ export function ReportsPage() {
           filteredStoreOrders={filteredStoreOrders}
           filteredCharges={filteredCharges}
           breakfastBookingsInRange={breakfastBookingsInRange}
+          // Per BR-12.1 (2026-10-15, decision #247):
+          // the new Sales → Add-Ons sub-tab props.
+          otherAddOnsBookingsInRange={otherAddOnsBookingsInRange}
+          otherAddOnsMetrics={otherAddOnsMetrics}
+          otherAddOnLateChangeCountValue={otherAddOnLateChangeCountValue}
+          otherAddOnPendingRefundTotalValue={otherAddOnPendingRefundTotalValue}
           toDate={toDate}
           chartColors={chartColors}
           isMobile={isMobile}
@@ -3007,6 +3139,20 @@ function SalesTab(props: {
   filteredStoreOrders: Array<any>;
   filteredCharges: ReportCharge[];
   breakfastBookingsInRange: Array<any>;
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Sales → Add-Ons sub-tab's input bookings + the
+  // pre-computed 5-metric block + the two audit
+  // / refund counters. Passed in as props so the
+  // metric cards stay in the same scope as the
+  // Sales sub-tab render.
+  otherAddOnsBookingsInRange: Array<any>;
+  otherAddOnsMetrics: {
+    totalSelections: number;
+    totalRevenue: number;
+    topAddOns: Array<{ addOnId: string; name: string; count: number; revenue: number }>;
+  };
+  otherAddOnLateChangeCountValue: number;
+  otherAddOnPendingRefundTotalValue: number;
   toDate: (v: any) => Date | null;
   chartColors: string[];
   isMobile: boolean;
@@ -3057,6 +3203,7 @@ function SalesTab(props: {
     deliveredStoreOrders, breakfastConfig, dailyKitchenPrep,
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
+    otherAddOnsBookingsInRange, otherAddOnsMetrics, otherAddOnLateChangeCountValue, otherAddOnPendingRefundTotalValue,
     toDate, chartColors, isMobile,
     discountsSummary, vatSummary, loyaltyLiability,
     rewardsConfig,
@@ -3650,19 +3797,20 @@ function SalesTab(props: {
           />
         </div>
 
-        <div role="tablist" className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 sm:grid-cols-4 sm:max-w-2xl">
-          {(["bookings", "breakfast", "store", "charges"] as const).map(tab => (
+        <div role="tablist" className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 sm:grid-cols-5 sm:max-w-3xl">
+          {(["bookings", "breakfast", "addons", "store", "charges"] as const).map(tab => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={salesSubTab === tab}
               onClick={() => setSalesSubTab(tab)}
+              data-testid={`sales-subtab-${tab}`}
               className={`min-h-[36px] rounded-md text-[10px] font-bold uppercase tracking-wider transition ${
                 salesSubTab === tab ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
               }`}
             >
-              {tab === "bookings" ? "Bookings" : tab === "breakfast" ? "Breakfast" : tab === "store" ? "Store Orders" : "Incidentals"}
+              {tab === "bookings" ? "Bookings" : tab === "breakfast" ? "Breakfast" : tab === "addons" ? "Add-Ons" : tab === "store" ? "Store Orders" : "Incidentals"}
             </button>
           ))}
         </div>
@@ -3673,6 +3821,95 @@ function SalesTab(props: {
 
         {salesSubTab === "breakfast" && (
           <SalesBreakfastTable bookings={filteredBreakfastBookings} toDate={toDate} isMobile={isMobile} />
+        )}
+
+        {/* Per BR-12.1 (2026-10-15, decision #247): the
+            Reports → Sales → Add-Ons sub-tab. Renders
+            the 5 BR-12.1 metrics (total selections,
+            total revenue, top add-ons, late-change
+            count, pending refund liability) as metric
+            cards + a simple bar chart, then the
+            per-booking detail list below. Mirrors the
+            Sales → Breakfast sub-tab's shape exactly. */}
+        {salesSubTab === "addons" && (
+          <div className="space-y-4" data-testid="sales-addons-subtab">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+              <div data-testid="addons-metric-total-selections" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total selections</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">
+                  {otherAddOnsMetrics.totalSelections.toLocaleString()}
+                </p>
+              </div>
+              <div data-testid="addons-metric-total-revenue" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total revenue</p>
+                <p className="mt-1 text-2xl font-bold text-primary-dark">
+                  {formatPrice(otherAddOnsMetrics.totalRevenue)}
+                </p>
+              </div>
+              <div data-testid="addons-metric-late-change" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Late-change count</p>
+                <p className="mt-1 text-2xl font-bold text-amber-700">
+                  {otherAddOnLateChangeCountValue.toLocaleString()}
+                </p>
+              </div>
+              <div data-testid="addons-metric-pending-refund" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Pending refund liability</p>
+                <p className="mt-1 text-2xl font-bold text-amber-700">
+                  {formatPrice(otherAddOnPendingRefundTotalValue)}
+                </p>
+              </div>
+              <div data-testid="addons-metric-booking-count" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Bookings with add-ons</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">
+                  {otherAddOnsBookingsInRange.length.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Top add-ons bar chart. Uses recharts —
+                the same library every other Reports
+                chart uses. Bars = top-5 add-on names by
+                total revenue; left axis = revenue; the
+                right axis would carry the count but the
+                v1 chart keeps it simple with one
+                revenue series. */}
+            <div className="rounded-card border border-gray-200 bg-white p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Top add-ons (by revenue)</p>
+              {otherAddOnsMetrics.topAddOns.length === 0 ? (
+                <p className="mt-2 text-xs text-gray-500">No add-on revenue in this range.</p>
+              ) : (
+                <div className="mt-2 h-48 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={otherAddOnsMetrics.topAddOns.map((a) => ({
+                        name: a.name,
+                        revenue: a.revenue,
+                        count: a.count
+                      }))}
+                      margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
+                    >
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ fontSize: 11 }}
+                        formatter={(value: any, name: any) => {
+                          if (name === "revenue") return [formatPrice(Number(value) || 0), "Revenue"];
+                          return [value, name];
+                        }}
+                      />
+                      <Bar dataKey="revenue" fill={config.colors.primaryDark} radius={[4, 4, 0, 0]} barSize={32} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            <SalesOtherAddOnsTable
+              bookings={otherAddOnsBookingsInRange}
+              toDate={toDate}
+              isMobile={isMobile}
+            />
+          </div>
         )}
 
         {salesSubTab === "store" && (
@@ -4060,6 +4297,115 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
                 <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numNights}</td>
                 <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numGuests}</td>
                 <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{formatPrice(b.breakfastTotal || 0)}</td>
+                <td className="px-3 py-2.5 text-right font-bold text-primary-dark">{formatPrice(total)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Per BR-12.1 (2026-10-15, decision #247): the
+// Sales → Add-Ons sub-tab's per-booking detail table.
+// Mirrors `SalesBreakfastTable` exactly — columns:
+// ref · guest · room · check-in · selections ·
+// total. The "selections" cell renders the count of
+// live `OtherAddOnSelectionEntry` rows + the
+// top-1 add-on name as a one-line summary.
+function SalesOtherAddOnsTable({ bookings, toDate, isMobile }: { bookings: any[]; toDate: (v: any) => Date | null; isMobile?: boolean }) {
+  if (bookings.length === 0) {
+    return (
+      <p
+        data-testid="sales-addons-table-empty"
+        className="text-xs text-gray-400 py-8 text-center"
+      >
+        No add-on bookings in this range.
+      </p>
+    );
+  }
+  // Derive one line per booking: total selections +
+  // top-1 add-on name. The per-booking list is a
+  // secondary view (the metric cards + chart are the
+  // primary surface).
+  const summarize = (b: any): { count: number; topName: string } => {
+    const selections = b.otherAddOnSelections || {};
+    let count = 0;
+    const byName = new Map<string, number>();
+    for (const list of Object.values(selections) as Array<Array<any>>) {
+      for (const entry of list) {
+        if (!entry || entry.removedAt != null) continue;
+        count += Math.max(0, Math.floor(Number(entry.quantity) || 0));
+        const name = String(entry.nameSnapshot || entry.addOnId);
+        byName.set(name, (byName.get(name) || 0) + Math.max(0, Math.floor(Number(entry.quantity) || 0)));
+      }
+    }
+    let topName = "—";
+    let topCount = 0;
+    for (const [name, c] of byName.entries()) {
+      if (c > topCount) { topCount = c; topName = name; }
+    }
+    return { count, topName };
+  };
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {bookings.slice(0, 50).map((b: any) => {
+          const total = Number(b.otherAddOnTotal) || 0;
+          const s = summarize(b);
+          return (
+            <div
+              key={b.id}
+              data-testid={`sales-addons-row-${b.id}`}
+              className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Ref</span>
+                <span className="text-[10px] text-gray-500">
+                  {toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-semibold text-gray-900">{b.bookingRef}</p>
+              <p className="mt-0.5 text-sm text-gray-700">{b.guestName} · Room {b.roomNumber}</p>
+              <p className="mt-1 text-[11px] text-gray-600">
+                {s.count} selection{s.count === 1 ? "" : "s"} · top: {s.topName}
+              </p>
+              <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(total)}</p>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-xs border-collapse">
+        <thead>
+          <tr className="border-b-2 border-primary/20 text-left">
+            <th className="py-2.5 pr-4 text-[10px] font-bold uppercase tracking-wider text-gray-400">Booking Ref</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Guest</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Room</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Check-In</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Selections</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Top add-on</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {bookings.slice(0, 50).map((b: any) => {
+            const total = Number(b.otherAddOnTotal) || 0;
+            const s = summarize(b);
+            return (
+              <tr key={b.id} data-testid={`sales-addons-row-${b.id}`} className="hover:bg-gray-50/50">
+                <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>
+                <td className="px-3 py-2.5 text-gray-700">{b.guestName}</td>
+                <td className="px-3 py-2.5 text-gray-600">{b.roomNumber}</td>
+                <td className="px-3 py-2.5 text-gray-600">
+                  {toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}
+                </td>
+                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{s.count}</td>
+                <td className="px-3 py-2.5 text-gray-600">{s.topName}</td>
                 <td className="px-3 py-2.5 text-right font-bold text-primary-dark">{formatPrice(total)}</td>
               </tr>
             );

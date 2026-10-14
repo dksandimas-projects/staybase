@@ -808,6 +808,40 @@ export interface AdminContextType {
     transactionReference?: string | null;
     note?: string | null;
   }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  // Per BR-12.1 (2026-10-15, decision #247 reserved):
+  // the staff "other add-ons" admin-context wrapper.
+  // Calls `/api/bookings/addons/staff-update` with the
+  // staff's Bearer token. Mirrors `staffUpdateBreakfast`
+  // shape (success/error + server data) so the
+  // caller's toast + state-update flows stay uniform
+  // with the rest of the admin booking-drawer.
+  staffUpdateOtherAddOns: (input: {
+    bookingId: string;
+    add: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    change: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    remove: Array<{ selectionKey: string }>;
+    overrideReason: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  markOtherAddOnServed: (input: {
+    bookingId: string;
+    selectionKey: string;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
   // Per fix/walkin-split-name (2026-07-25): the walk-in modal
   // mirrors the guest `/book` page and collects `firstName` +
   // `lastName` as separate fields. The server combines them
@@ -2950,6 +2984,104 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true, data: data.data || null };
     } catch (err: any) {
       console.error("Error marking breakfast refund as paid:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-12.1 (2026-10-15, decision #247 reserved):
+  // the staff other-add-ons admin-context wrapper.
+  // Calls `/api/bookings/addons/staff-update` with the
+  // staff's Bearer token. Mirrors `staffUpdateBreakfast`
+  // exactly (success/error + server data). The
+  // `overrideReason` field is required when the
+  // selection is past its per-add-on cutoff.
+  const staffUpdateOtherAddOns = async (input: {
+    bookingId: string;
+    add: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    change: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    remove: Array<{ selectionKey: string }>;
+    overrideReason: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/staff-update`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : "",
+            "X-Spark-Inn-Turnstile": "client-echo"
+          },
+          body: JSON.stringify({
+            ...input,
+            turnstileToken: undefined
+          })
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to update other add-on selections"
+        };
+      }
+      return { success: true, data: data.data || data };
+    } catch (err: any) {
+      console.error("Error updating other add-on selections:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-12.1: the staff mark-served wrapper for
+  // other add-ons. Calls
+  // `/api/bookings/addons/mark-served`. The selection
+  // key is `${date}-${addOnId}` (composite of the
+  // per-day × per-add-on slot). Single-action per
+  // call — the drawer submits one selection at a time.
+  const markOtherAddOnServed = async (input: {
+    bookingId: string;
+    selectionKey: string;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/mark-served`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify(input)
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to mark other add-on as served"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error marking other add-on as served:", err);
       return { success: false, error: err?.message || String(err) };
     }
   };
@@ -7744,6 +7876,8 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         staffUpdateBreakfast,
         markBreakfastServed,
         markBreakfastRefundPaid,
+        staffUpdateOtherAddOns,
+        markOtherAddOnServed,
         addWalkinBooking,
         resendBookingEmail,
         verifyAndRecordPayment,

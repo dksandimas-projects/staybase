@@ -221587,7 +221587,7 @@ var init_bookingInFlowHold = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, ExtendBookingHoldSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, AddOnCatalogAuditLogSchema, ExtendBookingHoldSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     "use strict";
@@ -221983,6 +221983,16 @@ var init_booking = __esm({
       note: external_exports.string().trim().max(500).nullable().optional().default(null),
       turnstileToken: external_exports.string().optional()
     }).passthrough();
+    AddOnCatalogAuditLogSchema = external_exports.object({
+      action: external_exports.enum(["addons.create", "addons.update", "addons.delete"]),
+      targetCollection: external_exports.string().default("addOns"),
+      targetId: external_exports.string().min(1).max(80),
+      actor: external_exports.string().min(1).max(120),
+      actorName: external_exports.string().max(120).default(""),
+      before: external_exports.any().nullable().default(null),
+      after: external_exports.any().nullable().default(null),
+      timestamp: external_exports.union([external_exports.string(), external_exports.any()]).optional()
+    });
     ExtendBookingHoldSchema = external_exports.object({
       holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
       reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
@@ -224877,6 +224887,7 @@ __export(shared_exports, {
   AIRPORT_TRANSFER_PRESEED: () => AIRPORT_TRANSFER_PRESEED,
   ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
   AboutContentSchema: () => AboutContentSchema,
+  AddOnCatalogAuditLogSchema: () => AddOnCatalogAuditLogSchema,
   AddOnSchema: () => AddOnSchema,
   AddRoomBookingSchema: () => AddRoomBookingSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,

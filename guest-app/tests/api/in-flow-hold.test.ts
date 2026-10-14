@@ -1110,8 +1110,11 @@ describe("IFH-01.3 follow-up — Settings UI editor (Booking & Holds tab)", () =
   it("the Settings page adds a new 'holds' tab with the Clock4 icon", () => {
     // The TabId type is widened to include 'holds'.
     expect(settingsPageSrc).toMatch(/type TabId = .*"holds"/);
-    // The VALID_TAB_IDS list includes 'holds'.
-    expect(settingsPageSrc).toMatch(/"holds"\s*$/m);
+    // The VALID_TAB_IDS list includes 'holds'. The
+    // BR-12.1 follow-up (2026-10-15) appends a new
+    // "addons" tab after "holds" so the regex anchors
+    // on the line itself, not the end of the array.
+    expect(settingsPageSrc).toMatch(/^\s*"holds",\s*$/m);
     // The tabs array adds the Booking & Holds entry
     // with the Clock4 icon.
     expect(settingsPageSrc).toMatch(

@@ -26,8 +26,20 @@ import {
   getLatestPaymentReference,
   MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   recomputeBreakfastTotal,
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // booking-drawer "Other Add-Ons" tab full edit UI
+  // uses the same shared helpers as the public
+  // booking flow (`getEnabledAddOnsByHotel`,
+  // `computeOtherAddOnCutoffState`, `recomputeOtherAddOnTotal`)
+  // — the source of truth is shared across the
+  // guest-app + admin-app surfaces.
+  computeOtherAddOnCutoffState,
+  getEnabledAddOnsByHotel,
+  recomputeOtherAddOnTotal,
+  type AddOn,
   type BreakfastSelectionEntry,
   type BreakfastServedEntry,
+  type OtherAddOnSelectionEntry,
   type PublicBreakfastConfig,
   type PublicBreakfastMeal
 } from "@spark-inn/shared";
@@ -44,7 +56,12 @@ import { Modal } from "./Modal";
 const REFUND_CATEGORY_OPTIONS = [
   { key: "all", label: "All" },
   { key: "cancellation", label: "Cancellation" },
-  { key: "breakfast", label: "Breakfast" }
+  { key: "breakfast", label: "Breakfast" },
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Refunds admin surface filter chip gains the new
+  // "Other add-on" category — mirrors the unified
+  // `markRefundPaid` helper's `category` union.
+  { key: "otherAddOn", label: "Other add-on" }
 ] as const;
 type RefundCategoryFilterKey = (typeof REFUND_CATEGORY_OPTIONS)[number]["key"];
 
@@ -1908,57 +1925,377 @@ export function StayHistory({ entries }: StayHistoryProps) {
 // ============================================================================
 // BR-12 (Phase 14 — Other Add-Ons, decision #245 reserved, 2026-10-14)
 // ============================================================================
-// The staff "Other Add-Ons" booking-drawer tab. Mirrors the
-// `BookingDrawerBreakfastTab` shape but for the per-day ×
-// per-add-on `otherAddOnSelections` field. Read-only by
-// default — staff can edit quantities through the
-// `WalkinOtherAddOnGrid` modal (the same pattern as
-// `WalkinBreakfastGrid`). BR-12 v1 ships with a compact
-// read view + the per-selection lock badge + a "Mark as
-// served" button (the most-used staff action for the
-// add-on workflow). Full edit support is the BR-13
-// refactor's territory.
+// The staff "Other Add-Ons" booking-drawer tab. Per BR-12.1
+// (2026-10-15, decision #247) the tab ships the full edit
+// UI: a per-day × per-add-on grid with quantity inputs,
+// an "add" row at the bottom of each date, a remove
+// button on each row, a locked-date badge for past
+// cutoffs, an override modal for late edits, and a
+// "Save changes" button that POSTs to
+// `/api/bookings/addons/staff-update`. The
+// `otherAddOnServed` map renders a "Served" badge on
+// stamped rows; a per-row "Mark served" action
+// fire-forwards through `/api/bookings/addons/mark-served`.
+// The "Refund due" banner mirrors the breakfast tab's
+// pattern and shows when the desk removes a paid entry
+// (the server stamps a `bookings/{id}/refunds/{refundId}`
+// row with `category: "otherAddOn"` + `status: "pending"`).
 
 interface BookingDrawerOtherAddOnsTabProps {
   booking: Booking;
+  onAfterSave?: () => void | Promise<void>;
 }
 
 export function BookingDrawerOtherAddOnsTab({
-  booking
+  booking,
+  onAfterSave
 }: BookingDrawerOtherAddOnsTabProps) {
-  const selections = booking.otherAddOnSelections || {};
-  const served = (booking as any).otherAddOnServed || {};
-  const hasAny = Boolean(booking.hasAnyOtherAddOns);
-  const dates = (() => {
-    const ci = String(booking.checkIn || "");
-    const co = String(booking.checkOut || "");
-    const a = Date.parse(`${ci}T00:00:00Z`);
-    const b = Date.parse(`${co}T00:00:00Z`);
-    if (!Number.isFinite(a) || !Number.isFinite(b)) return [];
+  const {
+    staffUpdateOtherAddOns,
+    markOtherAddOnServed
+  } = useAdmin();
+  const toast = useToast();
+
+  // Live `addOns` catalog from the public config endpoint
+  // — same source the public Step 2 grid reads. Re-fetched
+  // on mount + after save so the staff sees the latest
+  // enabled rows (a row hidden by Settings doesn't keep
+  // a stale dropdown option visible).
+  const [catalog, setCatalog] = useState<AddOn[] | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  // Local `pending` map: { date-addOnId: { kind, quantity, ... } }.
+  // Edits accumulate here; the "Save changes" button flushes
+  // them in one `staffUpdateOtherAddOns` call.
+  const [pending, setPending] = useState<Record<
+    string,
+    {
+      kind: "add" | "change" | "remove";
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }
+  >>({});
+
+  // Per-row served-busy key (when the staff taps "Mark
+  // served" on a single row, we lock the button + show
+  // a spinner so a double-tap doesn't double-fire).
+  const [serveBusyKey, setServeBusyKey] = useState<string | null>(null);
+
+  // Override modal — opened when any locked-date op needs
+  // an override reason before save proceeds. The
+  // `frontDeskOverrideEnabled` flag from the existing
+  // `BreakfastConfig` governs the override path for
+  // other add-ons in BR-12.1 v1 (the brief's decision
+  // #247 mirrors the existing toggle rather than
+  // duplicating it).
+  const [overrideModal, setOverrideModal] = useState<{
+    open: boolean;
+    lockedSelectionKeys: string[];
+    reason: string;
+  } | null>(null);
+
+  const [saving, setSaving] = useState(false);
+  const [servedRefresh, setServedRefresh] = useState(0);
+
+  // Catalog fetch on mount.
+  useEffect(() => {
+    let cancelled = false;
+    setCatalogLoading(true);
+    (async () => {
+      try {
+        const base = typeof window !== "undefined" ? window.location.origin : "";
+        const res = await fetch(`${base}/api/bookings/addons/config`, {
+          method: "GET"
+        });
+        const data: any = await res.json();
+        if (!cancelled && data?.success && Array.isArray(data?.data)) {
+          setCatalog(getEnabledAddOnsByHotel(data.data as AddOn[]));
+        }
+      } catch {
+        // silent — keep null
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Stay dates from the booking (one card per service date).
+  const dates = useMemo(() => {
+    const startMs = Date.parse(
+      `${String(booking.checkIn || "").slice(0, 10)}T00:00:00Z`
+    );
+    const endMs = Date.parse(
+      `${String(booking.checkOut || "").slice(0, 10)}T00:00:00Z`
+    );
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return [];
     const out: string[] = [];
-    for (let ms = a, i = 0; ms < b && i < 60; ms += 86_400_000, i += 1) {
+    for (let ms = startMs, i = 0; ms < endMs && i < 60; ms += 86_400_000, i += 1) {
       const d = new Date(ms);
-      const yyyy = d.getUTCFullYear();
-      const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-      const dd = String(d.getUTCDate()).padStart(2, "0");
-      out.push(`${yyyy}-${mm}-${dd}`);
+      out.push(
+        `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
+      );
     }
     return out;
-  })();
+  }, [booking.checkIn, booking.checkOut]);
 
-  if (!hasAny) {
+  // Existing selections (per day) — these are the rows
+  // the staff can edit. Removed entries (`removedAt !==
+  // null`) are still visible (read-only) for audit
+  // history but excluded from the live total.
+  const selections = booking.otherAddOnSelections || {};
+  const served = (booking as any).otherAddOnServed || {};
+  const paidAmount = Math.max(0, Number(booking.paidAmount || 0));
+
+  // Per (date, addOnId) lock state. The lock is per-add-on
+  // (not per-hotel) so we walk every row + every catalog
+  // row to compute the union of locked keys.
+  const perSelectionLocked = useMemo(() => {
+    const out: Record<string, boolean> = {};
+    if (!catalog) return out;
+    for (const date of dates) {
+      for (const cat of catalog) {
+        const key = `${date}-${cat.id}`;
+        const c = computeOtherAddOnCutoffState({
+          checkInDate: date,
+          addOn: cat
+        });
+        out[key] = Boolean(c.isLocked);
+      }
+    }
+    return out;
+  }, [catalog, dates]);
+
+  // Refund-due calc: any row the desk is removing AND
+  // its entry had a non-zero `priceSnapshot * quantity`
+  // AND the booking has a non-zero `paidAmount`. The
+  // banner mirrors the breakfast tab's pattern.
+  const refundDueAmount = useMemo(() => {
+    let total = 0;
+    for (const [key, op] of Object.entries(pending)) {
+      if (op.kind !== "remove") continue;
+      const parsed = parseSelectionKey(key);
+      if (!parsed) continue;
+      const prior = (selections[parsed.date] || []).find(
+        (e) => e && e.addOnId === parsed.addOnId
+      );
+      if (!prior) continue;
+      const price = Math.max(0, Number(prior.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(prior.quantity) || 0));
+      if (price * qty > 0 && paidAmount > 0) total += price * qty;
+    }
+    return total;
+  }, [pending, selections, paidAmount]);
+
+  const dirty = Object.keys(pending).length > 0;
+
+  // ---------- Handlers ----------
+
+  const setRowPending = (key: string, op: typeof pending[string] | null) => {
+    setPending((p) => {
+      const next = { ...p };
+      if (op === null) delete next[key];
+      else next[key] = op;
+      return next;
+    });
+  };
+
+  const handleQuantityChange = (date: string, addOn: AddOn, nextQty: number) => {
+    const key = `${date}-${addOn.id}`;
+    const q = Math.max(0, Math.min(50, Math.floor(Number(nextQty) || 0)));
+    const prior = (selections[date] || []).find((e) => e && e.addOnId === addOn.id);
+    if (!prior) {
+      // No prior — queue as `add`.
+      if (q === 0) {
+        setRowPending(key, null);
+        return;
+      }
+      setRowPending(key, {
+        kind: "add",
+        quantity: q,
+        priceSnapshot: addOn.price,
+        nameSnapshot: addOn.name,
+        unitSnapshot: addOn.unit,
+        cutoffHoursBeforeCheckInSnapshot: addOn.cutoffHoursBeforeCheckIn
+      });
+      return;
+    }
+    if (q === 0) {
+      setRowPending(key, {
+        kind: "remove",
+        quantity: 0,
+        priceSnapshot: prior.priceSnapshot,
+        nameSnapshot: prior.nameSnapshot,
+        unitSnapshot: prior.unitSnapshot,
+        cutoffHoursBeforeCheckInSnapshot: prior.cutoffHoursBeforeCheckInSnapshot
+      });
+      return;
+    }
+    if (q === Math.max(0, Math.floor(Number(prior.quantity) || 0))) {
+      // No effective change — clear the pending op.
+      setRowPending(key, null);
+      return;
+    }
+    setRowPending(key, {
+      kind: "change",
+      quantity: q,
+      priceSnapshot: addOn.price,
+      nameSnapshot: addOn.name,
+      unitSnapshot: addOn.unit,
+      cutoffHoursBeforeCheckInSnapshot: addOn.cutoffHoursBeforeCheckIn
+    });
+  };
+
+  const handleRemove = (date: string, addOnId: string) => {
+    const key = `${date}-${addOnId}`;
+    const prior = (selections[date] || []).find((e) => e && e.addOnId === addOnId);
+    if (!prior) {
+      setRowPending(key, null);
+      return;
+    }
+    setRowPending(key, {
+      kind: "remove",
+      quantity: 0,
+      priceSnapshot: prior.priceSnapshot,
+      nameSnapshot: prior.nameSnapshot,
+      unitSnapshot: prior.unitSnapshot,
+      cutoffHoursBeforeCheckInSnapshot: prior.cutoffHoursBeforeCheckInSnapshot
+    });
+  };
+
+  const handleAdd = (date: string, addOnId: string, qty: number) => {
+    if (!catalog) return;
+    const cat = catalog.find((a) => a.id === addOnId);
+    if (!cat) return;
+    const q = Math.max(0, Math.min(50, Math.floor(Number(qty) || 0)));
+    if (q <= 0) return;
+    const key = `${date}-${addOnId}`;
+    setRowPending(key, {
+      kind: "add",
+      quantity: q,
+      priceSnapshot: cat.price,
+      nameSnapshot: cat.name,
+      unitSnapshot: cat.unit,
+      cutoffHoursBeforeCheckInSnapshot: cat.cutoffHoursBeforeCheckIn
+    });
+  };
+
+  const handleMarkServed = async (date: string, addOnId: string) => {
+    const key = `${date}-${addOnId}`;
+    setServeBusyKey(key);
+    try {
+      const res = await markOtherAddOnServed({
+        bookingId: booking.id,
+        selectionKey: key
+      });
+      if (res?.success) {
+        toast.success("Served", `${key} marked as served.`);
+        setServedRefresh((n) => n + 1);
+        await onAfterSave?.();
+      } else {
+        toast.error("Failed to mark served", res?.error || "Please try again.");
+      }
+    } finally {
+      setServeBusyKey(null);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!dirty || saving) return;
+    // Compute locked selection keys to gate save.
+    const lockedKeys: string[] = [];
+    for (const key of Object.keys(pending)) {
+      if (perSelectionLocked[key]) lockedKeys.push(key);
+    }
+    if (lockedKeys.length > 0) {
+      setOverrideModal({ open: true, lockedSelectionKeys: lockedKeys, reason: "" });
+      return;
+    }
+    await flushSave(null);
+  };
+
+  const flushSave = async (overrideReason: string | null) => {
+    setSaving(true);
+    try {
+      const add: Array<any> = [];
+      const change: Array<any> = [];
+      const remove: Array<any> = [];
+      for (const [selectionKey, op] of Object.entries(pending)) {
+        if (op.kind === "add") {
+          add.push({
+            selectionKey,
+            addOnId: selectionKey.split("-").slice(3).join("-") || selectionKey,
+            quantity: op.quantity,
+            priceSnapshot: op.priceSnapshot,
+            nameSnapshot: op.nameSnapshot,
+            unitSnapshot: op.unitSnapshot,
+            cutoffHoursBeforeCheckInSnapshot: op.cutoffHoursBeforeCheckInSnapshot
+          });
+        } else if (op.kind === "change") {
+          change.push({
+            selectionKey,
+            addOnId: selectionKey.split("-").slice(3).join("-") || selectionKey,
+            quantity: op.quantity,
+            priceSnapshot: op.priceSnapshot,
+            nameSnapshot: op.nameSnapshot,
+            unitSnapshot: op.unitSnapshot,
+            cutoffHoursBeforeCheckInSnapshot: op.cutoffHoursBeforeCheckInSnapshot
+          });
+        } else {
+          remove.push({ selectionKey });
+        }
+      }
+      const res = await staffUpdateOtherAddOns({
+        bookingId: booking.id,
+        add,
+        change,
+        remove,
+        overrideReason
+      });
+      if (res?.success) {
+        toast.success("Saved", "Other add-ons updated.");
+        setPending({});
+        setOverrideModal(null);
+        await onAfterSave?.();
+      } else {
+        toast.error("Save failed", res?.error || "Please try again.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---------- Render ----------
+
+  if (catalogLoading) {
     return (
-      <div className="rounded-card border border-gray-200 bg-gray-50 p-5">
-        <p className="font-heading text-lg text-gray-950">Other Add-Ons</p>
-        <p className="mt-2 text-sm text-gray-600">
-          No add-ons ordered for this booking.
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading add-on catalog…
+      </div>
+    );
+  }
+
+  if (!catalog || catalog.length === 0) {
+    return (
+      <div
+        data-testid="booking-drawer-addons-empty"
+        className="rounded-card border border-amber-200 bg-amber-50 p-4"
+      >
+        <p className="font-heading text-base text-gray-950">Other Add-Ons</p>
+        <p className="mt-2 text-xs text-amber-800">
+          The add-on catalog is empty. Add a row in Settings → Other Add-Ons to start selling add-ons.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="booking-drawer-addons-tab">
       <div className="rounded-card border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between gap-2">
           <p className="font-heading text-lg text-gray-950">Other Add-Ons</p>
@@ -1967,10 +2304,25 @@ export function BookingDrawerOtherAddOnsTab({
           </p>
         </div>
       </div>
+
+      {refundDueAmount > 0 ? (
+        <div
+          data-testid="booking-drawer-addons-refund-due"
+          className="rounded-card border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"
+        >
+          <p className="font-bold">Refund due: ₱{refundDueAmount.toLocaleString()}</p>
+          <p className="mt-1 text-amber-700">
+            Removing a paid add-on creates a pending refund liability in
+            <code> bookings/{`{id}`}/refunds</code>.
+          </p>
+        </div>
+      ) : null}
+
       <div className="space-y-3">
         {dates.map((date) => {
-          const list = selections[date] || [];
-          if (list.length === 0) return null;
+          const list = (selections[date] || []).filter(
+            (e: any) => e && e.removedAt === null
+          );
           return (
             <div
               key={date}
@@ -1979,48 +2331,259 @@ export function BookingDrawerOtherAddOnsTab({
             >
               <p className="font-semibold text-gray-950">{date}</p>
               <div className="mt-3 space-y-2">
-                {list
-                  .filter((e: any) => e && e.removedAt === null)
-                  .map((entry: any) => {
+                {list.length === 0 ? (
+                  <p className="text-[11px] text-gray-500">No add-ons for this date.</p>
+                ) : (
+                  list.map((entry: any) => {
                     const key = `${date}-${entry.addOnId}`;
+                    const isLocked = Boolean(perSelectionLocked[key]);
+                    const pendingOp = pending[key];
+                    const isRemoved = pendingOp?.kind === "remove";
+                    const effectiveQty = isRemoved
+                      ? 0
+                      : pendingOp
+                        ? Math.max(0, Math.floor(Number(pendingOp.quantity) || 0))
+                        : Math.max(0, Math.floor(Number(entry.quantity) || 0));
+                    const price = Math.max(
+                      0,
+                      Number(pendingOp?.priceSnapshot ?? entry.priceSnapshot) || 0
+                    );
                     const isServed = Boolean(served[key]);
-                    const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-                    const price = Math.max(0, Number(entry.priceSnapshot) || 0);
                     return (
                       <div
                         key={key}
-                        className="flex items-center justify-between rounded-lg bg-gray-50 p-3 ring-1 ring-gray-100"
+                        data-testid={`booking-drawer-addons-row-${key}`}
+                        className={cn(
+                          "flex items-center justify-between gap-2 rounded-lg p-3 ring-1",
+                          isRemoved
+                            ? "bg-red-50 ring-red-200"
+                            : isLocked
+                              ? "bg-amber-50 ring-amber-200"
+                              : "bg-gray-50 ring-gray-100"
+                        )}
                       >
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-semibold text-gray-950">
                             {entry.nameSnapshot || entry.addOnId}
                           </p>
                           <p className="text-xs text-gray-600">
-                            {qty} guest{qty === 1 ? "" : "s"} · ₱{price.toLocaleString()} / unit
+                            {effectiveQty} guest{effectiveQty === 1 ? "" : "s"} · ₱{price.toLocaleString()} / unit
                           </p>
+                          {isLocked ? (
+                            <p
+                              data-testid={`booking-drawer-addons-locked-${key}`}
+                              className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700"
+                            >
+                              Cut-off was {date} — late edit requires override
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-950">
-                            ₱{(qty * price).toLocaleString()}
+                          <input
+                            type="number"
+                            min={0}
+                            max={50}
+                            value={effectiveQty}
+                            disabled={isLocked}
+                            onChange={(e) => handleQuantityChange(date, {
+                              id: entry.addOnId,
+                              name: entry.nameSnapshot || entry.addOnId,
+                              price,
+                              unit: entry.unitSnapshot || "per-person",
+                              cutoffHoursBeforeCheckIn: entry.cutoffHoursBeforeCheckInSnapshot || 24
+                            } as AddOn, Number(e.target.value))}
+                            className="min-h-[36px] w-16 rounded border border-gray-250 bg-white px-2 text-center text-[11px] disabled:opacity-50"
+                            aria-label={`Quantity for ${entry.nameSnapshot} on ${date}`}
+                          />
+                          <span className="w-20 text-right text-sm font-semibold text-gray-950">
+                            ₱{(effectiveQty * price).toLocaleString()}
                           </span>
-                          {isServed ? (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                          {!isServed ? (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkServed(date, entry.addOnId)}
+                              disabled={serveBusyKey === key}
+                              data-testid={`booking-drawer-addons-serve-${key}`}
+                              className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-emerald-200 bg-white px-2 text-[10px] font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                            >
+                              {serveBusyKey === key ? (
+                                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <CheckCircle2 size={12} aria-hidden="true" />
+                              )}
+                              Serve
+                            </button>
+                          ) : (
+                            <span
+                              data-testid={`booking-drawer-addons-served-${key}`}
+                              className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700"
+                            >
                               Served
                             </span>
-                          ) : (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                              Pending
-                            </span>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemove(date, entry.addOnId)}
+                            disabled={isLocked}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            aria-label={`Remove ${entry.nameSnapshot} for ${date}`}
+                          >
+                            <XCircle size={14} aria-hidden="true" />
+                          </button>
                         </div>
                       </div>
                     );
-                  })}
+                  })
+                )}
               </div>
+              {/* "Add" row for this date — surfaces the
+                  enabled catalog not already on the day. */}
+              <OtherAddOnAddRow
+                date={date}
+                catalog={catalog}
+                alreadyAddedIds={list.map((e: any) => e.addOnId)}
+                onAdd={(addOnId, qty) => handleAdd(date, addOnId, qty)}
+              />
             </div>
           );
         })}
       </div>
+
+      <div className="flex items-center justify-end gap-2 pt-2">
+        {dirty ? (
+          <span className="text-[10px] font-bold text-amber-700">Unsaved changes</span>
+        ) : null}
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          data-testid="booking-drawer-addons-save"
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save size={14} aria-hidden="true" />}
+          Save changes
+        </button>
+      </div>
+
+      {overrideModal ? (
+        <Modal
+          open={overrideModal.open}
+          onClose={() => setOverrideModal(null)}
+          title="Override add-on cutoff"
+          footer={null}
+        >
+          <div className="space-y-3 text-sm">
+            <p className="text-gray-700">
+              {overrideModal.lockedSelectionKeys.length} locked selection
+              {overrideModal.lockedSelectionKeys.length === 1 ? "" : "s"} need an override reason.
+            </p>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+              Override reason (≥ 8 chars)
+              <textarea
+                rows={2}
+                value={overrideModal.reason}
+                onChange={(e) =>
+                  setOverrideModal((m) => (m ? { ...m, reason: e.target.value } : m))
+                }
+                placeholder="e.g. Late check-in — guest asked at the desk."
+                className="min-h-[60px] rounded border border-amber-200 bg-white px-2 py-1 text-[11px]"
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setOverrideModal(null)}
+                className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={overrideModal.reason.trim().length < 8}
+                onClick={() => flushSave(overrideModal.reason.trim())}
+                data-testid="booking-drawer-addons-override-confirm"
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:opacity-50"
+              >
+                Save with override
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
+}
+
+// Per-day "Add" row. Renders the enabled add-on select
+// + quantity input + Add button. Hidden when every
+// enabled add-on is already on the day.
+function OtherAddOnAddRow({
+  date,
+  catalog,
+  alreadyAddedIds,
+  onAdd
+}: {
+  date: string;
+  catalog: AddOn[];
+  alreadyAddedIds: string[];
+  onAdd: (addOnId: string, qty: number) => void;
+}) {
+  const available = catalog.filter((a) => !alreadyAddedIds.includes(a.id));
+  const [selectedId, setSelectedId] = useState("");
+  const [qty, setQty] = useState(1);
+  if (available.length === 0) {
+    return (
+      <p className="mt-2 text-[10px] text-gray-500">
+        All enabled add-ons already added for this date.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-2">
+      <select
+        value={selectedId}
+        onChange={(e) => setSelectedId(e.target.value)}
+        aria-label={`Add add-on for ${date}`}
+        className="min-h-[36px] flex-1 rounded border border-gray-250 bg-white px-2 text-[11px]"
+      >
+        <option value="">— Select add-on —</option>
+        {available.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name} — ₱{a.price.toLocaleString()}
+          </option>
+        ))}
+      </select>
+      <input
+        type="number"
+        min={1}
+        max={50}
+        value={qty}
+        onChange={(e) => setQty(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+        aria-label={`Quantity for ${date}`}
+        className="min-h-[36px] w-16 rounded border border-gray-250 bg-white px-2 text-center text-[11px]"
+      />
+      <button
+        type="button"
+        onClick={() => {
+          if (!selectedId || qty <= 0) return;
+          onAdd(selectedId, qty);
+          setSelectedId("");
+          setQty(1);
+        }}
+        disabled={!selectedId || qty <= 0}
+        className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-primary px-3 text-[11px] font-semibold text-white disabled:opacity-50"
+      >
+        <Save size={12} aria-hidden="true" /> Add
+      </button>
+    </div>
+  );
+}
+
+// Composite selection key parser (`yyyy-mm-dd-addOnId`).
+// Lives at module scope so the `pending` state reads
+// don't have to re-parse the key on every render.
+function parseSelectionKey(key: string): { date: string; addOnId: string } | null {
+  const m = key.match(/^(\d{4}-\d{2}-\d{2})-(.+)$/);
+  if (!m) return null;
+  return { date: m[1], addOnId: m[2] };
 }

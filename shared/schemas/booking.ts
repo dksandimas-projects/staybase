@@ -715,6 +715,37 @@ export const OtherAddOnMarkRefundPaidSchema = z
   .passthrough();
 export type OtherAddOnMarkRefundPaidInput = z.infer<typeof OtherAddOnMarkRefundPaidSchema>;
 
+/**
+ * Per BR-12.1 (Phase 14 — Other Add-Ons admin UI surfaces,
+ * decision #247 reserved, 2026-10-15): the top-level
+ * audit-log entry written to `auditLogs/{auditId}` for
+ * every admin CRUD change to the add-on catalog
+ * (`addOns/{addOnId}`). Distinct from
+ * `OtherAddOnAuditEntrySchema` (the per-booking
+ * `bookings/{id}/otherAddOnAudit/{auditId}` audit trail
+ * written by the staff-update server handler) — the
+ * top-level log is for the catalog itself, not the
+ * booking selections.
+ *
+ * The `action` enum is the BR-12.1 v1 surface set:
+ * `addons.create` | `addons.update` | `addons.delete`.
+ * The `targetCollection` is a defensive field so future
+ * audit logs for other admin features (e.g.
+ * `vouchers.create`) can share this schema without
+ * collision.
+ */
+export const AddOnCatalogAuditLogSchema = z.object({
+  action: z.enum(["addons.create", "addons.update", "addons.delete"]),
+  targetCollection: z.string().default("addOns"),
+  targetId: z.string().min(1).max(80),
+  actor: z.string().min(1).max(120),
+  actorName: z.string().max(120).default(""),
+  before: z.any().nullable().default(null),
+  after: z.any().nullable().default(null),
+  timestamp: z.union([z.string(), z.any()]).optional()
+});
+export type AddOnCatalogAuditLogInput = z.infer<typeof AddOnCatalogAuditLogSchema>;
+
 // NOTE: The `BreakfastUpdateSchema` + `StaffBreakfastUpdateSchema`
 // payloads (the Manage Booking save-batch + the staff-override
 // variant) are intentionally NOT in BR-01. They belong in BR-04
