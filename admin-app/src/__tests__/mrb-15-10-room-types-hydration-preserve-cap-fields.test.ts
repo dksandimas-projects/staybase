@@ -57,7 +57,7 @@ const hydrationEffectStart = adminContextSrc.indexOf(
   "  useEffect(() => {\n    if (Array.isArray(hotelConfig.roomTypes)) {\n      setRoomTypes("
 );
 const hydrationEffectEnd = adminContextSrc.indexOf(
-  "    }\n  }, [hotelConfig.roomTypes]);\n\n  const saveRoomTypes"
+  "    }\n  }, [hotelConfig.roomTypes]);\n\n  // Per SR-01..05"
 );
 const hydrationEffect =
   hydrationEffectStart >= 0 && hydrationEffectEnd > hydrationEffectStart
