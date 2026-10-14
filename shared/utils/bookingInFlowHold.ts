@@ -42,6 +42,34 @@ export const DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
 export const IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"] as const;
 export type InFlowHoldStatus = (typeof IN_FLOW_HOLD_STATUSES)[number];
 
+// Per IMT-04 (2026-10-14, `plan/project/ROADMAP.md §IMT`): how many
+// times one `bookingHolds/{id}` may be extended before the CTA
+// disappears. The bound exists to keep unauthenticated doc lifetime
+// finite — it is emphatically NOT an inventory protection. An in-flow
+// hold is a soft UX signal that neither the public availability query
+// nor the booking transaction consults, so extending one can never
+// deny a room to another guest. The only thing worth capping is how
+// long a doc can sit in `"active"` before the daily Janitor sweep is
+// allowed to tombstone it.
+//
+// With `MAX_IN_FLOW_HOLD_MINUTES = 30`, the worst case is 3 x 30 =
+// ~2h of banner lifetime for one hold id.
+//
+// Owner answer pending (CVQ-01) — the working default stands if no
+// answer arrives before implementation.
+export const MAX_IN_FLOW_HOLD_EXTENSIONS = 3;
+
+// Per IMT-04: the two statuses an extend may act on. `"consumed"`
+// is deliberately ABSENT — a hold linked to a committed booking must
+// never be resurrectable, or a stale `?hold=` link could revive a
+// completed attempt. Anything outside this list (including a
+// hand-edited or corrupt status) is denied — fail-closed, consistent
+// with the narrow-by-default posture of the Firestore rules that keep
+// `bookingHolds` unreadable from clients.
+export const IN_FLOW_HOLD_EXTENSION_STATUSES = ["active", "expired"] as const;
+export type InFlowHoldExtensionStatus =
+  (typeof IN_FLOW_HOLD_EXTENSION_STATUSES)[number];
+
 export interface InFlowHoldInput {
   status: string | null | undefined;
   expiresAt: Date | string | null | undefined;
@@ -73,6 +101,79 @@ export function computeInFlowHoldExpiresAt(
     return null;
   }
   return new Date(now.getTime() + Number(minutes) * 60 * 1000);
+}
+
+// Per IMT-04 (2026-10-14): the single place the extension window
+// arithmetic lives, so the server is the only authority on what an
+// extend does to the deadline.
+//
+// ADDITIVE from the later of `now` and the current deadline, not a
+// reset from `now`:
+//   * hold still active (13:30 left of a 15-min window) -> base is
+//     the current deadline, so the guest KEEPS the 13:30 they had
+//     and gains a full window on top.
+//   * hold already expired -> the base is `now`, so the guest gets a
+//     full fresh window instead of being pushed 1 second forward.
+//
+// A reset-from-now would silently destroy the remaining time of an
+// actively-ticking hold, which is the opposite of "I need more time".
+// CVQ-02 carries the guest-visible wording question; this is the
+// mechanism either way.
+//
+// A missing / unparseable `currentExpiresAt` (a hand-edited doc) is
+// treated as "no remaining time" rather than trusted.
+export function computeExtendedInFlowHoldExpiresAt(
+  minutes: number | null | undefined,
+  currentExpiresAt: Date | string | null | undefined,
+  now: Date = new Date()
+): Date | null {
+  let base = now;
+  if (currentExpiresAt) {
+    const parsed =
+      currentExpiresAt instanceof Date
+        ? currentExpiresAt
+        : new Date(currentExpiresAt);
+    if (!isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
+      base = parsed;
+    }
+  }
+  return computeInFlowHoldExpiresAt(minutes, base);
+}
+
+export interface InFlowHoldExtensionInput {
+  status: string | null | undefined;
+  extensionCount?: number | null | undefined;
+}
+
+// Per IMT-04: server-side gate for "may this hold be extended?".
+// Mirrors `isInFlowHoldActive`'s shape so the two read the same way
+// at their call sites.
+//
+// Deliberately takes NO `now` parameter: the only two gates are the
+// status and the counter, and neither depends on the clock. Note that
+// an EXPIRED hold IS extendable — that is the literal "I need more
+// time" moment, and reviving it is safe precisely because the hold is
+// soft (see the `MAX_IN_FLOW_HOLD_EXTENSIONS` note above). The
+// countdown is not auto-revived on a passive re-entry though: revival
+// always requires an explicit call to the extend endpoint. See
+// `plan/docs/GOTCHAS.md §Booking Flow` (never auto-revive) and the
+// IMT-01 pins in `guest-app/tests/api/in-flow-hold.test.ts`.
+export function canExtendInFlowHold(
+  hold: InFlowHoldExtensionInput | null | undefined
+): boolean {
+  if (!hold) return false;
+  if (
+    !(IN_FLOW_HOLD_EXTENSION_STATUSES as readonly string[]).includes(
+      String(hold.status)
+    )
+  ) {
+    return false;
+  }
+  const count = Number(hold.extensionCount ?? 0);
+  // A non-finite / negative counter is a hand-edited doc — fail
+  // closed rather than treating it as 0 and handing out extensions.
+  if (!Number.isFinite(count) || count < 0) return false;
+  return count < MAX_IN_FLOW_HOLD_EXTENSIONS;
 }
 
 // Per the IFH-01.2 (settings-routing) follow-up:

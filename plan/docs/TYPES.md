@@ -579,9 +579,20 @@ BookingHold {
   expiresAt: Date                         // Hold deadline; stamped from `IN_FLOW_HOLD_MINUTES` (15 by default)
   status: "active" | "consumed" | "expired"
   holdMinutes: number                     // Snapshot of `IN_FLOW_HOLD_MINUTES` at start time
+  extensionCount: number                  // Per IMT-02: times `/api/holds/extend` has fired; absent on pre-IMT docs (reads as 0). Gates `MAX_IN_FLOW_HOLD_EXTENSIONS = 3`
   createdAt: Date
+  updatedAt?: Date                        // Stamped by the consume, sweep, and extend paths
 }
 ```
+
+Request/response schemas for the hold routes (all in `shared/schemas/booking.ts`):
+
+```
+StartBookingHoldInput   // POST /api/holds/start  — holdId, reservationId, roomType, checkIn, checkOut, numNights. .strict()
+ExtendBookingHoldInput  // POST /api/holds/extend — holdId, reservationId ONLY. .strict()
+```
+
+`ExtendBookingHoldInput` is deliberately two fields. There is no `minutes` / `holdMinutes` / `extraMinutes`: the extension window is read from the hold doc's own `holdMinutes` snapshot, so a client cannot request a longer window than the hotel configured. `.strict()` makes that enforceable — any extra key is a 400, which is pinned by a runtime Zod test. The shared helpers behind the semantics live in `shared/utils/bookingInFlowHold.ts`: `canExtendInFlowHold` (status + cap gate), `computeExtendedInFlowHoldExpiresAt` (additive from `max(now, expiresAt)`), and the `MAX_IN_FLOW_HOLD_EXTENSIONS` / `IN_FLOW_HOLD_EXTENSION_STATUSES` constants.
 
 The `Booking` doc also carries two optional fields stamped at create time (when the create request includes a `holdId`):
 

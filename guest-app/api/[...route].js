@@ -181579,6 +181579,7 @@ var init_hotel_config = __esm({
       domain: "sparkinnbohol.com",
       adminDomain: "admin.sparkinnbohol.com",
       supportEmail: "sparkinn.dev@gmail.com",
+      intercomGuestAppId: "",
       facebookUrl: "https://www.facebook.com/sparkinnbohol",
       instagramUrl: "https://www.instagram.com/sparkinnbohol",
       twitterHandle: "",
@@ -221218,7 +221219,7 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.18.0";
+    VERSION2 = "1.20.0";
   }
 });
 
@@ -221516,6 +221517,27 @@ function computeInFlowHoldExpiresAt(minutes, now = /* @__PURE__ */ new Date()) {
   }
   return new Date(now.getTime() + Number(minutes) * 60 * 1e3);
 }
+function computeExtendedInFlowHoldExpiresAt(minutes, currentExpiresAt, now = /* @__PURE__ */ new Date()) {
+  let base = now;
+  if (currentExpiresAt) {
+    const parsed2 = currentExpiresAt instanceof Date ? currentExpiresAt : new Date(currentExpiresAt);
+    if (!isNaN(parsed2.getTime()) && parsed2.getTime() > now.getTime()) {
+      base = parsed2;
+    }
+  }
+  return computeInFlowHoldExpiresAt(minutes, base);
+}
+function canExtendInFlowHold(hold) {
+  if (!hold) return false;
+  if (!IN_FLOW_HOLD_EXTENSION_STATUSES.includes(
+    String(hold.status)
+  )) {
+    return false;
+  }
+  const count = Number(hold.extensionCount ?? 0);
+  if (!Number.isFinite(count) || count < 0) return false;
+  return count < MAX_IN_FLOW_HOLD_EXTENSIONS;
+}
 function normalizeInFlowHoldMinutes(raw) {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_IN_FLOW_HOLD_MINUTES;
@@ -221542,7 +221564,7 @@ function generateHoldId() {
     return v6.toString(16);
   });
 }
-var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, HOLD_ID_REGEX;
+var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, MAX_IN_FLOW_HOLD_EXTENSIONS, IN_FLOW_HOLD_EXTENSION_STATUSES, HOLD_ID_REGEX;
 var init_bookingInFlowHold = __esm({
   "../shared/utils/bookingInFlowHold.ts"() {
     IN_FLOW_HOLD_MINUTES = 15;
@@ -221550,12 +221572,14 @@ var init_bookingInFlowHold = __esm({
     MAX_IN_FLOW_HOLD_MINUTES = 30;
     DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
     IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"];
+    MAX_IN_FLOW_HOLD_EXTENSIONS = 3;
+    IN_FLOW_HOLD_EXTENSION_STATUSES = ["active", "expired"];
     HOLD_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   }
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, ExtendBookingHoldSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     init_zod();
@@ -221761,6 +221785,10 @@ var init_booking = __esm({
       message: "Check-out must be after check-in",
       path: ["checkOut"]
     });
+    ExtendBookingHoldSchema = external_exports.object({
+      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
+    }).strict();
   }
 });
 
@@ -224140,12 +224168,14 @@ __export(shared_exports, {
   DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
   DEFAULT_VAT_CONFIG: () => DEFAULT_VAT_CONFIG,
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
+  ExtendBookingHoldSchema: () => ExtendBookingHoldSchema,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
   GuestDetailsSchema: () => GuestDetailsSchema,
   HOLD_ID_REGEX: () => HOLD_ID_REGEX,
   HOUSEKEEPING_STATUSES: () => HOUSEKEEPING_STATUSES,
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
+  IN_FLOW_HOLD_EXTENSION_STATUSES: () => IN_FLOW_HOLD_EXTENSION_STATUSES,
   IN_FLOW_HOLD_MINUTES: () => IN_FLOW_HOLD_MINUTES,
   IN_FLOW_HOLD_STATUSES: () => IN_FLOW_HOLD_STATUSES,
   KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
@@ -224155,6 +224185,7 @@ __export(shared_exports, {
   MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
   MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
   MAX_FEATURED_TYPES: () => MAX_FEATURED_TYPES,
+  MAX_IN_FLOW_HOLD_EXTENSIONS: () => MAX_IN_FLOW_HOLD_EXTENSIONS,
   MAX_IN_FLOW_HOLD_MINUTES: () => MAX_IN_FLOW_HOLD_MINUTES,
   MAX_PAYMENT_HOLD_WINDOW_HOURS: () => MAX_PAYMENT_HOLD_WINDOW_HOURS,
   MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
@@ -224215,6 +224246,7 @@ __export(shared_exports, {
   calculateVatBreakdown: () => calculateVatBreakdown,
   calculateVoucherBase: () => calculateVoucherBase,
   calculateVoucherDiscount: () => calculateVoucherDiscount,
+  canExtendInFlowHold: () => canExtendInFlowHold,
   checkExtraBedInventory: () => checkExtraBedInventory,
   clampIntegerInRange: () => clampIntegerInRange,
   clearCache: () => clearCache,
@@ -224223,6 +224255,7 @@ __export(shared_exports, {
   computeBookingFolio: () => computeBookingFolio,
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
+  computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
   computeRequestFingerprint: () => computeRequestFingerprint,
@@ -228284,19 +228317,23 @@ function toIsoOrNull(value) {
   }
   return null;
 }
-function serializeHold(snap) {
-  const data = snap.data() ?? {};
+function serializeHold(docId, data) {
+  const raw = data ?? {};
   return {
-    id: snap.id,
-    reservationId: String(data.reservationId ?? ""),
-    roomType: String(data.roomType ?? ""),
-    checkIn: String(data.checkIn ?? ""),
-    checkOut: String(data.checkOut ?? ""),
-    numNights: Number(data.numNights ?? 0),
-    expiresAt: toIsoOrNull(data.expiresAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
-    status: data.status === "consumed" || data.status === "expired" ? data.status : "active",
-    createdAt: toIsoOrNull(data.createdAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
-    holdMinutes: Number(data.holdMinutes ?? IN_FLOW_HOLD_MINUTES)
+    id: docId,
+    reservationId: String(raw.reservationId ?? ""),
+    roomType: String(raw.roomType ?? ""),
+    checkIn: String(raw.checkIn ?? ""),
+    checkOut: String(raw.checkOut ?? ""),
+    numNights: Number(raw.numNights ?? 0),
+    expiresAt: toIsoOrNull(raw.expiresAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    status: raw.status === "consumed" || raw.status === "expired" ? raw.status : "active",
+    createdAt: toIsoOrNull(raw.createdAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    holdMinutes: Number(raw.holdMinutes ?? IN_FLOW_HOLD_MINUTES),
+    // Per IMT-04: exposed so the banner can hide the "I need more
+    // time" CTA once the cap is reached, instead of letting the guest
+    // click a button the server is going to reject.
+    extensionCount: Number(raw.extensionCount ?? 0)
   };
 }
 async function handleStartInFlowHold(req, res) {
@@ -228346,7 +228383,7 @@ async function handleStartInFlowHold(req, res) {
       }
       return res.status(200).json({
         success: true,
-        data: serializeHold(existing),
+        data: serializeHold(existing.id, existing.data()),
         idempotentReplay: true
       });
     }
@@ -228371,7 +228408,7 @@ async function handleStartInFlowHold(req, res) {
     const fresh = await ref.get();
     return res.status(201).json({
       success: true,
-      data: serializeHold(fresh)
+      data: serializeHold(fresh.id, fresh.data())
     });
   } catch (err) {
     return res.status(500).json({
@@ -228403,7 +228440,7 @@ async function handleReadInFlowHold(req, res) {
       status: data.status,
       expiresAt
     });
-    const payload = serializeHold(snap);
+    const payload = serializeHold(snap.id, snap.data());
     if (payload.status === "active" && !activeNow) {
       payload.status = "expired";
     }
@@ -228440,7 +228477,92 @@ async function handleConsumeInFlowHold(holdId, reservationId, now = /* @__PURE__
     return { ok: false, reason: "expired" };
   }
   await ref.update({ status: "consumed", updatedAt: Timestamp.fromDate(now) });
-  return { ok: true, hold: serializeHold(snap) };
+  return { ok: true, hold: serializeHold(snap.id, snap.data()) };
+}
+async function handleExtendInFlowHold(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = ExtendBookingHoldSchema.safeParse(req.body);
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid hold extension request.",
+      details: parsed2.error.flatten()
+    });
+  }
+  const input = parsed2.data;
+  if (!HOLD_ID_REGEX.test(input.holdId)) {
+    return res.status(400).json({ success: false, error: "Invalid hold id format." });
+  }
+  const ref = adminDb.collection(HOLDS_COLLECTION).doc(input.holdId);
+  const now = /* @__PURE__ */ new Date();
+  let responseData = null;
+  let failure = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists) {
+        failure = { status: 404, error: "Hold not found." };
+        return;
+      }
+      const data = snap.data() ?? {};
+      if (data.reservationId && data.reservationId !== input.reservationId) {
+        failure = { status: 409, error: "Hold does not match this reservation." };
+        return;
+      }
+      if (!canExtendInFlowHold({ status: data.status, extensionCount: data.extensionCount })) {
+        const atCap = data.status === "consumed" || Number(data.extensionCount ?? 0) >= MAX_IN_FLOW_HOLD_EXTENSIONS;
+        failure = atCap ? {
+          status: 409,
+          error: data.status === "consumed" ? "This hold was already used by a confirmed booking." : "This hold has reached its extension limit."
+        } : { status: 409, error: "This hold can no longer be extended." };
+        return;
+      }
+      const holdMinutes = normalizeInFlowHoldMinutes(data.holdMinutes);
+      if (holdMinutes < MIN_IN_FLOW_HOLD_MINUTES || holdMinutes > MAX_IN_FLOW_HOLD_MINUTES) {
+        failure = { status: 500, error: "Hold window is misconfigured." };
+        return;
+      }
+      const nextExpiresAt = computeExtendedInFlowHoldExpiresAt(
+        holdMinutes,
+        toIsoOrNull(data.expiresAt),
+        now
+      );
+      if (!nextExpiresAt) {
+        failure = { status: 500, error: "Failed to compute hold deadline." };
+        return;
+      }
+      const nextExtensionCount = Number(data.extensionCount ?? 0) + 1;
+      transaction.update(ref, {
+        // Revive on the expired path — the literal "I need more
+        // time" moment. Safe because the hold is soft.
+        status: "active",
+        expiresAt: Timestamp.fromDate(nextExpiresAt),
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        // Per the IMT CVQ-04 answer (staff do not see extensions), no
+        // dedicated `extendedAt` field was added: `updatedAt` is the
+        // field the consume + sweep paths already stamp, so a second
+        // timestamp would have been write-only weight with no reader.
+        updatedAt: Timestamp.fromDate(now)
+      });
+      responseData = serializeHold(snap.id, {
+        ...data,
+        status: "active",
+        expiresAt: nextExpiresAt,
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        updatedAt: now
+      });
+    });
+    if (failure) {
+      return res.status(failure.status).json({ success: false, error: failure.error });
+    }
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to extend hold." });
+  }
 }
 var SWEEP_BATCH_SIZE = 200;
 async function handleSweepInFlowHolds(req, res, options = {}) {
@@ -241246,6 +241368,12 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many hold read requests. Please try again in a minute." });
     }
     return await handleReadInFlowHold(req, res);
+  }
+  if (domain === "holds" && action === "extend" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-extend:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many hold extension requests. Please try again in a minute." });
+    }
+    return await handleExtendInFlowHold(req, res);
   }
   if (domain === "holds" && action === "sweep" && (req.method === "POST" || req.method === "GET")) {
     const result = await handleSweepInFlowHolds(req, res);

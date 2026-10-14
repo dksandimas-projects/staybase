@@ -46,10 +46,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { StartBookingHoldSchema } from "@spark-inn/shared";
+import { StartBookingHoldSchema, ExtendBookingHoldSchema } from "@spark-inn/shared";
 import {
   HOLD_ID_REGEX,
   IN_FLOW_HOLD_MINUTES,
+  MAX_IN_FLOW_HOLD_EXTENSIONS,
   MAX_IN_FLOW_HOLD_MINUTES,
   MIN_IN_FLOW_HOLD_MINUTES,
   clampIntegerInRange,
@@ -468,6 +469,230 @@ describe("IMT-01 — Expired-hold dead end fix (`holdId` re-roll)", () => {
     // and the 15-minute window stops meaning anything.
     expect(hookSrc).toMatch(/readResponse\.status === 404 && startInput/);
     expect(hookSrc).not.toMatch(/status === "expired"/);
+  });
+});
+
+// Per IMT-02 (2026-10-14): the `POST /api/holds/extend` request body.
+// Runtime Zod coverage (not a source-text pin) because the whole point
+// of the two-field shape is what it REJECTS — a pin on the schema's
+// source text would pass happily while the object accepted a
+// client-supplied `minutes`.
+describe("IMT-02 — ExtendBookingHoldSchema (shared/schemas/booking.ts)", () => {
+  const validHoldId = generateHoldId();
+  const validReservationId = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+  it("accepts the minimal valid body (holdId + reservationId only)", () => {
+    const parsed = ExtendBookingHoldSchema.safeParse({
+      holdId: validHoldId,
+      reservationId: validReservationId
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("REJECTS a client-supplied duration — the window must come from the hold doc", () => {
+    // The load-bearing security property. A caller-supplied `minutes`
+    // would be an unauthenticated way to pin a doc in "active" for as
+    // long as they liked, defeating MAX_IN_FLOW_HOLD_EXTENSIONS.
+    for (const key of ["minutes", "holdMinutes", "extraMinutes", "extendBy"]) {
+      const parsed = ExtendBookingHoldSchema.safeParse({
+        holdId: validHoldId,
+        reservationId: validReservationId,
+        [key]: 999
+      });
+      expect(parsed.success, `accepted a client-supplied \`${key}\``).toBe(false);
+    }
+  });
+
+  it("REJECTS unknown keys (`.strict()` is what makes the above enforceable)", () => {
+    const parsed = ExtendBookingHoldSchema.safeParse({
+      holdId: validHoldId,
+      reservationId: validReservationId,
+      status: "active",
+      expiresAt: "2026-10-14T12:00:00.000Z"
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("REJECTS a missing holdId / reservationId", () => {
+    expect(
+      ExtendBookingHoldSchema.safeParse({ reservationId: validReservationId }).success
+    ).toBe(false);
+    expect(
+      ExtendBookingHoldSchema.safeParse({ holdId: validHoldId }).success
+    ).toBe(false);
+  });
+
+  it("REJECTS a non-UUIDv4 holdId / reservationId", () => {
+    expect(
+      ExtendBookingHoldSchema.safeParse({
+        holdId: "not-a-uuid",
+        reservationId: validReservationId
+      }).success
+    ).toBe(false);
+    expect(
+      ExtendBookingHoldSchema.safeParse({
+        holdId: validHoldId,
+        reservationId: "also-not-a-uuid"
+      }).success
+    ).toBe(false);
+  });
+
+  it("does NOT require roomType / dates — an extension changes time, not the hold", () => {
+    const parsed = ExtendBookingHoldSchema.safeParse({
+      holdId: validHoldId,
+      reservationId: validReservationId
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(Object.keys(parsed.data).sort()).toEqual(["holdId", "reservationId"]);
+    }
+  });
+});
+
+describe("IMT-02 — `POST /api/holds/extend` handler + route", () => {
+  it("the extend handler is registered on the existing catch-all (no new Vercel function)", () => {
+    expect(routerSrc).toMatch(
+      /domain === "holds" && action === "extend" && req\.method === "POST"/
+    );
+    expect(routerSrc).toMatch(/handleExtendInFlowHold/);
+  });
+
+  it("rate-limited at 10/IP/min — tighter than start's 30", () => {
+    // Extend is the call that extends doc lifetime, so it gets the
+    // tighter budget. Pin the exact limiter so a future copy-paste of
+    // start's 30 has to be deliberate.
+    expect(routerSrc).toMatch(/isRateLimited\(`holds-extend:\$\{ip\}`, 10, 60000\)/);
+  });
+
+  it("is NOT Turnstile-gated (same reason as start — the token is not available on Step 2)", () => {
+    // Extend must never grow a `verifyTurnstile` call. The hook fires
+    // on Steps 2 + 3 before the Step-3-only widget has a token; see
+    // `fix/holds-start-turnstile`.
+    //
+    // Two separate places a gate could appear, both checked: the route
+    // branch in apiRouter, and the handler body itself. (The route
+    // slice must start at the extend `if`, not before it — the start
+    // route directly above discusses Turnstile at length in its
+    // comments, which is the correct historical record and must not
+    // fail this assertion.)
+    const routeStart = routerSrc.indexOf(
+      'if (domain === "holds" && action === "extend"'
+    );
+    const routeBlock = routerSrc.slice(
+      routeStart,
+      routerSrc.indexOf("handleExtendInFlowHold(req, res)")
+    );
+    expect(routeStart).toBeGreaterThan(-1);
+    expect(routeBlock).not.toMatch(/verifyTurnstile/);
+
+    const handlerStart = handlerSrc.indexOf(
+      "export async function handleExtendInFlowHold"
+    );
+    const handlerBody = handlerSrc.slice(
+      handlerStart,
+      handlerSrc.indexOf("\n}", handlerStart)
+    );
+    expect(handlerBody).not.toMatch(/verifyTurnstile/);
+  });
+
+  it("reads the window from the doc's own holdMinutes, never from the request", () => {
+    expect(handlerSrc).toMatch(
+      /normalizeInFlowHoldMinutes\(data\.holdMinutes\)/
+    );
+    expect(handlerSrc).not.toMatch(/input\.(minutes|holdMinutes|extraMinutes)/);
+  });
+
+  it("validates with ExtendBookingHoldSchema and rejects non-POST", () => {
+    expect(handlerSrc).toMatch(/ExtendBookingHoldSchema\.safeParse\(req\.body\)/);
+    expect(handlerSrc).toMatch(/req\.method !== "POST"/);
+  });
+
+  it("all transaction reads complete BEFORE any write (GOTCHAS FOL-03)", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    const readAt = body.indexOf("await transaction.get(ref)");
+    const writeAt = body.indexOf("transaction.update(ref");
+    expect(readAt).toBeGreaterThan(-1);
+    expect(writeAt).toBeGreaterThan(-1);
+    // EXACTLY ONE read, and it precedes the write. Counting rather
+    // than position-checking matters: the FOL-03 class is "ANY read
+    // after ANY write", so an assertion that only checks where the
+    // FIRST read sits passes happily when a second read is appended
+    // after the update — which is precisely the antipattern this is
+    // meant to catch.
+    const reads = body.match(/await transaction\.get\(/g) ?? [];
+    expect(reads.length).toBe(1);
+    expect(readAt).toBeLessThan(writeAt);
+    // No bare `ref.get()` / `ref.update()` shortcut either — both
+    // bypass the transaction and reintroduce the read-modify-write
+    // race on `extensionCount`.
+    expect(body).not.toMatch(/(?<!transaction\.)ref\.get\(/);
+    expect(body).not.toMatch(/(?<!transaction\.)ref\.update\(/);
+  });
+
+  it("gates on `canExtendInFlowHold` (the single authority for status + cap)", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    expect(body).toMatch(/canExtendInFlowHold\(\{/);
+    // The gate must not be re-implemented inline alongside it.
+    expect(body).not.toMatch(/extensionCount >|extensionCount >=|status === "consumed" &&/);
+  });
+
+  it("revives an expired hold to 'active' and stamps the counter + updatedAt", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    expect(body).toMatch(/status: "active"/);
+    expect(body).toMatch(/extensionCount: nextExtensionCount/);
+    expect(body).toMatch(/updatedAt: Timestamp\.fromDate\(now\)/);
+    // Per the CVQ-04 answer, no dedicated timestamp field was added.
+    expect(body).not.toMatch(/extendedAt:/);
+  });
+
+  it("uses the additive window helper (never a reset-from-now inline)", () => {
+    const start = handlerSrc.indexOf("export async function handleExtendInFlowHold");
+    const body = handlerSrc.slice(start, handlerSrc.indexOf("\n}", start));
+    expect(body).toMatch(/computeExtendedInFlowHoldExpiresAt\(/);
+    expect(body).not.toMatch(/now\.getTime\(\) \+ holdMinutes/);
+  });
+
+  it("`serializeHold` takes (docId, data) so post-update state can be constructed in JS", () => {
+    // A transaction cannot observe the doc it just wrote (FOL-03), so
+    // the extended handler must serialize a JS-built shape.
+    expect(handlerSrc).toMatch(/function serializeHold\(\s*docId: string,/);
+    expect(handlerSrc).toMatch(/extensionCount: Number\(raw\.extensionCount \?\? 0\)/);
+  });
+
+  it("`serializeHold` callers were all migrated to the new signature", () => {
+    // Guards the refactor: a stale single-arg call is a compile error
+    // today, but this pin documents that all four sites were visited.
+    expect(handlerSrc).toMatch(/serializeHold\(existing\.id, existing\.data\(\)\)/);
+    expect(handlerSrc).toMatch(/serializeHold\(fresh\.id, fresh\.data\(\)\)/);
+    expect(handlerSrc).toMatch(/serializeHold\(snap\.id, snap\.data\(\)\)/);
+  });
+
+  it("the cap constant is exported from shared (never hardcoded in the handler)", () => {
+    expect(handlerSrc).toMatch(/MAX_IN_FLOW_HOLD_EXTENSIONS/);
+    expect(handlerSrc).not.toMatch(/extensionCount >= 3/);
+    expect(MAX_IN_FLOW_HOLD_EXTENSIONS).toBe(3);
+  });
+});
+
+describe("IMT-02 — no new Vercel function / no Firestore rules change", () => {
+  it("the holds routes stay inside the single catch-all function", () => {
+    // Every holds/* route is a branch in the existing router, so the
+    // Hobby plan's 12-function cap is untouched by IMT-02.
+    expect(routerSrc).toMatch(/domain === "holds" && action === "start"/);
+    expect(routerSrc).toMatch(/domain === "holds" && action === "read"/);
+    expect(routerSrc).toMatch(/domain === "holds" && action === "extend"/);
+  });
+
+  it("bookingHolds still has NO Firestore rules block (default-deny, Admin-SDK only)", () => {
+    // The extend handler writes through the Admin SDK, which bypasses
+    // rules. If a `match /bookingHolds/{id}` block ever appears, this
+    // pin forces a re-review of the client trust model.
+    const rulesSrc = read("firebase/firestore.rules");
+    expect(rulesSrc).not.toMatch(/match \/bookingHolds/);
+    expect(rulesSrc).toMatch(/match \/staffInventoryHolds/);
   });
 });
 

@@ -35,9 +35,13 @@ import { Timestamp } from "firebase-admin/firestore";
 import {
   HOLD_ID_REGEX,
   IN_FLOW_HOLD_MINUTES,
+  MAX_IN_FLOW_HOLD_EXTENSIONS,
   MAX_IN_FLOW_HOLD_MINUTES,
   MIN_IN_FLOW_HOLD_MINUTES,
+  ExtendBookingHoldSchema,
   StartBookingHoldSchema,
+  canExtendInFlowHold,
+  computeExtendedInFlowHoldExpiresAt,
   computeInFlowHoldExpiresAt,
   isInFlowHoldActive,
   normalizeInFlowHoldMinutes
@@ -60,7 +64,19 @@ function toIsoOrNull(value: any): string | null {
   return null;
 }
 
-function serializeHold(snap: FirebaseFirestore.DocumentSnapshot): {
+// Per IMT-02 (2026-10-14): takes `(docId, data)` rather than a
+// DocumentSnapshot so a caller can serialize the POST-update state it
+// just constructed inside a transaction — Firestore gives you no way
+// to observe a doc you just wrote from inside the same transaction
+// (see `plan/docs/GOTCHAS.md` FOL-03), so the extended handler builds
+// the resulting shape in JS and passes it here. This also matches
+// `serializeStaffInventoryHold` in `staff-inventory-holds.ts`.
+// `createdAt` stays the ORIGINAL stamp — an extension extends the
+// window, it does not restart the attempt's history.
+function serializeHold(
+  docId: string,
+  data: Record<string, any> | undefined
+): {
   id: string;
   reservationId: string;
   roomType: string;
@@ -71,22 +87,27 @@ function serializeHold(snap: FirebaseFirestore.DocumentSnapshot): {
   status: "active" | "consumed" | "expired";
   createdAt: string;
   holdMinutes: number;
+  extensionCount: number;
 } {
-  const data = snap.data() ?? {};
+  const raw = data ?? {};
   return {
-    id: snap.id,
-    reservationId: String(data.reservationId ?? ""),
-    roomType: String(data.roomType ?? ""),
-    checkIn: String(data.checkIn ?? ""),
-    checkOut: String(data.checkOut ?? ""),
-    numNights: Number(data.numNights ?? 0),
-    expiresAt: toIsoOrNull(data.expiresAt) ?? new Date(0).toISOString(),
+    id: docId,
+    reservationId: String(raw.reservationId ?? ""),
+    roomType: String(raw.roomType ?? ""),
+    checkIn: String(raw.checkIn ?? ""),
+    checkOut: String(raw.checkOut ?? ""),
+    numNights: Number(raw.numNights ?? 0),
+    expiresAt: toIsoOrNull(raw.expiresAt) ?? new Date(0).toISOString(),
     status:
-      data.status === "consumed" || data.status === "expired"
-        ? data.status
+      raw.status === "consumed" || raw.status === "expired"
+        ? raw.status
         : "active",
-    createdAt: toIsoOrNull(data.createdAt) ?? new Date(0).toISOString(),
-    holdMinutes: Number(data.holdMinutes ?? IN_FLOW_HOLD_MINUTES)
+    createdAt: toIsoOrNull(raw.createdAt) ?? new Date(0).toISOString(),
+    holdMinutes: Number(raw.holdMinutes ?? IN_FLOW_HOLD_MINUTES),
+    // Per IMT-04: exposed so the banner can hide the "I need more
+    // time" CTA once the cap is reached, instead of letting the guest
+    // click a button the server is going to reject.
+    extensionCount: Number(raw.extensionCount ?? 0)
   };
 }
 
@@ -174,7 +195,7 @@ export async function handleStartInFlowHold(req: any, res: any) {
       }
       return res.status(200).json({
         success: true,
-        data: serializeHold(existing),
+        data: serializeHold(existing.id, existing.data()),
         idempotentReplay: true
       });
     }
@@ -201,7 +222,7 @@ export async function handleStartInFlowHold(req: any, res: any) {
     const fresh = await ref.get();
     return res.status(201).json({
       success: true,
-      data: serializeHold(fresh)
+      data: serializeHold(fresh.id, fresh.data())
     });
   } catch (err) {
     return res.status(500).json({
@@ -241,7 +262,7 @@ export async function handleReadInFlowHold(req: any, res: any) {
     // the Janitor hasn't run yet. The on-disk `status`
     // stays "active" until the Janitor cleans it up —
     // we don't mutate the doc on every read.
-    const payload = serializeHold(snap);
+    const payload = serializeHold(snap.id, snap.data());
     if (payload.status === "active" && !activeNow) {
       payload.status = "expired";
     }
@@ -295,7 +316,162 @@ export async function handleConsumeInFlowHold(
     return { ok: false, reason: "expired" };
   }
   await ref.update({ status: "consumed", updatedAt: Timestamp.fromDate(now) });
-  return { ok: true, hold: serializeHold(snap) };
+  return { ok: true, hold: serializeHold(snap.id, snap.data()) };
+}
+
+// POST /api/holds/extend — the "I need more time" handler (IMT-02,
+// 2026-10-14). This is also where the server-side terminal-hold
+// revival deferred out of IMT-01 lives: IMT-01 could not revive an
+// expired hold because `useInFlowHold` only POSTs on a 404 and an
+// expired doc reads back as 200. The explicit extend call is the
+// reachable path.
+//
+// Trust model (unchanged from start/read): the hold id is a
+// client-preallocated opaque UUIDv4 with no auth behind it, and the
+// Firestore rules are narrow enough that no client can enumerate
+// holds — same bearer-credential posture as `/api/bookings/lookup`,
+// as documented in the `useInFlowHold` docstring. The only binding is
+// `holdId` + `reservationId` agreeing with the stored doc, mirroring
+// `handleStartInFlowHold`'s idempotency guard.
+//
+// NO Turnstile gate, for the documented `fix/holds-start-turnstile`
+// reason: the banner lives on Steps 2 + 3 and fires before the
+// Step-3-only Turnstile widget has a token. Gating here would break
+// the exact surface the button lives on. The real security boundary
+// is still the Turnstile-gated `/api/bookings/create`; extending a
+// soft hold unlocks nothing. Rate limiting (10/IP/min, tighter than
+// start's 30) is the spam control.
+//
+// Abuses: the worst a caller can do is inflate their own banner's
+// lifetime. `bookingHolds` is consulted by neither the availability
+// query nor the booking transaction, so an extended hold can never
+// deny a room to anyone else. `MAX_IN_FLOW_HOLD_EXTENSIONS` bounds the
+// doc lifetime, not the inventory.
+export async function handleExtendInFlowHold(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const parsed = ExtendBookingHoldSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid hold extension request.",
+      details: parsed.error.flatten()
+    });
+  }
+  const input = parsed.data;
+  if (!HOLD_ID_REGEX.test(input.holdId)) {
+    return res.status(400).json({ success: false, error: "Invalid hold id format." });
+  }
+
+  const ref = adminDb.collection(HOLDS_COLLECTION).doc(input.holdId);
+  const now = new Date();
+  let responseData: ReturnType<typeof serializeHold> | null = null;
+  let failure: { status: number; error: string } | null = null;
+
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      // Per GOTCHAS FOL-03: every read completes before any write.
+      const snap = await transaction.get(ref);
+
+      if (!snap.exists) {
+        failure = { status: 404, error: "Hold not found." };
+        return;
+      }
+      const data = snap.data() ?? {};
+
+      // Ownership bind — mirrors the start endpoint's idempotency
+      // guard. A hold doc with no stored `reservationId` (legacy
+      // write) is accepted; anything that disagrees is refused.
+      if (data.reservationId && data.reservationId !== input.reservationId) {
+        failure = { status: 409, error: "Hold does not match this reservation." };
+        return;
+      }
+
+      // Status + cap gate. `canExtendInFlowHold` denies `"consumed"`
+      // (a committed booking's hold is never resurrectable, so a stale
+      // `?hold=` link cannot revive a completed attempt) and any
+      // status outside `"active" | "expired"` — fail-closed on a
+      // hand-edited doc. It accepts `"expired"` because reviving is
+      // exactly what the guest asked for.
+      if (!canExtendInFlowHold({ status: data.status, extensionCount: data.extensionCount })) {
+        const atCap =
+          data.status === "consumed" ||
+          Number(data.extensionCount ?? 0) >= MAX_IN_FLOW_HOLD_EXTENSIONS;
+        failure = atCap
+          ? {
+              status: 409,
+              error:
+                data.status === "consumed"
+                  ? "This hold was already used by a confirmed booking."
+                  : "This hold has reached its extension limit."
+            }
+          : { status: 409, error: "This hold can no longer be extended." };
+        return;
+      }
+
+      // The window comes from the hold's own `holdMinutes` snapshot,
+      // never from the request — a client cannot ask for a longer
+      // hold than the hotel configured. `normalizeInFlowHoldMinutes`
+      // re-clamps a hand-edited value to the 5..30 range.
+      const holdMinutes = normalizeInFlowHoldMinutes(data.holdMinutes);
+      if (
+        holdMinutes < MIN_IN_FLOW_HOLD_MINUTES ||
+        holdMinutes > MAX_IN_FLOW_HOLD_MINUTES
+      ) {
+        failure = { status: 500, error: "Hold window is misconfigured." };
+        return;
+      }
+
+      // Additive from max(now, currentExpiresAt) — a guest at 0:30
+      // keeps that 0:30; an expired hold restarts from now.
+      const nextExpiresAt = computeExtendedInFlowHoldExpiresAt(
+        holdMinutes,
+        toIsoOrNull(data.expiresAt),
+        now
+      );
+      if (!nextExpiresAt) {
+        failure = { status: 500, error: "Failed to compute hold deadline." };
+        return;
+      }
+
+      const nextExtensionCount = Number(data.extensionCount ?? 0) + 1;
+
+      transaction.update(ref, {
+        // Revive on the expired path — the literal "I need more
+        // time" moment. Safe because the hold is soft.
+        status: "active",
+        expiresAt: Timestamp.fromDate(nextExpiresAt),
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        // Per the IMT CVQ-04 answer (staff do not see extensions), no
+        // dedicated `extendedAt` field was added: `updatedAt` is the
+        // field the consume + sweep paths already stamp, so a second
+        // timestamp would have been write-only weight with no reader.
+        updatedAt: Timestamp.fromDate(now)
+      });
+
+      // Post-update state constructed in JS — a transaction cannot
+      // observe the doc it just wrote (FOL-03). `createdAt` is
+      // carried through from the pre-read untouched.
+      responseData = serializeHold(snap.id, {
+        ...data,
+        status: "active",
+        expiresAt: nextExpiresAt,
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        updatedAt: now
+      });
+    });
+
+    if (failure) {
+      return res.status(failure.status).json({ success: false, error: failure.error });
+    }
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to extend hold." });
+  }
 }
 
 // Cron-driven Janitor sweep for stale in-flow holds.
