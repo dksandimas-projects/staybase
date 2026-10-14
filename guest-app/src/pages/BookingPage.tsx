@@ -2409,7 +2409,7 @@ export function BookingPage() {
             <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
-              Optional extras for your stay. Today the only add-on is breakfast — pick a meal for each guest on each day, or skip the day entirely.
+              Optional extras for your stay.
             </p>
           </div>
         </section>
@@ -2500,7 +2500,7 @@ export function BookingPage() {
             <div>
               <p className="text-sm text-gray-600">Add-ons</p>
               <p className="text-lg font-semibold text-gray-950">
-                Continue to guest details when you&apos;re ready — breakfast is optional.
+                Continue to guest details when you&apos;re ready.
               </p>
             </div>
             {/* Per BR-10 (decision #244 reserved, 2026-10-14
