@@ -213,7 +213,7 @@ describe("BR-08 — Close-out tripwires (shared)", () => {
     expect(stripComments(source)).not.toMatch(/breakfastIncludesChildren:\s*boolean\b/);
   });
 
-  it("13. shared/VERSION.ts is 2.0.0 (the BR-08 close-out release)", () => {
+  it("13. shared/VERSION.ts is at or past the 2.0.0 BR-08 close-out release", () => {
     const source = readFileSafe(VERSION_PATH);
     // The post-BR-08 version is `2.0.0` — a MAJOR bump
     // for the data-model change (decision #238: the
@@ -222,6 +222,21 @@ describe("BR-08 — Close-out tripwires (shared)", () => {
     // would fail at compile-time + run-time). Husky
     // auto-bumps via Conventional Commits, but BR-08
     // also bumps explicitly to lock the release tag.
-    expect(source).toMatch(/VERSION\s*=\s*["']2\.0\.0["']/);
+    //
+    // Asserted as a FLOOR, not an exact pin. This test used to
+    // require the literal string "2.0.0", which meant it failed on
+    // the very next `feat:`/`fix:`/`refactor:` commit — the
+    // commit-msg hook bumps the minor/patch automatically, so an
+    // exact-version assertion in a suite that runs on every commit
+    // is guaranteed to break sooner or later and teaches everyone
+    // to ignore red. What BR-08 actually needs to guarantee is that
+    // the MAJOR cutover happened, i.e. the version is 2.x or higher
+    // and nothing has rolled the data model back to 1.x.
+    const match = source.match(/VERSION\s*=\s*["'](\d+)\.(\d+)\.(\d+)["']/);
+    expect(match).not.toBeNull();
+    const major = Number(match![1]);
+    // The point of the floor: the 2.x MAJOR cutover has happened and
+    // has not been rolled back. A deliberate future 3.x still passes.
+    expect(major).toBeGreaterThanOrEqual(2);
   });
 });
