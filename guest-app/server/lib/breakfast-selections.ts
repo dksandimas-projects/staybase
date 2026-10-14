@@ -160,11 +160,20 @@ export function validateBreakfastSelections(
     // recomputes the `serviceDate` cutoff. A guest
     // who back-dated their clock to slip past the
     // cutoff still gets rejected.
+    //
+    // Per BR-10 (2026-10-14, decision #244 reserved —
+    // Phase 14): when `breakfastConfig.cutoffsEnabled`
+    // is `false`, the helper short-circuits to
+    // `isLocked: false` regardless of `now` vs.
+    // `cutoffAt`. The flag is required on the
+    // `BreakfastConfig` shape — `normalizeBreakfastConfig`
+    // defaults it to `true` for legacy docs.
     const cutoffState = computeBreakfastCutoffState({
       serviceDate,
       now,
       cutoffTime: breakfastConfig.cutoffTime,
-      timezone: breakfastConfig.cutoffTimezone
+      timezone: breakfastConfig.cutoffTimezone,
+      cutoffsEnabled: breakfastConfig.cutoffsEnabled
     });
     if (cutoffState.isLocked) {
       throw new BreakfastSelectionValidationError(
@@ -359,13 +368,20 @@ export function assertMealExists(
 // surfaces 400 directly. The helper accepts the `now: Date`
 // + `cutoffTime` + `timezone` triple so the same source
 // values flow through both handlers.
+//
+// Per BR-10 (2026-10-14, decision #244 reserved —
+// Phase 14): the `cutoffsEnabled` flag is threaded through
+// so callers can honor the admin-side "Cut-offs enabled"
+// toggle. `true` (or omitted, defaulting in the helper to
+// `true`) keeps the pre-BR-10 locked behaviour.
 export function assertNotLocked(input: {
   slotKey: string;
   serverNow: Date;
   cutoffTime: string;
   timezone: string;
+  cutoffsEnabled?: boolean;
 }): void {
-  const { slotKey, serverNow, cutoffTime, timezone } = input;
+  const { slotKey, serverNow, cutoffTime, timezone, cutoffsEnabled } = input;
   const serviceDate = slotKey.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
     // A malformed slotKey is the caller's fault; surface as
@@ -376,7 +392,8 @@ export function assertNotLocked(input: {
     serviceDate,
     now: serverNow,
     cutoffTime,
-    timezone
+    timezone,
+    cutoffsEnabled
   });
   if (cutoff.isLocked) {
     throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${serviceDate}`);

@@ -8147,15 +8147,54 @@ export function BookingsPage() {
               {walkinStep === 4 && "Step 4 — Review (use footer to confirm)"}
             </p>
             {walkinStep < 4 ? (
-              <button
-                type="button"
-                onClick={() => setWalkinStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4) : current))}
-                className="min-h-[40px] rounded-lg bg-primary px-4 text-xs font-semibold text-white transition hover:bg-primary-dark"
-              >
-                {walkinStep === 1 && "Continue to add-ons"}
-                {walkinStep === 2 && "Continue to guest details"}
-                {walkinStep === 3 && "Continue to review"}
-              </button>
+              // Per BR-10 (decision #244 reserved, 2026-10-14 —
+              // Phase 14): the walk-in modal's Add-ons step
+              // (step 2) renders TWO parallel CTAs that both
+              // call the IDENTICAL `setWalkinStep` advance
+              // callback. They differ only in visual style +
+              // label, mirroring the public + corporate
+              // booking flows:
+              //   - **Primary**  "Continue to guest details"
+              //     — mirrored from the pre-BR-10 single
+              //     button.
+              //   - **Ghost**    "No add-ons, continue"
+              //     — the skip affordance for staff who
+              //     don't want to spend any time on the
+              //     per-date breakfast picker (the grid is
+              //     rendered one tab over; the staff member
+              //     hasn't actively skipped it).
+              // The BR-10 invariant is "both buttons call
+              // the same nextStep function" — both
+              // onClick handlers below reference the
+              // exact same `setWalkinStep((current) =>
+              // (current < 4 ? ((current + 1) as ...) :
+              // current))` arrow. The `WalkinBreakfastGrid`
+              // still runs the cut-off check per-date, so
+              // a past-cutoff date locks the dropdown and
+              // requires a selection OR an explicit
+              // `cutoffsEnabled = false` admin toggle to
+              // advance.
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWalkinStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4) : current))}
+                  className="min-h-[40px] rounded-lg bg-primary px-4 text-xs font-semibold text-white transition hover:bg-primary-dark"
+                >
+                  {walkinStep === 1 && "Continue to add-ons"}
+                  {walkinStep === 2 && "Continue to guest details"}
+                  {walkinStep === 3 && "Continue to review"}
+                </button>
+                {walkinStep === 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setWalkinStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4) : current))}
+                    data-testid="walkin-addons-skip-addons"
+                    className="min-h-[40px] rounded-lg border border-gray-300 bg-transparent px-4 text-xs font-semibold text-gray-500 transition hover:bg-gray-50"
+                  >
+                    No add-ons, continue
+                  </button>
+                )}
+              </div>
             ) : (
               <span className="min-h-[40px] inline-flex items-center rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-500">
                 Place booking ↓

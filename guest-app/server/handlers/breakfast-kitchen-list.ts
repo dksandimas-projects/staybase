@@ -324,10 +324,22 @@ interface ProjectionBooking {
  */
 async function computeKitchenList(date: string): Promise<KitchenListResponse> {
   const datePrefix = date; // "YYYY-MM-DD"
+  // Per BR-10 (2026-10-14, decision #244 reserved —
+  // Phase 14): read the live `cutoffsEnabled` toggle so
+  // the kitchen list honors the admin-side flip. When
+  // `cutoffsEnabled === false`, every date appears
+  // "still open" in the response — the finalised /
+  // late-change split collapses because there is no
+  // cut-off moment to be late against. We still re-use
+  // the BR-07 default cutoff time / timezone (per the
+  // existing comment below) so the read is a single
+  // targeted fetch for the toggle, not a settings-doc
+  // hydration.
+  const cutoffsEnabled = await loadKitchenListCutoffsEnabled();
   // The cutoff AT for this date is `(date - 1) at 20:00
   // hotel-tz`. We piggy-back on `computeBreakfastCutoffState`
   // (in @spark-inn/shared) for the canonical rule.
-  const cutoffState = computeBreakfastCutoffStateSafe(date);
+  const cutoffState = computeBreakfastCutoffStateSafe(date, cutoffsEnabled);
   const cutoffAtIso = cutoffState.cutoffAt.toISOString();
   const cutoffPassed = cutoffState.isLocked;
 
@@ -508,7 +520,10 @@ async function computeKitchenList(date: string): Promise<KitchenListResponse> {
  * bogus `date` string yields a present-time fallback
  * (the same posture `breakfast-config` uses).
  */
-function computeBreakfastCutoffStateSafe(date: string): {
+function computeBreakfastCutoffStateSafe(
+  date: string,
+  cutoffsEnabled = true
+): {
   cutoffAt: Date;
   isLocked: boolean;
 } {
@@ -521,9 +536,15 @@ function computeBreakfastCutoffStateSafe(date: string): {
       // Firestore on every kitchen list hit is a
       // worthwhile follow-up but not required for
       // BR-07 (the defaults match the BR-02
-      // settings surface 99% of the time).
+      // settings surface 99% of the time). Per
+      // BR-10 the `cutoffsEnabled` toggle IS
+      // re-read on every uncached request via
+      // `loadKitchenListCutoffsEnabled` so the
+      // late-change split honors the admin-side
+      // flip immediately.
       cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
-      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
+      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled
     });
     return {
       cutoffAt: state.cutoffAt instanceof Date ? state.cutoffAt : new Date(state.cutoffAt),
@@ -534,6 +555,42 @@ function computeBreakfastCutoffStateSafe(date: string): {
       cutoffAt: new Date(),
       isLocked: false
     };
+  }
+}
+
+// Per BR-10 (2026-10-14, decision #244 reserved —
+// Phase 14): fetch just the `cutoffsEnabled` toggle
+// from the live settings doc. The read is wrapped in
+// a try / catch so a transient Firestore outage
+// degrades to the conservative `true` (cut-offs
+// enforced) posture rather than silently locking
+// every date open.
+let cutoffsEnabledCache: { value: boolean; at: number } | null = null;
+const KITCHEN_LIST_CUTOFFS_CACHE_MS = 30_000;
+async function loadKitchenListCutoffsEnabled(): Promise<boolean> {
+  const now = Date.now();
+  if (
+    cutoffsEnabledCache &&
+    now - cutoffsEnabledCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS
+  ) {
+    return cutoffsEnabledCache.value;
+  }
+  try {
+    const snap = await adminDb
+      .collection("settings")
+      .doc("breakfastConfig")
+      .get();
+    const source: any = snap.exists ? snap.data() : null;
+    const value = source?.cutoffsEnabled !== false;
+    cutoffsEnabledCache = { value, at: now };
+    return value;
+  } catch {
+    // Conservative posture on a Firestore blip:
+    // assume cut-offs are enforced (the pre-BR-10
+    // default). The 30s cache window means the
+    // fallback only applies briefly during an
+    // outage.
+    return true;
   }
 }
 

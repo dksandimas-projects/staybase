@@ -1025,6 +1025,17 @@ export interface BreakfastMeal {
 export interface BreakfastConfig {
   /** Master toggle. When `false`, the Step 2 section + Manage Booking + the booking-drawer breakfast tab all hide. */
   isEnabled: boolean;
+  /**
+   * Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+   * the cut-off enforcement toggle. Default `true`. When `false`,
+   * `computeBreakfastCutoffState` short-circuits to `isLocked: false`
+   * for every date — guests can edit breakfast meals right up
+   * until the morning of service, and the staff override flow
+   * becomes a no-op (no date ever locks). The `cutoffTime` +
+   * `cutoffTimezone` settings stay on the doc so flipping the
+   * toggle back on doesn't lose the configured time.
+   */
+  cutoffsEnabled: boolean;
   /** `HH:MM` 24h, default `"20:00"`. */
   cutoffTime: string;
   /** IANA timezone, defaults to the hotel-config timezone. */

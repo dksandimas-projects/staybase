@@ -2309,9 +2309,51 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                 Continue to provide employee + billing details.
               </p>
             </div>
-            <PrimaryButton to={`/corporate/book?${addOnsNext.toString()}`} className="sm:min-w-56">
-              Continue to guest details <ArrowRight size={16} />
-            </PrimaryButton>
+            {/* Per BR-10 (decision #244 reserved, 2026-10-14
+                — Phase 14): parity with the public booking
+                Add-ons step — TWO parallel CTAs that both
+                advance to the same `guest-details` step.
+                  - **Primary**  "Continue to guest details"
+                    — mirrored from the pre-BR-10 single
+                    button.
+                  - **Ghost**    "No add-ons, continue"
+                    — the skip affordance, kept consistent
+                    with the public flow even though the
+                    corporate Add-ons step has no
+                    configurable meals (the rate is a flat
+                    rate). The parity is intentional so
+                    future per-stay add-ons (BR-12
+                    airport transfer, etc.) drop into both
+                    pages identically without renaming.
+                Both buttons target the identical
+                `/corporate/book?step=guest-details` URL, so
+                the URL-side guard + the per-step payload
+                validation are exercised by both paths. The
+                muted `bg-transparent text-gray-500
+                border border-gray-300 hover:bg-gray-50`
+                ghost recipe is the FRONTEND.md §Button
+                Variants — the existing `GhostButton`
+                component uses `border-primary text-primary`
+                which would visually compete with the
+                primary, so we inline the muted variant
+                here (matching the same call-site shape in
+                the public booking flow). */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <PrimaryButton
+                to={`/corporate/book?${addOnsNext.toString()}`}
+                className="sm:min-w-56"
+                data-testid="corporate-addons-continue-primary"
+              >
+                Continue to guest details <ArrowRight size={16} />
+              </PrimaryButton>
+              <Link
+                to={`/corporate/book?${addOnsNext.toString()}`}
+                data-testid="corporate-addons-skip-addons"
+                className="inline-flex w-full items-center justify-center gap-2 self-center rounded-lg border border-gray-300 bg-transparent px-5 py-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto sm:min-w-56"
+              >
+                No add-ons, continue
+              </Link>
+            </div>
           </div>
         </div>
       </>
