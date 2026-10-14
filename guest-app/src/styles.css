@@ -37,3 +37,26 @@ body {
     font-size: 16px;
   }
 }
+
+/* DR-02 (2026-10-15): brand the range calendar's month navigation.
+   react-day-picker styles `.rdp-button_previous` / `.rdp-button_next`
+   with its own default accent, which is not `config.colors.primary`.
+   The override is scoped to `.spark-date-range` so it cannot leak into
+   any other surface, and the hex is deliberately NOT hardcoded at the
+   call site — the component sets the same value via
+   `--rdp-accent-color` from config, so a per-client white-label change
+   in `hotel.config.ts` flows through automatically. */
+.spark-date-range .rdp-button_previous,
+.spark-date-range .rdp-button_next {
+  color: var(--rdp-accent-color);
+}
+
+.spark-date-range .rdp-button_previous:hover,
+.spark-date-range .rdp-button_next:hover {
+  background-color: var(--rdp-accent-background-color);
+  color: #fff;
+}
+
+.spark-date-range .rdp-chevron {
+  fill: currentColor;
+}

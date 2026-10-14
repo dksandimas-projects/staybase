@@ -5,7 +5,8 @@ import {
   isValidIsoDate,
   addDaysToIsoDate,
   diffNightsBetweenIso,
-  DEFAULT_MAX_STAY_NIGHTS
+  DEFAULT_MAX_STAY_NIGHTS,
+  resolveRangeSelection
 } from "../utils/stayRange";
 
 // DR-01 (2026-10-14). The regression this suite pins: a guest could
@@ -213,5 +214,101 @@ describe("stayRange — isValidStayRange", () => {
     expect(isValidStayRange("2020-01-01", "2026-10-18", TODAY)).toBe(false);
     expect(isValidStayRange("", "2026-10-18", TODAY)).toBe(false);
     expect(isValidStayRange(null, null, TODAY)).toBe(false);
+  });
+});
+// ---------------------------------------------------------------------------
+// DR-02 (2026-10-15): range-calendar selection resolution.
+//
+// This suite exists because the two-step contract is where the real
+// bug was. A calendar's range mode reports the FIRST click of a new
+// selection as `{ from: day, to: day }` — same day, not
+// `to: undefined`. Treating any `to` as "complete" committed a
+// 1-night range on a single click, which fired an availability refetch
+// that swapped the booking page for a full-page loader and unmounted
+// the picker. The guest's single click silently vanished.
+// ---------------------------------------------------------------------------
+
+describe("stayRange — resolveRangeSelection (DR-02)", () => {
+  const TODAY = "2026-10-15";
+  const HORIZON = "2026-11-14";
+  const select = (from?: string | null, to?: string | null) =>
+    resolveRangeSelection({ from, to, minCheckIn: TODAY, maxCheckOut: HORIZON });
+
+  it("THE REGRESSION: a same-day click is pending, never complete", () => {
+    // react-day-picker's first click returns from === to. Committing
+    // here is what unmounted the picker mid-selection.
+    expect(select("2026-10-20", "2026-10-20")).toEqual({
+      status: "pending",
+      checkIn: "2026-10-20"
+    });
+  });
+
+  it("completes once a strictly later day is chosen", () => {
+    expect(select("2026-10-20", "2026-10-23")).toEqual({
+      status: "complete",
+      checkIn: "2026-10-20",
+      checkOut: "2026-10-23",
+      nights: 3
+    });
+  });
+
+  it("treats a first click with no `to` as pending", () => {
+    expect(select("2026-10-20", null)).toEqual({ status: "pending", checkIn: "2026-10-20" });
+    expect(select("2026-10-20", undefined)).toEqual({ status: "pending", checkIn: "2026-10-20" });
+  });
+
+  it("restarts the selection when the second click runs backwards", () => {
+    // Clicking a day at or before the pending check-in starts a NEW
+    // selection; it must never produce an inverted range.
+    expect(select("2026-10-20", "2026-10-18")).toEqual({
+      status: "pending",
+      checkIn: "2026-10-20"
+    });
+  });
+
+  it("clears when there is no usable check-in", () => {
+    expect(select(null, "2026-10-20")).toEqual({ status: "cleared" });
+    expect(select(undefined, undefined)).toEqual({ status: "cleared" });
+    expect(select("garbage", "2026-10-20")).toEqual({ status: "cleared" });
+  });
+
+  it("floors a past check-in at today", () => {
+    expect(select("2020-01-01", "2026-10-20")).toEqual({
+      status: "complete",
+      checkIn: TODAY,
+      checkOut: "2026-10-20",
+      nights: 5
+    });
+  });
+
+  it("refuses to complete past the booking horizon", () => {
+    expect(select("2026-11-01", "2027-06-01")).toEqual({
+      status: "pending",
+      checkIn: "2026-11-01"
+    });
+  });
+
+  it("never completes a zero-night or inverted range, for ANY input pair", () => {
+    const inputs = [
+      ["2026-10-20", "2026-10-20"],
+      ["2026-10-20", "2026-10-19"],
+      ["2026-10-20", "2026-10-01"],
+      ["2020-01-01", "2019-01-01"],
+      ["2026-11-01", "2030-01-01"]
+    ];
+    for (const [from, to] of inputs) {
+      const result = select(from, to);
+      if (result.status === "complete") {
+        expect(result.checkOut).not.toBe(result.checkIn);
+        expect(result.nights).toBe(diffNightsBetweenIso(result.checkIn, result.checkOut));
+        expect(result.nights).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  it("is idempotent for an already-complete range", () => {
+    const a = select("2026-10-20", "2026-10-23");
+    const b = select("2026-10-20", "2026-10-23");
+    expect(a).toEqual(b);
   });
 });

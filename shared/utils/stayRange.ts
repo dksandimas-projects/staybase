@@ -224,3 +224,72 @@ export function isValidStayRange(
   if (checkIn < minCheckIn) return false;
   return diffNightsBetweenIso(checkIn, checkOut) >= 1;
 }
+// ---------------------------------------------------------------------------
+// DR-02 (2026-10-15): range-calendar selection resolution.
+//
+// The range calendar replaces two independent date fields with one
+// two-step selection. This resolver is deliberately PURE and
+// separate from the component so the two-step contract — which is
+// where the real bugs live — is unit-testable without a DOM.
+// ---------------------------------------------------------------------------
+
+export type StaySelection =
+  /** First click landed. Check-in is chosen; check-out still pending. */
+  | { status: "pending"; checkIn: string }
+  /** Both clicks landed and the range is bookable. */
+  | { status: "complete"; checkIn: string; checkOut: string; nights: number }
+  /** Nothing selected (the guest cleared the range). */
+  | { status: "cleared" };
+
+export interface ResolveRangeSelectionOptions {
+  /** Check-in picked in the calendar (ISO key, may be invalid or absent). */
+  from?: string | null;
+  /** Check-out picked in the calendar (ISO key, may be invalid or absent). */
+  to?: string | null;
+  /** Earliest legal check-in, property timezone. */
+  minCheckIn: string;
+  /** Latest legal check-out (the booking horizon). */
+  maxCheckOut: string;
+}
+
+/**
+ * Turns a raw calendar selection into a booking decision.
+ *
+ * The non-obvious rule, and the one that caused a real bug: a
+ * calendar's range mode reports the FIRST click of a brand-new
+ * selection as `{ from: day, to: day }` — same day, NOT `to:
+ * undefined`. Treating any `to` as "complete" therefore committed a
+ * 1-night range on a single click. That commit fires an availability
+ * refetch, which swaps the booking page for a full-page loader and
+ * unmounts the picker, silently discarding the half-made selection.
+ * A same-day pair is therefore ALWAYS "pending", never "complete".
+ */
+export function resolveRangeSelection({
+  from,
+  to,
+  minCheckIn,
+  maxCheckOut
+}: ResolveRangeSelectionOptions): StaySelection {
+  if (!isValidIsoDate(from ?? "")) return { status: "cleared" };
+
+  const checkIn = (from as string) < minCheckIn ? minCheckIn : (from as string);
+
+  if (!isValidIsoDate(to ?? "")) return { status: "pending", checkIn };
+
+  const checkOut = to as string;
+
+  // Same day is a single click, not a zero-night stay. Never complete.
+  if (checkOut === checkIn) return { status: "pending", checkIn };
+
+  // A range that runs backwards means the guest clicked a day at or
+  // before the check-in — that starts a NEW selection, it does not
+  // invert the current one.
+  if (checkOut < checkIn) return { status: "pending", checkIn };
+
+  const clampedCheckIn = checkIn < minCheckIn ? minCheckIn : checkIn;
+  const nights = diffNightsBetweenIso(clampedCheckIn, checkOut);
+  if (nights < 1) return { status: "pending", checkIn: clampedCheckIn };
+  if (checkOut > maxCheckOut) return { status: "pending", checkIn: clampedCheckIn };
+
+  return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
+}

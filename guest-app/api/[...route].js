@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.3.0";
+    VERSION2 = "2.4.0";
   }
 });
 
@@ -222373,6 +222373,24 @@ function isValidStayRange(checkIn, checkOut, minCheckIn) {
   if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) return false;
   if (checkIn < minCheckIn) return false;
   return diffNightsBetweenIso(checkIn, checkOut) >= 1;
+}
+function resolveRangeSelection({
+  from,
+  to: to3,
+  minCheckIn,
+  maxCheckOut
+}) {
+  if (!isValidIsoDate(from ?? "")) return { status: "cleared" };
+  const checkIn = from < minCheckIn ? minCheckIn : from;
+  if (!isValidIsoDate(to3 ?? "")) return { status: "pending", checkIn };
+  const checkOut = to3;
+  if (checkOut === checkIn) return { status: "pending", checkIn };
+  if (checkOut < checkIn) return { status: "pending", checkIn };
+  const clampedCheckIn = checkIn < minCheckIn ? minCheckIn : checkIn;
+  const nights = diffNightsBetweenIso(clampedCheckIn, checkOut);
+  if (nights < 1) return { status: "pending", checkIn: clampedCheckIn };
+  if (checkOut > maxCheckOut) return { status: "pending", checkIn: clampedCheckIn };
+  return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
 }
 var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS;
 var init_stayRange = __esm({
@@ -225109,6 +225127,7 @@ __export(shared_exports, {
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolveCurrentLevel: () => resolveCurrentLevel,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
+  resolveRangeSelection: () => resolveRangeSelection,
   runBackfill: () => runBackfill,
   scaleIn: () => scaleIn,
   slideInBottom: () => slideInBottom,

@@ -33,7 +33,8 @@ import { resolve } from "node:path";
 import {
   addDaysToIsoDate,
   diffNightsBetweenIso,
-  normalizeStayRange
+  normalizeStayRange,
+  resolveRangeSelection
 } from "@spark-inn/shared";
 
 const read = (relative: string) =>
@@ -92,47 +93,76 @@ describe("DR-01 — create-booking rejects an inverted stay range", () => {
   });
 });
 
-describe("DR-01 — DateRangePicker self-heals instead of only guarding input", () => {
-  it("renders the normalized values, not the raw props", () => {
-    expect(pickerSrc).toMatch(/value=\{resolved\.checkIn\}/);
-    expect(pickerSrc).toMatch(/value=\{resolved\.checkOut\}/);
+describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", () => {
+  it("renders react-day-picker in range mode", () => {
+    // The whole point of DR-02: one calendar, one range being drawn.
+    // An inverted range is not representable, so the clamp/correct
+    // machinery around two independent fields is no longer the
+    // primary defence against it.
+    expect(pickerSrc).toMatch(/<DayPicker/);
+    expect(pickerSrc).toMatch(/mode="range"/);
   });
 
-  it("routes both inputs through normalizeStayRange", () => {
+  it("commits through the pure resolver, not ad-hoc inline logic", () => {
+    expect(pickerSrc).toMatch(/resolveRangeSelection\(\{/);
+    expect(pickerSrc).toMatch(/selection\.status === "complete"/);
+    expect(pickerSrc).toMatch(/selection\.status === "cleared"/);
+  });
+
+  it("holds the first click as pending instead of committing it", () => {
+    // Committing after click #1 fires an availability refetch, and
+    // BookingPage replaces itself with a full-page loader that
+    // unmounts this picker — the click would silently vanish.
+    expect(pickerSrc).toMatch(/setDraft\(\{ from: isoToTzDate\(selection\.checkIn\), to: undefined \}\)/);
+  });
+
+  it("keeps a draft range separate from the committed pair", () => {
+    expect(pickerSrc).toMatch(/const \[draft, setDraft\] = useState<DateRange \| undefined>/);
+    expect(pickerSrc).toMatch(/\}, \[resolved\.checkIn, resolved\.checkOut\]\)/);
+  });
+
+  it("still self-heals a bad pair arriving from outside the calendar", () => {
+    expect(pickerSrc).toMatch(/if \(resolved\.checkIn !== checkIn\) onCheckInChange\(resolved\.checkIn\)/);
+    expect(pickerSrc).toMatch(/if \(resolved\.checkOut !== checkOut\) onCheckOutChange\(resolved\.checkOut\)/);
     expect(pickerSrc).toMatch(/normalizeStayRange\(\{/);
   });
 
-  it("pushes the correction back to the parent so state + URL agree", () => {
-    expect(pickerSrc).toMatch(/if \(resolved\.checkIn !== checkIn\) onCheckInChange\(resolved\.checkIn\)/);
-    expect(pickerSrc).toMatch(/if \(resolved\.checkOut !== checkOut\) onCheckOutChange\(resolved\.checkOut\)/);
+  it("bounds the calendar to today .. the booking horizon", () => {
+    expect(pickerSrc).toMatch(/startMonth=\{startMonth\}/);
+    expect(pickerSrc).toMatch(/endMonth=\{endMonth\}/);
+    expect(pickerSrc).toMatch(/disabled=\{\{ before: startMonth, after: endMonth \}\}/);
   });
 
-  it("preserves the last valid night count for the nights-preserved path", () => {
-    expect(pickerSrc).toMatch(/lastValidNights/);
-    expect(pickerSrc).toMatch(/previousNights: lastValidNights/);
+  it("themes the selected range with the brand primary colour", () => {
+    // Hard rule: primary CTAs use config.colors.primary.
+    // react-day-picker ships a blue default, which would put an
+    // off-brand colour on the most prominent element in the flow.
+    expect(pickerSrc).toMatch(/"--rdp-accent-color": config\.colors\.primary/);
+    expect(pickerSrc).toMatch(/"--rdp-accent-background-color": config\.colors\.primary/);
   });
 
-  it("bounds the inputs without freezing either one", () => {
-    // DR-01 follow-up (2026-10-15): check-in must NOT be bounded
-    // by `checkOut - 1`. With the default 1-night stay, check-out is
-    // always `checkIn + 1`, so that max resolved to check-in's OWN
-    // current value and the native picker greyed out every later
-    // day — the guest could not move check-in at all. The upper
-    // bound is the booking horizon; the lower is property-timezone
-    // today.
-    expect(pickerSrc).toMatch(/max=\{maxCheckOut\}/);
-    expect(pickerSrc).not.toMatch(/max=\{addDaysToIsoDate\(resolved\.checkOut/);
-    // Check-out stays floored at one night after check-in — that
-    // bound is correct and does not lock the field, because every
-    // date from `checkIn + 1` up to the horizon stays selectable.
-    expect(pickerSrc).toMatch(/min=\{addDaysToIsoDate\(resolved\.checkIn, 1\)\}/);
+  it("shows the resolved range and night count as text", () => {
+    expect(pickerSrc).toMatch(/\{nights\} \{nights === 1 \? "night" : "nights"\}/);
   });
 
-  it("surfaces a hint when it auto-corrects", () => {
-    expect(pickerSrc).toMatch(/describeAdjustment/);
-    expect(pickerSrc).toMatch(/role="status"/);
+  it("no longer ships the nights stepper", () => {
+    // Replaced by the range band: the length is already legible, and
+    // a second control to change it competes with clicking the band.
+    expect(pickerSrc).not.toMatch(/aria-label="Add one night"/);
+    expect(pickerSrc).not.toMatch(/aria-label="Remove one night"/);
+  });
+
+  it("shows two months only where there is room", () => {
+    expect(pickerSrc).toMatch(/matchMedia\("\(min-width: 768px\)"\)/);
+    expect(pickerSrc).toMatch(/numberOfMonths=\{twoMonths \? 2 : 1\}/);
+  });
+
+  it("only explains corrections the guest cannot infer", () => {
+    expect(pickerSrc).toMatch(/Check-in can't be in the past/);
+    expect(pickerSrc).toMatch(/nights ahead, so check-out was capped\./);
   });
 });
+
 
 describe("DR-01 — URL params no longer seed a raw, unvalidated range", () => {
   it("BookingPage seeds both dates through normalizeStayRange", () => {
@@ -159,18 +189,13 @@ describe("DR-01 — the remaining date surfaces are bounded", () => {
     expect(bookingLookupSrc).toMatch(/extendCheckOut <= activeBooking\.checkOut/);
   });
 });
-describe("DR-01 follow-up — the check-in bound never freezes the picker", () => {
-  // The reported regression (2026-10-15): check-in was bounded by
-  // `checkOut - 1`. With the default 1-night stay, check-out is
-  // always `checkIn + 1`, so the bound equalled check-in's own
-  // current value and the native picker greyed out every later day —
-  // the guest could not move check-in at all. The bound is now the
-  // booking horizon.
-  //
-  // This is the invariant the freeze broke, asserted behaviourally
-  // against the real helpers the component composes. The source-text
-  // pin above catches a re-introduced `max={…checkOut…}`; this
-  // catches the horizon math silently collapsing.
+describe("DR-02 — the horizon always leaves selectable days ahead", () => {
+  // The reported regression (2026-10-15) was a frozen picker: check-in
+  // was bounded by `checkOut - 1`, which with the default 1-night stay
+  // equalled check-in's own value, so every later day greyed out. The
+  // calendar no longer has per-input bounds — it disables by horizon
+  // — so the invariant to protect is that the horizon always sits
+  // strictly ahead of today, leaving real room to move.
   const TODAY = "2026-10-15";
   const MAX_STAY_NIGHTS = 30; // must mirror the component constant
   const maxCheckOut = addDaysToIsoDate(TODAY, MAX_STAY_NIGHTS);
@@ -179,140 +204,29 @@ describe("DR-01 follow-up — the check-in bound never freezes the picker", () =
     expect(diffNightsBetweenIso(TODAY, maxCheckOut)).toBe(MAX_STAY_NIGHTS);
   });
 
-  it("offers selectable dates after check-in for every valid range", () => {
-    // Walk the whole month plus a few edge ranges. For each one the
-    // check-in input's upper bound must leave forward room, or the
-    // picker greys out every day the guest would want to move to.
-    const ranges = [
-      { checkIn: "2026-10-15", checkOut: "2026-10-16" }, // default 1-night
-      { checkIn: "2026-10-15", checkOut: "2026-10-17" }, // 2 nights
-      { checkIn: "2026-10-31", checkOut: "2026-11-02" }, // month boundary
-      { checkIn: "2026-11-10", checkOut: "2026-11-14" }
-    ];
-    for (const range of ranges) {
-      expect(maxCheckOut > range.checkIn).toBe(true);
-    }
+  it("never bounds a selection by the other endpoint", () => {
+    // The precise anti-pattern. `max={…checkOut - 1}` on a check-in
+    // input, or any equivalent coupling, reintroduces the freeze.
+    expect(pickerSrc).not.toMatch(/max=\{[^}]*checkOut/);
+    expect(pickerSrc).not.toMatch(/min=\{[^}]*checkIn/);
   });
 
-  it("still lets the guest move check-in past check-out, preserving nights", () => {
-    // The flow the freeze made unreachable. With check-in bounded by
-    // the horizon, picking a check-in AFTER the current check-out is
-    // selectable — and the normalizer preserves the stay length.
-    const current = normalizeStayRange({
-      checkIn: "2026-10-20",
-      checkOut: "2026-10-22",
+  it("lets a guest move check-in past check-out by restarting the range", () => {
+    const moved = resolveRangeSelection({
+      from: "2026-10-20",
+      to: "2026-10-22",
       minCheckIn: TODAY,
       maxCheckOut
     });
-    expect(current.nights).toBe(2);
-
-    const moved = normalizeStayRange({
-      checkIn: "2026-10-26", // guest drags check-in forward past check-out
-      checkOut: "2026-10-22",
+    expect(moved.status).toBe("complete");
+    // Clicking again before the pending check-in restarts rather than
+    // inverting — the calendar has no "invalid" state to repair.
+    const restarted = resolveRangeSelection({
+      from: "2026-10-20",
+      to: "2026-10-18",
       minCheckIn: TODAY,
-      previousNights: current.nights,
       maxCheckOut
     });
-    expect(moved.checkIn).toBe("2026-10-26");
-    expect(moved.checkOut).toBe("2026-10-28");
-    expect(moved.nights).toBe(2);
-  });
-});
-
-describe("DR-01 follow-up — the nights stepper makes the stay length visible", () => {
-  // Per the industry pattern (Agoda's "Nights" ticker, Booking.com's
-  // adjusting calendar), the stay LENGTH is a control the guest owns
-  // and can see. Two independent date fields plus a silent auto-move
-  // is the odd one out — it reads as arbitrary precisely because the
-  // number driving the move is invisible.
-  it("renders a Nights control between the dates", () => {
-    expect(pickerSrc).toMatch(/^\s*Nights$/m);
-    expect(pickerSrc).toMatch(/aria-label="Remove one night"/);
-    expect(pickerSrc).toMatch(/aria-label="Add one night"/);
-  });
-
-  it("shows the resolved night count, not a raw diff", () => {
-    expect(pickerSrc).toMatch(/\{resolved\.nights\} \{resolved\.nights === 1 \? "night" : "nights"\}/);
-  });
-
-  it("steps check-out off check-in rather than touching check-in", () => {
-    // check-in is the anchor; the stepper only moves check-out.
-    expect(pickerSrc).toMatch(
-      /onClick=\{\(\) => setNights\(resolved\.nights \+ 1\)\}/
-    );
-    expect(pickerSrc).toMatch(
-      /function setNights\(next: number\) \{[\s\S]*?onCheckOutChange\(addDaysToIsoDate\(resolved\.checkIn, next\)\)/
-    );
-  });
-
-  it("caps the stepper at 1 night and at the horizon measured from check-in", () => {
-    expect(pickerSrc).toMatch(/disabled=\{resolved\.nights <= 1\}/);
-    expect(pickerSrc).toMatch(
-      /maxNights = Math\.max\(\s*Math\.min\(MAX_STAY_NIGHTS, diffNightsBetweenIso\(resolved\.checkIn, maxCheckOut\)\),\s*1\s*\)/
-    );
-    expect(pickerSrc).toMatch(/disabled=\{resolved\.nights >= maxNights\}/);
-  });
-
-  it("keeps 44px touch targets on the stepper buttons", () => {
-    // Hard rule: all form fields minimum 44px touch height.
-    expect(pickerSrc.match(/flex h-11 w-11 items-center justify-center/g) || []).toHaveLength(2);
-  });
-
-  it("drops the nights-preserved hint, which the stepper now makes obvious", () => {
-    // The message existed to explain an invisible move. With the
-    // count on screen, check-out is visibly `check-in + nights`.
-    const match = pickerSrc.match(/case "nights-preserved":[\s\S]*?return ([^;]+);/);
-    expect(match).not.toBeNull();
-    expect(match![1]).toBe("null");
-  });
-
-  it("still explains the corrections the guest cannot infer", () => {
-    expect(pickerSrc).toMatch(/Check-out must be at least one night after check-in\./);
-    expect(pickerSrc).toMatch(/Check-in can't be in the past/);
-    expect(pickerSrc).toMatch(/nights ahead, so check-out was capped\./);
-  });
-});
-
-describe("DR-01 — nights stepper arithmetic", () => {
-  const TODAY = "2026-10-15";
-  const HORIZON = addDaysToIsoDate(TODAY, 30);
-
-  it("moving check-in past check-out preserves the visible length", () => {
-    const r = normalizeStayRange({
-      checkIn: "2026-10-20",
-      checkOut: "2026-10-18", // inverted — guest dragged check-in
-      minCheckIn: TODAY,
-      previousNights: 3,
-      maxCheckOut: HORIZON
-    });
-    expect(r.nights).toBe(3);
-    expect(r.checkOut).toBe("2026-10-23");
-    // check-out is exactly check-in + nights, which the guest can see.
-    expect(r.checkOut).toBe(addDaysToIsoDate(r.checkIn, r.nights));
-  });
-
-  it("caps the stepper from the check-in, not from today", () => {
-    // Check-in 20 days out leaves only 10 nights inside a 30-night horizon.
-    const checkIn = "2026-11-04";
-    const maxNights = Math.max(Math.min(30, diffNightsBetweenIso(checkIn, HORIZON)), 1);
-    expect(maxNights).toBe(10);
-  });
-
-  it("stepping nights always keeps check-out within the horizon", () => {
-    for (let nights = 1; nights <= 30; nights += 1) {
-      const checkOut = addDaysToIsoDate(TODAY, nights);
-      expect(checkOut <= HORIZON).toBe(true);
-    }
-  });
-
-  it("never lets the stepper produce a zero-night stay", () => {
-    const r = normalizeStayRange({
-      checkIn: "2026-10-20",
-      checkOut: "2026-10-20", // 1 is the floor the stepper enforces
-      minCheckIn: TODAY,
-      previousNights: 1,
-      maxCheckOut: HORIZON
-    });
-    expect(r.nights).toBeGreaterThanOrEqual(1);
+    expect(restarted).toEqual({ status: "pending", checkIn: "2026-10-20" });
   });
 });
