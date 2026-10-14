@@ -869,6 +869,102 @@ describe("IMT-03 — HoldCountdownBanner extend CTA", () => {
   });
 });
 
+// Per IMT-05 (2026-10-14): the banner must be brand-rebrandable.
+// White-label is the whole point of `hotel.config.ts` — a hotel that
+// changes `colors.primary` and gets a Spark-orange booking banner still
+// is not rebranded.
+describe("IMT-05 — banner uses brand tokens, not a hardcoded palette", () => {
+  /**
+   * Strip comments before running class-name pins.
+   *
+   * This codebase's house style is extremely verbose explanatory
+   * comments, and those comments legitimately QUOTE class names to
+   * explain them (e.g. "`bg-red-600` the established danger action").
+   * Without this, every pin below would eventually fail on prose rather
+   * than on code — and the obvious "fix" would be to delete the
+   * explanation, which is backwards. Class pins read code; the
+   * documentation pin (below) deliberately reads the comments.
+   */
+  const code = bannerSrc
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1"))
+    .join("\n");
+
+  it("NEGATIVE: no indigo classes remain — indigo was the one-off", () => {
+    // Verified before the change: indigo appeared in ZERO other
+    // guest-app components. Every indigo class in the codebase lived
+    // in this file, so it was an unbranded orphan rather than a house
+    // convention.
+    expect(code).not.toMatch(/indigo-\d/);
+  });
+
+  it("the active state is brand-tinted via the `primary` tokens", () => {
+    expect(code).toMatch(/bg-primary-light/);
+    expect(code).toMatch(/border-primary/);
+    // Body copy stays gray: `text-primary` on `primary-light` is
+    // 2.35:1 and would fail AA for the heading and sub-copy.
+    expect(code).toMatch(/text-gray-900/);
+    expect(code).toMatch(/text-gray-700/);
+  });
+
+  it("brand color is only ever carried by DECORATIVE elements, never reading text", () => {
+    // Measured: #EA8A1A on #FEF3E2 is 2.35:1 — unusable for copy.
+    // Brand color may appear as an accent (icon, border, button fill),
+    // but any element using `text-primary` must be aria-hidden, i.e.
+    // purely decorative and invisible to assistive tech.
+    const brandTextLines = code
+      .split("\n")
+      .filter((line) => /text-primary(?!-)/.test(line));
+    expect(brandTextLines.length).toBeGreaterThan(0);
+    for (const line of brandTextLines) {
+      expect(line).toMatch(/aria-hidden/);
+    }
+  });
+
+  it("the PRIMARY CTA uses the brand token, not a palette color", () => {
+    // This was the real hard-rule violation: after IMT-03 the
+    // primary action on the expired state was `bg-red-600`.
+    expect(code).toMatch(/bg-primary[^\"]*font-semibold text-gray-900/);
+    expect(code).toMatch(/hover:bg-primary-dark/);
+    expect(code).not.toMatch(/bg-red-600/);
+  });
+
+  it("CTAs use `text-gray-900`, NOT the app-wide `text-white` convention", () => {
+    // Measured: #EA8A1A + white = 2.58:1 (fails AA).
+    // #EA8A1A + gray-900 = 6.88:1 (passes). The rest of the app
+    // still ships the 2.58:1 version — see the IMT-05 roadmap note.
+    expect(code).not.toMatch(/bg-primary[^\"]*text-white/);
+    expect(code).toMatch(/bg-primary[^\"]*text-gray-900/);
+  });
+
+  it("the danger + warning SURFACES stay semantic (not rebranded)", () => {
+    // Deliberate. "Your hold expired" must not turn orange when a
+    // client changes their brand color — it would destroy the signal.
+    // These match the established app patterns: `border-amber-200
+    // bg-amber-50` (11 uses) and `bg-red-600` danger actions (5 uses).
+    expect(code).toMatch(/border-amber-200 bg-amber-50/);
+    expect(code).toMatch(/border-red-300 bg-red-50/);
+  });
+
+  it("the countdown pill keeps semantic urgency tiers, with no brand color in the normal tier", () => {
+    // A normal countdown in brand orange would compete with the
+    // urgency signal; amber (<=3min) and red (<=1min) stay.
+    expect(code).toMatch(/text-amber-700 ring-amber-200/);
+    expect(code).toMatch(/text-red-700 ring-red-200/);
+    expect(code).toMatch(/text-gray-700 ring-gray-200/);
+  });
+
+  it("documents the colour policy in the component header (so it survives the next refactor)", () => {
+    // Reads the COMMENTS on purpose — this pin is about the reasoning
+    // surviving, not about any class name.
+    expect(bannerSrc).toMatch(/COLOR POLICY \(IMT-05\)/);
+    expect(bannerSrc).toMatch(/semantic state signals, not brand/);
+    // The stale "blue/indigo" description is gone.
+    expect(bannerSrc).not.toMatch(/blue\/indigo banner/);
+  });
+});
+
 describe("IFH-01 follow-up — Janitor sweep cron", () => {
   it("the sweep handler is registered in the apiRouter (no new Vercel function, just a new catch-all branch)", () => {
     expect(routerSrc).toMatch(

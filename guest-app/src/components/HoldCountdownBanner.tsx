@@ -2,22 +2,41 @@
 // public booking flow's Steps 2 + 3.
 //
 // Surfaces:
-//   * **active** + time left: blue/indigo banner with a
+//   * **active** + time left: brand-tinted banner with a
 //     live MM:SS countdown. Honest copy: "Your room is
 //     held for you while you finish and pay. We'll lock
 //     it in the moment you confirm — if another guest
 //     books first, we'll let you know and you can pick
 //     a new room."
 //   * **expired** (or the local clock has crossed
-//     `expiresAt`): red banner. "Your hold has expired.
-//     Return to Step 1 to pick a new room, or finish
-//     quickly — if another guest gets the room first
-//     we'll let you know before you pay."
+//     `expiresAt`): red banner. "Your hold has expired."
+//     Per IMT-03 the PRIMARY action here is "I need more
+//     time" (brand `primary`); "Pick a new room" demotes
+//     to a secondary outline. Both stay one tap.
 //   * **consumed** (the booking transaction committed):
 //     the banner hides entirely — the Step 4
 //     confirmation page is the next surface.
-//   * **error** (fetch failed): muted gray banner with
-//     a "Retry" CTA so the user is not stranded.
+//   * **error** (fetch failed): amber banner with a
+//     "Retry" CTA so the user is not stranded.
+//
+// COLOR POLICY (IMT-05)
+// The active state is brand-tinted via the `primary*`
+// Tailwind tokens so a white-label hotel's booking banner
+// adopts their colors. The expired (danger) and error
+// (warning) surfaces stay on Tailwind's red/amber palette
+// DELIBERATELY: those are semantic state signals, not brand
+// color, and they match the rest of the guest app
+// (`border-amber-200 bg-amber-50` is the established
+// warning banner, and `bg-red-600` the established danger
+// action). Rebranding "your hold expired" to orange would
+// destroy the signal.
+//
+// The one deliberate exception to the app-wide
+// `bg-primary text-white` convention: the CTAs here use
+// `text-gray-900`, because #EA8A1A on white is 2.58:1 and
+// fails WCAG AA, while #EA8A1A on gray-900 is 6.88:1. The
+// app-wide 2.58:1 issue is filed separately — see the
+// IMT-05 note in `plan/project/ROADMAP.md`.
 //
 // The component is fully self-contained: it reads the
 // `holdId` prop, fetches + ticks via `useInFlowHold`,
@@ -140,12 +159,12 @@ export function HoldCountdownBanner({
       <div
         role="status"
         aria-live="polite"
-        className="w-full border-b border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900"
+        className="w-full border-b border-primary/40 bg-primary-light px-4 py-3 text-sm text-gray-900"
         data-testid="hold-countdown-banner"
         data-state="loading"
       >
         <div className="mx-auto flex max-w-5xl items-center gap-3">
-          <Hourglass className="h-4 w-4 shrink-0 animate-pulse text-indigo-500" aria-hidden />
+          <Hourglass className="h-4 w-4 shrink-0 animate-pulse text-primary" aria-hidden />
           <span className="font-medium">Loading your room hold…</span>
         </div>
       </div>
@@ -216,7 +235,7 @@ export function HoldCountdownBanner({
                 disabled={isExtending}
                 data-testid="hold-extend-cta"
                 data-state={isExtending ? "extending" : "idle"}
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-gray-900 hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <TimerReset className="h-3.5 w-3.5" aria-hidden />
                 {isExtending ? "Adding time…" : "I need more time"}
@@ -253,18 +272,18 @@ export function HoldCountdownBanner({
       initial={shouldReduceMotion ? false : { opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className="w-full border-b border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-950"
+      className="w-full border-b border-primary/40 bg-primary-light px-4 py-3 text-sm text-gray-900"
       data-testid="hold-countdown-banner"
       data-state="active"
       data-seconds-left={secondsLeft}
     >
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
-        <Clock4 className="h-4 w-4 shrink-0 text-indigo-600" aria-hidden />
+        <Clock4 className="h-4 w-4 shrink-0 text-primary-dark" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">
+          <p className="font-semibold text-gray-900">
             Your room is held for you until {expiresAt || "the hold expires"}.
           </p>
-          <p className="text-xs text-indigo-900/80">
+          <p className="text-xs text-gray-700">
             We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room.
           </p>
           {extendError ? (
@@ -281,7 +300,7 @@ export function HoldCountdownBanner({
                 ? "text-red-700 ring-red-200"
                 : secondsLeft <= 180
                   ? "text-amber-700 ring-amber-200"
-                  : "text-indigo-700 ring-indigo-200"
+                  : "text-gray-700 ring-gray-200"
             )}
             aria-label={`Time left: ${formatCountdown(secondsLeft)}`}
           >
@@ -299,7 +318,7 @@ export function HoldCountdownBanner({
               disabled={isExtending}
               data-testid="hold-extend-cta"
               data-state={isExtending ? "extending" : "idle"}
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 text-xs font-semibold text-indigo-800 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-primary bg-white px-3 text-xs font-semibold text-gray-900 hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-60"
             >
               <TimerReset className="h-3.5 w-3.5" aria-hidden />
               {isExtending ? "Adding time…" : "I need more time"}
