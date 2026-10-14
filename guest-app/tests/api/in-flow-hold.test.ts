@@ -965,6 +965,67 @@ describe("IMT-05 — banner uses brand tokens, not a hardcoded palette", () => {
   });
 });
 
+// Per IMT-03 follow-up (2026-10-14): the owner asked for the "I need
+// more time" CTA to appear only when the timer is nearly out, instead
+// of sitting beside the countdown for the whole window.
+//
+// Two things are being pinned here, and the second is the important
+// one: the ACTIVE state reveals on a countdown threshold, but the
+// EXPIRED state must still offer it unconditionally. That is what makes
+// the reveal safe — a guest who missed the window is not stranded,
+// because the button is waiting for them on the red banner.
+describe("IMT-03 follow-up — urgent-only CTA reveal", () => {
+  const code = bannerSrc
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1"))
+    .join("\n");
+
+  it("the reveal threshold is a named constant, not a magic number in the JSX", () => {
+    expect(bannerSrc).toMatch(/const HOLD_EXTEND_CTA_REVEAL_SECONDS = 60/);
+    expect(code).toMatch(/secondsLeft <= HOLD_EXTEND_CTA_REVEAL_SECONDS/);
+  });
+
+  it("the ACTIVE branch gates on the countdown threshold, not on `canExtend` alone", () => {
+    // Regression guard: if this ever reverts to a bare `canExtend ?`
+    // the button is back on screen for the whole 15 minutes, which is
+    // the exact thing the owner asked to change.
+    const active = code.slice(code.indexOf("const showExtendCta"));
+    expect(active).toMatch(/canExtend && secondsLeft <= HOLD_EXTEND_CTA_REVEAL_SECONDS/);
+    expect(active).toMatch(/\{showExtendCta \? \(/);
+  });
+
+  it("the threshold matches the countdown pill's red tier, so the reveal is motivated", () => {
+    // Both are 60. The CTA appearing at the instant the pill already
+    // turns red reads as intentional; an unrelated threshold would be
+    // a fourth arbitrary state boundary.
+    expect(code).toMatch(/secondsLeft <= 60/);
+    const constant = bannerSrc.match(/HOLD_EXTEND_CTA_REVEAL_SECONDS = (\d+)/);
+    expect(constant).not.toBeNull();
+    expect(Number(constant![1])).toBe(60);
+  });
+
+  it("the EXPIRED branch still shows the CTA on `canExtend` alone — the safety net", () => {
+    // This is what makes a narrow reveal window acceptable. Missing the
+    // 60s reveal drops the guest onto the red banner, where "I need more
+    // time" is the primary action — so no guest is ever stranded.
+    const expired = code.slice(
+      code.indexOf('data-state="expired"'),
+      code.indexOf("const expiresAt = formatTime")
+    );
+    expect(expired).toMatch(/\{canExtend \? \(/);
+    expect(expired).toMatch(/data-testid="hold-extend-cta"/);
+    expect(expired).not.toMatch(/showExtendCta/);
+  });
+
+  it("documents why the threshold is not tighter than 60s", () => {
+    // The reasoning is load-bearing: someone tightening this to 15s
+    // would drop the slow-connection guest into the expired state.
+    expect(bannerSrc).toMatch(/Why 60s and not a much tighter window/);
+    expect(bannerSrc).toMatch(/exactly the flows that blow past 15 seconds/);
+  });
+});
+
 describe("IFH-01 follow-up — Janitor sweep cron", () => {
   it("the sweep handler is registered in the apiRouter (no new Vercel function, just a new catch-all branch)", () => {
     expect(routerSrc).toMatch(

@@ -74,6 +74,36 @@ interface HoldCountdownBannerProps {
   locale?: string;
 }
 
+/**
+ * Per IMT-03 follow-up (2026-10-14): how close to expiry the "I need
+ * more time" CTA reveals on the ACTIVE state.
+ *
+ * The button used to sit next to the countdown for the whole window,
+ * which meant it competed with the banner's actual message and invited
+ * the occasional reflex tap. Revealing it only as the deadline nears
+ * makes it read as "this is the moment to ask" — and it disappears
+ * again after an extension, so it can never be habitually clicked.
+ *
+ * **Why 60s and not a much tighter window.** The reason this feature
+ * exists is a guest mid-payment on a slow connection or mid-terms
+ * read. Those are exactly the flows that blow past 15 seconds without
+ * looking up, and a 15s reveal would drop them into the expired state —
+ * the *worse* experience — when extending while still calm was
+ * available to them. 60s is long enough to survive a distracted
+ * glance and short enough that the guest still perceives it as
+ * time-critical.
+ *
+ * **Why 60 specifically, and not an arbitrary number.** It is the
+ * countdown pill's own red-tier boundary (see the ring/text classes
+ * below). The CTA appears at the exact moment the timer already *looks*
+ * alarming, so the reveal is motivated by a signal that is already on
+ * screen rather than introducing a fourth, arbitrary threshold.
+ *
+ * Not a server concern: the cap and status gate are still the server's
+ * (`canExtendInFlowHold`). This is purely when the affordance is shown.
+ */
+const HOLD_EXTEND_CTA_REVEAL_SECONDS = 60;
+
 function formatTime(iso: string, locale: string): string {
   const date = new Date(iso);
   if (isNaN(date.getTime())) return "";
@@ -257,8 +287,12 @@ export function HoldCountdownBanner({
     );
   }
 
-  // Active state — blue banner, live countdown.
+  // Active state — brand-tinted banner, live countdown.
   const expiresAt = formatTime(hold.expiresAt, locale);
+  // Urgent-only reveal — see HOLD_EXTEND_CTA_REVEAL_SECONDS. Once an
+  // extension lands, `secondsLeft` jumps back to a full window, so the
+  // CTA hides again and can only re-arm after another countdown.
+  const showExtendCta = canExtend && secondsLeft <= HOLD_EXTEND_CTA_REVEAL_SECONDS;
   return (
     <motion.div
       // Per IMT-03: deliberately NOT a live region. This subtree
@@ -310,8 +344,10 @@ export function HoldCountdownBanner({
           {/* Secondary affordance while the hold is still running — the
               guest gets more room than the full 15 minutes without ever
               having to hit zero. Hidden once the cap is spent so the
-              guest never taps a button the server would 409. */}
-          {canExtend ? (
+              guest never taps a button the server would 409, and hidden
+              until the timer is genuinely urgent (see
+              HOLD_EXTEND_CTA_REVEAL_SECONDS). */}
+          {showExtendCta ? (
             <button
               type="button"
               onClick={handleExtend}
