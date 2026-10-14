@@ -6,6 +6,7 @@ import {
   normalizeStayRange,
   type StayRangeAdjustmentReason
 } from "@spark-inn/shared";
+import { Minus, Moon, Plus } from "lucide-react";
 import config from "@config";
 import { cn } from "../utils/cn";
 
@@ -25,9 +26,14 @@ interface DateRangePickerProps {
 const MAX_STAY_NIGHTS = 30;
 
 /**
- * Copy for each auto-correction. The point is to make a silent
- * correction legible — a guest who watches check-out slide to
- * Oct 18 without being told why will assume the picker is broken.
+ * Copy for each auto-correction. Per the industry pattern (Agoda's
+ * "Nights" ticker, Booking.com's adjusting calendar) the stay
+ * LENGTH is a control the guest owns and can see — so once the
+ * nights stepper below is on screen, a correction that merely
+ * preserves that visible length is self-explanatory and needs no
+ * message. Only corrections the guest cannot infer from the
+ * inputs get one; announcing those is what stops a silent
+ * auto-move from reading as a broken form.
  */
 function describeAdjustment(
   reason: StayRangeAdjustmentReason,
@@ -35,7 +41,9 @@ function describeAdjustment(
 ): string | null {
   switch (reason) {
     case "nights-preserved":
-      return `Check-out moved to keep your ${nights}-night stay.`;
+      // The stepper already shows `nights`, and check-out is
+      // visibly check-in + nights. Nothing to explain.
+      return null;
     case "check-out-clamped-after-check-in":
       return "Check-out must be at least one night after check-in.";
     case "check-in-clamped-to-today":
@@ -64,9 +72,10 @@ export function DateRangePicker({
   );
 
   // The last *valid* stay length. When check-in is moved onto or
-  // past check-out we reuse this so a 2-night stay stays 2 nights
-  // (Booking.com / Airbnb convention) instead of silently
-  // collapsing to 1 and changing the price the guest agreed to.
+  // past check-out we reuse this so the stay length the guest
+  // already chose is preserved rather than silently collapsing to
+  // 1. Now that the nights stepper renders this value, the guest
+  // can see it — but the behaviour is unchanged.
   const [lastValidNights, setLastValidNights] = useState<number | null>(null);
   useEffect(() => {
     const nights = diffNightsBetweenIso(checkIn, checkOut);
@@ -109,56 +118,119 @@ export function DateRangePicker({
 
   const hintText = hint ? describeAdjustment(hint, resolved.nights) : null;
 
+  // The stepper can only offer as many nights as the booking
+  // horizon still allows from the current check-in. Measured from
+  // the check-in, not from today — a check-in 20 days out with a
+  // 30-night horizon only has 10 nights of room.
+  const maxNights = Math.max(
+    Math.min(MAX_STAY_NIGHTS, diffNightsBetweenIso(resolved.checkIn, maxCheckOut)),
+    1
+  );
+
+  function setNights(next: number) {
+    setHint(null);
+    onCheckOutChange(addDaysToIsoDate(resolved.checkIn, next));
+  }
+
+  const checkInField = (
+    <label className="grid gap-2 text-sm font-medium text-gray-700">
+      Check-in
+      <input
+        className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+        // DR-01 follow-up (2026-10-15): do NOT bound check-in
+        // by `checkOut - 1`. With the default 1-night stay,
+        // check-out is always `checkIn + 1`, so that max
+        // resolved to check-in's OWN current value and the
+        // native picker greyed out every day after it — the
+        // guest could not move check-in at all. The
+        // `nights-preserved` correction path exists precisely
+        // to handle check-in landing after check-out, so the
+        // bound has to leave that path reachable. The upper
+        // bound here is the booking horizon, not the other
+        // field.
+        max={maxCheckOut}
+        min={todayIso}
+        type="date"
+        value={resolved.checkIn}
+        aria-describedby={hintText ? "date-range-hint" : undefined}
+        onChange={(event) => {
+          setHint(null);
+          onCheckInChange(event.target.value);
+        }}
+      />
+    </label>
+  );
+
+  const checkOutField = (
+    <label className="grid gap-2 text-sm font-medium text-gray-700">
+      Check-out
+      <input
+        className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+        max={maxCheckOut}
+        min={addDaysToIsoDate(resolved.checkIn, 1)}
+        type="date"
+        value={resolved.checkOut}
+        aria-describedby={hintText ? "date-range-hint" : undefined}
+        onChange={(event) => {
+          setHint(null);
+          onCheckOutChange(event.target.value);
+        }}
+      />
+    </label>
+  );
+
+  // Matches the existing Adults / Children steppers on the booking
+  // page (same markup, same 44px touch targets, same disabled
+  // treatment). Making the stay length a visible control is what
+  // turns "check-out moved on its own" from arbitrary into
+  // obvious: check-out is always check-in + this number.
+  const nightsStepper = (
+    <label className="grid gap-2 text-sm font-medium text-gray-700">
+      Nights
+      <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
+        <button
+          aria-label="Remove one night"
+          className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={resolved.nights <= 1}
+          type="button"
+          onClick={() => setNights(resolved.nights - 1)}
+        >
+          <Minus size={16} />
+        </button>
+        <span className="flex items-center gap-2 text-sm text-gray-700">
+          <Moon size={16} className="text-primary" />
+          {resolved.nights} {resolved.nights === 1 ? "night" : "nights"}
+        </span>
+        <button
+          aria-label="Add one night"
+          className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={resolved.nights >= maxNights}
+          type="button"
+          onClick={() => setNights(resolved.nights + 1)}
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+    </label>
+  );
+
   return (
     <div className="grid gap-2">
-      <div
-        className={cn(
-          "grid gap-3",
-          orientation === "horizontal" && "sm:grid-cols-2"
-        )}
-      >
-        <label className="grid gap-2 text-sm font-medium text-gray-700">
-          Check-in
-          <input
-            className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
-            // DR-01 follow-up (2026-10-15): do NOT bound check-in
-            // by `checkOut - 1`. With the default 1-night stay,
-            // check-out is always `checkIn + 1`, so that max
-            // resolved to check-in's OWN current value and the
-            // native picker greyed out every day after it — the
-            // guest could not move check-in at all. The
-            // `nights-preserved` correction path exists precisely
-            // to handle check-in landing after check-out, so the
-            // bound has to leave that path reachable. The upper
-            // bound here is the booking horizon, not the other
-            // field.
-            max={maxCheckOut}
-            min={todayIso}
-            type="date"
-            value={resolved.checkIn}
-            aria-describedby={hintText ? "date-range-hint" : undefined}
-            onChange={(event) => {
-              setHint(null);
-              onCheckInChange(event.target.value);
-            }}
-          />
-        </label>
-        <label className="grid gap-2 text-sm font-medium text-gray-700">
-          Check-out
-          <input
-            className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
-            max={maxCheckOut}
-            min={addDaysToIsoDate(resolved.checkIn, 1)}
-            type="date"
-            value={resolved.checkOut}
-            aria-describedby={hintText ? "date-range-hint" : undefined}
-            onChange={(event) => {
-              setHint(null);
-              onCheckOutChange(event.target.value);
-            }}
-          />
-        </label>
-      </div>
+      {orientation === "horizontal" ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {checkInField}
+            {checkOutField}
+          </div>
+          {nightsStepper}
+        </>
+      ) : (
+        <>
+          {checkInField}
+          {nightsStepper}
+          {checkOutField}
+        </>
+      )}
       {hintText ? (
         <p
           id="date-range-hint"
