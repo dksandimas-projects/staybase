@@ -87,9 +87,14 @@ describe("Audit Batch 3 (BI-12 + BI-16) — past-date rejection + guest details 
       // computed from the browser's `new Date()`.
       expect(corporateBookingSrc).not.toMatch(/"2026-06-12"/);
       expect(corporateBookingSrc).not.toMatch(/"2026-06-14"/);
-      // Mirrors BookingPage's timezone-aware shared helper.
-      expect(corporateBookingSrc).toMatch(/getDateKeyInTimezone\(config\.timezone,\s*1\)/);
-      expect(corporateBookingSrc).toMatch(/getDateKeyInTimezone\(config\.timezone,\s*2\)/);
+      // Per DR-01 (2026-10-14): the offsets moved out of
+      // `getDateKeyInTimezone` and into the normalizer's
+      // `defaultNights`. The INTENT is unchanged — the seed is
+      // still today / tomorrow from the timezone-aware shared
+      // helper, never a hardcoded literal. What is now also
+      // enforced is that the pair itself is valid.
+      expect(corporateBookingSrc).toMatch(/minCheckIn: getDateKeyInTimezone\(config\.timezone\)/);
+      expect(corporateBookingSrc).toMatch(/defaultNights: 1/);
       //
       // Per NBS-2026-08-08 (F10, booking-flow audit
       // 2026-08-08): the pre-F10 `useState(searchParams.get("checkIn") ?? ...)`
@@ -102,14 +107,15 @@ describe("Audit Batch 3 (BI-12 + BI-16) — past-date rejection + guest details 
       // helper. The test asserts both halves of the
       // contract: (a) the URL is validated, (b) the
       // fallback is the shared helper.
+      // Per DR-01 (2026-10-14): `isValidDateKey` (a shape-only
+      // regex) is superseded by `normalizeStayRange`, which also
+      // rejects an inverted or past pair.
+      expect(corporateBookingSrc).toMatch(/normalizeStayRange/);
       expect(corporateBookingSrc).toMatch(
-        /isValidDateKey/
+        /useState\(initialStayRange\.checkIn\)/
       );
       expect(corporateBookingSrc).toMatch(
-        /useState\(\s*isValidDateKey\(initialCheckInParam\)/
-      );
-      expect(corporateBookingSrc).toMatch(
-        /useState\(\s*isValidDateKey\(initialCheckOutParam\)/
+        /useState\(initialStayRange\.checkOut\)/
       );
     });
   });

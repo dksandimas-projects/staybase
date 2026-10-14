@@ -31,6 +31,7 @@ import { useRoomTypes } from "../hooks/useRoomTypes";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
 import { fadeUp, staggerContainer, staggerChild, DEFAULT_CORPORATE_PAGE_CONTENT, type RoomTypeEntry } from "@spark-inn/shared";
+import { addDaysToIsoDate, getDateKeyInTimezone } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import type { ContentItem } from "@spark-inn/shared";
 import { HeroImage } from "../components/HeroImage";
@@ -84,6 +85,9 @@ export function CorporateStaysPage() {
   // string field is preserved server-side for legacy compatibility.
   const [preferredDateFrom, setPreferredDateFrom] = useState("");
   const [preferredDateTo, setPreferredDateTo] = useState("");
+  // DR-01 (2026-10-14): property-timezone "today" for the `min`
+  // bound on the preferred check-in field.
+  const [todayIso] = useState(() => getDateKeyInTimezone(config.timezone));
   const [specialRequirements, setSpecialRequirements] = useState("");
   
   // Honeypot state
@@ -793,7 +797,16 @@ export function CorporateStaysPage() {
                     </select>
                   </label>
 
-                  {/* C-03 (E2E audit 2026-07-17): structured date inputs */}
+                  {/* C-03 (E2E audit 2026-07-17): structured date inputs.
+                      DR-01 (2026-10-14): the two inputs were fully
+                      independent — no `min`/`max` on either — so the
+                      native pickers happily offered a check-out
+                      before check-in and the guest only learned
+                      about it after hitting Submit. Note this is a
+                      corporate *inquiry* (a requested window), not a
+                      booked stay, so we surface the constraint
+                      rather than silently rewriting the client's
+                      dates the way the booking picker does. */}
                   <div className="grid grid-cols-2 gap-3">
                     <label className="grid gap-2 text-sm font-medium text-gray-700">
                       <span className="flex items-center gap-1.5">
@@ -803,6 +816,8 @@ export function CorporateStaysPage() {
                       <input
                         type="date"
                         className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+                        min={todayIso}
+                        max={preferredDateTo ? addDaysToIsoDate(preferredDateTo, -1) : undefined}
                         value={preferredDateFrom}
                         onChange={(e) => setPreferredDateFrom(e.target.value)}
                         required
@@ -816,12 +831,18 @@ export function CorporateStaysPage() {
                       <input
                         type="date"
                         className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+                        min={preferredDateFrom ? addDaysToIsoDate(preferredDateFrom, 1) : todayIso}
                         value={preferredDateTo}
                         onChange={(e) => setPreferredDateTo(e.target.value)}
                         required
                       />
                     </label>
                   </div>
+                  {preferredDateFrom && preferredDateTo && preferredDateTo <= preferredDateFrom ? (
+                    <p role="alert" className="text-xs font-medium text-red-600">
+                      Preferred check-out date must be after check-in date.
+                    </p>
+                  ) : null}
                 </div>
 
                 {/* Special Requirements */}

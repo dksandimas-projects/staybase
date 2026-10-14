@@ -54,6 +54,21 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
 - [x] The client sends one explicit `roomSelections[]` entry per requested room. The transaction assigns distinct physical rooms, prices every child stay, applies reservation-level discounts once, and allocates the exact rounded total back to the child bookings.
 
+### Stay-range normalization (DR-01, 2026-10-14)
+
+The check-in/check-out pair is **never** validated per-input at a call site. Every guest-facing surface routes the pair through `normalizeStayRange()` in `shared/utils/stayRange.ts` — the single source of truth for shape, ordering, the past-date floor, and the booking horizon.
+
+- [x] **Normalization happens in the render/derive path, not only in `onChange`** — `DateRangePicker` renders the normalized values, so an invalid pair arriving from a parent (a shared `?checkIn=` link, a parent that bypasses the handler, any future call site) can never put an inverted range on screen. Handler-only guards leave the inverted state reachable without touching the input.
+- [x] **The correction is pushed back to the parent** — URL params, the price summary, and the availability query must all see the same range the inputs display.
+- [x] **Bounds that do not freeze the picker** — check-out carries `min={checkIn + 1}`; check-in is floored at property-timezone today and capped at the 30-night booking horizon. **Check-in must NOT be bounded by `checkOut - 1`** (DR-01 follow-up, 2026-10-15): with the default 1-night stay, check-out is always `checkIn + 1`, so that bound equalled check-in's own current value and the native picker greyed out every later day — the guest could not move check-in at all. A mutual bound that makes the *corrective* path unreachable is worse than no bound: the `nights-preserved` correction exists precisely to handle check-in landing after check-out, so the picker must let the guest reach that state.
+- [x] **Auto-correct preserves the last valid night count** — moving check-in onto/past check-out keeps the stay length the guest already chose (a 2-night stay stays 2 nights), falling back to `checkIn + 1` only when there is no prior valid range. Never snap to `checkIn + 1` unconditionally: it silently downgrades the stay and changes the price the guest agreed to.
+- [x] **Every correction is explained in an inline hint** (`role="status"`) — a guest who watches check-out slide with no explanation assumes the picker is broken.
+- [x] **URL seeding is normalized** — `BookingPage` and `CorporateBookingPage` route both `?checkIn` / `?checkOut` params through the helper at init, so the first availability query never uses a bad range. The shape-only `isValidDateKey` regex is deleted (it accepted inverted and past ranges).
+- [x] **The server boundary rejects, it does not clamp** — `handleCreateBooking` returns 400 for a non-ISO date or a range shorter than one night. Never treat `Math.max(diff, 0)` as validation; that clamp is what hid the 0-night booking. `handleRescheduleBooking` enforces the same rule.
+- [x] **Corporate *inquiry* pairs surface the constraint rather than rewriting them** — `CorporateStaysPage`'s preferred check-in/out captures what the client *wants*, not a bookable stay, so its inputs are linked with `min`/`max` plus a live inline error instead of a silent auto-correct. `BookingLookupPage`'s extend-stay field clamps on change and disables its CTA while invalid.
+
+Tests: `shared/__tests__/stay-range.test.ts` (behavioural) + `guest-app/tests/api/dr-01-stay-range-guard.test.ts` (source-level contract pins). See `plan/docs/DECISIONS-FEATURES.md` #245 and `plan/docs/GOTCHAS.md` §Booking Flow.
+
 ---
 
 ## Step 2 — Guest Details

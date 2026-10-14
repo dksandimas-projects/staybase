@@ -36,6 +36,7 @@ import {
   calculateBookingTotal,
   compressImageFile,
   getDateKeyInTimezone,
+  normalizeStayRange,
   getNumNights,
   // Per EXB-07 (2026-08-01, per decision #155): the
   // capacity overflow rule (per decision #153) is the
@@ -258,20 +259,19 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   // value falls back to today's Manila date. The same
   // pattern guards `checkOut` (a missing URL value
   // previously landed as `null` → empty date input).
-  const initialCheckInParam = searchParams.get("checkIn");
-  const initialCheckOutParam = searchParams.get("checkOut");
-  const isValidDateKey = (value: string | null) =>
-    typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const [checkIn, setCheckIn] = useState(
-    isValidDateKey(initialCheckInParam)
-      ? initialCheckInParam!
-      : getDateKeyInTimezone(config.timezone, 1)
-  );
-  const [checkOut, setCheckOut] = useState(
-    isValidDateKey(initialCheckOutParam)
-      ? initialCheckOutParam!
-      : getDateKeyInTimezone(config.timezone, 2)
-  );
+  // DR-01 (2026-10-14): the old `isValidDateKey` regex only checked
+  // the `YYYY-MM-DD` SHAPE — it happily accepted an inverted or
+  // past range from the URL. Route both params through
+  // `normalizeStayRange` so a shared corporate-booking link can't
+  // seed a 0-night stay.
+  const initialStayRange = normalizeStayRange({
+    checkIn: searchParams.get("checkIn"),
+    checkOut: searchParams.get("checkOut"),
+    minCheckIn: getDateKeyInTimezone(config.timezone),
+    defaultNights: 1
+  });
+  const [checkIn, setCheckIn] = useState(initialStayRange.checkIn);
+  const [checkOut, setCheckOut] = useState(initialStayRange.checkOut);
   // Per EXB-07 (2026-08-01, per decision #155): the
   // corporate /book page gains the same adult/child split
   // + extra bed count the guest /book page already has.
@@ -2429,7 +2429,10 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
             </motion.div>
 
             <motion.div className="mt-5 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
-              <div className="grid gap-2">
+              {/* Per fix(guest-details-field-alignment): `content-start`
+                  keeps the taller Email cell from stretching the Phone
+                  field's label row. */}
+              <div className="grid content-start gap-2">
                 <TextField
                   error={touchedFields.email ? guestErrors.email : ""}
                   icon={<Mail size={17} />}
@@ -2478,15 +2481,15 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
 
             <motion.div className="grid gap-5 sm:grid-cols-2 mt-4" variants={staggerChild}>
               {/* Company Name */}
-              <label htmlFor="companyName" className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="companyName" className="grid content-start gap-2 text-sm font-medium text-gray-700">
                 Company Name
-                <span className="relative block">
-                  <Building size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary" />
+                <span className="relative flex items-center">
+                  <Building size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-primary" />
                   <input
                     id="companyName"
                     name="companyName"
                     className={cn(
-                      "min-h-11 w-full rounded-lg border py-2 pl-10 pr-3 text-gray-950 outline-none transition",
+                      "block min-h-11 w-full rounded-lg border py-2 pl-10 pr-3 text-gray-950 outline-none transition",
                       isFlatRate ? "border-gray-200 bg-white focus:border-primary focus:ring-2 focus:ring-primary-light" : "border-gray-100 bg-gray-50 text-gray-500 cursor-not-allowed"
                     )}
                     type="text"
@@ -3152,17 +3155,22 @@ function TextField({
   readOnly = false
 }: TextFieldProps) {
   return (
-    <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
+    // Per fix(guest-details-field-alignment): same fix as the public
+    // BookingPage TextField — `content-start` stops the stretched grid cell
+    // from inflating the label + input rows (which offset the Phone field
+    // next to the taller Email cell), and the flex wrapper keeps the icon
+    // centred on the input box itself.
+    <label htmlFor={id} className="grid content-start gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
-      <span className="relative block">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
+      <span className="relative flex items-center">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
           id={id}
           name={name}
           autoComplete={autoComplete}
           className={cn(
-            "min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
+            "block min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
             error ? "border-red-300" : "border-gray-200",
             readOnly ? "cursor-default bg-gray-50 text-gray-700" : null
           )}

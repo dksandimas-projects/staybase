@@ -35,6 +35,7 @@ import {
   calculateBreakfastMealsTotal,
   getDateKeyInTimezone,
   getNumNights,
+  normalizeStayRange,
   staggerChild,
   staggerContainer,
   compressImageFile,
@@ -435,8 +436,19 @@ export function BookingPage() {
     ? Number(rewardsConfig?.memberDiscountPct) || 0
     : 0;
 
-  const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
-  const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
+  // DR-01 (2026-10-14): seed the range from the URL only through
+  // `normalizeStayRange`. Previously the params were trusted raw, so
+  // a shared or hand-edited `?checkIn=2026-10-16&checkOut=2026-10-09`
+  // opened the flow on an inverted range and the first availability
+  // query already used the bad dates.
+  const initialStayRange = normalizeStayRange({
+    checkIn: searchParams.get("checkIn"),
+    checkOut: searchParams.get("checkOut"),
+    minCheckIn: getDateKeyInTimezone(config.timezone),
+    defaultNights: 1
+  });
+  const [checkIn, setCheckIn] = useState(initialStayRange.checkIn);
+  const [checkOut, setCheckOut] = useState(initialStayRange.checkOut);
   // Per CHD-11.5 (2026-08-05, per decision #196): the picker
   // asks for Adults + Children directly, not Guests (total) +
   // Children. `adults` is the state; `guests` is derived as
@@ -2632,7 +2644,11 @@ export function BookingPage() {
             </motion.div>
 
             <motion.div className="mt-5 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
-              <div className="grid gap-2">
+              {/* Per fix(guest-details-field-alignment): `content-start`
+                  keeps the two-cell row packed to the top so the taller
+                  Email cell (it carries the helper line) can't stretch the
+                  Phone field's label row and offset its input. */}
+              <div className="grid content-start gap-2">
                 <TextField
                   error={touchedFields.email ? guestErrors.email : ""}
                   icon={<Mail size={17} />}
@@ -4573,17 +4589,24 @@ function TextField({
   readOnly = false
 }: TextFieldProps) {
   return (
-    <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
+    // Per fix(guest-details-field-alignment): `content-start` keeps the
+    // label's grid rows at their natural size. Without it, the default
+    // `align-content: stretch` distributes any extra cell height (e.g. the
+    // taller Email cell, which carries the "Linked to your ... account"
+    // helper line) into the label row AND the input row — pushing the
+    // sibling Phone input down by half the delta. The icon was centred on
+    // the wrapper (not the input), so it drifted too.
+    <label htmlFor={id} className="grid content-start gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
-      <span className="relative block">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
+      <span className="relative flex items-center">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
           id={id}
           name={name}
           autoComplete={autoComplete}
           className={cn(
-            "min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
+            "block min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
             error ? "border-red-300" : "border-gray-200",
             readOnly ? "cursor-default bg-gray-50 text-gray-700" : null
           )}

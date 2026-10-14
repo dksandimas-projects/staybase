@@ -170,7 +170,13 @@ import {
   // in `guest-app/server/handlers/in-flow-hold.ts` and is
   // called best-effort AFTER the booking transaction
   // commits (a UX signal, not a hard inventory lock).
-  IN_FLOW_HOLD_MINUTES
+  IN_FLOW_HOLD_MINUTES,
+  // DR-01 (2026-10-14): strict ISO validation for the
+  // create-booking date-range guard below. The schema itself only
+  // bounded the string LENGTH (`.max(40)`), so an inverted pair
+  // parsed cleanly.
+  isValidIsoDate,
+  diffNightsBetweenIso
 } from "@spark-inn/shared";
 // Per CRL-06 (2026-08-02): the preview helper
 // (per-scope breakdown). The preview
@@ -1471,6 +1477,26 @@ export async function handleCreateBooking(req: any, res: any) {
   }
 
   const body = parsedBody.data;
+
+  // DR-01 (2026-10-14): reject an inverted / zero-night range at the
+  // boundary. `createBookingSchema` validated these as free-form
+  // strings (`.min(1).max(40)`) and the night count was computed as
+  // `Math.max(checkOut - checkIn, 0)`, so a client that sent
+  // check-out BEFORE check-in produced a real, confirmed **0-night
+  // booking** instead of an error. `handleRescheduleBooking` already
+  // guarded this correctly; this closes the same hole on create.
+  if (!isValidIsoDate(body.checkIn) || !isValidIsoDate(body.checkOut)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid check-in or check-out date."
+    });
+  }
+  if (diffNightsBetweenIso(body.checkIn, body.checkOut) < 1) {
+    return res.status(400).json({
+      success: false,
+      error: "Check-out must be at least one night after check-in."
+    });
+  }
 
   const {
     bookingId,

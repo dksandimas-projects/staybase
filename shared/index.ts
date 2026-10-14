@@ -8,6 +8,7 @@ export * from "./schemas/websiteContent";
 export * from "./schemas/seo";
 export * from "./types";
 export * from "./utils/bookingDates";
+export * from "./utils/stayRange";
 export * from "./utils/bookingFolio";
 export * from "./utils/bookingAddOns";
 export * from "./utils/bookingDiscounts";

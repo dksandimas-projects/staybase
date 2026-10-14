@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn } from "@spark-inn/shared";
+import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn, addDaysToIsoDate, isValidIsoDate } from "@spark-inn/shared";
 import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
 import config from "@config";
 import { db } from "../firebase/config";
@@ -1914,7 +1914,11 @@ export function BookingLookupPage() {
         )}
       </section>
 
-      {showExtendModal && activeBooking && (
+      {showExtendModal && activeBooking && (() => {
+        // DR-01 (2026-10-14): earliest legal new check-out —
+        // one night after the booking's current check-out.
+        const minExtendCheckOut = addDaysToIsoDate(activeBooking.checkOut, 1);
+        return (
         <Modal
           open={showExtendModal}
           onClose={() => {
@@ -1966,23 +1970,30 @@ export function BookingLookupPage() {
                 </div>
               </div>
 
-              {/* New check-out date */}
+              {/* New check-out date. DR-01 (2026-10-14): `min`
+                  alone never corrects an already-set value, and the
+                  extend form writes straight into the reschedule
+                  API — so the floor is now enforced on change and
+                  the CTA stays disabled while the range is invalid. */}
               <label className="grid gap-2 text-sm font-semibold text-gray-700">
                 New check-out date
                 <input
                   type="date"
                   required
-                  min={
-                    (() => {
-                      const d = new Date(`${activeBooking.checkOut}T00:00:00Z`);
-                      d.setUTCDate(d.getUTCDate() + 1);
-                      return d.toISOString().slice(0, 10);
-                    })()
-                  }
+                  min={minExtendCheckOut}
                   value={extendCheckOut}
-                  onChange={(e) => setExtendCheckOut(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setExtendCheckOut(isValidIsoDate(value) && value < minExtendCheckOut ? minExtendCheckOut : value);
+                  }}
+                  aria-invalid={Boolean(extendCheckOut && extendCheckOut <= activeBooking.checkOut)}
                   className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
+                {extendCheckOut && extendCheckOut <= activeBooking.checkOut ? (
+                  <span role="alert" className="text-xs font-medium text-red-600">
+                    New check-out must be at least one night after your current check-out.
+                  </span>
+                ) : null}
               </label>
 
               {/* Reason */}
@@ -2060,7 +2071,8 @@ export function BookingLookupPage() {
             </form>
           )}
         </Modal>
-      )}
+        );
+      })()}
 
       {(showCancelModal && (activeBooking || activeReservation)) && (
         <Modal open={showCancelModal} onClose={() => {
