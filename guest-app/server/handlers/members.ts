@@ -152,7 +152,17 @@ function projectStay(bookingDoc: any) {
     numNights: Number(data.numNights || 0),
     totalPrice: Number(data.totalPrice || 0),
     status: data.status || "",
-    hasBreakfast: Boolean(data.hasBreakfast),
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` is removed. The
+    // My Stays card derives the breakfast pill from
+    // `breakfastSelections` (a non-empty map of non-removed
+    // entries = a breakfast on file). Carry the map
+    // through so the client doesn't have to round-trip
+    // the booking doc.
+    breakfastSelections:
+      data.breakfastSelections && typeof data.breakfastSelections === "object"
+        ? data.breakfastSelections
+        : null,
     earlyCheckIn: data.earlyCheckIn || null
   };
 }

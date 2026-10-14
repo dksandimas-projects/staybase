@@ -11,25 +11,33 @@ describe("pricing utilities", () => {
   });
 
   test("applies breakfast correctly if enabled and selected", () => {
+    // BR-08: replaced the legacy `breakfastRate × numGuests ×
+    // numNights` recomputation with the snapshotted
+    // `breakfastTotal: 1000` (computed server-side from
+    // `booking.breakfastSelections[key].price`). The total is
+    // identical to the legacy path because the booking doc
+    // carries the single source of truth.
     const total = calculateBookingTotal({
       ratePerNight: 2000,
       numNights: 2,
       numGuests: 2,
-      breakfastRate: 250,
-      hasBreakfast: true
+      breakfastTotal: 1000
     });
     // roomTotal = 2000 * 2 = 4000
-    // breakfastTotal = 250 * 2 guests * 2 nights = 1000
+    // breakfastTotal = 1000 (snapshotted)
     // subtotal = 5000
     expect(total).toBe(5000);
   });
 
-  test("ignores breakfast if not selected or rate is missing", () => {
+  test("ignores breakfast if not selected or total is missing", () => {
+    // BR-08: the absence of `breakfastTotal` (or `breakfastTotal
+    // === 0`) reads as "no breakfast". The legacy `hasBreakfast:
+    // false` flag is gone.
     const total = calculateBookingTotal({
       ratePerNight: 2000,
       numNights: 2,
       numGuests: 2,
-      hasBreakfast: false
+      breakfastTotal: 0
     });
     expect(total).toBe(4000);
   });

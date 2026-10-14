@@ -625,7 +625,19 @@ export function DashboardPage() {
     }> = [];
 
     bookings.forEach((b: any) => {
-      if (!b.hasBreakfast || !["confirmed", "checked-in", "checked-out"].includes(b.status)) return;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `b.hasBreakfast: boolean` flag is
+      // removed from the Booking doc. The gate here
+      // uses the new `breakfastSelections` map
+      // (any non-removed entry = an active breakfast
+      // for this booking) so the daily widget
+      // surfaces the right rooms even when the
+      // booking hasn't been "enabled" via the
+      // obsolete pre-BR-01 boolean toggle.
+      const hasAnyActive = b.breakfastSelections
+        && typeof b.breakfastSelections === "object"
+        && Object.values(b.breakfastSelections).some((entry: any) => entry && entry.removedAt == null);
+      if (!hasAnyActive || !["confirmed", "checked-in", "checked-out"].includes(b.status)) return;
       for (let g = 1; g <= (b.numGuests || 0); g++) {
         const key = `${todayKey}-guest-${g}`;
         const selection = b.breakfastSelections?.[key];

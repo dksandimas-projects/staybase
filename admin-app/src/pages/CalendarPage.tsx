@@ -10,9 +10,7 @@ import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarClock, CalendarDays, Edi
 import {
   calculateSeasonalAwareRoomTotal,
   getNumNights,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   PaymentMethodConfig,
-  calculateBreakfastAddOn,
   generateReservationId
 } from "@spark-inn/shared";
 // Per BR-05 (2026-10-13, decision #234): the shared
@@ -362,22 +360,14 @@ export function CalendarPage() {
       );
       return;
     }
-    // Per BR-05 (2026-10-13, decision #234): the calendar
+    // Per BR-05 (2026-10-13, decision #234) + BR-08
+    // (decision #238, 2026-10-14 — close-out): the calendar
     // create breakfast section uses the same rich-shape
-    // `breakfastSelections` + `breakfastTotal` as the
-    // walk-in modal at `BookingsPage.tsx`. The flat-rate
-    // `calculateBreakfastAddOn` helper is no longer the
-    // source of truth — the grid (`<WalkinBreakfastGrid>`)
-    // computes the total + snapshots the per-slot entries
-    // when the desk selects a meal.
-    const breakfastRate = calendarBreakfast
-      ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT)
-      : 0;
-    const hasBreakfast = Boolean(
-      calendarBreakfast &&
-        calendarBreakfast.breakfastSelections &&
-        Object.keys(calendarBreakfast.breakfastSelections).length > 0
-    );
+    // `breakfastSelections` + `breakfastTotal` as the walk-in
+    // modal at `BookingsPage.tsx`. The flat-rate
+    // `calculateBreakfastAddOn` helper is gone — the grid
+    // (`<WalkinBreakfastGrid>`) computes the total + snapshots
+    // the per-slot entries when the desk selects a meal.
     const totalPrice = selectedRoomTotal + (calendarBreakfast ? calendarBreakfast.breakfastTotal : 0);
     const result = await addWalkinBooking({
       // Per NBS-2026-08-08 (F1): the modal-session preallocations.
@@ -441,16 +431,14 @@ export function CalendarPage() {
       pointsRedeemedValue: 0,
       pointsRedeemedBy: null,
       pointsRedeemedAt: null,
-      // Per BR-05 (2026-10-13, decision #234): the calendar
-      // create writes the rich `breakfastSelections` shape +
-      // `breakfastTotal` when the desk selected meals via
-      // `<WalkinBreakfastGrid>`. The legacy `hasBreakfast` +
-      // `breakfastRate` pair stays populated so the
-      // registration-form printout + receipt PDF keep
-      // rendering the historical "Breakfast — ₱X / guest /
-      // night" line item.
-      hasBreakfast,
-      breakfastRate,
+      // Per BR-05 (2026-10-13, decision #234) + BR-08
+      // (decision #238, 2026-10-14 — close-out): the calendar
+      // create writes only the rich `breakfastSelections`
+      // shape + `breakfastTotal` when the desk selected
+      // meals via `<WalkinBreakfastGrid>`. The legacy
+      // `hasBreakfast` + `breakfastRate` pair is gone —
+      // the registration-form printout + receipt PDF now
+      // read the new shape (BR-08 updated both).
       ...(calendarBreakfast ? {
         breakfastSelections: calendarBreakfast.breakfastSelections,
         breakfastTotal: calendarBreakfast.breakfastTotal

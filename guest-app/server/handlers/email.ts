@@ -253,7 +253,7 @@ function generateReceiptPdf(booking: any): Buffer {
     text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
     for (const room of rooms) {
       const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "-")} · ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${fmtMoney(Number(room.totalPrice || 0))}`;
+      const value = `${String(room.bookingRef || "-")} · ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${fmtMoney(Number(room.totalPrice || 0))}`;
       text(label, value, { gap: 5 });
     }
   } else {
@@ -598,7 +598,22 @@ export function buildReservationEmailView(reservation: any, children: any[]): an
     numAdults: Number(child.numAdults || 0),
     numChildren: Number(child.numChildren || 0),
     extraBedCount: Number(child.extraBedCount || 0),
-    hasBreakfast: child.hasBreakfast === true,
+    // Per BR-08 (Phase 13 — Breakfast Redesign, decision
+    // #238, 2026-10-14): the per-room `breakfastSelections`
+    // rich shape + `breakfastTotal` + `hasAnyBreakfast`
+    // flag replace the legacy flat-rate `hasBreakfast`
+    // boolean. The email reader reads the per-date
+    // breakdown from `rateBreakdown.addOns[]` (already
+    // populated by BR-03's `buildRateBreakdown`); the
+    // `hasAnyBreakfast` flag below drives the per-room
+    // "breakfast" pill on the rooms table.
+    breakfastSelections: child.breakfastSelections && typeof child.breakfastSelections === "object"
+      ? child.breakfastSelections
+      : {},
+    breakfastTotal: Number(child.breakfastTotal || 0),
+    hasAnyBreakfast: child.hasAnyBreakfast === true
+      || (child.breakfastSelections && typeof child.breakfastSelections === "object"
+        && Object.keys(child.breakfastSelections).length > 0),
     ratePerNight: Number(child.ratePerNight || 0),
     totalPrice: Number(child.totalPrice || 0)
   }));
@@ -846,8 +861,8 @@ function bookingRows(booking: any) {
             : "";
           return row(`Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
             room.bookingRef
-              ? `${escapeHtml(String(room.bookingRef))} · ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
-              : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+              ? `${escapeHtml(String(room.bookingRef))} · ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+              : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
           );
         }).join("")}
       </table>
@@ -2380,6 +2395,77 @@ export async function sendStaffRefundReviewTrigger(order: any) {
   );
 }
 
+// Per BR-08 (decision #238, 2026-10-14 — close-out): a
+// guest-facing "Late served — please rate" email fires
+// after the BR-05 mark-served handler records a serve
+// action whose service date has crossed
+// `BreakfastConfig.cutoffTime` (i.e. `occurredAfterCutoff
+// === true` on the audit doc). The email is the guest's
+// first signal that the breakfast service was delivered
+// past the published cutoff — the kitchen list already
+// surfaces late changes to staff (BR-07), but the guest
+// needs a direct line so they can flag a service problem
+// quickly. The link points at `/my-booking` so the guest
+// lands on their lookup page; the rating submission is a
+// follow-up ticket (a Servy-style star widget on the
+// booking's breakfast section) and is out of scope here.
+//
+// The audit action reused is `"serve"` — the audit doc
+// carries `occurredAfterCutoff: true` and the late-served
+// email trigger reads the same field. We do NOT add a new
+// `BreakfastAuditAction` enum value; the existing flag is
+// the discriminator.
+function lateServedEmail(booking: any, slotEntry: any, occurredAtIso: string) {
+  const slotDate = typeof slotEntry?.slotKey === "string"
+    ? slotEntry.slotKey.slice(0, 10)
+    : "—";
+  const mealLabel = slotEntry?.mealName || "your meal";
+  const bookingRef = booking.bookingRef || booking.reservationRef || booking.id || "your booking";
+  const ratingUrl = siteUrl(`/my-booking?ref=${encodeURIComponent(bookingRef || "")}`);
+  // Per DF-7 + the existing audit-extension posture: the
+  // email body surfaces the booking ref + slot date + meal
+  // name so the guest can identify the meal in question.
+  // No PII (no guest email in the visible HTML — the
+  // recipient line carries it). No payment or id URLs.
+  return emailLayout({
+    preheader: `Your breakfast on ${slotDate} was served past our cutoff — we'd value your feedback.`,
+    eyebrow: "Service update",
+    title: "We served your breakfast late",
+    intro: `We noticed that the breakfast for ${escapeHtml(String(bookingRef))} on ${escapeHtml(slotDate)} (${escapeHtml(mealLabel)}) was served past our ${escapeHtml(String(bookingRef)).length > 0 ? "published" : ""} cutoff window. We're sorry for the delay.`,
+    body: `
+      ${callout("warm", "How was it?", "If a few minutes of delay affected your meal, let us know — your feedback helps the kitchen team tighten their morning service. Open the booking below and tap the rate-this-meal card on the breakfast section.")}
+      ${card("What happened", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", bookingRef)}
+        ${row("Service date", slotDate)}
+        ${row("Meal", mealLabel)}
+        ${row("Served at", occurredAtIso)}
+      </table>`)}
+    `,
+    ctaLabel: "Rate this meal",
+    ctaUrl: ratingUrl,
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+
+export async function sendLateServedTrigger(booking: any, slotEntry: any, occurredAtIso: string) {
+  // ETR-22.10: subject prefix from the booking's test-run
+  // banner state. Staging auto-detects inside `sendEmail`.
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
+      ? booking.testRunEnvironment
+      : undefined
+  };
+  await sendEmail(
+    booking.guestEmail,
+    `[${config.brandName}] Late served — please rate your meal`,
+    lateServedEmail(booking, slotEntry, occurredAtIso),
+    undefined,
+    banner
+  );
+}
+
 async function getTomorrowConfirmedBookings() {
   // Per BF-42 (booking-flow audit 2026-06-26): this is NOT
   // a duplicate of getManilaDateInfo() — it computes a
@@ -3083,9 +3169,9 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
           roomCount: 3,
           activeRoomCount: 2,
           rooms: [
-            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 7200 },
-            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 3600, cancelledAt: new Date().toISOString() },
-            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasBreakfast: true, totalPrice: 9800 }
+            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 7200 },
+            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 3600, cancelledAt: new Date().toISOString() },
+            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasAnyBreakfast: true, totalPrice: 9800 }
           ],
           cancellationReason: "Guest requested partial cancellation.",
           cancellationSource: "guest"

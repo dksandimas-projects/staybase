@@ -84,12 +84,15 @@ export const WalkinRoomLineSchema = z.object({
   numAdults: z.coerce.number().int().min(0).max(100),
   numChildren: z.coerce.number().int().min(0).max(100),
   extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
-  // Per EXB-12 (2026-08-06, per decision #199): whether the
-  // walk-in guest wants breakfast for the extra-bed occupant(s).
-  // Optional — when absent, the server treats it as `false`.
-  // The server validates the invariant: `extraBedBreakfast`
-  // can only be `true` when `extraBedCount > 0`.
-  extraBedBreakfast: z.boolean().optional()
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+  // toggle is deleted. Extra-bed occupants are ordinary meal
+  // slots in Step 2 (the per-meal picker), so the create
+  // payload no longer carries a breakfast flag for them.
+  // The BR-08 audit-trail comment is kept here as a record
+  // of the close-out — see `plan/features/BREAKFAST.md
+  // §Decisions Locked` (decision 4 — extra-bed occupants
+  // are ordinary meal slots).
 }).strict();
 
 export const WalkinBookingSchema = z.object({
@@ -107,14 +110,19 @@ export const WalkinBookingSchema = z.object({
   checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   guests: z.coerce.number().int().min(1).max(100),
-  hasBreakfast: z.boolean(),
-  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-  // the server snapshots the admin default from
-  // `settings/breakfastConfig.breakfastIncludesChildrenDefault` and
-  // writes the result to the booking doc alongside `hasBreakfast`.
-  // `true` is the safe default (matches the historical "children pay
-  // the full rate" math).
-  breakfastIncludesChildren: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` pair is deleted from
+  // the walk-in schema. The walk-in modal now sends the rich
+  // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+  // shape (per-date × per-guest meal entries) which is
+  // captured by `WalkinBreakfastGrid` and validated by the
+  // BR-01 `BreakfastSelectionSchema`. The BR-08 audit-trail
+  // comment is kept here as a record of the close-out — see
+  // `plan/features/BREAKFAST.md §Decisions Locked` (decision
+  // 5 — Step 1 carries no breakfast data).
+  breakfastSelections: z.record(z.string(), z.unknown()).optional(),
+  breakfastTotal: z.coerce.number().finite().min(0).optional(),
   // Per CHD-01 (2026-08-01, per decision #144): adults/children
   // split. Both optional — when absent, the server derives
   // `numAdults = guests`, `numChildren = 0` (the historical
@@ -131,14 +139,18 @@ export const WalkinBookingSchema = z.object({
   // server snapshots the room type's `extraBedRate` onto the
   // booking doc alongside this field.
   extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): whether the
-  // guest wants breakfast for the extra-bed occupant(s). When
-  // `true`, all `extraBedCount` beds in this room are counted
-  // toward the breakfast total. Optional — when absent, the
-  // server treats it as `false` (no breakfast for extra beds).
-  // The server validates the invariant: `extraBedBreakfast`
-  // can only be `true` when `extraBedCount > 0`.
-  extraBedBreakfast: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+  // toggle is deleted from the walk-in schema. Extra-bed
+  // occupants are ordinary meal slots in Step 2 (the
+  // per-meal picker) — the walk-in modal captures them via
+  // `WalkinBreakfastGrid` which writes the rich
+  // `breakfastSelections` shape (per-date × per-guest
+  // meal entries) validated by `BreakfastSelectionSchema`.
+  // The BR-08 audit-trail comment is kept here as a record
+  // of the close-out — see `plan/features/BREAKFAST.md
+  // §Decisions Locked` (decision 4 — extra-bed occupants
+  // are ordinary meal slots).
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: z.string().trim().min(1).max(80),
   // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so

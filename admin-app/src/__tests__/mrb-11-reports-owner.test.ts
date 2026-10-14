@@ -81,8 +81,10 @@ describe("MRB-11 — Reports unit tests (per-stream allocation contract)", () =>
       ratePerNight: 2_000,
       numNights: 2,
       numGuests: 2,
-      breakfastRate: 250,
-      hasBreakfast: true,
+      // BR-08: replaced `breakfastRate: 250` + `hasBreakfast: true`
+      // (which produced 250 × 2 guests × 2 nights = 1000) with the
+      // snapshotted `breakfastTotal: 1000`.
+      breakfastTotal: 1000,
       rateBreakdown: { roomSubtotal: 4_000 }
     };
     const legacy = splitBookingRevenue(booking);
@@ -128,8 +130,9 @@ describe("MRB-11 — Reports unit tests (per-stream allocation contract)", () =>
       ratePerNight: 4_000,
       numNights: 2,
       numGuests: 2,
-      breakfastRate: 250,
-      hasBreakfast: true,
+      // BR-08: replaced `breakfastRate: 250` + `hasBreakfast: true`
+      // with the snapshotted `breakfastTotal: 1000`.
+      breakfastTotal: 1000,
       rateBreakdown: { roomSubtotal: 8_000 }
     });
     expect(streams.allocation).toBe("stored");
@@ -208,8 +211,9 @@ describe("MRB-11 — Reports unit tests (per-stream allocation contract)", () =>
       ratePerNight: 1_500,
       numNights: 2,
       numGuests: 0,
-      breakfastRate: 0,
-      hasBreakfast: false,
+      // BR-08: replaced `breakfastRate: 0` + `hasBreakfast: false`
+      // with the snapshotted `breakfastTotal: 0`.
+      breakfastTotal: 0,
       rateBreakdown: { roomSubtotal: 3_000 }
     };
     const streams = getReservationRevenueStreams(

@@ -80,7 +80,11 @@ import {
   getEffectiveVatRate,
   normalizeVatConfig,
   type VatConfig,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` import
+  // removed — the constant was deleted from
+  // `shared/constants/index.ts`. The admin uses the
+  // per-meal catalog (`breakfastConfig.meals[]`) now.
   type BookingRateBreakdown,
   type BookingSourceConfig,
   type DiscountScope,
@@ -358,8 +362,15 @@ export interface Booking {
   confirmedWithBalanceBy?: string | null;
   unpaidCheckoutReason?: string | null;
   unpaidCheckoutApprovedBy?: string | null;
-  hasBreakfast: boolean;
-  breakfastRate: number;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastRate: number` pair is deleted from the
+  // admin-side `Booking` interface. The new meal-based
+  // model reads `breakfastSelections: Record<key,
+  // BreakfastSelectionEntry>` + `breakfastTotal: number`
+  // instead — every read site (Reports, the booking
+  // drawer, the dashboard, the bookings table) was
+  // migrated in BR-08.
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15): stamped by the
   // `/api/bookings/reject-payment` handler.
@@ -848,13 +859,19 @@ export interface AdminContextType {
   corporateInquiries: CorporateInquiry[];
   updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => Promise<void>;
   addInquiryNote: (inquiryId: string, text: string) => Promise<void>;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the corporate-inquiry conversion no longer carries an
+  // `hasBreakfast` toggle. Corporate groups negotiate their
+  // own catering separately from the room rate; the server
+  // `convert-inquiry` endpoint accepts no breakfast flag
+  // (the booking is created with `breakfastTotal: 0` and
+  // `hasAnyBreakfast: false`).
   convertInquiryToBooking: (input: {
     inquiryId: string;
     roomId: string;
     checkIn: string;
     checkOut: string;
     guests: number;
-    hasBreakfast: boolean;
     paymentMethod: string;
     ratePerNightOverride?: number | null;
   }) => Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }>;
@@ -1748,8 +1765,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             pointsRedeemedValue: data.pointsRedeemedValue || 0,
             pointsRedeemedBy: data.pointsRedeemedBy || null,
             pointsRedeemedAt: data.pointsRedeemedAt || null,
-            hasBreakfast: !!data.hasBreakfast,
-            breakfastRate: data.breakfastRate || 0,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast: boolean` +
+            // `breakfastRate: number` pair is removed from
+            // the hydration path. The new meal-based model
+            // hydrates `breakfastSelections: Record<key,
+            // BreakfastSelectionEntry>` + `breakfastTotal:
+            // number` directly from the booking doc (no
+            // client-side recomputation).
             reminderSentAt: data.reminderSentAt ? parseDateTimeString(data.reminderSentAt) : null,
             guestIdPhotoUrl: data.guestIdPhotoUrl || null,
             handledBy: data.handledBy || "",
@@ -2856,7 +2879,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           numAdults: input.numAdults,
           numChildren: input.numChildren,
           extraBedCount: input.extraBedCount,
-          hasBreakfast: input.hasBreakfast,
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // the legacy `hasBreakfast: boolean` is gone. The
+          // walk-in modal's `WalkinBreakfastGrid` captures the
+          // rich `breakfastSelections: Record<key,
+          // BreakfastSelectionEntry>` shape directly when the
+          // desk picks a meal — the `input.hasBreakfast` flag
+          // (a boolean for the legacy flat-rate flow) is no
+          // longer written.
           guestDetails: {
             firstName: trimmedFirst,
             lastName: trimmedLast,
@@ -3419,13 +3449,16 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     checkIn: string;
     checkOut: string;
     guests: number;
-    hasBreakfast: boolean;
     paymentMethod: string;
     ratePerNightOverride?: number | null;
   }): Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const bookingId = doc(collection(db, "bookings")).id;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the body no longer carries `hasBreakfast`. Corporate
+      // groups negotiate catering separately; the conversion
+      // creates a breakfast-free booking by default.
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
         method: "POST",
         headers: {
@@ -3439,7 +3472,6 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           checkIn: input.checkIn,
           checkOut: input.checkOut,
           guests: input.guests,
-          hasBreakfast: input.hasBreakfast,
           paymentMethod: input.paymentMethod,
           ratePerNightOverride: input.ratePerNightOverride ?? null
         })
@@ -5882,22 +5914,32 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     pointsRedemptionRate: 100
   });
 
-  const [breakfastConfig, setBreakfastConfig] = useState({
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `ratePerPersonPerNight: number` +
+  // `breakfastIncludesChildrenDefault: boolean` +
+  // `silogItems[]` fields are deleted from the
+  // `breakfastConfig` default state. The new meal-based
+  // model reads the per-meal catalog from
+  // `breakfastConfig.meals[]` (added in BR-02). The
+  // Settings page writes the new shape; legacy code
+  // paths that read `ratePerPersonPerNight` /
+  // `silogItems` are gone.
+  const [breakfastConfig, setBreakfastConfig] = useState<{
+    isEnabled: boolean;
+    meals: Array<{ id: string; name: string; description?: string; price: number; displayOrder?: number; isActive?: boolean }>;
+    cutoffTime: string;
+    cutoffTimezone: string;
+    servedGraceMinutes: number;
+  }>({
     isEnabled: true,
-    ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
-    // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
-    // "include children in the breakfast charge". The server
-    // snapshots this onto every new booking whose client did not
-    // send a per-booking override. `true` is the historical
-    // default (children pay the full rate) and the safe one —
-    // narrowing is a one-line change, unwinding under-charged
-    // bills is not.
-    breakfastIncludesChildrenDefault: true,
-    silogItems: [
-      { id: "sl-1", name: "Tapsilog", isActive: true },
-      { id: "sl-2", name: "Longsilog", isActive: true },
-      { id: "sl-3", name: "Tocilog", isActive: true }
-    ]
+    meals: [
+      { id: "sl-1", name: "Tapsilog", description: "Beef tapa with garlic rice and fried egg.", price: 250, displayOrder: 1, isActive: true },
+      { id: "sl-2", name: "Longsilog", description: "Sweet longaniza with garlic rice and fried egg.", price: 250, displayOrder: 2, isActive: true },
+      { id: "sl-3", name: "Tocilog", description: "Sweet tocino with garlic rice and fried egg.", price: 250, displayOrder: 3, isActive: true }
+    ],
+    cutoffTime: "20:00",
+    cutoffTimezone: "Asia/Manila",
+    servedGraceMinutes: 15
   });
 
   const [storeConfig, setStoreConfig] = useState<StoreConfig>({

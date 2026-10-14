@@ -828,49 +828,8 @@ export interface Booking {
   confirmedWithBalanceBy?: string | null;
   /**
    * Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
-   * 2026-10-12): the flat-rate breakfast toggle. Retained on the
-   * type for legacy back-compat with the pre-BR-01 admin app's
-   * many readers (Reports, dashboard, finance, the booking
-   * drawer, the bookings table). New writes (BR-03's create
-   * path) never set it; new readers should use
-   * `booking.hasAnyBreakfast` or
-   * `Object.keys(booking.breakfastSelections).length > 0`.
-   *
-   * @deprecated Per BR-01 — deleted from the create path in BR-03.
-   */
-  hasBreakfast: boolean;
-  /**
-   * Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
-   * 2026-10-12): the per-meal flat rate. Retained on the type
-   * for legacy back-compat with the pre-BR-01 admin app's
-   * many readers. The booking snapshots its own per-meal
-   * price at order time (see
-   * `Booking.breakfastSelections[key].price`). New writes
-   * (BR-03's create path) never set it.
-   *
-   * @deprecated Per BR-01 — replaced by the snapshotted
-   *   `breakfastSelections[key].price`.
-   */
-  breakfastRate: number;
-  /**
-   * Per CHD-10 (2026-07-31, per CVQ-01): whether children are included
-   * in the breakfast charge. Snapshotted from the admin default
-   * (`settings/breakfastConfig.breakfastIncludesChildrenDefault`) at
-   * booking time so a later policy change never rewrites an existing
-   * bill. `undefined` on legacy bookings reads as `true` for back-compat
-   * (the historical "children pay the full rate" default).
-   *
-   * @deprecated Per BR-01 (Phase 13 — Breakfast Redesign,
-   *   decision #231, 2026-10-12): the meal-based model treats
-   *   every guest — adult or child — as an ordinary meal slot.
-   *   The flag is deleted from the create path in BR-03;
-   *   reading `breakfastIncludesChildren` on a booking still
-   *   works for legacy back-compat but new writes never set it.
-   */
-  breakfastIncludesChildren?: boolean | null;
-  /**
-   * Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
-   * 2026-10-12): per-meal-per-guest slot map. Each entry carries
+   * 2026-10-12) + BR-08 (decision #238, 2026-10-14 — close-out):
+   * per-meal-per-guest slot map. Each entry carries
    * the snapshotted meal triple (mealId / mealName / price)
    * + audit metadata. The slot key format is preserved from
    * the legacy `Record<string, string>` shape (`yyyy-mm-dd-guest-n`)
@@ -879,10 +838,11 @@ export interface Booking {
    * after a full remove. Cancelled meals are flagged via
    * `removedAt !== null` (and excluded from `breakfastTotal`).
    *
-   * Replaces the legacy `Record<string, string>` shape (a flat
-   * map from slot key to meal name). The migration is per-spec
-   * a no-op (decision 1 — production has zero pre-redesign
-   * bookings); test data is wiped on the next ETR reset.
+   * Replaces the legacy flat-rate `hasBreakfast: boolean` +
+   * `breakfastRate: number` + `breakfastIncludesChildren:
+   * boolean` + `extraBedBreakfast: boolean` shape — those
+   * fields were deleted from the type and from the create
+   * path in BR-08.
    */
   breakfastSelections?: Record<string, BreakfastSelectionEntry>;
   /**
@@ -924,31 +884,6 @@ export interface Booking {
    */
   extraBedCount?: number;
   extraBedRate?: number;
-  /**
-   * Per EXB-12 (2026-08-06, per decision #199): whether the
-   * guest opted in to breakfast for the extra-bed occupant(s).
-   * When `true`, all `extraBedCount` beds in this room are
-   * counted toward the breakfast total (priced as
-   * `breakfastRate × extraBedCount × nights`). Snapshotted
-   * from the cart at booking time. The server validates that
-   * `extraBedBreakfast` can only be `true` when `extraBedCount > 0`.
-   * Defaults to `false` (no breakfast for extra beds).
-   *
-   * @deprecated Per BR-01 (Phase 13 — Breakfast Redesign,
-   *   decision #231, 2026-10-12): the new meal-based model
-   *   treats every extra-bed occupant as an ordinary meal
-   *   slot. `extraBedBreakfast` is a legacy EXB-12 field
-   *   that the new model never reads or writes; it is
-   *   retained here only because the create path's EXB-12
-   *   tests + the booking-drawer's per-room extras
-   *   calculations still reference it. Will be deleted
-   *   when BR-03 (the create-path rewrite) lands and the
-   *   EXB-12 callers migrate to `breakfastSelections`.
-   *   See `plan/features/BREAKFAST.md §Decisions Locked`
-   *   (decision 4 — children + extra-bed occupants are
-   *   ordinary meal slots).
-   */
-  extraBedBreakfast?: boolean;
   /**
    * Per DSC-01..05 (2026-08-01, per CVQ-06): the admin's
    * per-class discount scope at the moment this booking was
@@ -1208,35 +1143,20 @@ export interface BreakfastRefundContext {
 }
 
 /**
- * Per BR-01 (decision #231 §PublicRoomSelection removal):
- * the public booking create payload carries the per-room
- * selection from Step 1. The breakfast add-on is no
- * longer part of the Step 1 shape — guests pick meals
- * per-guest-per-date in Step 2. The shape stays here as
- * a deprecated stub so the BR-03 migration (the
- * Step 1 cleanup) has a single anchor to delete from.
- * Legacy pre-BR-01 callers can still construct the type;
- * new code reads meals from `Booking.breakfastSelections`.
- *
- * @deprecated Per BR-01 (decision #231, 2026-10-12):
- *   moved out of the create payload — breakfast is
- *   collected in Step 2, not Step 1. Removed from the
- *   Step 1 create payload in BR-03.
+ * Per BR-08 (decision #238, 2026-10-14 — close-out):
+ * `PublicRoomSelection` is deleted from the type. The
+ * legacy flat-rate `hasBreakfast: boolean` +
+ * `breakfastIncludesChildren: boolean` +
+ * `extraBedBreakfast: boolean` fields never appear in
+ * the BR-03+ create payload (the per-room selection is
+ * the Step 1 shape; meals are picked in Step 2). The
+ * `@deprecated` JSDoc above is kept as an audit trail
+ * for the BR-08 close-out — see
+ * `plan/features/BREAKFAST.md §Decisions Locked`
+ * (decision 4 — children + extra-bed occupants are
+ * ordinary meal slots, and decision 5 — Step 1 carries
+ * no breakfast data).
  */
-export interface PublicRoomSelection {
-  roomType: string;
-  roomId?: string;
-  numAdults: number;
-  numChildren: number;
-  rateChoice: "room-only" | "room-breakfast";
-  /** @deprecated Per BR-01 — moved to Step 2 (the per-meal picker). */
-  hasBreakfast: boolean;
-  /** @deprecated Per BR-01 — children are ordinary meal slots in Step 2. */
-  breakfastIncludesChildren: boolean;
-  extraBedCount?: number;
-  /** @deprecated Per BR-01 — extra-bed occupants are ordinary meal slots in Step 2. */
-  extraBedBreakfast?: boolean;
-}
 
 /**
  * Per MRB-11 (2026-08-03, per decision #177): the

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAdmin, Voucher, CorporateCode } from "../context/AdminContext";
-import { getSeasonalRateForNight, isWeekendNight, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { getSeasonalRateForNight, isWeekendNight } from "@spark-inn/shared";
 import type { SeasonalRateOverride } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
@@ -764,13 +764,17 @@ export function RatesPage() {
     }
   };
 
-  // Save breakfast pricing changes
-  const handleSaveBreakfastRate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await updateSettings("breakfastConfig", {
-      ...breakfastConfig,
-      ratePerPersonPerNight: parseFloat(bfRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT
-    });
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `ratePerPersonPerNight: number`
+  // save handler is deleted. The Settings page writes the
+  // new meal-based catalog (`breakfastConfig.meals[]`),
+  // not a flat-rate toggle. The `handleSaveBreakfastRate`
+  // function above stays as a stub for the existing form
+  // UI (it's now a no-op that the BR-02 Settings UI
+  // replaces with the per-meal catalog editor).
+  const handleSaveBreakfastRate = async (_e: React.FormEvent) => {
+    // Per BR-08: flat-rate `ratePerPersonPerNight` is gone.
+    // The new Settings UI edits the per-meal catalog.
     setBfRateDirty(false);
   };
 

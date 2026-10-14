@@ -208,25 +208,6 @@ export const ARRIVAL_WINDOW_HOURS = 24;
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
 
-// Single source of truth for the breakfast rate fallback (PHP per
-// person, per night). The live rate lives in the Firestore document
-// `settings/breakfastConfig.ratePerPersonPerNight` and is snapshotted
-// onto `booking.breakfastRate` at booking time. This constant is used
-// ONLY as the fallback when that config doc / snapshot is missing or
-// unset. Every handler and UI must reference this — never a hardcoded
-// number — so the fallback can never drift out of sync again.
-//
-// @deprecated Per BR-01 (Phase 13 — Breakfast Redesign,
-//   decision #231, 2026-10-12): the flat-rate model is
-//   removed. Each meal carries its own price on
-//   `BreakfastMeal.price` and is snapshotted onto
-//   `BreakfastSelectionEntry.price` at order time. The
-//   fallback is no longer used; it will be deleted in BR-02
-//   when the Settings UI for the new catalog lands. Kept
-//   here for the existing 71 unit tests on
-//   `calculateBreakfastAddOn`; will be removed in BR-03.
-export const DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
-
 // Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
 // 2026-10-12): the daily breakfast-order cutoff. The
 // `cutoffForDate(serviceDate)` rule is `(serviceDate − 1

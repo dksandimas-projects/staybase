@@ -50,10 +50,20 @@ import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
 import {
   DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
-  MIN_BREAKFAST_OVERRIDE_REASON_LENGTH
+  DEFAULT_BREAKFAST_CUTOFF_TIME,
+  DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+  MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
+  computeBreakfastCutoffState
 } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
 import { auditBreakfastOp } from "../lib/breakfast-selections";
+// Per BR-08 (decision #238, 2026-10-14 — close-out): the
+// `sendLateServedTrigger` carries the guest-facing "Late
+// served — please rate" email fired from this handler
+// when a serve action crosses the per-date cutoff window.
+// The email is the guest's first signal that the meal was
+// delivered past the published cutoff.
+import { sendLateServedTrigger } from "./email";
 
 // ---------- Wire schemas ----------
 
@@ -105,6 +115,35 @@ async function loadServedGraceMinutes(): Promise<number> {
     // Fall through to default.
   }
   return DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES;
+}
+
+// Read the BR-02 per-date cutoff triple
+// (`cutoffTime` + `cutoffTimezone`) so the serve branch can
+// detect a late serve. Falls back to the BR-01 defaults so
+// a missing / unconfigured settings doc still gates (the
+// defaults match the documented hotel posture).
+async function loadCutoffConfig(): Promise<{ cutoffTime: string; cutoffTimezone: string }> {
+  try {
+    const snap = await adminDb
+      .collection("settings")
+      .doc("breakfastConfig")
+      .get();
+    const source: any = snap.exists ? snap.data() : null;
+    const rawCutoff = String(source && source.cutoffTime || "").trim();
+    const rawZone = String(source && source.cutoffTimezone || "").trim();
+    if (
+      /^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff) &&
+      rawZone.length > 0
+    ) {
+      return { cutoffTime: rawCutoff, cutoffTimezone: rawZone };
+    }
+  } catch {
+    // Fall through to defaults.
+  }
+  return {
+    cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
+    cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
+  };
 }
 
 // Read the live selection entry that the serve /
@@ -174,6 +213,37 @@ export async function handleMarkServed(req: VercelRequest, res: VercelResponse) 
   // Read the served-grace window once so the un-serve
   // branch uses a single canonical value.
   const graceMinutes = await loadServedGraceMinutes();
+
+  // Read the per-date cutoff triple so the serve branch
+  // can flag a late serve (a serve action whose slot date
+  // has crossed `cutoffTime` — per BR-08 + decision #238).
+  // The cut-off is a single canonical value keyed off the
+  // BR-02 settings doc; a missing / unconfigured doc falls
+  // back to the BR-01 defaults (`20:00 Asia/Manila`).
+  const { cutoffTime, cutoffTimezone } = await loadCutoffConfig();
+
+  // Detect a late serve up-front so the audit doc carries
+  // `occurredAfterCutoff: true` AND the post-transaction
+  // email fires. The `computeBreakfastCutoffState` helper
+  // returns `isLocked: true` when `now >= cutoffAt`; we
+  // use the same gate as the BR-04 manage + BR-07
+  // kitchen-list late-change column (BR-08 ships this
+  // single detector as the source of truth). The
+  // fallback path inside `computeBreakfastCutoffState`
+  // already returns `isLocked: true` on any bad input,
+  // so a misconfigured settings doc means every serve is
+  // flagged late — the conservative posture.
+  const slotDate = slotKey.slice(0, 10);
+  let isLateServe = false;
+  if (action === "serve") {
+    const cutoffState = computeBreakfastCutoffState({
+      serviceDate: slotDate,
+      now: new Date(),
+      cutoffTime,
+      timezone: cutoffTimezone
+    });
+    isLateServe = cutoffState.isLocked;
+  }
 
   // Read the booking + target slot entry outside the
   // transaction — both fields are read once per request,
@@ -269,7 +339,15 @@ export async function handleMarkServed(req: VercelRequest, res: VercelResponse) 
           },
           actorUid: staff.uid,
           actorRole: staff.role,
-          reasonOrCutoff: false
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // late serves (a serve action after the per-date
+          // cutoff window) carry `true` so the audit doc
+          // stamps `occurredAfterCutoff: true`. The kitchen
+          // list's "Late changes" column (BR-07) and the new
+          // late-served guest email both read this flag.
+          // On-time serves (`isLocked === false`) keep the
+          // historical `false` (no flag).
+          reasonOrCutoff: isLateServe
         });
         resultPayload = {
           servedAt: now,
@@ -363,6 +441,50 @@ export async function handleMarkServed(req: VercelRequest, res: VercelResponse) 
 
   if (opError) {
     return res.status(opError.status).json({ success: false, error: opError.error });
+  }
+
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // fire the guest-facing "Late served — please rate"
+  // email after the transaction commits, only when the
+  // serve action crossed the per-date cutoff. Fire-and-
+  // log: an email send failure must NOT mask the 200
+  // response — the audit doc + kitchen list are already
+  // correct, the email is the guest-comms icing.
+  if (isLateServe && action === "serve") {
+    try {
+      const detail = await adminDb.collection("bookings").doc(bookingId).get();
+      const data: any = detail.exists ? detail.data() || {} : {};
+      const guestEmail = String(data.guestEmail || "").trim();
+      if (guestEmail) {
+        const slotEntry = {
+          slotKey,
+          mealId: String(selection.mealId),
+          mealName: String(selection.mealName),
+          price: Number(selection.price || 0)
+        };
+        const occurredAtIso = new Date().toISOString();
+        await sendLateServedTrigger(
+          {
+            id: bookingId,
+            bookingRef: data.bookingRef || data.reservationRef || bookingId,
+            reservationRef: data.reservationRef || null,
+            guestEmail,
+            guestName: data.guestName || "",
+            isTestData: data.isTestData === true,
+            testRunName: typeof data.testRunName === "string" ? data.testRunName : undefined,
+            testRunEnvironment:
+              data.testRunEnvironment === "staging" || data.testRunEnvironment === "production"
+                ? data.testRunEnvironment
+                : undefined
+          },
+          slotEntry,
+          occurredAtIso
+        );
+      }
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error("[breakfast-mark-served] late-served email failed:", err?.message || err);
+    }
   }
 
   return res.status(200).json({ success: true, data: resultPayload });

@@ -26,7 +26,6 @@ import {
   calculateVatBreakdown,
   computeBookingFolio,
   computeReservationAggregatePaymentStatus,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   getBookingVatBreakdown,
   isPaymentVerified,
   requiredExtraBedsFor,
@@ -252,8 +251,17 @@ function estimateNewTotalPrice(
 
   const roomTotal = roomBreakdown.roomSubtotal;
 
-  const bRate = booking.breakfastRate || breakfastConfig?.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-  const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
+  // Per BR-08 (decision #238, 2026-10-14): the per-meal
+  // `booking.breakfastTotal` (computed from
+  // `booking.breakfastSelections` via the BR-01
+  // `calculateBreakfastMealsTotal` helper) replaces the
+  // legacy flat-rate `booking.breakfastRate × numGuests ×
+  // numNights` toggle. The `manualNightlyRate === null`
+  // guard stays (it's an existing manual-rate edge case
+  // unrelated to breakfast).
+  const breakfastTotal = manualNightlyRate === null
+    ? Number(booking.breakfastTotal || 0)
+    : 0;
   const subtotal = roomTotal + breakfastTotal;
 
   let discountPct = booking.discountPct || 0;
@@ -1590,16 +1598,14 @@ export function BookingsPage() {
     return Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
   };
   const numNights = getNumNights();
-  const brekkieRate = breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-  // Per BR-05 (2026-10-13, decision #234): the
+  // Per BR-08 (decision #238, 2026-10-14): the walk-in
   // breakfast add-on is the new rich-shape `breakfastTotal`
-  // (computed by `WalkinBreakfastGrid`) instead of the
-  // legacy `ratePerPersonPerNight * numGuests * numNights`
-  // flat-rate. The legacy field stays computed below only
-  // for the receipt PDF / registration-form clone (the
-  // booking create keeps writing the `breakfastRate` so
-  // the post-booking email + receipt still show the
-  // same line the legacy code did).
+  // (computed by `WalkinBreakfastGrid`) which replaces the
+  // legacy `ratePerPersonPerNight × numGuests * numNights`
+  // flat-rate + the `breakfastRate` / `hasBreakfast`
+  // fields written onto the booking doc. The legacy
+  // fields are removed by BR-08; the walk-in grid is the
+  // single source of truth for the add-on.
   const breakfastAddOn = walkinBreakfast?.breakfastTotal || 0;
   const totalPrice = roomChargeTotal + breakfastAddOn;
 
@@ -3152,8 +3158,17 @@ export function BookingsPage() {
     }
 
     // ── Breakfast Selections ──
-    if (b.hasBreakfast) {
-      const activeSilogItems = breakfastConfig.silogItems.filter(
+    // Per BR-08 (decision #238, 2026-10-14): the
+    // registration-form pre-fill reads the new rich
+    // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+    // shape (which carries `mealName` directly — no
+    // legacy `Record<key, string>` fallback). The
+    // catalog reads `meals[]` instead of the legacy
+    // `silogItems[]`. The trigger condition is now
+    // "any meal in `breakfastSelections`" instead of
+    // the legacy flat-rate `hasBreakfast: boolean`.
+    if (b.breakfastSelections && Object.keys(b.breakfastSelections).length > 0) {
+      const activeMeals = (breakfastConfig.meals || []).filter(
         (item: { id: string; name: string; isActive: boolean }) => item.isActive
       );
       const stayDates = getStayDates(b);
@@ -3162,24 +3177,25 @@ export function BookingsPage() {
       const breakfastTop = Math.min(Math.max(y + 3, 232), 276 - breakfastH);
       y = breakfastTop;
 
-      drawCompactSectionTitle("Breakfast Silog Selections", marginL, y, marginR - marginL);
+      drawCompactSectionTitle("Breakfast Meal Selections", marginL, y, marginR - marginL);
       y += 4.8;
       pdf.setFontSize(8);
       pdf.setTextColor(120, 120, 120);
       // Per the 2026-08-09 follow-up to the booking-drawer
-      // breakfast capture: when staff pre-select a silog per
+      // breakfast capture (BR-05 renewed this for the per-meal
+      // catalog): when staff pre-select a meal per
       // guest per day in the drawer, the matching checkbox in the
       // printed registration form is pre-filled (filled box +
       // white check + bold label) so the guest can see what was
       // already recorded and override at check-in if needed. The
-      // other silog options stay blank.
+      // other meal options stay blank.
       pdf.text("Pre-selected choices are marked; circle or check to change.", marginL, y);
       y += 5.5;
 
-      if (activeSilogItems.length === 0) {
+      if (activeMeals.length === 0) {
         pdf.setFontSize(8);
         pdf.setTextColor(150, 150, 150);
-        pdf.text("No active silog items configured.", marginL, y);
+        pdf.text("No active breakfast meals configured.", marginL, y);
         y += 4.5;
       } else {
         pdf.setFontSize(7);
@@ -3189,17 +3205,23 @@ export function BookingsPage() {
             : "";
           for (let g = 0; g < b.numGuests; g++) {
             const rowLabel = stayDates.length > 1 ? `Guest ${g + 1} (${shortDate}):` : `Guest ${g + 1}:`;
-            // The drawer's <select> stores the silog item name
-            // (not id) under `${date}-guest-${g + 1}`, so the
-            // pre-fill match is by name. Editing a silog name in
-            // Settings after capture would silently drop the
-            // pre-check for that booking — accepted trade-off,
-            // matching the drawer's persistence shape.
-            const selectedName = b.breakfastSelections?.[`${date}-guest-${g + 1}`];
+            // The new `breakfastSelections` shape stores
+            // a `{mealId, mealName, price, …}` object under
+            // `${date}-guest-${g + 1}` (BR-01). The pre-fill
+            // match uses `mealName` to stay backward-compatible
+            // with the legacy silog-names match used in earlier
+            // captures — a guest whose booking predates the
+            // BR-01 migration still gets the right checkbox.
+            const selectionEntry = b.breakfastSelections[`${date}-guest-${g + 1}`];
+            const selectedName = selectionEntry
+              ? (typeof selectionEntry === "string"
+                ? selectionEntry
+                : (selectionEntry as { mealName?: string }).mealName || null)
+              : null;
             pdf.setTextColor(...compactTextRgb);
             pdf.text(rowLabel, marginL, y);
             let optionX = marginL + 24;
-            for (const item of activeSilogItems) {
+            for (const item of activeMeals) {
               const optionLabel = fitText(item.name, 17);
               const isSelected = !!selectedName && item.name === selectedName;
               if (isSelected) {
@@ -3479,8 +3501,22 @@ export function BookingsPage() {
           value: isReservationReceipt ? "See room allocations" : `${formatAmount(b.ratePerNight)} / night`
         }
       ];
-      if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
-        stayRows.push({ label: "Breakfast", value: `${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night` });
+      // Per BR-08 (decision #238, 2026-10-14): the per-room
+        // `breakfastSelections` rich shape + `breakfastTotal`
+        // replace the legacy flat-rate `hasBreakfast: boolean`
+        // + `breakfastConfig.ratePerPersonPerNight` toggle. The
+        // Pricing Breakdown section below already iterates
+        // `rateBreakdown.addOns[]` which carries the per-date
+        // breakfast lines stamped by BR-03's
+        // `buildBreakfastRateBreakdownLines` helper. The Stay
+        // card now shows the total breakfast count + total
+        // (instead of the old "X / guest / night" line).
+      if (b.breakfastTotal && Number(b.breakfastTotal) > 0) {
+        const selectionsCount = Object.keys(b.breakfastSelections || {}).length;
+        stayRows.push({
+          label: "Breakfast",
+          value: `${selectionsCount} meal${selectionsCount === 1 ? "" : "s"} · ${formatAmount(Number(b.breakfastTotal))} total`
+        });
       }
       const stayCardH = drawInfoCard("Stay", stayRows, marginL + cardW + cardGap, y, cardW);
       y += Math.max(guestCardH, stayCardH) + 4.5; // Tighter vertical gap
@@ -4438,12 +4474,21 @@ export function BookingsPage() {
         // `breakfastConfig.ratePerPersonPerNight` field stays
         // populated so older dashboards that surface the line
         // item "Breakfast — ₱X / guest / night" don't render empty.
-        hasBreakfast: Boolean(walkinBreakfast && walkinBreakfast.breakfastSelections && Object.keys(walkinBreakfast.breakfastSelections).length > 0),
-        breakfastRate: walkinBreakfast ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0,
-        ...(walkinBreakfast ? {
-          breakfastSelections: walkinBreakfast.breakfastSelections,
-          breakfastTotal: walkinBreakfast.breakfastTotal
-        } : {}),
+        // Per BR-08 (decision #238, 2026-10-14): the legacy
+        // flat-rate `hasBreakfast: boolean` + `breakfastRate: number`
+        // pair is gone — the rich shape
+        // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+        // + `breakfastTotal: number` is the single source of truth.
+        // The walk-in `WalkinBreakfastGrid` returns both fields; if
+        // the desk hasn't picked any meals, the spread is omitted
+        // so the doc carries no legacy empty keys.
+        ...(walkinBreakfast && walkinBreakfast.breakfastSelections
+          && Object.keys(walkinBreakfast.breakfastSelections).length > 0
+          ? {
+            breakfastSelections: walkinBreakfast.breakfastSelections,
+            breakfastTotal: walkinBreakfast.breakfastTotal
+          }
+          : {}),
         guestIdPhotoUrl: null,
         handledBy: currentUser?.uid || "staff",
         cancellationReason: "",
@@ -4456,9 +4501,9 @@ export function BookingsPage() {
         setGuestEmail("");
         setGuestPhone("");
         setPriceOverride("");
-        // Per BR-05: reset the new rich-shape breakfast state
-        // alongside the older `hasBreakfast` reset (kept as a
-        // sibling for back-compat).
+        // Per BR-05 / BR-08: reset the rich-shape breakfast
+        // state (the legacy `hasBreakfast` reset was
+        // retired with the close-out).
         setWalkinBreakfast(null);
         setWalkinBreakfastOverrideReason("");
         setWalkinDiscountType("");
@@ -5746,7 +5791,7 @@ export function BookingsPage() {
 
             {/* Breakfast selections */}
             <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection}>
-            {selectedBooking.hasBreakfast && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (() => {
+            {(selectedBooking.breakfastSelections && Object.keys(selectedBooking.breakfastSelections).length > 0) && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (() => {
               const breakfastKeys = Object.keys(selectedBooking.breakfastSelections ?? {});
               const recordedCount = breakfastKeys.filter((key) => selectedBooking.breakfastSelections?.[key]).length;
               const totalSlots = selectedBooking.numGuests * getStayDates(selectedBooking).length;
@@ -5793,19 +5838,29 @@ export function BookingsPage() {
                                 return (
                                   <td key={key} className="px-2 py-2">
                                     <select
-                                      // The legacy registration-form checkbox-fill
-                                      // surface still reads the old `string` value
-                                      // (a meal name); per BR-05 this surface is
-                                      // a stub — the BR-05 real grid lives in the
-                                      // drawer's Breakfast tab. The cast keeps
-                                      // the `Record<string, string>` + rich
-                                      // union type-checked at the call site.
-                                      value={(selectedBooking.breakfastSelections as any)?.[key] ?? ""}
+                                      // Per BR-08 (decision #238, 2026-10-14):
+                                      // this booking-drawer breakfast surface
+                                      // is a STUB retained for the registration
+                                      // form pre-fill — the real per-meal
+                                      // capture lives in the drawer's Breakfast
+                                      // tab (BR-05). The select reads the new
+                                      // `breakfastSelections: Record<key,
+                                      // BreakfastSelectionEntry>` shape and
+                                      // falls back to the legacy string value
+                                      // for pre-BR-01 bookings. The catalog
+                                      // is the new `meals[]` instead of the
+                                      // legacy `silogItems[]`.
+                                      value={(
+                                        selectedBooking.breakfastSelections?.[key]
+                                          && typeof selectedBooking.breakfastSelections[key] === "object"
+                                          ? (selectedBooking.breakfastSelections[key] as any).mealName || ""
+                                          : (selectedBooking.breakfastSelections?.[key] as unknown as string) || ""
+                                      )}
                                       onChange={(event) => handleBreakfastSelection(key, event.target.value)}
                                       className="min-h-[34px] w-full rounded border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700"
                                     >
                                       <option value="">Select meal</option>
-                                      {breakfastConfig.silogItems
+                                      {(breakfastConfig.meals || [])
                                         .filter((item: { id: string; name: string; isActive: boolean }) => item.isActive)
                                         .map((item: { id: string; name: string; isActive: boolean }) => (
                                           <option key={item.id} value={item.name}>{item.name}</option>
@@ -7766,7 +7821,9 @@ export function BookingsPage() {
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Breakfast</p>
                 <p className="font-semibold text-gray-900">
-                  {selectedBooking.hasBreakfast ? "Included" : "Not included"}
+                  {(selectedBooking.breakfastSelections && Object.keys(selectedBooking.breakfastSelections).length > 0)
+                    ? `${Object.keys(selectedBooking.breakfastSelections).length} meal${Object.keys(selectedBooking.breakfastSelections).length === 1 ? "" : "s"}`
+                    : "Not included"}
                 </p>
               </div>
             </div>

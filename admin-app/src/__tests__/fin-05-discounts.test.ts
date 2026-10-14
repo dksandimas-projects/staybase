@@ -12,12 +12,14 @@ describe("FIN-05 discounts and adjustments", () => {
 
   it("reconstructs the gross bookings revenue including room subtotal and breakfast", () => {
     expect(reports).toMatch(/roomSubtotal = b\.rateBreakdown\?.roomSubtotal \?\? \(b\.ratePerNight \* b\.numNights\)/);
-    // Per EXB-02 (2026-07-31): the inline `breakfastRate × numGuests × numNights`
-    // pattern was extracted to the shared `calculateBreakfastAddOn` helper, so
-    // the breakfast total now comes from the helper instead of a `hasBreakfast ?`
-    // ternary. The `(roomSubtotal + breakfastTotal)` sum below still produces
+    // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+    // breakfast total reads the snapshotted `b.breakfastTotal`
+    // (the per-meal catalog sum) instead of the legacy
+    // `calculateBreakfastAddOn({ hasBreakfast, breakfastRate, numGuests, numNights })`
+    // helper (which was deleted in BR-08). The
+    // `(roomSubtotal + breakfastTotal)` sum below still produces
     // the same gross-revenue figure byte-equivalently.
-    expect(reports).toMatch(/breakfastTotal = calculateBreakfastAddOn\(/);
+    expect(reports).toMatch(/breakfastTotal = Number\(b\.breakfastTotal\) \|\| 0/);
     expect(reports).toMatch(/subtotal = b\.originalTotalPrice \?\? \(roomSubtotal \+ breakfastTotal\)/);
   });
 

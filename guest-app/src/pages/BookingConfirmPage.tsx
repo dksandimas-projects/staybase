@@ -47,7 +47,12 @@ interface ConfirmedRoom {
   numAdults: number;
   numChildren: number;
   extraBedCount: number;
-  hasBreakfast: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `hasBreakfast: boolean` per-room flag is deleted.
+  // The confirmation page reads `rateBreakdown.addOns[]` to
+  // display the per-date breakfast breakdown (the rich
+  // `breakfastSelections` shape's per-date lines stamped by
+  // BR-03's `buildBreakfastRateBreakdownLines` helper).
   totalPrice: number;
 }
 

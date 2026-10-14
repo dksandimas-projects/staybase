@@ -25,135 +25,18 @@
 //
 // Pinned by `shared/__tests__/booking-addons.test.ts`.
 //
-// Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
-// 2026-10-12): `calculateBreakfastAddOn` is now DEPRECATED.
-// The new meal-based model reads prices from per-slot
-// snapshots (`booking.breakfastSelections[key].price`)
-// summed by `recomputeBreakfastTotal` in
-// `shared/utils/breakfastTotal.ts`. The new wrapper
-// `calculateBreakfastMealsTotal` (below) takes the
-// `breakfastSelections` shape directly. Kept here for the
-// booking-create path's existing 71 unit tests; will be
-// removed when BR-03 lands and the create path switches
-// over to the snapshot shape. See
+// Per BR-08 (decision #238, 2026-10-14 — close-out): the
+// legacy flat-rate `calculateBreakfastAddOn` helper +
+// `BreakfastAddOnInput` type are deleted. The new meal-based
+// model is the single source of truth —
+// `calculateBreakfastMealsTotal` (below) sums the
+// snapshotted per-meal prices from
+// `booking.breakfastSelections[key].price`. See
 // `plan/features/BREAKFAST.md §Decisions Locked` (decision
 // 1 — "no migration, the old fields are deleted from the
-// create path").
-
-export interface BreakfastAddOnInput {
-  /** `false` (or undefined / null) short-circuits to 0. */
-  hasBreakfast?: boolean | null;
-  /** Per-person-per-night rate; nullish / zero short-circuits to 0. */
-  breakfastRate?: number | null;
-  /**
-   * Total occupancy. Used when `numAdults` is not provided (the
-   * historical shape). Nullish / zero short-circuits to 0. When
-   * `numAdults` IS provided, this is ignored and the helper uses
-   * `(numAdults + (breakfastIncludesChildren ? numChildren : 0))`.
-   */
-  numGuests?: number | null;
-  /**
-   * Per CHD-10 (2026-07-31): the number of adult guests (12+). When
-   * provided, takes precedence over `numGuests` for the math —
-   * children are counted separately via `numChildren`. Nullish /
-   * zero falls back to `numGuests` (the historical path).
-   */
-  numAdults?: number | null;
-  /**
-   * Per CHD-10 (2026-07-31): the number of child guests (0–11).
-   * Only counted toward the breakfast total when `breakfastIncludesChildren`
-   * is truthy AND `numAdults` is provided. Ignored when `numAdults`
-   * is nullish (the historical path uses `numGuests`).
-   */
-  numChildren?: number | null;
-  /**
-   * Per CHD-10 (2026-07-31, per CVQ-01): whether children are included
-   * in the breakfast charge. Snapshotted from the admin default
-   * (`settings/breakfastConfig.breakfastIncludesChildrenDefault`) at
-   * booking time. `undefined` defaults to `true` for back-compat with
-   * the historical "children pay the full rate" math.
-   */
-  breakfastIncludesChildren?: boolean | null;
-  /**
-   * Per EXB-12 (2026-08-06, per decision #199): the number of
-   * extra beds the guest is renting in this room. Only counted
-   * toward the breakfast total when `extraBedBreakfast` is truthy.
-   * Nullish / zero short-circuits to 0. The `extraBedCount` is
-   * the BED count, not the person count — the breakfast is per
-   * person, but the extra bed is per bed. The user opts in
-   * separately via the `extraBedBreakfast` toggle.
-   */
-  extraBedCount?: number | null;
-  /**
-   * Per EXB-12 (2026-08-06, per decision #199): whether the
-   * guest wants breakfast for the extra-bed occupant(s). When
-   * `true`, all extra beds in the room are counted toward the
-   * breakfast total (priced as `breakfastRate × extraBedCount × nights`).
-   * `undefined` / `false` → no extra-bed breakfast. The server
-   * validates that `extraBedBreakfast` can only be `true` when
-   * `extraBedCount > 0`.
-   */
-  extraBedBreakfast?: boolean | null;
-  /** Number of nights; nullish / zero short-circuits to 0. */
-  numNights?: number | null;
-}
-
-/**
- * Compute the breakfast add-on total for a booking. Returns 0
- * unless the booking actually has breakfast, the rate + nights
- * are positive, and the effective occupancy is positive.
- *
- * **Per CHD-10 (2026-07-31, per CVQ-01)**: when `numAdults` is
- * provided, the effective occupancy is
- * `(numAdults + (breakfastIncludesChildren ? numChildren : 0))`.
- * Otherwise the helper falls back to `numGuests` (the historical
- * shape, byte-equivalent to the pre-CHD-10 inline patterns).
- * `breakfastIncludesChildren` defaults to `true` when undefined,
- * matching the historical "children pay the full rate" default.
- *
- * @deprecated Per BR-01 (Phase 13 — Breakfast Redesign,
- *   decision #231, 2026-10-12): replaced by
- *   {@link calculateBreakfastMealsTotal} in BR-03. Kept here
- *   for the booking-create path; will be removed when BR-03
- *   lands. See `plan/features/BREAKFAST.md §Decisions Locked`
- *   (decision 1 — no migration, old fields deleted from the
- *   create path).
- */
-export function calculateBreakfastAddOn(input: BreakfastAddOnInput): number {
-  if (!input.hasBreakfast) return 0;
-  const rate = Number(input.breakfastRate) || 0;
-  const nights = Number(input.numNights) || 0;
-  if (rate === 0 || nights === 0) return 0;
-  // Per CHD-10: when the adult/child split is provided, count only
-  // adults + (optionally) children. Otherwise fall back to numGuests
-  // (the historical path). `breakfastIncludesChildren` defaults to
-  // `true` when undefined so existing callers keep producing the
-  // same byte-equivalent output.
-  const numAdults = Number(input.numAdults);
-  const useSplit = Number.isFinite(numAdults) && numAdults > 0;
-  let effectiveOccupancy: number;
-  if (useSplit) {
-    const numChildren = Number(input.numChildren) || 0;
-    const includesChildren = input.breakfastIncludesChildren !== false; // nullish defaults to true
-    effectiveOccupancy = numAdults + (includesChildren ? numChildren : 0);
-  } else {
-    effectiveOccupancy = Number(input.numGuests) || 0;
-  }
-  // Per EXB-12 (2026-08-06, per decision #199): when the user opts
-  // in to breakfast for the extra beds, all `extraBedCount` beds
-  // are counted toward the breakfast total. The extra bed is a
-  // physical bed; the breakfast is per person. The user opts in
-  // explicitly via the `extraBedBreakfast` toggle (no surprise
-  // charges). When the toggle is off, the extra beds are NOT
-  // counted — the user pays for the extra bed but not the
-  // breakfast. Nullish / zero `extraBedCount` short-circuits to 0.
-  if (input.extraBedBreakfast) {
-    const extraBedCount = Number(input.extraBedCount) || 0;
-    effectiveOccupancy += extraBedCount;
-  }
-  if (effectiveOccupancy === 0) return 0;
-  return rate * effectiveOccupancy * nights;
-}
+// create path") + (decision 5 — Step 1 carries no breakfast
+// data). The 71 unit tests that targeted the legacy helper
+// are migrated to the new helper in `shared/__tests__/`.
 
 // Per EXB-01 (2026-07-31): the extra-bed add-on term. Sibling to
 // `calculateBreakfastAddOn` — same defensive coercion, no

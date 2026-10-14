@@ -43,8 +43,10 @@ const booking = (overrides: Partial<Booking>): Booking => ({
   pointsRedeemedValue: 0,
   pointsRedeemedBy: null,
   pointsRedeemedAt: null,
-  hasBreakfast: false,
-  breakfastRate: 0,
+  // BR-08: legacy `hasBreakfast: false` + `breakfastRate: 0`
+  // pair is gone. The booking fixture leaves
+  // `breakfastSelections` undefined + `breakfastTotal: 0`
+  // (the new rich shape).
   reminderSentAt: null,
   guestIdPhotoUrl: null,
   handledBy: "",

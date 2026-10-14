@@ -7,10 +7,10 @@ import {
   // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
   // the Breakfast & Dining tab now seeds the cutoff + served-grace
   // inputs from the new shared constants (replacing the legacy flat
-  // rate). DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT is still
-  // imported because the AdminContext default state still seeds it;
-  // the Settings tab no longer reads it. BR-03 deletes the constant.
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  // rate). Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` import was
+  // removed — the constant was deleted from `shared/constants`.
+  // The AdminContext default state no longer seeds it.
   DEFAULT_BREAKFAST_CUTOFF_TIME,
   DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
   DEFAULT_CORPORATE_PAGE_CONTENT,

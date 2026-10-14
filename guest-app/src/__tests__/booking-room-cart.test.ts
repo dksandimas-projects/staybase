@@ -44,37 +44,27 @@ describe("booking room cart", () => {
     // unequal. The fixture MUST declare the field
     // explicitly so the round-trip is byte-equivalent.
     const rooms: BookingRoomCartItem[] = [
-      { bookingId: "a", roomType: "standard", rateChoice: "room-only", numAdults: 2, numChildren: 1, extraBedCount: 0, extraBedBreakfast: false }
+      { bookingId: "a", roomType: "standard", rateChoice: "room-only", numAdults: 2, numChildren: 1, extraBedCount: 0 }
     ];
     const roundTripped = parseBookingRoomCart(serializeBookingRoomCart(rooms));
     expect(roundTripped).toEqual(rooms);
-    // Pin the EXB-12 invariant explicitly: the
-    // round-trip preserves the false default. If a
-    // future refactor drops the `extraBedBreakfast`
-    // handling in parseBookingRoomCart, the field
-    // would be undefined after parse — vitest's
-    // `.toEqual` would fail (undefined ≠ false) and
-    // this assertion catches the drift at the test
-    // boundary, not at the runtime boundary.
-    expect(roundTripped[0].extraBedBreakfast).toBe(false);
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy EXB-12 `extraBedBreakfast: false` round-trip
+    // test is removed. Extra-bed occupants are ordinary meal
+    // slots in Step 2 (the per-meal picker) — the round-trip
+    // no longer carries a per-room breakfast flag.
   });
 
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // round-trip MUST preserve `extraBedBreakfast: true`
-  // (the opt-in case) end-to-end. If a future refactor
-  // drops the `extraBedBreakfast === true` guard in
-  // parseBookingRoomCart (the defensive coercion),
-  // the cart would lose the guest's choice after every
-  // page reload — silent data loss. Pin the opt-in
-  // path with its own test so the true + false paths
-  // are both covered.
-  it("round-trips the EXB-12 extra-bed breakfast opt-in toggle", () => {
-    const rooms: BookingRoomCartItem[] = [
-      { bookingId: "a", roomType: "standard", rateChoice: "room-breakfast", numAdults: 2, numChildren: 1, extraBedCount: 1, extraBedBreakfast: true }
-    ];
-    const roundTripped = parseBookingRoomCart(serializeBookingRoomCart(rooms));
-    expect(roundTripped).toEqual(rooms);
-    expect(roundTripped[0].extraBedBreakfast).toBe(true);
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy EXB-12 extra-bed breakfast opt-in toggle
+  // round-trip test is removed. Extra-bed occupants are
+  // ordinary meal slots in Step 2 (the per-meal picker);
+  // the round-trip carries no per-room breakfast flag.
+  it.skip("legacy EXB-12 extra-bed breakfast opt-in toggle round-trip (BR-08 close-out: removed)", () => {
+    // Removed by BR-08: extra-bed occupants are ordinary
+    // meal slots in Step 2; the round-trip carries no
+    // per-room breakfast flag. Kept here as a stub so
+    // the test file's audit-trail history is preserved.
   });
 
   // Per EXB-11 (2026-08-04, per decision #186): the

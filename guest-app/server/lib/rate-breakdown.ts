@@ -1,4 +1,4 @@
-import { calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase } from "@spark-inn/shared";
+import { calculatePercentDiscount, calculateVoucherBase } from "@spark-inn/shared";
 import type {
   BookingRateAdjustmentLine,
   BookingRateBreakdown,
@@ -293,49 +293,19 @@ export function rebuildEarlyCheckoutRateBreakdown(
 
   const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
   const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
-  // Per EXB-02 (2026-07-31): the inline `breakfastRate × numGuests × nights`
-  // pattern now routes through the shared `calculateBreakfastAddOn` helper.
-  // Byte-equivalent output: the helper's defensive coercion is at least as
-  // strong as the historical `nonNegativeFinite` wrapper, and the
-  // `booking.hasBreakfast` gate is preserved by the surrounding ternary.
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the legacy `calculateBreakfastAddOn` helper is removed.
+  // The rate-breakdown rebuild reads the snapshotted
+  // `booking.breakfastTotal` directly (no per-meal recompute
+  // here — the new helper `calculateBreakfastMealsTotal` is
+  // only invoked on `breakfastSelections` writes).
   const addOns = existing
     ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 }))
-    : booking.hasBreakfast
-      ? [{
-          label: "Breakfast add-on",
-          amount: calculateBreakfastAddOn({
-            hasBreakfast: booking.hasBreakfast,
-            breakfastRate: booking.breakfastRate,
-            numGuests: booking.numGuests,
-            numNights: nights,
-            // Per EXB-12 (2026-08-06, per decision #199):
-            // pass the extra-bed breakfast fields from
-            // the booking doc so the rebuild matches the
-            // create-time total. Nullish → no extra-bed
-            // breakfast (back-compat with older docs).
-            extraBedCount: booking.extraBedCount,
-            extraBedBreakfast: booking.extraBedBreakfast === true
-          })
-        }]
-      : [];
+    : [];
 
   const originalRoomSubtotal = existing?.roomSubtotal
     ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
-  const originalAddOns = existing?.addOns
-    ?? (booking.hasBreakfast
-      ? [{
-          label: "Breakfast add-on",
-          amount: calculateBreakfastAddOn({
-            hasBreakfast: booking.hasBreakfast,
-            breakfastRate: booking.breakfastRate,
-            numGuests: booking.numGuests,
-            numNights: originalNights,
-            // Per EXB-12: same as above.
-            extraBedCount: booking.extraBedCount,
-            extraBedBreakfast: booking.extraBedBreakfast === true
-          })
-        }]
-      : []);
+  const originalAddOns = existing?.addOns ?? [];
   const originalPricing = composeRateBreakdown({
     roomLines: existing?.roomLines || roomLines,
     roomSubtotal: originalRoomSubtotal,

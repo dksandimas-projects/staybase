@@ -246,7 +246,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       checkIn: WEEKDAY_CHECKIN,
       checkOut: WEEKDAY_CHECKOUT,
       guests: 3,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Guest",
@@ -279,7 +278,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       guests: 3,
       numAdults: 2,
       numChildren: 1,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Family",
@@ -313,7 +311,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       guests: 3,
       numAdults: 2,
       numChildren: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Mismatch",
@@ -343,7 +340,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       checkIn: WEEKDAY_CHECKIN,
       checkOut: WEEKDAY_CHECKOUT,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Guest",
@@ -378,7 +374,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       checkIn: WEEKEND_CHECKIN,
       checkOut: WEEKEND_CHECKOUT,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Guest",
@@ -427,7 +422,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       checkIn: WEEKDAY_CHECKIN,
       checkOut: WEEKDAY_CHECKOUT,
       guests: 5,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Guest",
@@ -458,7 +452,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       checkIn: WEEKDAY_CHECKIN,
       checkOut: WEEKDAY_CHECKOUT,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Guest",
@@ -487,7 +480,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
       checkIn: WEEKDAY_CHECKIN,
       checkOut: WEEKDAY_CHECKOUT,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Walkin",
         lastName: "Guest",

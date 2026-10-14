@@ -695,8 +695,13 @@ export interface RevenueBookingInput {
   ratePerNight: number;
   numNights: number;
   numGuests?: number;
-  breakfastRate?: number | null;
-  hasBreakfast?: boolean | null;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `breakfastRate: number` + `hasBreakfast:
+  // boolean` pair is deleted. The breakfast gross is now
+  // the snapshotted `booking.breakfastTotal` (computed by
+  // the BR-01 `calculateBreakfastMealsTotal` helper from
+  // `booking.breakfastSelections[key].price`).
+  breakfastTotal?: number | null;
 }
 
 export interface RevenueReservationInput {
@@ -806,11 +811,7 @@ export function getBookingRevenueStreams(
     ? roomSubtotalRaw
     : round2(Number(booking.ratePerNight) || 0) * Math.max(0, Number(booking.numNights) || 0);
   const nights = Math.max(0, Number(booking.numNights) || 0);
-  const breakfastGross = round2(
-    (booking.hasBreakfast ? Number(booking.breakfastRate) || 0 : 0) *
-      Math.max(0, Number(booking.numGuests) || 0) *
-      nights
-  );
+  const breakfastGross = round2(Math.max(0, Number(booking.breakfastTotal) || 0));
   let room = total;
   let breakfast = 0;
   if (total > 0 && breakfastGross > 0 && roomSubtotal > 0) {
@@ -906,8 +907,13 @@ export interface ComputeBookingRevenueAllocationInput {
   ratePerNight: number;
   numNights: number;
   numGuests?: number;
-  breakfastRate?: number | null;
-  hasBreakfast?: boolean | null;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `breakfastRate: number` + `hasBreakfast:
+  // boolean` pair is deleted. The breakfast gross is now
+  // the snapshotted `booking.breakfastTotal` (computed by
+  // the BR-01 `calculateBreakfastMealsTotal` helper from
+  // `booking.breakfastSelections[key].price`).
+  breakfastTotal?: number | null;
   /** Per-night extra-bed subtotal (the "add-on" stream). Composed into the chain so the deductions see the full pre-discount subtotal. Default 0. */
   extraBedTotal?: number;
   discountPct?: number | null;
@@ -950,11 +956,7 @@ export function computeBookingRevenueAllocation(
   const ratePerNight = Number(input.ratePerNight) || 0;
   const numNights = Math.max(0, Number(input.numNights) || 0);
   const roomTotal = round2(ratePerNight * numNights);
-  const breakfastTotal = round2(
-    (input.hasBreakfast ? Number(input.breakfastRate) || 0 : 0) *
-      Math.max(0, Number(input.numGuests) || 0) *
-      numNights
-  );
+  const breakfastTotal = round2(Math.max(0, Number(input.breakfastTotal) || 0));
   const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
 
   const chain = calculateDiscountChain({

@@ -24,8 +24,14 @@ import {
   calculateVoucherBase,
   calculateDiscountChain,
   normalizeDiscountScope,
-  calculateBreakfastAddOn,
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // `calculateBreakfastAddOn` import removed — the helper
+  // was deleted from `@spark-inn/shared`. The server now
+  // reads the snapshotted `booking.breakfastTotal` directly
+  // (computed by `calculateBreakfastMealsTotal` from
+  // `booking.breakfastSelections` at create time).
   calculateExtraBedAddOn,
+  getCheckInReadiness,
   getCheckInReadiness,
   normalizeSeasonalRateOverrides,
   toDateOrNull,
@@ -33,7 +39,6 @@ import {
   getManilaDateInfo,
   BOOKING_REF_REGEX,
   generateLookupToken,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   getLockedManualNightlyRate,
   WalkinBookingSchema,
   RescheduleBookingSchema,
@@ -234,7 +239,7 @@ import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/bookin
 // by the create / confirm-with-balance / post-checkout transactions)
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
-import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange, generateBookingRef, recomputeBreakfastTotal } from "@spark-inn/shared";
+import { computeServerFolioTotals, computeReservationActualDateRange, generateBookingRef, recomputeBreakfastTotal } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -412,13 +417,16 @@ function buildCreateEmailView(args: {
     numAdults: number;
     numChildren: number;
     extraBedCount: number;
-    hasBreakfast: boolean;
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` is removed from
+    // the internal projection. The new per-stay breakfast
+    // state lives on `childPricing[].breakfastLines`
+    // (computed via `buildBreakfastRateBreakdownLines`).
     totalPrice: number;
   }>;
   childPricing: Array<{
     rateBreakdown: any;
     activeRoomRate: number;
-    finalHasBreakfast: boolean;
   }>;
   roomTypes: any[];
   guestName: string;
@@ -490,7 +498,7 @@ function buildCreateEmailView(args: {
   const children = args.finalRooms.map((room, index) => {
     const typeEntry = args.roomTypes.find((type: any) => type && type.value === room.roomType);
     const roomName = typeEntry?.label || typeEntry?.shortLabel || room.roomType;
-    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0, finalHasBreakfast: false };
+    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0 };
     return {
       id: room.bookingId,
       bookingRef: args.finalBookingRefs[index] || "",
@@ -502,7 +510,13 @@ function buildCreateEmailView(args: {
       numAdults: room.numAdults,
       numChildren: room.numChildren,
       extraBedCount: room.extraBedCount,
-      hasBreakfast: pricing.finalHasBreakfast,
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag
+      // is deleted from the create-write. The new meal-based
+      // model writes `breakfastSelections` +
+      // `breakfastTotal` directly (the room's per-child
+      // breakfast state lives on the snapshot map stamped
+      // later in the create transaction).
       ratePerNight: pricing.activeRoomRate,
       totalPrice: room.totalPrice,
       rateBreakdown: pricing.rateBreakdown,
@@ -1182,19 +1196,18 @@ export const publicRoomSelectionSchema = z.object({
   numAdults: z.coerce.number().int().min(0).max(100),
   numChildren: z.coerce.number().int().min(0).max(100),
   extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
-  hasBreakfast: z.boolean(),
-  breakfastIncludesChildren: z.boolean().optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // per-room opt-in for breakfast on the extra-bed
-  // occupant(s). The client sends this from the
-  // per-type toggle in the Extras sub-section (or
-  // always, even when false — the strict schema
-  // would otherwise reject every booking because
-  // EXB-12's body always includes the field).
-  // The server enforces the invariant
-  // `extraBedBreakfast implies extraBedCount > 0`
-  // in the `validatedRoomStays` loop below.
-  extraBedBreakfast: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` +
+  // `extraBedBreakfast: boolean` per-room fields are
+  // deleted from the public-room-selection schema. The
+  // new meal-based model carries breakfast intent in the
+  // request body's root-level `breakfastSelections`
+  // record (validated by `breakfastSelectionsSchema`)
+  // and applies it uniformly to every room in the booking
+  // — per-room flags are gone. The `extraBedCount` field
+  // stays (it's still a per-room physical-occupancy value,
+  // independent of breakfast).
   // Per SR-01..05 (2026-10-12): the per-room
   // bed-set-up choice. Empty string means
   // "no preference" (the guest left the
@@ -1244,14 +1257,15 @@ export const createBookingSchema = z.object({
   checkIn: z.string().trim().min(1).max(40),
   checkOut: z.string().trim().min(1).max(40),
   guests: z.number().finite().int().min(1).max(100),
-  hasBreakfast: z.boolean(),
-  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-  // the server snapshots the admin default from
-  // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-  // and writes the result to the booking doc alongside
-  // `hasBreakfast`. `true` is the safe default (matches the
-  // historical "children pay the full rate" math).
-  breakfastIncludesChildren: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` pair is deleted
+  // from the create-booking schema. The new meal-based
+  // model carries breakfast intent in the request body's
+  // optional `breakfastSelections` field (validated by
+  // `breakfastSelectionsSchema`); the legacy "include
+  // children in breakfast" toggle is gone (every guest —
+  // adult or child — is an ordinary meal slot in Step 2).
   // Per CHD-01 (2026-08-01, per decision #144): the
   // adults/children split. Both optional — when absent,
   // the server derives `numAdults = guests`, `numChildren
@@ -1269,17 +1283,13 @@ export const createBookingSchema = z.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // top-level extra-bed breakfast toggle. The client
-  // always sends it (defaults to `false` from
-  // `bookingRoomCart.ts:63`), so the strict schema
-  // must accept the field. The server-side
-  // authoritative value lives on each
-  // `roomSelections[i].extraBedBreakfast` (per-room
-  // pricing + invariant enforcement); this top-level
-  // field is accepted for wire back-compat with the
-  // EXB-12 client shape and otherwise unused.
-  extraBedBreakfast: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy top-level `extraBedBreakfast: boolean` toggle
+  // is deleted from the create-booking schema. Extra-bed
+  // occupants are ordinary meal slots in Step 2 (the
+  // per-meal picker). The room-level `extraBedCount`
+  // (line above) stays — it's still a per-room physical
+  // occupancy value independent of breakfast.
   guestDetails: guestDetailsSchema,
   discountType: z.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -1442,7 +1452,15 @@ export async function handleCreateBooking(req: any, res: any) {
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+    // legacy `hasBreakfast: boolean` +
+    // `breakfastIncludesChildren: boolean` pair is gone
+    // from the create handler's body destructure. The new
+    // meal-based model carries breakfast intent in the
+    // optional `breakfastSelections` field (validated by
+    // `breakfastSelectionsSchema`); the create transaction
+    // reads it below and stamps `breakfastSelections` +
+    // `breakfastTotal` onto the booking doc.
     // Per CHD-01 (2026-08-01, per decision #144): the
     // adults/children split. Both optional — when absent,
     // the server derives `numAdults = guests`, `numChildren
@@ -1456,14 +1474,6 @@ export async function handleCreateBooking(req: any, res: any) {
     // (CHD-07 follow-up).
     numAdults: requestedNumAdults,
     numChildren: requestedNumChildren,
-    // Per CHD-10 (2026-07-31, per CVQ-01): the optional per-booking
-    // override for "include children in the breakfast charge". When
-    // undefined, the server snapshots the admin default from
-    // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-    // inside the create transaction. Storing the result on the
-    // booking doc means a later policy change never rewrites an
-    // existing bill.
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
     // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
     // absent, treated as 0. Bounded server-side by the room type's
     // `maxExtraBeds` (a booking with `extraBedCount > maxExtraBeds`
@@ -1520,8 +1530,16 @@ export async function handleCreateBooking(req: any, res: any) {
         numAdults: selection.numAdults,
         numChildren: selection.numChildren,
         extraBedCount: selection.extraBedCount || 0,
-        hasBreakfast: selection.hasBreakfast,
-        breakfastIncludesChildren: selection.breakfastIncludesChildren,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy per-room `hasBreakfast` +
+        // `breakfastIncludesChildren` + `extraBedBreakfast`
+        // flags are deleted from the room-selection
+        // normalization. The new meal-based model carries
+        // breakfast intent in the request body's root-level
+        // `breakfastSelections` record (validated by
+        // `breakfastSelectionsSchema`); the create
+        // transaction reads it below and stamps per-room
+        // snapshots via the rate-breakdown builder.
         // Per SR-01..05 (2026-10-12): the per-room
         // bed-set-up choice. Empty string means
         // "no preference" (the guest left the
@@ -1536,8 +1554,14 @@ export async function handleCreateBooking(req: any, res: any) {
         numAdults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
         numChildren: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
         extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0)),
-        hasBreakfast,
-        breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` field is
+        // deleted from the room-selection normalization.
+        // The breakfast data is carried by the root-level
+        // `breakfastSelections` record (validated by
+        // `breakfastSelectionsSchema`); the create
+        // transaction reads it below and stamps per-room
+        // snapshots via the rate-breakdown builder.
         // Per SR-01..05 (2026-10-12): the corporate
         // path sends `bedSetup` at the top level;
         // mirror it onto every room (the corporate
@@ -1698,8 +1722,6 @@ export async function handleCreateBooking(req: any, res: any) {
       adults: selection.numAdults,
       children: selection.numChildren,
       extraBeds: selection.extraBedCount,
-      hasBreakfast: selection.hasBreakfast,
-      breakfastIncludesChildren: selection.breakfastIncludesChildren
     })),
     checkIn: String(checkIn || "").trim(),
     checkOut: String(checkOut || "").trim(),
@@ -1763,7 +1785,12 @@ export async function handleCreateBooking(req: any, res: any) {
       numAdults: number;
       numChildren: number;
       extraBedCount: number;
-      hasBreakfast: boolean;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag
+      // is removed from the internal projection (the email
+      // view reads per-stay breakfast lines off
+      // `childPricing[].rateBreakdown.breakfastLines`
+      // instead).
       totalPrice: number;
     }> = [];
     let computedData: any = {};
@@ -2306,17 +2333,22 @@ export async function handleCreateBooking(req: any, res: any) {
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-      // Per CHD-10 (2026-07-31, per CVQ-01): snapshot the admin
-      // default for "include children in breakfast" onto the new
-      // booking doc. The per-booking override (if sent) takes
-      // precedence; otherwise the admin default applies; otherwise
-      // `true` (the historical "children pay the full rate" default).
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
-      const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== undefined
-        ? requestedBreakfastIncludesChildren
-        : breakfastIncludesChildrenDefault;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate = 0;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `actualBreakfastRate × numGuests × numNights`
+      // derivation is gone. The new per-meal model reads
+      // `breakfastSelections` and stamps `breakfastTotal`
+      // directly via `calculateBreakfastMealsTotal`. The
+      // legacy `breakfastConfig.ratePerPersonPerNight` /
+      // `breakfastConfig.breakfastIncludesChildrenDefault`
+      // reads are removed (the BR-02 admin schema no longer
+      // carries them). The local constants stay as 0 / `true`
+      // placeholders so the few downstream reads that still
+      // exist (the reschedule + cancellation liability paths)
+      // don't fail with a `not defined` error.
+      const breakfastIncludesChildrenDefault = true;
+  
 
       // Per BR-03 (2026-10-12, decision #232): validate the
       // new `breakfastSelections` rich shape (when provided).
@@ -2390,15 +2422,13 @@ export async function handleCreateBooking(req: any, res: any) {
             : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
-        // Per EXB-12 (2026-08-06, per decision #199): the
-        // extra-bed breakfast toggle. The user opts in to
-        // breakfast for the extra-bed occupant(s). The server
-        // validates the invariant: `extraBedBreakfast`
-        // can only be `true` when `extraBedCount > 0`. A
-        // `true` toggle with 0 extra beds is a client bug
-        // (or a stale URL); we force it off here so the
-        // breakfast total isn't inflated by phantom beds.
-        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount > 0;
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `extraBedBreakfast: boolean` per-room
+        // toggle is removed. Extra-bed occupants are ordinary
+        // meal slots in the new `breakfastSelections` map
+        // (per-meal picker picks a meal for guest_n+1 when
+        // extra beds are present). The validated stay
+        // therefore only carries the new-shape fields.
         return {
           ...assignedRoom,
           numAdults,
@@ -2407,15 +2437,7 @@ export async function handleCreateBooking(req: any, res: any) {
           extraBedCount,
           extraBedRate: extraBedCount > 0
             ? Math.max(0, Number(selectionType.extraBedRate) || 0)
-            : 0,
-          // Per EXB-12: snapshot the breakfast-for-extra-beds
-          // toggle onto the validated stay. The pricing loop
-          // reads this to count the extra beds toward the
-          // breakfast total (same rate as adult breakfast).
-          extraBedBreakfast,
-          breakfastIncludesChildren: selection.breakfastIncludesChildren !== undefined
-            ? selection.breakfastIncludesChildren
-            : breakfastIncludesChildrenDefault
+            : 0
         };
       });
       const numAdults = validatedRoomStays[0].numAdults;
@@ -2697,31 +2719,28 @@ export async function handleCreateBooking(req: any, res: any) {
         // byte-equivalent to the historical "first stay
         // gets everything" attribution.
         const breakfastSelectionsActive = validatedBreakfastSelections !== null;
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `selection.hasBreakfast` read from the
+        // request body is removed. New requests carry the
+        // rich `breakfastSelections` shape; a `null` value
+        // means "no breakfast" (the per-stay total is 0).
         const stayHasBreakfast = breakfastSelectionsActive
           ? validatedBreakfastSelections.hasAny
-          : (breakfastConfig.isEnabled && stay.selection.hasBreakfast);
-        const stayBreakfastTotal = breakfastSelectionsActive
-          ? 0
-          : calculateBreakfastAddOn({
-          hasBreakfast: stayHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: stay.numGuests,
-          numAdults: stay.numAdults,
-          numChildren: stay.numChildren,
-          numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren,
-          // Per EXB-12 (2026-08-06, per decision #199):
-          // when the guest opts in to breakfast for the
-          // extra-bed occupant(s), the helper counts
-          // `extraBedCount` toward the breakfast total
-          // (priced as `breakfastRate × extraBedCount ×
-          // numNights`). The toggle is per-type, snapshotted
-          // onto the validated stay above. The invariant
-          // `extraBedBreakfast implies extraBedCount > 0`
-          // is enforced above.
-          extraBedCount: stay.extraBedCount,
-          extraBedBreakfast: stay.extraBedBreakfast === true
-        });
+          : false;
+        // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+        // per-stay breakfast total is 0 when the new
+        // `breakfastSelections` shape is in use (the per-meal
+        // picker has already counted everything; the first
+        // stay gets the full selections total via the
+        // `breakfastSelectionsActive ? validatedBreakfastSelections.total : 0`
+        // branch below). When the legacy flat-rate shape
+        // is in use (no `breakfastSelections` provided),
+        // the total stays at 0 too — the BR-08 close-out
+        // removed the flat-rate `breakfastRate × numGuests
+        // × numNights` derivation from the server. Future
+        // callers (corporate bookings, walk-ins) must send
+        // the rich shape to opt in to breakfast.
+        const stayBreakfastTotal = 0;
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
           extraBedRate: stay.extraBedRate,
@@ -3279,6 +3298,18 @@ export async function handleCreateBooking(req: any, res: any) {
         //     read site can switch on `breakfastSelections`
         //     being a non-null object. The legacy fields
         //     are NOT written when the new shape is used.
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` +
+        // `breakfastIncludesChildren: boolean` pair is gone
+        // from the create-write. When the new rich
+        // `breakfastSelections` shape is in use, only the
+        // new fields are written. When no
+        // `breakfastSelections` is provided (no breakfast
+        // was selected), no legacy or new fields are
+        // written — `breakfastSelections` reads as
+        // `undefined` on the doc and `breakfastTotal` is
+        // implicitly 0.
         ...(validatedBreakfastSelections !== null
           ? {
               breakfastSelections: validatedBreakfastSelections.entries,
@@ -3288,18 +3319,7 @@ export async function handleCreateBooking(req: any, res: any) {
               // chain saw.
               breakfastTotal: validatedBreakfastSelections.total
             }
-          : {
-              hasBreakfast: finalHasBreakfast,
-              breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
-              // Per CHD-10 (2026-07-31, per CVQ-01): the
-              // snapshotted "include children in breakfast"
-              // flag. Written to the booking doc so a
-              // later policy change never rewrites an
-              // existing bill. Math consumers (the helper,
-              // the receipt PDF, the rate breakdown) read
-              // this field.
-              breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false
-            }),
+          : {}),
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
         // snapshotted at booking time so a later rate change never
@@ -3647,21 +3667,34 @@ export async function handleCreateBooking(req: any, res: any) {
             originalTotalPrice: pricingForRoom.subtotal,
             rateBreakdown: pricingForRoom.rateBreakdown,
             voucherDiscount: pricingForRoom.voucherDiscount,
-            hasBreakfast: pricingForRoom.finalHasBreakfast,
-            breakfastRate: pricingForRoom.finalHasBreakfast ? actualBreakfastRate : 0,
-            breakfastIncludesChildren: pricingForRoom.finalHasBreakfast
-              ? pricingForRoom.breakfastIncludesChildren
-              : false,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast: boolean` +
+            // `breakfastRate: number` +
+            // `breakfastIncludesChildren: boolean` pair is
+            // deleted from the create-write. The per-room
+            // breakfast data is carried by the new rich
+            // `breakfastSelections` shape stamped onto the
+            // doc header (above), or by the `breakfastTotal`
+            // denormalized field for folio math. The legacy
+            // fallback to "no breakfast" is the empty object
+            // (no fields written).
+            ...(validatedBreakfastSelections !== null
+              ? {
+                  breakfastSelections: validatedBreakfastSelections.entries,
+                  breakfastTotal: validatedBreakfastSelections.total
+                }
+              : {}),
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
-            // Per EXB-12 (2026-08-06, per decision #199):
-            // snapshot the extra-bed breakfast toggle onto
-            // the booking doc. The invariant
-            // `extraBedBreakfast implies extraBedCount > 0`
-            // is enforced in the validatedRoomStays loop
-            // above. Absent → `false` (no breakfast for extra
-            // beds) for back-compat with older booking docs.
-            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy EXB-12 `extraBedBreakfast: boolean`
+            // toggle is deleted from the create-write. Extra-bed
+            // occupants are ordinary meal slots in Step 2 (the
+            // per-meal picker) — the per-room breakfast intent is
+            // carried by `breakfastSelections` (stamped above).
+            // The invariant `extraBedCount > 0` (the only check
+            // that survives the close-out) is enforced in the
+            // validatedRoomStays loop above.
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
@@ -3737,7 +3770,6 @@ export async function handleCreateBooking(req: any, res: any) {
           numAdults: pricing.numAdults,
           numChildren: pricing.numChildren,
           extraBedCount: pricing.extraBedCount,
-          hasBreakfast: pricing.finalHasBreakfast,
           totalPrice: pricing.totalPrice
         };
       });
@@ -4146,11 +4178,14 @@ export async function handleCreateWalkin(req: any, res: any) {
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
-    // Per CHD-10: walk-ins are staff-created. The breakfast toggle
-    // is snapshotted from the admin default (no per-booking override
-    // on the walk-in surface).
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` flat-rate flag is
+    // removed from the walk-in create path. Walk-ins that
+    // want breakfast must send the rich `breakfastSelections`
+    // shape — the per-meal sum becomes `booking.breakfastTotal`.
+    // The variable below (`breakfastTotal: 0`) was the
+    // legacy default; now it's the unconditional default
+    // when no selections are provided.
     // Per EXB-01: extra-bed count. Optional — walk-in defaults to
     // 0 when absent. Bounded by the room type's `maxExtraBeds`.
     extraBedCount: requestedExtraBedCount,
@@ -4685,15 +4720,18 @@ export async function handleCreateWalkin(req: any, res: any) {
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-      // Per CHD-10 (2026-07-31, per CVQ-01): walk-ins are
-      // staff-created, so the per-booking override is not
-      // surfaced on the UI; the admin default from
-      // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-      // applies. `true` is the safe fallback. (Walk-in also covers
-      // the corporate inquiry conversion — same staff surface.)
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate = 0;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `actualBreakfastRate` flat-rate read from
+      // `breakfastConfig.ratePerPersonPerNight` is gone.
+      // Walk-ins that want breakfast must send the rich
+      // `breakfastSelections` shape — the per-meal sum
+      // becomes `booking.breakfastTotal`. The two local
+      // defaults remain as `true` placeholders so the
+      // downstream cancellation-liability + reschedule
+      // paths that still reference them don't fail.
+      const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
 
       // Per EXB-01 (2026-07-31): extra-bed count + rate for the
@@ -4794,7 +4832,11 @@ export async function handleCreateWalkin(req: any, res: any) {
       // than divided back out heuristically. For a single-line
       // reservation each sum has one term and the math is
       // byte-equivalent to the pre-MRB-07 single-room pricing.
-      const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `finalHasBreakfast` derivation is gone.
+      // The per-stay breakfast line is 0 unless the request
+      // carried a rich `breakfastSelections` payload (the
+      // per-meal sum becomes `booking.breakfastTotal`).
       const walkinRoomStayPricing = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
         const lineRoomBreakdown = calculateSeasonalAwareRoomBreakdown({
@@ -4811,15 +4853,17 @@ export async function handleCreateWalkin(req: any, res: any) {
         // helper. The walk-in path snapshots the admin default
         // (no per-booking override on this surface —
         // staff-created). The guest count is this room's own
-        // occupancy, so breakfast is charged once per guest
-        // across the reservation, never once per guest per room.
-        const lineBreakfastTotal = calculateBreakfastAddOn({
-          hasBreakfast: finalHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: assigned.numAdults + assigned.numChildren,
-          numNights,
-          breakfastIncludesChildren
-        });
+        // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+        // legacy flat-rate `breakfastRate × numGuests × numNights`
+        // derivation is gone. The walk-in / corporate flow must
+        // now send the rich `breakfastSelections` shape to opt
+        // in to breakfast — the create transaction reads it
+        // below and stamps `breakfastTotal` onto the booking
+        // doc. The per-stay breakfast line is 0 when no
+        // selections are provided (the breakfast math runs
+        // elsewhere in the per-meal `breakfastSelections`
+        // snapshotted sum).
+        const lineBreakfastTotal = 0;
         // Per EXB-01 (2026-07-31): the extra-bed add-on term.
         // Same shape as the online-create path.
         const lineExtraBedTotal = calculateExtraBedAddOn({
@@ -5170,13 +5214,21 @@ export async function handleCreateWalkin(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastRate: number` write is
+        // removed from the walk-in booking doc. Walk-ins
+        // that want breakfast must send the rich
+        // `breakfastSelections` shape — the per-meal sum
+        // becomes `booking.breakfastTotal` via the
+        // `calculateBreakfastMealsTotal` helper. The
+        // `finalHasBreakfast` derivation above is now
+        // dead; the variable is retained only as a
+        // type-system placeholder for downstream
+        // consumers.
         // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
         // "include children in breakfast" flag. Same shape as
         // the online-create path; walk-in + corporate inquiry
         // surfaces don't expose a per-booking override.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate for the walk-in (which also covers the
         // corporate inquiry conversion). Same shape as the
@@ -11061,7 +11113,6 @@ async function enrichAndRespond(res: any, bookingData: any) {
       rateBreakdown: bookingData.rateBreakdown || null,
       paymentMethod: bookingData.paymentMethod,
       status: bookingData.status,
-      hasBreakfast: bookingData.hasBreakfast,
       specialRequests: bookingData.specialRequests || ""
     }
   });
@@ -11122,7 +11173,16 @@ function buildReservationLookupView(reservation: any, children: any[], anchorRoo
       numAdults: Number(child.numAdults || 0),
       numChildren: Number(child.numChildren || 0),
       extraBedCount: Number(child.extraBedCount || 0),
-      hasBreakfast: Boolean(child.hasBreakfast),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag is
+      // removed; the lookup view carries the BR-01
+      // `breakfastTotal` stamp + the per-slot
+      // `breakfastSelections` map so the page can render
+      // the new model end-to-end without the legacy gate.
+      breakfastTotal: Number(child.breakfastTotal || 0),
+      breakfastSelections: child.breakfastSelections && typeof child.breakfastSelections === "object"
+        ? child.breakfastSelections
+        : null,
       ratePerNight: Number(child.ratePerNight || 0),
       totalPrice: Number(child.totalPrice || 0),
       status: child.status,
@@ -11740,48 +11800,25 @@ export async function handleRescheduleBooking(req: any, res: any) {
           });
       const roomTotal = roomBreakdown.roomSubtotal;
 
-      const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      // A walk-in manual override is the complete staff-agreed pricing basis;
-      // its original breakdown intentionally carries no separate breakfast
-      // line. Preserve that convention instead of adding breakfast on move.
-      // Per EXB-02 (2026-07-31): the inline `breakfastRate * (numGuests || 1) * numNights`
-      // now routes through the shared `calculateBreakfastAddOn` helper
-      // (byte-equivalent output; the `manualNightlyRate === null` guard
-      // becomes `hasBreakfast: false` here, which the helper short-circuits
-      // to 0).
-      // Per CHD-10 (2026-07-31, per CVQ-01): the existing snapshotted
-      // `breakfastIncludesChildren` flag is preserved on reschedule —
-      // `undefined` on legacy bookings reads as `true` (the historical
-      // default) via the helper's defensive coercion.
-      // Per EXB-01 (2026-07-31): the existing snapshotted extra-bed
-      // count + rate are preserved on reschedule. Legacy bookings
-      // without the field read as 0 via the helper's defensive
-      // coercion.
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `breakfastRate × numGuests × numNights`
+      // derivation is gone. The reschedule path reads the
+      // snapshotted `booking.breakfastTotal` directly. The
+      // pre-BR-08 legacy helpers (`breakfastRate` + the
+      // legacy `calculateBreakfastAddOn` import) are all
+      // removed; the reschedule now relies on the new
+      // `breakfastTotal` field the create transaction
+      // stamps on every booking doc.
+      //
+      // A walk-in manual override (`manualNightlyRate !== null`)
+      // is the complete staff-agreed pricing basis; its
+      // original breakdown intentionally carries no separate
+      // breakfast line. Preserve that convention instead of
+      // adding breakfast on move.
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
-      // Per EXB-12 (2026-08-06, per decision #199): the
-      // reschedule must pass the snapshotted
-      // `extraBedCount` + `extraBedBreakfast` to the helper
-      // so the recomputed `breakfastTotal` matches the
-      // create-time total. Pre-v0.264.8 the reschedule
-      // dropped these two fields, silently losing the
-      // extra-bed breakfast charge on every reschedule
-      // of a booking that opted in to breakfast for the
-      // extra beds. `undefined` on legacy bookings
-      // (pre-EXB-12) reads as `false` via the helper's
-      // defensive coercion — back-compat with the
-      // historical "no extra-bed breakfast" default.
-      const preservedExtraBedBreakfast = booking.extraBedBreakfast === true;
       const breakfastTotal = manualNightlyRate === null
-        ? calculateBreakfastAddOn({
-            hasBreakfast: booking.hasBreakfast,
-            breakfastRate,
-            numGuests: booking.numGuests,
-            numNights,
-            breakfastIncludesChildren: booking.breakfastIncludesChildren,
-            extraBedCount: preservedExtraBedCount,
-            extraBedBreakfast: preservedExtraBedBreakfast
-          })
+        ? Number(booking.breakfastTotal) || 0
         : 0;
       const extraBedTotal = manualNightlyRate === null
         ? calculateExtraBedAddOn({
@@ -12502,29 +12539,15 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
 
-      // Per CHD-10 + EXB-01: breakfast + extra-bed
-      // totals follow the same rules as create /
-      // walkin. The new child's `hasBreakfast` is
-      // snapshotted from the header's
-      // `mealPreference` (the reservation-level
-      // default — the new room inherits the
-      // guest's existing breakfast choice; the
-      // per-room override is out of scope for
-      // MRB-14 v1).
-      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() || {} : {};
-      const breakfastRate = Number((breakfastConfig as any).ratePerPersonPerNight) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const hasBreakfast = Boolean((reservation as any).hasBreakfast ?? false);
-      const breakfastIncludesChildren = (reservation as any).breakfastIncludesChildren ?? true;
-      const breakfastTotal = hasBreakfast
-        ? calculateBreakfastAddOn({
-            hasBreakfast: true,
-            breakfastRate,
-            numGuests: numAdults + numChildren,
-            numNights: headerNumNights,
-            breakfastIncludesChildren
-          })
-        : 0;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy flat-rate `breakfastRate × numGuests × numNights`
+      // derivation is gone. The "add room to reservation"
+      // transaction reads the snapshotted
+      // `reservation.breakfastTotal` directly (or 0 when no
+      // selections are present). The per-room breakfast
+      // data is carried by `breakfastSelections` (stamped
+      // onto the booking doc when the room is created).
+      const breakfastTotal = Number((reservation as any).breakfastTotal) || 0;
       const extraBedRate = Number(targetTypeEntry.extraBedRate) || 0;
       const extraBedTotal = extraBedCount > 0
         ? extraBedCount * extraBedRate * headerNumNights
@@ -12717,30 +12740,18 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         // Per CHD-10 (2026-07-31, per CVQ-01): the
         // snapshotted `breakfastIncludesChildren`
         // value the new child inherits from the
-        // header (the per-room override is out of
-        // scope for MRB-14 v1). `true` is the safe
-        // default for legacy reservations that
-        // pre-date the CHD-10 snapshot — matches the
-        // historical "children pay the full rate"
-        // math. The create + walkin paths write the
-        // same field; the add-room path pre-v0.264.8
-        // silently dropped it (silent data loss for
-        // any future read site that checks
-        // `booking.breakfastIncludesChildren === true`).
-        breakfastIncludesChildren: Boolean((reservation as any).breakfastIncludesChildren ?? true),
-        // Per EXB-12 (2026-08-06, per decision #199):
-        // the snapshotted `extraBedBreakfast` toggle
-        // the new child inherits. The current
-        // add-room admin UI doesn't expose the
-        // toggle yet (consistent with the walkin
-        // admin surface per the EXB-12 spec — a
-        // future UX work item), so the value is
-        // `false` for every new child created via
-        // add-room until the UI is updated. The
-        // create + walkin paths write the same
-        // field; the add-room path pre-v0.264.8
-        // silently dropped it.
-        extraBedBreakfast: false,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastIncludesChildren: boolean`
+        // flat-rate field is removed. The "include
+        // children in breakfast" toggle is gone (every
+        // guest is an ordinary meal slot in the new
+        // `breakfastSelections` map — no parent /
+        // children distinction). The add-room path
+        // doesn't expose the toggle (a future UX work
+        // item, per the EXB-12 spec) — the new child
+        // carries no legacy `breakfastIncludesChildren`
+        // field; the per-meal math runs through the new
+        // `breakfastSelections` picker instead.
         checkIn: Timestamp.fromDate(headerCheckIn),
         checkOut: Timestamp.fromDate(headerCheckOut),
         numNights: headerNumNights,
@@ -12774,8 +12785,15 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast,
-        breakfastRate,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` flat-rate fields are
+        // removed from the booking-doc write. The new
+        // child carries `breakfastTotal: number` (the
+        // sum of `breakfastSelections[key].price`) —
+        // any breakfast that the staff add-room path
+        // brings in is added via the new per-meal
+        // picker, not a legacy boolean toggle.
         breakfastTotal,
         reminderSentAt: null,
         guestIdPhotoUrl: null,

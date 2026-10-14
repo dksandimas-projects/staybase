@@ -40,8 +40,10 @@ function makeBooking(overrides: Partial<RevenueBookingInput> = {}): RevenueBooki
     ratePerNight: 2_000,
     numNights: 2,
     numGuests: 2,
-    breakfastRate: 250,
-    hasBreakfast: true,
+    // BR-08: replaced `breakfastRate: 250 + hasBreakfast: true`
+    // (which produced 250 × 2 guests × 2 nights = 1000) with the
+    // snapshotted `breakfastTotal: 1000`.
+    breakfastTotal: 1000,
     rateBreakdown: { roomSubtotal: 4_000 },
     ...overrides
   };
@@ -84,7 +86,7 @@ describe("getBookingRevenueStreams", () => {
   it("legacy fallback byte-equivalent to the pre-MRB-11 splitBookingRevenue for no-breakfast bookings", () => {
     // No breakfast: legacy `splitBookingRevenue` returns { room: total, breakfast: 0 }.
     const streams = getBookingRevenueStreams(
-      makeBooking({ hasBreakfast: false, totalPrice: 8_000 })
+      makeBooking({ breakfastTotal: 0, totalPrice: 8_000 })
     );
     expect(streams).toEqual({
       roomNet: 8_000,
@@ -105,7 +107,11 @@ describe("getBookingRevenueStreams", () => {
         rateBreakdown: null,
         ratePerNight: 1_000,
         numNights: 3,
-        hasBreakfast: false,
+        // BR-08: also override `breakfastTotal: 0` so the
+        // totalPrice=3000 doesn't include a snapshotted
+        // breakfast sum that the makeBooking default (1000)
+        // would otherwise contribute.
+        breakfastTotal: 0,
         totalPrice: 3_000
       })
     );
@@ -123,7 +129,6 @@ describe("getBookingRevenueStreams", () => {
       makeBooking({
         ratePerNight: Number.NaN as unknown as number,
         numNights: 0,
-        hasBreakfast: false,
         totalPrice: 0,
         rateBreakdown: null
       })
@@ -324,8 +329,7 @@ describe("computeBookingRevenueAllocation", () => {
       ratePerNight: 2_000,
       numNights: 2,
       numGuests: 2,
-      breakfastRate: 0,
-      hasBreakfast: false,
+      breakfastTotal: 0, 
       totalPrice: 4_000
     });
     expect(allocation).toEqual({
@@ -343,8 +347,7 @@ describe("computeBookingRevenueAllocation", () => {
       ratePerNight: 2_000,
       numNights: 2,
       numGuests: 2,
-      breakfastRate: 250,
-      hasBreakfast: true,
+      breakfastTotal: 1000,
       totalPrice: 5_000
     });
     expect(allocation).toEqual({
@@ -362,8 +365,7 @@ describe("computeBookingRevenueAllocation", () => {
       ratePerNight: 2_000,
       numNights: 2,
       numGuests: 2,
-      breakfastRate: 125,
-      hasBreakfast: true,
+      breakfastTotal: 500, 
       extraBedTotal: 500,
       totalPrice: 5_000
     });
@@ -389,8 +391,7 @@ describe("computeBookingRevenueAllocation", () => {
       ratePerNight: 4_000,
       numNights: 2,
       numGuests: 2,
-      breakfastRate: 250,
-      hasBreakfast: true,
+      breakfastTotal: 1000,
       extraBedTotal: 0,
       discountPct: 20,
       voucherDiscount: 300,
@@ -416,8 +417,7 @@ describe("computeBookingRevenueAllocation", () => {
         ratePerNight: 1_234.56,
         numNights: 3,
         numGuests: 1,
-        breakfastRate: 99.99,
-        hasBreakfast: true,
+        breakfastTotal: 999.9, 
         extraBedTotal: 50.01,
         discountPct: 5,
         voucherDiscount: 25.55,
@@ -438,8 +438,7 @@ describe("computeBookingRevenueAllocation", () => {
       ratePerNight: 1_234.567, // 3dp — round2 should clip to 1234.57
       numNights: 1,
       numGuests: 0,
-      breakfastRate: 0,
-      hasBreakfast: false,
+      breakfastTotal: 0, 
       totalPrice: 1_234.57
     });
     expect(allocation.roomNet).toBe(1_234.57);
@@ -454,8 +453,7 @@ describe("computeBookingRevenueAllocation", () => {
       ratePerNight: 1_000,
       numNights: 1,
       numGuests: undefined,
-      breakfastRate: null,
-      hasBreakfast: null,
+      breakfastTotal: null, 
       extraBedTotal: undefined,
       discountPct: null,
       voucherDiscount: null,
@@ -480,8 +478,7 @@ describe("computeBookingRevenueAllocation", () => {
       ratePerNight: 2_000,
       numNights: 2,
       numGuests: 0,
-      breakfastRate: 0,
-      hasBreakfast: false,
+      breakfastTotal: 0, 
       totalPrice: 4_000
     });
     expect(allocation.totalNet).toBe(4_000);

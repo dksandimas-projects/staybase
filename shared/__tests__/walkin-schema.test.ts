@@ -7,7 +7,10 @@ const validWalkin = {
   checkIn: "2026-07-13",
   checkOut: "2026-07-15",
   guests: 2,
-  hasBreakfast: false,
+  // BR-08: the legacy `hasBreakfast: false` flag is replaced
+  // by the optional `breakfastSelections` (BR-01 meal map) +
+  // `breakfastTotal` (snapshotted total). A walk-in with no
+  // meals picks simply omits both fields.
   guestDetails: {
     firstName: "Maria",
     lastName: "Santos",

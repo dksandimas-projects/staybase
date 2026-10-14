@@ -181,9 +181,12 @@ describe("computeBookingFolio — the historical 8-call-site shape (the bug-clas
     const booking: FolioBooking = {
       ...baseBooking,
       totalPrice: 4500, // 2 nights × ₱2,000 + ₱500 breakfast
-      hasBreakfast: true,
-      breakfastRate: 250,
-      numGuests: 2
+      // BR-08: the breakfast data is now part of the booking
+      // doc (`booking.breakfastTotal`); the FolioBooking type
+      // intentionally keeps its surface minimal (just `id` +
+      // `totalPrice`) so the test fixture carries the breakfast
+      // data as an extra property via a cast.
+      ...({ breakfastTotal: 500, numGuests: 2 } as any)
     };
     const storeOrders: FolioStoreOrder[] = [
       { bookingId: "b1", paymentMethod: "add-to-bill", status: "delivered", isBilled: true, totalAmount: 300 },

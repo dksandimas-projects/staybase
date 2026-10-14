@@ -217,7 +217,17 @@ export function BookingDrawerWorkspaceHeader({
                 }
                 return <span>{booking.numGuests} guest{booking.numGuests === 1 ? "" : "s"}</span>;
               })()}
-              <span>{booking.hasBreakfast ? "Breakfast included" : "No breakfast"}</span>
+              // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+                // legacy `booking.hasBreakfast: boolean` flag is
+                // gone. The drawer's overview summary reads the
+                // new rich `booking.breakfastSelections` map
+                // directly (the meal count + the snapshotted
+                // total).
+                <span>
+                  {(booking.breakfastSelections && Object.keys(booking.breakfastSelections).length > 0)
+                    ? `${Object.keys(booking.breakfastSelections).length} meal${Object.keys(booking.breakfastSelections).length === 1 ? "" : "s"}`
+                    : "No breakfast"}
+                </span>
             </div>
           </div>
 

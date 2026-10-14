@@ -901,14 +901,20 @@ export function CorporateBookingPage() {
   // to the server's `subtotal` for the whole
   // reservation. The two paths produce the same
   // number when the cart has a single stay.
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // corporate `calculateBookingTotal` call no longer passes
+  // the legacy `breakfastRate` + `hasBreakfast` flat-rate
+  // pair. The new meal-based model stamps the breakfast
+  // total onto the booking doc (`booking.breakfastTotal`),
+  // which the server's per-stay pricing consumes. The
+  // client preview here uses the pre-computed
+  // `breakfastTotal` (summed from `perStayPricing`).
   const total = distributedRoomCart.length <= 1
     ? calculateBookingTotal({
         ratePerNight,
         numNights: nights,
         roomTotal,
-        numGuests: guests,
-        breakfastRate: breakfastRatePerPerson,
-        hasBreakfast,
+        breakfastTotal: breakfastTotal,
         discountPct: 0, // discounts already applied to ratePerNight
         voucherDiscount: 0 // corporate flow doesn't use standard vouchers
       })
