@@ -150,6 +150,12 @@ Things agents must never do. Check this file before implementing any feature.
 
 ---
 
+## Tailwind & Layout
+
+- **Never let a stretched grid cell inflate a form field's label + input rows** (2026-10-14, Step 3 Guest details) — a grid cell stretches to its tallest sibling and its auto rows absorb the spare height, so in a two-column field row the shorter field's input drifted ~12px below its neighbour. Set content-start on every form-field label/wrapper grid and on each cell of a field row. Center a leading icon on the input box (flex items-center wrapper + block input + pointer-events-none icon), never on an arbitrary wrapper. Sibling fields must match in height, top edge, and icon centring even when only one renders a hint line — verify by measuring bounding boxes, not by eyeballing a screenshot.
+
+---
+
 ## General
 
 - **Never commit `.env` files** — all three are gitignored (`guest-app/.env`, `admin-app/.env`, `api/.env`).
