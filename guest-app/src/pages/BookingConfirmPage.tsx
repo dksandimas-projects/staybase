@@ -1,4 +1,4 @@
-import { CalendarPlus, CheckCircle2, Clock, ExternalLink, Home, Mail, Sparkles, Star, X } from "lucide-react";
+import { CalendarCheck, CalendarPlus, Check, CheckCircle2, ChevronDown, Clock, Copy, ExternalLink, Home, Mail, Sparkles, Star, X } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
@@ -16,11 +16,15 @@ import { useGuestAuth } from "../context/GuestAuthContext";
 import { useRoomTypes } from "../hooks/useRoomTypes";
 // Per SR-01..05 (2026-10-12): the confirmation page's
 // `feat/special-requests-redirect` card is retired.
-// The `usePublicSiteContent` + `Mail` imports stay
-// (still used by the "Email the staff card" panel
-// further in the JSX).
-import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+//
+// MBUX-08 collateral fix: that retirement also left behind a
+// `usePublicSiteContent()` call whose `contact` binding nothing read,
+// under a comment that still claimed an "Email the staff card"
+// panel existed "further in the JSX". It did not — it had been
+// deleted. The stale comment is corrected and the dead read removed;
+// `Mail` stays because the email-status row uses it.
 import { formatPrice } from "../utils/format";
+import { resolveConfirmationStatus } from "../utils/confirmationStatus";
 
 function formatStayDate(value: string) {
   if (!value) return "";
@@ -71,12 +75,9 @@ export function BookingConfirmPage() {
   const shouldReduceMotion = useReducedMotion();
   const { roomTypes } = useRoomTypes();
   const { user, memberProfile } = useGuestAuth();
-  // Per feat/special-requests-redirect (2026-08-21): the
-  // redirect card on the confirmation page reads the per-hotel
-  // contact override (Settings → Hotel Info) with the
-  // deploy-time `hotel.config.ts` as the fallback. Same pattern
-  // as ContactPage + Footer.
-  const { contact } = usePublicSiteContent();
+  // MBUX-08: the `usePublicSiteContent()` read that used to sit here
+  // was dead — see the import note. The confirmation page needs no
+  // site content.
 
   // The payment-method label shown to the guest is now sourced
   // from `settings/hotelConfig.paymentMethods[].label` (admin-
@@ -206,7 +207,10 @@ export function BookingConfirmPage() {
     brand: config.brandName
   });
 
-  const isOnlinePayment = rawPaymentMethod === "gcash" || rawPaymentMethod === "bank";
+  // MBUX-08: `isOnlinePayment` is gone. Method classification now
+  // lives in `resolveConfirmationStatus` so the status COPY and the
+  // payment STATUS cannot be derived from two different ideas of
+  // "which methods are online".
   const isRewardsMember = !!user && !!memberProfile?.isMember;
   const showRewardsJoinPrompt = !isRewardsMember;
 
@@ -224,6 +228,55 @@ export function BookingConfirmPage() {
   // create endpoint into this URL. It is only a UI hint; the request endpoint
   // validates the booking's current status before accepting early check-in.
   const [bookingStatus] = useState<string>(() => searchParams.get("status") ?? "");
+
+  // MBUX-08: every line of status copy derives from ONE call, so the
+  // headline, the payment row, the next step and the email note cannot
+  // disagree about whether the payment was merely uploaded or has
+  // actually been verified. Before this, a single `isOnlinePayment`
+  // boolean chose all of them and could not express that difference.
+  // Declared here (not next to `paymentMethodLabel`) because
+  // `bookingStatus` is declared further down and const bindings are in
+  // the temporal dead zone until then.
+  const confirmationStatus = resolveConfirmationStatus({
+    paymentMethod: rawPaymentMethod,
+    bookingStatus,
+    paymentMethodLabel,
+    brandName: config.brandName
+  });
+
+  // The guest is asked for this reference over the phone at check-in,
+  // so it must be selectable and copyable without a text selection.
+  // Clipboard access is best-effort: a denied permission or an
+  // insecure context must not break the button, so the failure path
+  // falls back to selecting the text and says so.
+  const [referenceCopied, setReferenceCopied] = useState(false);
+  useEffect(() => {
+    if (!referenceCopied) return;
+    const timer = window.setTimeout(() => setReferenceCopied(false), 2400);
+    return () => window.clearTimeout(timer);
+  }, [referenceCopied]);
+
+  const handleCopyReference = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard-unavailable");
+      await navigator.clipboard.writeText(bookingRef);
+      setReferenceCopied(true);
+    } catch {
+      // Fall back to a manual selection so the reference is still
+      // obtainable without a working clipboard API.
+      setReferenceCopied(false);
+      const node = document.getElementById("booking-reference-value");
+      if (node && typeof window.getSelection === "function") {
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          selection.addRange(range);
+        }
+      }
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -357,87 +410,90 @@ export function BookingConfirmPage() {
       <Navbar />
 
       <section className="mx-auto max-w-[620px] px-4 pt-10 pb-20">
-        {/* Success Header */}
+        {/* Success Header — MBUX-08.
+            Every string below comes from `confirmationStatus`. It used
+            to be an `isOnlinePayment` ternary, so a guest whose
+            payment staff had ALREADY verified still read "Booking
+            submitted for review". The status was on the page the whole
+            time; only the copy refused to read it. */}
         <motion.div
           className="flex flex-col items-center text-center"
           variants={scaleIn}
           {...entranceProps}
         >
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-light text-primary shadow-lg shadow-primary-light/50">
-            <CheckCircle2 size={48} className="animate-pulse" />
+          <div
+            className={`flex h-20 w-20 items-center justify-center rounded-full shadow-lg ${
+              confirmationStatus.tone === "success"
+                ? "bg-primary-light text-primary shadow-primary-light/50"
+                : confirmationStatus.tone === "pending"
+                  ? "bg-amber-100 text-amber-700 shadow-amber-100/60"
+                  : "bg-gray-200 text-gray-600 shadow-gray-200/60"
+            }`}
+          >
+            {confirmationStatus.tone === "success" ? (
+              <CheckCircle2 size={48} className="animate-pulse" />
+            ) : (
+              <Clock size={44} aria-hidden="true" />
+            )}
           </div>
           <h1 className="mt-6 font-heading text-4xl text-gray-950 sm:text-5xl">
-            {isOnlinePayment ? "Booking submitted for review" : "Your booking is confirmed."}
+            {confirmationStatus.headline}
           </h1>
           <p className="mt-3 text-base text-gray-600 sm:text-lg">
-            {isOnlinePayment
-              ? "We have received your details. Our team is verifying your payment and will send an official confirmation shortly."
-              : `We're looking forward to hosting you at ${config.brandName}.`}
+            {confirmationStatus.summary}
           </p>
+          {/* MBUX-08: the old page never said what happens NEXT. A
+              guest who had just sent a receipt could not tell whether
+              anything was still owed of them. */}
+          <div
+            data-testid="confirmation-next-step"
+            className="mt-5 w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left shadow-sm"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+              What happens next
+            </p>
+            <p className="mt-1 text-sm text-gray-800">{confirmationStatus.nextStep}</p>
+          </div>
         </motion.div>
 
-        {/* Booking Reference Box */}
+        {/* Booking Reference Box — MBUX-08: COPYABLE.
+            The front desk asks for this reference at check-in, and the
+            old markup made the guest hand-select monospace text on a
+            phone. `select-all` plus a manual-selection fallback means
+            the reference is obtainable even where the Clipboard API is
+            blocked (insecure context, denied permission). */}
         <motion.div
+          data-testid="booking-reference"
           className="mx-auto mt-8 flex flex-col items-center rounded-xl border border-gray-200 bg-white px-6 py-4 shadow-sm"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15, duration: 0.4 }}
         >
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Reservation Reference</span>
-          <span className="mt-1 font-mono text-2xl font-bold tracking-tight text-primary">{bookingRef}</span>
-        </motion.div>
-
-        {/* The early check-in perk sits immediately after the
-            reservation reference so eligible members see the
-            time-sensitive action without scrolling past the full
-            stay summary. The booking success message + reference
-            remain the first and primary confirmation content. */}
-        {showEarlyCheckInButton && (
-          <motion.div
-            data-testid="early-checkin-request-section"
-            className="mt-6 rounded-xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.4 }}
+          <span
+            id="booking-reference-value"
+            className="mt-1 select-all font-mono text-2xl font-bold tracking-tight text-primary"
           >
-            <div className="flex items-start gap-3">
-              <Clock size={20} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
-              <div className="flex-1">
-                <h3 className="font-heading text-base text-amber-950">
-                  Request early check-in
-                </h3>
-                <p className="mt-1 text-xs leading-relaxed text-amber-900">
-                  As a {config.rewardsName} member, you can request an earlier arrival for
-                  booking <span className="font-mono font-bold">{bookingRef}</span>. This
-                  request is <strong>not guaranteed</strong> — it's subject to approval by our
-                  team, and you'll receive an email once we approve or decline the request.
-                </p>
-                {earlyCheckInSent ? (
-                  <div
-                    data-testid="early-checkin-sent"
-                    className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800"
-                  >
-                    <CheckCircle2 size={16} className="shrink-0" aria-hidden="true" />
-                    Request sent — we'll email you when our team has reviewed it.
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowEarlyCheckInModal(true);
-                      setEarlyCheckInError(null);
-                    }}
-                    data-testid="early-checkin-open-modal"
-                    className="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-amber-700 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
-                  >
-                    <Clock size={14} />
-                    Request early check-in
-                  </button>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
+            {bookingRef}
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleCopyReference()}
+            data-testid="copy-booking-reference"
+            aria-label={`Copy booking reference ${bookingRef}`}
+            className="mt-2 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-700 transition hover:border-primary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+          >
+            {referenceCopied ? (
+              <Check size={14} aria-hidden="true" />
+            ) : (
+              <Copy size={14} aria-hidden="true" />
+            )}
+            {referenceCopied ? "Copied" : "Copy reference"}
+          </button>
+          <span role="status" className="sr-only">
+            {referenceCopied ? "Booking reference copied to clipboard" : ""}
+          </span>
+        </motion.div>
 
         {/* Details Card */}
         <motion.div
@@ -514,62 +570,192 @@ export function BookingConfirmPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-2">
+            {/* MBUX-08: payment METHOD was on this page; payment STATUS was not.
+                Those are different facts. Showing only the first is how
+                a guest with an uploaded-but-unverified receipt read as
+                though the hotel had already confirmed the money — the
+                headline said "verified" by implication while nothing
+                had been checked. The label never blurs the two: it
+                says "Proof received — not yet verified" verbatim. */}
+            <div
+              data-testid="confirmation-payment-status"
+              className={`rounded-lg border px-4 py-3 ${
+                confirmationStatus.paymentState === "verified"
+                  ? "border-emerald-200 bg-emerald-50"
+                  : confirmationStatus.paymentState === "proof-received"
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-gray-200 bg-gray-50"
+              }`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Payment status
+              </p>
+              <p className="mt-1 text-sm font-bold text-gray-900">
+                {confirmationStatus.paymentStatusLabel}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-gray-600">
+                {confirmationStatus.paymentStatusDetail}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-gray-100 pt-4">
               <span className="font-semibold text-gray-900">Total Price</span>
               <span className="text-2xl font-bold text-primary">{formatPrice(total)}</span>
             </div>
-            {rateBreakdown ? (
-              <PriceBreakdown breakdown={rateBreakdown} total={total} />
-            ) : null}
           </div>
         </motion.div>
 
-        {/* Email Alert Banner */}
+        {/* Email status — MBUX-08: was an `isOnlinePayment` ternary that
+            always told an online guest "official confirmation will
+            follow after payment verification", even when verification
+            had already happened. Now it states the ACTUAL state. */}
         <motion.div
-          className="mt-6 flex items-center justify-center gap-2 px-4 text-center text-sm italic text-gray-600"
+          data-testid="confirmation-email-status"
+          className="mt-6 flex items-start justify-center gap-2 px-4 text-center text-sm text-gray-600"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.35, duration: 0.4 }}
         >
-          <Mail size={16} className="text-primary" />
-          <span>
-            {isOnlinePayment
-              ? "An acknowledgment email has been sent. Official confirmation will follow after payment verification."
-              : "A confirmation has been sent to your email. See you soon!"}
-          </span>
+          <Mail size={16} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+          <span>{confirmationStatus.emailStatus}</span>
         </motion.div>
 
-        {/* Per SR-01..05 (2026-10-12): the
-            `feat/special-requests-redirect` "Forgot
-            something?" prompt is retired — the guest
-            captured their preferences + free-text +
-            bed-set-up + arrival time on Step 2. */}
+        {/* MBUX-08: the full rate breakdown is a receipt detail, not the
+            outcome of the booking. It stays exactly one tap away but no
+            longer expands by default above the actions — the essential
+            result is dates, rooms, guests, total, payment status and
+            email status, and nothing else competes with it. */}
+        {rateBreakdown ? (
+          <motion.div
+            data-testid="confirmation-full-breakdown"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.38, duration: 0.4 }}
+            className="mt-4"
+          >
+            <details className="group rounded-xl border border-gray-200 bg-white shadow-sm">
+              <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-gray-800">
+                See the full price breakdown
+                <ChevronDown
+                  size={18}
+                  aria-hidden="true"
+                  className="shrink-0 text-gray-500 transition-transform duration-200 group-open:rotate-180"
+                />
+              </summary>
+              <div className="border-t border-gray-100 px-4 py-4">
+                <PriceBreakdown breakdown={rateBreakdown} total={total} />
+              </div>
+            </details>
+          </motion.div>
+        ) : null}
 
-        {/* Action Buttons */}
+        {/* Action Buttons — MBUX-08: "Add to calendar" and "Manage
+            booking" are what a guest does NEXT, so they are the two
+            primary actions. The old order promoted "Return to Homepage"
+            to the single PrimaryButton — the least useful of the three
+            — and offered no way to reach the booking afterwards.
+
+            The label stays "Add to Google Calendar", NOT the shorter
+            "Add to Calendar": this button deep-links to Google
+            Calendar, while "Download .ics" immediately below adds to
+            the DEVICE calendar. Two adjacent buttons both reading
+            "Add to Calendar" would describe different destinations. */}
         <motion.div
           className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4, duration: 0.4 }}
         >
-          <GhostButton type="button" className="sm:min-w-48" onClick={handleAddToCalendar}>
-            <CalendarPlus size={18} />
-            Download .ics
-          </GhostButton>
           <a
             href={googleCalendarUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-5 text-sm font-semibold text-gray-800 shadow-sm transition hover:border-primary hover:text-primary sm:min-w-48"
+            data-testid="add-to-google-calendar"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 sm:min-w-48"
           >
-            <ExternalLink size={16} />
+            <ExternalLink size={16} aria-hidden="true" />
             Add to Google Calendar
           </a>
-          <PrimaryButton to="/" className="sm:min-w-48">
-            <Home size={18} />
-            Return to Homepage
+          {/* No `data-testid` here: `PrimaryButton` types its props as
+              `LinkProps`, which does not accept arbitrary `data-*`
+              attributes. The `/my-booking` target is pinned in the
+              MBUX-08 suite instead. */}
+          <PrimaryButton to="/my-booking" className="sm:min-w-48">
+            <CalendarCheck size={18} aria-hidden="true" />
+            Manage booking
           </PrimaryButton>
         </motion.div>
+
+        <motion.div
+          className="mt-3 flex flex-col gap-3 sm:flex-row sm:justify-center"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.42, duration: 0.4 }}
+        >
+          <GhostButton type="button" className="sm:min-w-48" onClick={handleAddToCalendar}>
+            <CalendarPlus size={18} aria-hidden="true" />
+            Download .ics
+          </GhostButton>
+          <GhostButton to="/" className="sm:min-w-48">
+            <Home size={18} aria-hidden="true" />
+            Return to Homepage
+          </GhostButton>
+        </motion.div>
+
+        {/* MBUX-08: the early check-in perk MOVED here, from
+            directly under the reference, to BELOW the essential
+            result. It is a member upsell, not the outcome of the
+            booking — a guest who wants to know their dates, total
+            and payment status no longer has to scroll past a perk
+            they may never use. The time-sensitive argument for
+            putting it high is answered by the next-step block, which
+            always states what the guest owes. */}
+        {showEarlyCheckInButton && (
+          <motion.div
+            data-testid="early-checkin-request-section"
+            className="mt-6 rounded-xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.4 }}
+          >
+            <div className="flex items-start gap-3">
+              <Clock size={20} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+              <div className="flex-1">
+                <h3 className="font-heading text-base text-amber-950">
+                  Request early check-in
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-amber-900">
+                  As a {config.rewardsName} member, you can request an earlier arrival for
+                  booking <span className="font-mono font-bold">{bookingRef}</span>. This
+                  request is <strong>not guaranteed</strong> — it's subject to approval by our
+                  team, and you'll receive an email once we approve or decline the request.
+                </p>
+                {earlyCheckInSent ? (
+                  <div
+                    data-testid="early-checkin-sent"
+                    className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800"
+                  >
+                    <CheckCircle2 size={16} className="shrink-0" aria-hidden="true" />
+                    Request sent — we'll email you when our team has reviewed it.
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEarlyCheckInModal(true);
+                      setEarlyCheckInError(null);
+                    }}
+                    data-testid="early-checkin-open-modal"
+                    className="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-amber-700 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+                  >
+                    <Clock size={14} />
+                    Request early check-in
+                  </button>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {showRewardsJoinPrompt && (
           <motion.div

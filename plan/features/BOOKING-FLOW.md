@@ -170,6 +170,38 @@ Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step
 - [x] Online payment: "Your payment is under review. You will receive a confirmation email within 24 hours."
 - [x] Celebratory design treatment — Peak-End Rule, positive final impression
 - [x] Link to `/my-booking` to check status anytime
+### Per MBUX-08 (decision #260) — confirmation hierarchy
+
+The essential result leads; everything else is below it. All of this is derived from ONE
+`resolveConfirmationStatus()` call (`guest-app/src/utils/confirmationStatus.ts`), so the headline, summary,
+next step, payment-status label, payment-status detail and email-status sentence cannot disagree.
+
+- [x] **Payment PROOF is never presented as payment VERIFICATION.** The page derives every status string from the
+      server-returned `status` (already carried in the URL for the early-check-in gate), never from the payment-method
+      boolean. `payment-uploaded` renders `Proof received — not yet verified` verbatim; only `payment-confirmed` /
+      `confirmed` / `checked-in` / `checked-out` on an ONLINE method render `Payment verified`.
+- [x] **Precedence:** `cancelled` beats everything → a NON-online method outranks the booking status → verified outranks
+      `payment-uploaded` → `payment-uploaded` outranks awaiting-proof. The pay-at-hotel arm is deliberate: a
+      pay-at-hotel booking reaching `confirmed` has had its *stay* confirmed, but no money moved and none could have
+      been checked. An empty, unknown or hand-edited `status` on an online method resolves to awaiting-proof, never verified.
+- [x] **Payment status is a visible row, distinct from payment method.** The method keeps reading the admin-configured
+      label via `resolvePaymentMethodLabel`; the status is separate and never hardcoded per method.
+- [x] **Copyable reservation reference.** The front desk asks for it at check-in. `navigator.clipboard.writeText`,
+      `role="status"` live-region confirmation (guest-app has no toast system), auto-reset after 2.4s, and a
+      select-the-text fallback when the Clipboard API is unavailable — the control is never dead.
+- [x] **Explicit "What happens next"** — always states what the guest owes. For `payment-uploaded` it says verification
+      is the hotel's job, not the guest's.
+- [x] **Email status is state-driven**, replacing the old copy that told every online guest confirmation "will follow
+      after payment verification", including those already verified.
+- [x] **Primary action pair = `Add to Google Calendar` + `Manage booking` (`/my-booking`).** `Return to Homepage` is a
+      `GhostButton`; `Download .ics` stays. The `!hasAllParams` empty state keeps its primary "Return to Homepage"
+      deliberately — with no booking there is nothing else to offer. The Google label is deliberately NOT shortened to
+      "Add to Calendar": it deep-links to Google Calendar while `Download .ics` adds to the *device* calendar.
+- [x] **Early check-in moved below the actions** (reversed EC-02's placement, which put a member perk above the stay
+      summary). The rewards prompt already sat below. The full rate breakdown is a collapsed
+      `See the full price breakdown` `<details>` — a receipt detail, not the outcome.
+- [x] `cancelled` deep links get a neutral tone, so the green success tick is never rendered beside a cancellation.
+
 - [x] Spark Rewards prompt — shown only to logged-out guests or non-members:
   - [x] Heading: "Join Spark Rewards and earn points on this stay!"
   - [x] Perks chips — two static icon + name chips ("Earn Points", "Member Discounts"); NOT settings-driven (the settings-driven perks list lives on the homepage section only)

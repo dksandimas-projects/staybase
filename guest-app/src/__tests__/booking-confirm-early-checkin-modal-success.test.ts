@@ -106,26 +106,36 @@ describe.skip("BookingConfirmPage — early check-in success persistence", () =>
   });
 });
 
-describe.skip("BookingConfirmPage — early check-in placement", () => {
-  it.skip("places the early check-in card after the reservation reference and before reservation details", () => {
+describe("BookingConfirmPage — early check-in placement", () => {
+  // MBUX-08 (decision #260) REVERSED EC-02's original placement, and
+  // this suite was `describe.skip`-ed while the old one shipped. The
+  // original argument was that early check-in is time-sensitive and
+  // should sit directly under the reference. It does hold up — but it
+  // put a member UPSELL between the guest and the outcome of their own
+  // booking, above the dates, total and payment status they came to
+  // check. The perk now trails the essential result, and the
+  // "what happens next" block carries the time-sensitive part for
+  // everyone.
+  it("places the early check-in card BELOW the reservation details", () => {
     const referenceIndex = bookingConfirmPage.indexOf("Reservation Reference");
+    const detailsIndex = bookingConfirmPage.indexOf("Reservation Details");
     const earlyCheckInIndex = bookingConfirmPage.indexOf(
       'data-testid="early-checkin-request-section"'
     );
-    const detailsIndex = bookingConfirmPage.indexOf("Reservation Details");
 
     expect(referenceIndex).toBeGreaterThan(-1);
-    expect(earlyCheckInIndex).toBeGreaterThan(referenceIndex);
-    expect(detailsIndex).toBeGreaterThan(earlyCheckInIndex);
+    expect(detailsIndex).toBeGreaterThan(-1);
+    // The reference still leads the essential result...
+    expect(detailsIndex).toBeGreaterThan(referenceIndex);
+    // ...and the perk now trails it.
+    expect(earlyCheckInIndex).toBeGreaterThan(detailsIndex);
   });
 
-  it.skip("keeps the special-requests card below the reservation details", () => {
-    const detailsIndex = bookingConfirmPage.indexOf("Reservation Details");
-    const specialRequestsIndex = bookingConfirmPage.indexOf(
-      'data-testid="special-requests-redirect"'
-    );
-
-    expect(specialRequestsIndex).toBeGreaterThan(detailsIndex);
+  it("keeps the special-requests card retired", () => {
+    // SR-01..05 deleted it. There is nothing left to place, so the
+    // old "below the reservation details" expectation is obsolete
+    // rather than merely inverted.
+    expect(bookingConfirmPage).not.toContain('data-testid="special-requests-redirect"');
   });
 });
 
