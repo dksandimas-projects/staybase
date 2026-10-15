@@ -4569,6 +4569,16 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     { id: "seo" as const, label: seoSettings.sourceChangesPending ? "SEO & Search •" : "SEO & Search", icon: Eye },
     { id: "rewards" as const, label: "Loyalty Rewards", icon: Gift },
     { id: "breakfast" as const, label: "Breakfast & Dining", icon: Coffee },
+    // Per BR-12.1 (2026-10-15, decision #247): the Other Add-Ons
+    // tab body reads/writes the `addOns/{addOnId}` collection.
+    // This entry was added post-merge (decision #251 follow-up)
+    // because the SETTINGS_GROUPS.guest.tabs entry referenced
+    // "addons" but the `tabs` array below was missing the
+    // matching entry — the pill/sidebar render does
+    // `tabs.find(...)` and silently returned `null`, so the
+    // tab was hidden from both the mobile pill bar and the
+    // desktop sidebar even though the badge counter said "5".
+    { id: "addons" as const, label: "Other Add-Ons", icon: Package },
     { id: "store" as const, label: "In-Room Store", icon: ShoppingBag },
     { id: "email" as const, label: "Email Config", icon: Mail },
     { id: "intercom" as const, label: "Intercom", icon: MessageSquare },
