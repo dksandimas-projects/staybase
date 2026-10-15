@@ -4542,6 +4542,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       // is missing one entry; the active-call banner / hang-up
       // already succeeded by the time recordCallHistory is
       // called.
+      //
+      // Defense-in-depth — FCH-01 (decision #263, 2026-10-16):
+      // the toast is the staff-facing PRIMARY signal; the
+      // console.warn is the SECONDARY diagnostic for the
+      // operator's devtools. Pre-#263 the catch was silent from
+      // the staff member's perspective — the exact shape that
+      // hid #216's rule-rejection bug. Now any future write
+      // failure (Firestore quota, network blip, a new rule
+      // field mismatch, missing parent doc, etc.) surfaces in
+      // the UI immediately so the staff can flag it instead of
+      // finding a missing "Call answered by {Name}" entry after
+      // the fact.
+      notify.error(
+        "Call history not recorded",
+        `The call-history entry for room ${roomId} could not be saved. See the browser console for details.`
+      );
       console.warn(`[call-history] failed to record ${outcome} for ${roomId}:`, error);
     }
   };
