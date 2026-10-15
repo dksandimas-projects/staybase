@@ -4,6 +4,7 @@ import {
   BedDouble,
   CalendarDays,
   Check,
+  ChevronDown,
   CheckCircle2,
   CreditCard,
   Info,
@@ -3020,6 +3021,21 @@ export function BookingPage() {
     // now exactly one consent value and the server reads the same one.
     const canConfirm = guestDetails.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
 
+    // Per MBUX-07 (decision #259): which optional savings are ACTUALLY
+    // applied, so the collapsed disclosure can state them.
+    //
+    // The disclosure is collapsed by default, and that creates a
+    // hazard the spec calls out directly: a guest who applied a
+    // voucher must still SEE that it is applied while the section is
+    // shut. Hiding that would invite them to apply a second code, or
+    // to conclude their discount vanished when they reach payment.
+    const appliedSavingsLabels = [
+      voucherApplied ? `Voucher ${voucherCode.trim().toUpperCase()}` : "",
+      pendingPointsToRedeem > 0 ? `${pendingPointsToRedeem.toLocaleString()} points` : "",
+      discountType === "senior" ? "Senior Citizen discount" : "",
+      discountType === "pwd" ? "PWD discount" : ""
+    ].filter(Boolean);
+
     return bookingShell(
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
@@ -3037,7 +3053,248 @@ export function BookingPage() {
         </section>
 
         <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
-          <div className="space-y-6">
+          {/* Per MBUX-07 (decision #259): MOBILE ORDER IS SUMMARY FIRST. The
+              sidebar below this column carries the full booking summary, and
+              in a single-column grid it used to render AFTER every control —
+              so a guest had to scroll past payment, uploads, and optional
+              savings to discover what they were paying for.
+
+              CSS `order` is the fix: it applies in a single-column grid
+              (mobile) and is overridden at `lg:`, where the two-column
+              layout must keep controls on the left and summary on the
+              right. No DOM reorder, no duplicate summary component, so the
+              desktop sidebar cannot drift from the mobile card. */}
+          <div className="order-2 space-y-6 lg:order-1">
+            {/* Payment Method Section — dynamic, per
+                `plan/features/SETTINGS.md §Payment Methods`. The
+                list is sourced from
+                `settings/hotelConfig.paymentMethods[]` and filtered
+                to `isEnabled`. The "Pay at Hotel" method is just
+                another entry — there is no separate global
+                `payAtHotelEnabled` flag. If no methods are enabled
+                (or the config hasn't loaded), the booking is
+                blocked at the Confirm button. */}
+            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h3 className="text-lg font-semibold text-gray-950">Payment Method</h3>
+              <p className="mt-1 text-sm text-gray-600">Select how you would like to pay for your reservation.</p>
+
+              {availablePaymentMethods.length === 0 ? (
+                <div className="mt-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center">
+                  <p className="text-sm font-semibold text-gray-700">No payment methods available</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Please contact the front desk to complete your reservation.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {availablePaymentMethods.map((pm) => {
+                      const Icon =
+                        pm.method === "gcash" || pm.method === "maya"
+                          ? Wallet
+                          : pm.method === "bank"
+                          ? Landmark
+                          : pm.method === "pay-at-hotel"
+                          ? Banknote
+                          : CreditCard;
+                      return (
+                        <button
+                          key={pm.method}
+                          type="button"
+                          onClick={() => setPaymentMethod(pm.method)}
+                          className={cn(
+                            "flex flex-col items-start p-4 rounded-lg border text-left transition",
+                            paymentMethod === pm.method
+                              ? "border-primary bg-primary-light ring-1 ring-primary"
+                              : "border-gray-200 bg-white hover:border-primary"
+                          )}
+                        >
+                          <Icon size={20} className={paymentMethod === pm.method ? "text-primary" : "text-gray-500"} />
+                          <span className="mt-3 block text-sm font-bold text-gray-900">{pm.label}</span>
+                          <span className="mt-0.5 block text-xs text-gray-500">
+                            {pm.method === "gcash"
+                              ? "Digital wallet"
+                              : pm.method === "maya"
+                              ? "Digital wallet"
+                              : pm.method === "bank"
+                              ? "Direct deposit"
+                              : pm.method === "paypal"
+                              ? "International card / PayPal balance"
+                              : pm.method === "pay-at-hotel"
+                              ? "Upon arrival"
+                              : "Online payment"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Conditional instructions panel — one unified
+                      layout for every online method. "Pay at Hotel"
+                      gets a separate, simpler panel. */}
+                  <div className="mt-6 rounded-xl border border-primary-light bg-section-bg overflow-hidden">
+                    {isPayAtHotel ? (
+                      <div className="p-5 flex items-start gap-3">
+                        <Info size={20} className="text-primary shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="font-semibold text-primary text-base">Pay upon Check-in</h4>
+                          <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                            Present your booking reference at the front desk upon arrival. We accept cash, major credit cards, and digital wallet payments.
+                          </p>
+                        </div>
+                      </div>
+                    ) : currentPaymentMethod ? (
+                      <div className="grid sm:grid-cols-5">
+                        <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
+                          {currentPaymentMethod.qrUrl ? (
+                            <img
+                              src={currentPaymentMethod.qrUrl}
+                              alt={`${currentPaymentMethod.label} QR code`}
+                              className="h-40 w-40 object-contain rounded"
+                            />
+                          ) : (
+                            <p className="text-xs text-gray-500 text-center px-4">
+                              QR code not yet configured. Please contact the front desk for payment details.
+                            </p>
+                          )}
+                        </div>
+                        <div className="sm:col-span-3 p-5 flex flex-col justify-center">
+                          <h4 className="font-semibold text-primary text-base">{currentPaymentMethod.label} Payment Details</h4>
+                              <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(displayTotal)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
+                              </p>
+                          {currentPaymentMethod.accountNumber && (
+                            <p className="mt-1 text-xs font-semibold text-gray-800">
+                              {currentPaymentMethod.method === "paypal" ? "PayPal email" : "Account number"}: {currentPaymentMethod.accountNumber}
+                            </p>
+                          )}
+                          <ul className="mt-3 space-y-1.5 text-xs text-gray-500">
+                            <li className="flex items-center gap-1.5">
+                              <Info size={14} className="text-primary" />
+                              Your booking is held for 30 minutes.
+                            </li>
+                            <li className="flex items-center gap-1.5">
+                              <ShieldCheck size={14} className="text-primary" />
+                              Secure transaction via {currentPaymentMethod.label}.
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Proof of Payment Upload box */}
+            {paymentMethod !== "pay-at-hotel" && (
+                <div className="mt-5">
+                  <p className="text-sm font-semibold text-gray-700">
+                    Upload Proof of Payment <span className="text-red-500">*</span>
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">Upload a screenshot or photo of your successful digital wallet payment or bank transfer receipt.</p>
+                  
+                  <div className="mt-3">
+                    {paymentProofUpload ? (
+                      <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={18} className="text-status-green-text" />
+                          <span className="text-sm font-medium text-gray-800">{paymentProofUpload.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setImagePreview({ title: paymentProofUpload.name, url: paymentProofUpload.previewUrl })}
+                            className="text-xs font-semibold text-primary hover:underline"
+                          >
+                            Preview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearPaymentProofUpload();
+                            }}
+                            className="text-xs font-semibold text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
+                        <UploadCloud size={28} className="text-gray-400" />
+                        <span className="mt-2 text-sm font-semibold text-gray-700">
+                          {uploadingPaymentProof ? "Uploading Receipt..." : "Click to upload receipt photo"}
+                        </span>
+                        <span className="mt-0.5 text-xs text-gray-500">Supports JPEG, PNG, WEBP up to 5MB</span>
+                        <input
+                          id="paymentProofFile"
+                          name="paymentProofFile"
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={handlePaymentProofChange}
+                          className="sr-only"
+                          disabled={uploadingPaymentProof}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {paymentProofError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{paymentProofError}</p>
+                  )}
+                </div>
+              )}
+
+            {/* Reference Number Input — removed 2026-07-24 (refactor/unify-payment-reference-fields).
+                Staff populates `transactionReference` on the relevant payment ledger entry
+                when confirming payment. The guest no longer enters a reference at booking time. */}
+
+            {/* Honeypot field (hidden from user) */}
+            <input
+              type="text"
+              name="_hp"
+              value={guestDetails._hp || ""}
+              onChange={(e) => updateGuestDetail("_hp", e.target.value)}
+              className="absolute opacity-0 pointer-events-none"
+              tabIndex={-1}
+              autoComplete="off"
+            />
+
+            {/* Per MBUX-07 (decision #259): optional savings moved
+                BELOW payment and collapsed behind one disclosure.
+
+                Two problems with the pre-MBUX-07 order. (1) The
+                voucher / points / discount controls sat ABOVE the
+                payment method, so a guest who simply wanted to pay
+                had to scroll past three optional controls they may
+                never use. (2) All three were permanently expanded,
+                making the most common path the longest one.
+
+                The applied state stays visible while collapsed: a
+                guest who DID apply a voucher must still see that it
+                is applied — hiding that would invite them to apply a
+                second one. Long eligibility guidance likewise stays
+                inside, where it is only read when relevant. */}
+            <details
+              className="group rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
+              data-testid="optional-savings-disclosure"
+            >
+              <summary
+                className="flex min-h-11 cursor-pointer list-none items-center justify-between font-semibold text-gray-950"
+                data-testid="optional-savings-summary"
+              >
+                <span>Have a voucher, points, or discount?</span>
+                <ChevronDown size={18} aria-hidden className="transition-transform group-open:rotate-180" />
+              </summary>
+              {appliedSavingsLabels.length > 0 ? (
+                <p
+                  className="mt-2 text-sm font-medium text-gray-700"
+                  data-testid="optional-savings-applied"
+                >
+                  Applied: {appliedSavingsLabels.join(", ")}
+                </p>
+              ) : null}
+              <div className="mt-5 space-y-6">
             {/* Voucher Section */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Voucher or Promo Code</h3>
@@ -3323,201 +3580,8 @@ export function BookingPage() {
                 )}
             </div>}
 
-            {/* Payment Method Section — dynamic, per
-                `plan/features/SETTINGS.md §Payment Methods`. The
-                list is sourced from
-                `settings/hotelConfig.paymentMethods[]` and filtered
-                to `isEnabled`. The "Pay at Hotel" method is just
-                another entry — there is no separate global
-                `payAtHotelEnabled` flag. If no methods are enabled
-                (or the config hasn't loaded), the booking is
-                blocked at the Confirm button. */}
-            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
-              <h3 className="text-lg font-semibold text-gray-950">Payment Method</h3>
-              <p className="mt-1 text-sm text-gray-600">Select how you would like to pay for your reservation.</p>
-
-              {availablePaymentMethods.length === 0 ? (
-                <div className="mt-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center">
-                  <p className="text-sm font-semibold text-gray-700">No payment methods available</p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Please contact the front desk to complete your reservation.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {availablePaymentMethods.map((pm) => {
-                      const Icon =
-                        pm.method === "gcash" || pm.method === "maya"
-                          ? Wallet
-                          : pm.method === "bank"
-                          ? Landmark
-                          : pm.method === "pay-at-hotel"
-                          ? Banknote
-                          : CreditCard;
-                      return (
-                        <button
-                          key={pm.method}
-                          type="button"
-                          onClick={() => setPaymentMethod(pm.method)}
-                          className={cn(
-                            "flex flex-col items-start p-4 rounded-lg border text-left transition",
-                            paymentMethod === pm.method
-                              ? "border-primary bg-primary-light ring-1 ring-primary"
-                              : "border-gray-200 bg-white hover:border-primary"
-                          )}
-                        >
-                          <Icon size={20} className={paymentMethod === pm.method ? "text-primary" : "text-gray-500"} />
-                          <span className="mt-3 block text-sm font-bold text-gray-900">{pm.label}</span>
-                          <span className="mt-0.5 block text-xs text-gray-500">
-                            {pm.method === "gcash"
-                              ? "Digital wallet"
-                              : pm.method === "maya"
-                              ? "Digital wallet"
-                              : pm.method === "bank"
-                              ? "Direct deposit"
-                              : pm.method === "paypal"
-                              ? "International card / PayPal balance"
-                              : pm.method === "pay-at-hotel"
-                              ? "Upon arrival"
-                              : "Online payment"}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Conditional instructions panel — one unified
-                      layout for every online method. "Pay at Hotel"
-                      gets a separate, simpler panel. */}
-                  <div className="mt-6 rounded-xl border border-primary-light bg-section-bg overflow-hidden">
-                    {isPayAtHotel ? (
-                      <div className="p-5 flex items-start gap-3">
-                        <Info size={20} className="text-primary shrink-0 mt-0.5" />
-                        <div>
-                          <h4 className="font-semibold text-primary text-base">Pay upon Check-in</h4>
-                          <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                            Present your booking reference at the front desk upon arrival. We accept cash, major credit cards, and digital wallet payments.
-                          </p>
-                        </div>
-                      </div>
-                    ) : currentPaymentMethod ? (
-                      <div className="grid sm:grid-cols-5">
-                        <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
-                          {currentPaymentMethod.qrUrl ? (
-                            <img
-                              src={currentPaymentMethod.qrUrl}
-                              alt={`${currentPaymentMethod.label} QR code`}
-                              className="h-40 w-40 object-contain rounded"
-                            />
-                          ) : (
-                            <p className="text-xs text-gray-500 text-center px-4">
-                              QR code not yet configured. Please contact the front desk for payment details.
-                            </p>
-                          )}
-                        </div>
-                        <div className="sm:col-span-3 p-5 flex flex-col justify-center">
-                          <h4 className="font-semibold text-primary text-base">{currentPaymentMethod.label} Payment Details</h4>
-                              <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(displayTotal)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
-                              </p>
-                          {currentPaymentMethod.accountNumber && (
-                            <p className="mt-1 text-xs font-semibold text-gray-800">
-                              {currentPaymentMethod.method === "paypal" ? "PayPal email" : "Account number"}: {currentPaymentMethod.accountNumber}
-                            </p>
-                          )}
-                          <ul className="mt-3 space-y-1.5 text-xs text-gray-500">
-                            <li className="flex items-center gap-1.5">
-                              <Info size={14} className="text-primary" />
-                              Your booking is held for 30 minutes.
-                            </li>
-                            <li className="flex items-center gap-1.5">
-                              <ShieldCheck size={14} className="text-primary" />
-                              Secure transaction via {currentPaymentMethod.label}.
-                            </li>
-                          </ul>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Proof of Payment Upload box */}
-            {paymentMethod !== "pay-at-hotel" && (
-                <div className="mt-5">
-                  <p className="text-sm font-semibold text-gray-700">
-                    Upload Proof of Payment <span className="text-red-500">*</span>
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">Upload a screenshot or photo of your successful digital wallet payment or bank transfer receipt.</p>
-                  
-                  <div className="mt-3">
-                    {paymentProofUpload ? (
-                      <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 size={18} className="text-status-green-text" />
-                          <span className="text-sm font-medium text-gray-800">{paymentProofUpload.name}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setImagePreview({ title: paymentProofUpload.name, url: paymentProofUpload.previewUrl })}
-                            className="text-xs font-semibold text-primary hover:underline"
-                          >
-                            Preview
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              clearPaymentProofUpload();
-                            }}
-                            className="text-xs font-semibold text-red-600 hover:underline"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
-                        <UploadCloud size={28} className="text-gray-400" />
-                        <span className="mt-2 text-sm font-semibold text-gray-700">
-                          {uploadingPaymentProof ? "Uploading Receipt..." : "Click to upload receipt photo"}
-                        </span>
-                        <span className="mt-0.5 text-xs text-gray-500">Supports JPEG, PNG, WEBP up to 5MB</span>
-                        <input
-                          id="paymentProofFile"
-                          name="paymentProofFile"
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          onChange={handlePaymentProofChange}
-                          className="sr-only"
-                          disabled={uploadingPaymentProof}
-                        />
-                      </label>
-                    )}
-                  </div>
-                  {paymentProofError && (
-                    <p className="mt-2 text-xs font-semibold text-red-600">{paymentProofError}</p>
-                  )}
-                </div>
-              )}
-
-            {/* Reference Number Input — removed 2026-07-24 (refactor/unify-payment-reference-fields).
-                Staff populates `transactionReference` on the relevant payment ledger entry
-                when confirming payment. The guest no longer enters a reference at booking time. */}
-
-            {/* Honeypot field (hidden from user) */}
-            <input
-              type="text"
-              name="_hp"
-              value={guestDetails._hp || ""}
-              onChange={(e) => updateGuestDetail("_hp", e.target.value)}
-              className="absolute opacity-0 pointer-events-none"
-              tabIndex={-1}
-              autoComplete="off"
-            />
-
+              </div>
+            </details>
             {/* Cancellation Policy */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <details className="group">
@@ -3680,7 +3744,7 @@ export function BookingPage() {
         <BookingStickyFooter
           summary={
             <>
-              <p className="text-sm text-gray-600">Review & Pay</p>
+              <p className="text-sm text-gray-600">Total due</p>
               <p className="text-lg font-semibold text-gray-950">
                 {isSubmitting
                   ? "Processing booking request..."
@@ -3701,7 +3765,7 @@ export function BookingPage() {
                   ? "Please upload proof of payment"
                   : !turnstileToken
                   ? "Running a quick security check..."
-                  : "Ready to confirm booking"}
+                  : `Ready to confirm · ${formatPrice(displayTotal)}`}
               </p>
             </>
           }
@@ -3712,7 +3776,15 @@ export function BookingPage() {
             disabled={!canConfirm || isSubmitting || uploadingDiscountId || uploadingPaymentProof}
             className="flex min-h-11 w-full items-center justify-center rounded-lg bg-primary text-white font-semibold px-6 hover:bg-primary-dark transition disabled:bg-gray-300 disabled:text-gray-500 sm:min-w-56"
           >
-            {isSubmitting ? "Processing..." : "Place booking"}
+            {/* Per MBUX-07 (decision #259): the action names the amount
+                it commits to. A guest confirming a booking should not
+                have to travel back up the page to remember the figure.
+                It is `displayTotal` — the SAME value the summary card,
+                the sidebar, and the create payload use, so the button
+                can never quote a total that differs from the bill. */}
+            {isSubmitting
+              ? "Processing..."
+              : `Place booking · ${formatPrice(displayTotal)}`}
           </button>
         </BookingStickyFooter>
       </>
@@ -3744,7 +3816,9 @@ export function BookingPage() {
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[320px_1fr] lg:px-8">
-        <aside className="lg:sticky lg:top-28 lg:self-start">
+        {/* Per MBUX-07: `order-1` puts the summary above the controls on
+            mobile; `lg:order-2` restores the right-hand sidebar. */}
+        <aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">
           <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
             <h2 className="text-lg font-semibold text-gray-950">Stay details</h2>
             <div className="mt-5 space-y-6">

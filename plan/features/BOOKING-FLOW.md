@@ -315,6 +315,35 @@ Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step
 - [x] Signed-in member identity fields remain prefilled and `readOnly`.
 - [x] Inline validation stays touched-field gated; the cart-readiness gate still blocks Continue to review.
 
+## Step 4 Review & Pay — Summary-First (MBUX-07, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #259. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 4 — Review & Pay`. Public `/book` flow.
+
+### Mobile information order
+
+- [x] **The booking summary is first on mobile.** Step 4's grid is `lg:grid-cols-[1fr_380px]`; below `lg:` it is a single column, so the summary used to render AFTER every control. The controls column is now `order-2 lg:order-1` and the summary aside `order-1 lg:order-2` — CSS `order`, so **one node moves** and the desktop sidebar cannot drift from the mobile card.
+- [x] Order is now: summary → total due → payment method → proof / eligibility upload → optional savings (collapsed) → cancellation policy → Place booking.
+- [x] **No DOM reorder and no duplicated summary component** — a second render would be free to diverge from the sidebar.
+
+### Optional savings
+
+- [x] Voucher, rewards points, and the Senior/PWD discount moved **below** payment and the upload, behind one collapsed `Have a voucher, points, or discount?` disclosure.
+- [x] The long eligibility guidance moved inside the disclosure, so it is only read when relevant.
+- [x] **An applied saving stays visible while collapsed.** A single `Applied: …` line renders outside the collapsible body whenever any saving is active. Hiding an applied voucher would invite the guest to conclude the discount vanished and apply a second code.
+- [x] Only eligible controls render, as before — the collapse does not change which controls exist.
+
+### Footer
+
+- [x] The summary reads `Total due` and the single action reads `Place booking · {formatPrice(displayTotal)}`. Both quote the same value as the summary card, the sidebar, and the create payload, so the button cannot display a figure that differs from the bill.
+- [x] Processing and upload states stay explicit and never replace the action. Blocking messages still name their specific gate.
+
+### Preserved
+
+- [x] Only the **selected** payment method expands its instructions (`isPayAtHotel` derives from the current selection).
+- [x] The cancellation policy stays a collapsed `<details>`.
+- [x] Proof and ID uploads accept JPEG/PNG/WebP and show format + size guidance. There is deliberately **no `capture` attribute** — on mobile a file input with image `accept` already offers "Take Photo" beside the library, and forcing `capture` would remove the library option.
+- [x] The duplicate consent checkbox stays removed (MBUX-06).
+
 ## Shared Mobile Booking Shell (MBUX-01, shipped 2026-10-15)
 
 > Decision: `plan/docs/DECISIONS-FEATURES.md` #254. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`. Applies to **both** the public `/book` flow and the corporate `/corporate/book` flow. Later slices (MBUX-02..09) change each step's *content*; this section covers the *frame* they all sit in.
