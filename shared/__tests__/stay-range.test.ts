@@ -7,7 +7,11 @@ import {
   diffNightsBetweenIso,
   DEFAULT_MAX_STAY_NIGHTS,
   DEFAULT_BOOKING_HORIZON_DAYS,
-  resolveRangeSelection
+  resolveRangeSelection,
+  resolveMaxStayNights,
+  describeMaxStayNights,
+  isUnlimitedStay,
+  MAX_MAX_STAY_NIGHTS
 } from "../utils/stayRange";
 
 // DR-01 (2026-10-14). The regression this suite pins: a guest could
@@ -437,5 +441,158 @@ describe("stayRange — booking horizon vs. stay length (DR-03)", () => {
         maxNights: DEFAULT_MAX_STAY_NIGHTS
       })
     ).toEqual({ status: "complete", checkIn: "2026-11-20", checkOut: "2026-11-24", nights: 4 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MSL-01 (2026-10-15): the stay-length cap became a per-hotel setting
+// (`settings/hotelConfig.maxStayNights`). The regression this suite
+// pins is the `0` trap: `0` is the admin's "no limit" choice, but
+// `Math.max(Math.min(0, horizon), 1) === 1` — passing it through raw
+// would collapse EVERY stay to a single night.
+// ---------------------------------------------------------------------------
+describe("stayRange — resolveMaxStayNights", () => {
+  it("treats an ABSENT field as the historical default, never as unlimited", () => {
+    // `Number(undefined)` is NaN, so a resolver that only checked "is
+    // it finite?" would read every un-migrated install as unlimited and
+    // quietly open existing hotels to unbounded stays.
+    expect(resolveMaxStayNights(undefined)).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(resolveMaxStayNights(null)).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(resolveMaxStayNights("")).toBe(DEFAULT_MAX_STAY_NIGHTS);
+  });
+
+  it("maps the admin's explicit 0 to Infinity (no limit)", () => {
+    expect(resolveMaxStayNights(0)).toBe(Infinity);
+    expect(resolveMaxStayNights("0")).toBe(Infinity);
+    // -0 must not sneak past the `value < 0` guard as a negative.
+    expect(resolveMaxStayNights(-0)).toBe(Infinity);
+  });
+
+  it("never floors a fractional value down to 0", () => {
+    // THE subtle case. Flooring happens after the `0` test, so 0.5
+    // floors to 0 and would re-enter as an UNLIMITED cap — the exact
+    // inversion the admin did not ask for.
+    expect(resolveMaxStayNights(0.5)).toBe(1);
+    expect(resolveMaxStayNights(0.1)).toBe(1);
+    expect(resolveMaxStayNights(1.9)).toBe(1);
+  });
+
+  it("fails CLOSED on garbage — never opens to unlimited", () => {
+    expect(resolveMaxStayNights(-5)).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(resolveMaxStayNights(NaN)).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(resolveMaxStayNights("abc")).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(resolveMaxStayNights({})).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(resolveMaxStayNights(Infinity)).toBe(DEFAULT_MAX_STAY_NIGHTS);
+  });
+
+  it("passes through a positive value and clamps to the reachable horizon", () => {
+    expect(resolveMaxStayNights(14)).toBe(14);
+    expect(resolveMaxStayNights("90")).toBe(90);
+    expect(resolveMaxStayNights(45.7)).toBe(45);
+    // A stay longer than the booking horizon is unreachable anyway —
+    // store the horizon rather than a number it would override.
+    expect(resolveMaxStayNights(9999)).toBe(MAX_MAX_STAY_NIGHTS);
+    expect(MAX_MAX_STAY_NIGHTS).toBe(DEFAULT_BOOKING_HORIZON_DAYS);
+  });
+});
+
+describe("stayRange — unlimited stays survive every clamp site", () => {
+  it("does NOT collapse to one night (the Math.max(..., 1) trap)", () => {
+    // The trap, demonstrated: passing the RAW 0 makes
+    // `stayCap = Math.max(Math.min(0, horizon), 1)` === 1, and the
+    // length clamp becomes `addDaysToIsoDate(checkIn, 0)` — a
+    // zero-night range the final guard then bumps to 1 night.
+    const raw = normalizeStayRange({
+      checkIn: TODAY,
+      checkOut: "2026-10-19", // 5 nights
+      minCheckIn: TODAY,
+      maxNights: 0,
+      maxCheckOut: "2027-10-14"
+    });
+    // The reason label is then overwritten by the final inversion
+    // guard, so assert the outcome that matters: the 5 nights are gone.
+    expect(raw.nights).toBe(1);
+    expect(raw.checkOut).not.toBe("2026-10-19");
+
+    // The resolved value keeps the guest's 5 nights intact.
+    const resolved = normalizeStayRange({
+      checkIn: TODAY,
+      checkOut: "2026-10-19",
+      minCheckIn: TODAY,
+      maxNights: resolveMaxStayNights(0),
+      maxCheckOut: "2027-10-14"
+    });
+    expect(resolved.nights).toBe(5);
+    expect(resolved.adjustment).toBeNull();
+    expect(resolved.checkOut).toBe("2026-10-19");
+  });
+
+  it("accepts a long stay that a capped hotel would refuse", () => {
+    const ninety = normalizeStayRange({
+      checkIn: TODAY,
+      checkOut: "2026-12-31",
+      minCheckIn: TODAY,
+      maxNights: resolveMaxStayNights(0),
+      maxCheckOut: "2027-10-14"
+    });
+    expect(ninety.adjustment).toBeNull();
+    expect(ninety.nights).toBe(diffNightsBetweenIso(TODAY, "2026-12-31"));
+
+    // Same input against the default cap is refused.
+    const capped = normalizeStayRange({
+      checkIn: TODAY,
+      checkOut: "2026-12-31",
+      minCheckIn: TODAY,
+      maxNights: resolveMaxStayNights(undefined),
+      maxCheckOut: "2027-10-14"
+    });
+    expect(capped.adjustment).toBe("nights-clamped");
+    expect(capped.nights).toBe(DEFAULT_MAX_STAY_NIGHTS);
+  });
+
+  it("still enforces the horizon when the stay cap is unlimited", () => {
+    // Unlimited nights must not mean unlimited dates.
+    const result = normalizeStayRange({
+      checkIn: TODAY,
+      checkOut: "2028-01-01",
+      minCheckIn: TODAY,
+      maxNights: resolveMaxStayNights(0),
+      maxCheckOut: "2027-10-14"
+    });
+    expect(result.adjustment).toBe("horizon-capped");
+    expect(result.checkOut).toBe("2027-10-14");
+  });
+
+  it("completes a long range in the calendar resolver", () => {
+    expect(
+      resolveRangeSelection({
+        from: TODAY,
+        to: "2026-12-31",
+        minCheckIn: TODAY,
+        maxCheckOut: "2027-10-14",
+        maxNights: resolveMaxStayNights(0)
+      })
+    ).toEqual({ status: "complete", checkIn: TODAY, checkOut: "2026-12-31", nights: 78 });
+  });
+
+  it("keeps refusing the same range at the default cap", () => {
+    expect(
+      resolveRangeSelection({
+        from: TODAY,
+        to: "2026-12-31",
+        minCheckIn: TODAY,
+        maxCheckOut: "2027-10-14",
+        maxNights: resolveMaxStayNights(undefined)
+      })
+    ).toEqual({ status: "pending", checkIn: TODAY });
+  });
+});
+
+describe("stayRange — describeMaxStayNights", () => {
+  it("reads the same way in the server 400 and the picker banner", () => {
+    expect(describeMaxStayNights(30)).toBe("30 nights");
+    expect(describeMaxStayNights(Infinity)).toBe("no maximum");
+    expect(isUnlimitedStay(Infinity)).toBe(true);
+    expect(isUnlimitedStay(30)).toBe(false);
   });
 });

@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.5.0";
+    VERSION2 = "2.5.3";
   }
 });
 
@@ -222304,6 +222304,21 @@ function diffNightsBetweenIso(first, second) {
   const end = Date.parse(`${second}T00:00:00Z`);
   return Math.round((end - start) / 864e5);
 }
+function resolveMaxStayNights(raw) {
+  if (raw === void 0 || raw === null || raw === "") return DEFAULT_MAX_STAY_NIGHTS;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_MAX_STAY_NIGHTS;
+  if (value === 0) return Infinity;
+  const floored = Math.floor(value);
+  if (floored < MIN_MAX_STAY_NIGHTS) return MIN_MAX_STAY_NIGHTS;
+  return Math.min(floored, MAX_MAX_STAY_NIGHTS);
+}
+function describeMaxStayNights(maxNights) {
+  return Number.isFinite(maxNights) ? `${maxNights} nights` : "no maximum";
+}
+function isUnlimitedStay(maxNights) {
+  return !Number.isFinite(maxNights);
+}
 function normalizeStayRange({
   checkIn,
   checkOut,
@@ -222402,7 +222417,7 @@ function resolveRangeSelection({
   if (nights > maxNights) return { status: "pending", checkIn: clampedCheckIn };
   return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
 }
-var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS, DEFAULT_BOOKING_HORIZON_DAYS;
+var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS, DEFAULT_BOOKING_HORIZON_DAYS, MIN_MAX_STAY_NIGHTS, MAX_MAX_STAY_NIGHTS;
 var init_stayRange = __esm({
   "../shared/utils/stayRange.ts"() {
     "use strict";
@@ -222410,6 +222425,8 @@ var init_stayRange = __esm({
     DEFAULT_STAY_NIGHTS = 1;
     DEFAULT_MAX_STAY_NIGHTS = 30;
     DEFAULT_BOOKING_HORIZON_DAYS = 365;
+    MIN_MAX_STAY_NIGHTS = 1;
+    MAX_MAX_STAY_NIGHTS = DEFAULT_BOOKING_HORIZON_DAYS;
   }
 });
 
@@ -224974,12 +224991,14 @@ __export(shared_exports, {
   MAX_FEATURED_TYPES: () => MAX_FEATURED_TYPES,
   MAX_IN_FLOW_HOLD_EXTENSIONS: () => MAX_IN_FLOW_HOLD_EXTENSIONS,
   MAX_IN_FLOW_HOLD_MINUTES: () => MAX_IN_FLOW_HOLD_MINUTES,
+  MAX_MAX_STAY_NIGHTS: () => MAX_MAX_STAY_NIGHTS,
   MAX_PAYMENT_HOLD_WINDOW_HOURS: () => MAX_PAYMENT_HOLD_WINDOW_HOURS,
   MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS: () => MAX_ROOM_TYPE_PHOTOS,
   MAX_STAY_NIGHTS: () => MAX_STAY_NIGHTS,
   MIN_BREAKFAST_OVERRIDE_REASON_LENGTH: () => MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
+  MIN_MAX_STAY_NIGHTS: () => MIN_MAX_STAY_NIGHTS,
   MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
   OtherAddOnAuditEntrySchema: () => OtherAddOnAuditEntrySchema,
   OtherAddOnMarkRefundPaidSchema: () => OtherAddOnMarkRefundPaidSchema,
@@ -225068,6 +225087,7 @@ __export(shared_exports, {
   datesOverlap: () => datesOverlap,
   deriveReservationCounters: () => deriveReservationCounters,
   deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
+  describeMaxStayNights: () => describeMaxStayNights,
   diffNightsBetweenIso: () => diffNightsBetweenIso,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
@@ -225106,6 +225126,7 @@ __export(shared_exports, {
   isInFlowHoldActive: () => isInFlowHoldActive,
   isPaymentVerified: () => isPaymentVerified,
   isRewardVoucher: () => isRewardVoucher,
+  isUnlimitedStay: () => isUnlimitedStay,
   isValidBookingRef: () => isValidBookingRef,
   isValidIsoDate: () => isValidIsoDate,
   isValidLookupToken: () => isValidLookupToken,
@@ -225138,6 +225159,7 @@ __export(shared_exports, {
   recordSweepResult: () => recordSweepResult,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolveCurrentLevel: () => resolveCurrentLevel,
+  resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   resolveRangeSelection: () => resolveRangeSelection,
   runBackfill: () => runBackfill,

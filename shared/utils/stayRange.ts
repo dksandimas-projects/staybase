@@ -88,7 +88,15 @@ export interface NormalizeStayRangeOptions {
   previousNights?: number | null;
   /** Stay length used when there is no prior valid range to preserve. */
   defaultNights?: number;
-  /** Hard cap on stay length. */
+  /**
+   * Hard cap on stay length. Pass the output of
+   * `resolveMaxStayNights` — `Infinity` means "no limit" and is
+   * supported at every clamp site below (`n > Infinity` is never true,
+   * and `min(Infinity, horizonNights)` correctly degrades to the
+   * horizon). Do NOT pass the raw Firestore value: a literal `0` would
+   * reach `Math.max(Math.min(0, horizon), 1)` and collapse every stay
+   * to one night.
+   */
   maxNights?: number;
   /**
    * Latest legal check-out (booking horizon). Defaults to
@@ -115,6 +123,89 @@ export const DEFAULT_MAX_STAY_NIGHTS = 30;
 // 30 days out. Booking.com's horizon is ~a year; 365 days matches
 // that and matches how far ahead a boutique hotel realistically sells.
 export const DEFAULT_BOOKING_HORIZON_DAYS = 365;
+
+// ---------------------------------------------------------------------------
+// MSL-01 (2026-10-15): the stay-length cap becomes a per-hotel setting.
+//
+// The cap moves from a compile-time constant to
+// `settings/hotelConfig.maxStayNights` so the hotel decides it from
+// Settings instead of a code deploy. `resolveMaxStayNights` is the ONE
+// place that Firestore value crosses into stay-length arithmetic, and it
+// owns the whole mapping — including the two traps below, which is why
+// no call site ever passes a raw setting straight through.
+// ---------------------------------------------------------------------------
+
+/** Bounds for the admin-editable cap. `0` (unlimited) bypasses them entirely. */
+export const MIN_MAX_STAY_NIGHTS = 1;
+/**
+ * The effective cap is always `min(maxStayNights, horizonNights)` —
+ * a stay longer than the 365-day horizon is unreachable by
+ * construction, so capping the input at the horizon keeps the stored
+ * value honest instead of letting the operator store a number the
+ * horizon silently overrides.
+ */
+export const MAX_MAX_STAY_NIGHTS = DEFAULT_BOOKING_HORIZON_DAYS;
+
+/**
+ * Resolves the raw `settings/hotelConfig.maxStayNights` value into the
+ * number the clamp sites use. Returns `Infinity` for "no limit".
+ *
+ * Four distinct inputs, four distinct answers — collapsing any pair of
+ * them is the bug this function exists to prevent:
+ *
+ *   | Firestore value        | Result        | Why                                    |
+ *   |------------------------|---------------|----------------------------------------|
+ *   | absent / `null` / `""` | `30`          | legacy installs keep today's behavior  |
+ *   | `0`                    | `Infinity`    | admin explicitly chose "no limit"      |
+ *   | `0.5`                  | `1`           | floors, but MUST NOT floor to `0`      |
+ *   | `NaN` / negative       | `30`          | hand-edited garbage — never fail OPEN  |
+ *
+ * The `0.5 -> 1` row is the subtle one. Flooring happens after the
+ * `0` test, so a fractional value would floor to `0` and be read as
+ * "unlimited" — inverting the admin's intent. The `floored < MIN`
+ * guard runs last for exactly that reason.
+ *
+ * Note the absent-vs-zero asymmetry: `Number(undefined)` is `NaN`, so
+ * a naive resolver would read every un-migrated install as unlimited
+ * and quietly open every existing hotel to unbounded stays.
+ */
+export function resolveMaxStayNights(raw: unknown): number {
+  // Absent / null / empty -> the historical default, NOT unlimited.
+  if (raw === undefined || raw === null || raw === "") return DEFAULT_MAX_STAY_NIGHTS;
+
+  const value = Number(raw);
+  // Non-finite or negative = a hand-edited doc. Fail to the default,
+  // never to unlimited — failing open here is the expensive direction.
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_MAX_STAY_NIGHTS;
+
+  // Explicit zero is the admin's "no limit" choice. This is the ONLY
+  // input that produces `Infinity`.
+  if (value === 0) return Infinity;
+
+  const floored = Math.floor(value);
+  // Guards the fractional trap: `0.5` floors to `0` here, which would
+  // otherwise re-enter as an unlimited cap.
+  if (floored < MIN_MAX_STAY_NIGHTS) return MIN_MAX_STAY_NIGHTS;
+  return Math.min(floored, MAX_MAX_STAY_NIGHTS);
+}
+
+/**
+ * Human-readable cap for guest- and staff-facing copy. Returns
+ * `"no maximum"` when unlimited so the server's 400 and the picker's
+ * inline banner describe the same policy in the same words.
+ */
+export function describeMaxStayNights(maxNights: number): string {
+  return Number.isFinite(maxNights) ? `${maxNights} nights` : "no maximum";
+}
+
+/**
+ * True when the cap refuses nothing. Used to SKIP clamp messaging
+ * entirely — an unlimited hotel should never render "a single stay
+ * can run at most no maximum nights".
+ */
+export function isUnlimitedStay(maxNights: number): boolean {
+  return !Number.isFinite(maxNights);
+}
 
 /**
  * The one function every date surface should call before trusting a
@@ -286,7 +377,12 @@ export interface ResolveRangeSelectionOptions {
   minCheckIn: string;
   /** Latest legal check-out (the booking horizon). */
   maxCheckOut: string;
-  /** Longest stay the guest may book. Defaults to `DEFAULT_MAX_STAY_NIGHTS`. */
+  /**
+   * Longest stay the guest may book. Defaults to
+   * `DEFAULT_MAX_STAY_NIGHTS`; `Infinity` disables the length cap
+   * entirely (the horizon below still applies). Same resolve-first
+   * contract as `normalizeStayRange`'s `maxNights`.
+   */
   maxNights?: number;
 }
 
