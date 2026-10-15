@@ -237840,6 +237840,21 @@ var createBookingSchema = external_exports.object({
   breakfastSelections: breakfastSelectionsSchema.optional(),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
+async function loadMaxStayNights() {
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (!snap.exists) return resolveMaxStayNights(void 0);
+    return resolveMaxStayNights(snap.data()?.maxStayNights);
+  } catch {
+    return resolveMaxStayNights(void 0);
+  }
+}
+function buildMaxStayNightsError(res, maxNights) {
+  res.status(400).json({
+    success: false,
+    error: `Maximum stay length is ${describeMaxStayNights(maxNights)}. Please shorten your stay.`
+  });
+}
 async function handleCreateBooking(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -238017,24 +238032,9 @@ async function handleCreateBooking(req, res) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
-  async function loadMaxStayNights2() {
-    try {
-      const snap = await adminDb.collection("settings").doc("hotelConfig").get();
-      if (!snap.exists) return resolveMaxStayNights(void 0);
-      return resolveMaxStayNights(snap.data()?.maxStayNights);
-    } catch {
-      return resolveMaxStayNights(void 0);
-    }
-  }
-  function buildMaxStayNightsError2(res2, maxNights) {
-    res2.status(400).json({
-      success: false,
-      error: `Maximum stay length is ${describeMaxStayNights(maxNights)}. Please shorten your stay.`
-    });
-  }
-  const maxStayNights = await loadMaxStayNights2();
+  const maxStayNights = await loadMaxStayNights();
   if (numNights > maxStayNights) {
-    buildMaxStayNightsError2(res, maxStayNights);
+    buildMaxStayNightsError(res, maxStayNights);
     return;
   }
   const advanceDays = Math.round((checkInDate.getTime() - currentManilaDate.getTime()) / 864e5);

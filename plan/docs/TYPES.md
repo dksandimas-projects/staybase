@@ -816,6 +816,12 @@ HotelConfig {
   intercomQuickRequests: string[]
   notificationSoundUrl: string
   extraBedInventory?: number // EXB-10: 0/absent = no hotel-wide constraint
+  // MSL-01: maximum stay length in nights. 0 = NO LIMIT (explicit).
+  // Absent = fall back to the 30-night default, which is NOT the same
+  // as 0 — read it through `resolveMaxStayNights` in shared/utils/stayRange.ts
+  // rather than using the raw field, because `0` must become Infinity for
+  // the clamp arithmetic and must never reach it as a literal.
+  maxStayNights?: number // MSL-01: 0 = no limit; absent = 30-night default
 }
 
 // HotelConfig additions (in hotel.config.ts)

@@ -1469,6 +1469,47 @@ export const createBookingSchema = z.object({
 // `shared/utils/bookingDates.ts` and is imported as
 // `getManilaDateInfo` above. Local definitions removed BF-42.
 
+// Per MSL-01 (2026-10-15): the maximum stay length is a per-hotel
+// setting (`settings/hotelConfig.maxStayNights`), not a compile-time
+// constant, so the hotel raises or removes the cap from Settings
+// without a deploy.
+//
+// `resolveMaxStayNights` owns the whole raw-value mapping — in
+// particular `0` means "no limit" and must NEVER reach the clamp
+// arithmetic as a literal, where `Math.max(Math.min(0, horizon), 1)`
+// would collapse every stay to one night. Callers pass the RESOLVED
+// value only.
+//
+// Fails SAFE: any read error falls back to the default cap rather than
+// to unlimited. A Firestore blip must not open the hotel to unbounded
+// bookings, and the historical behavior on this path was "capped at
+// 30", so the fallback is also the no-regression choice.
+async function loadMaxStayNights(): Promise<number> {
+try {
+  const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+  if (!snap.exists) return resolveMaxStayNights(undefined);
+  return resolveMaxStayNights((snap.data() as Record<string, unknown> | undefined)?.maxStayNights);
+} catch {
+  return resolveMaxStayNights(undefined);
+}
+}
+
+/**
+ * MSL-01: the shared 400 for an over-cap stay. Kept in one place so
+ * the guest booking, walk-in, and reschedule paths refuse identically
+ * and quote the SAME live cap the guest's picker enforced — so the
+ * error names the number the guest was just shown.
+ *
+ * Only ever reached when a FINITE cap refused (`n > Infinity` is
+ * false), so `describeMaxStayNights` always yields "N nights" here.
+ */
+function buildMaxStayNightsError(res: any, maxNights: number): void {
+res.status(400).json({
+  success: false,
+  error: `Maximum stay length is ${describeMaxStayNights(maxNights)}. Please shorten your stay.`
+});
+}
+
 export async function handleCreateBooking(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -1688,47 +1729,6 @@ export async function handleCreateBooking(req: any, res: any) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
-
-// Per MSL-01 (2026-10-15): the maximum stay length is a per-hotel
-// setting (`settings/hotelConfig.maxStayNights`), not a compile-time
-// constant, so the hotel raises or removes the cap from Settings
-// without a deploy.
-//
-// `resolveMaxStayNights` owns the whole raw-value mapping — in
-// particular `0` means "no limit" and must NEVER reach the clamp
-// arithmetic as a literal, where `Math.max(Math.min(0, horizon), 1)`
-// would collapse every stay to one night. Callers pass the RESOLVED
-// value only.
-//
-// Fails SAFE: any read error falls back to the default cap rather than
-// to unlimited. A Firestore blip must not open the hotel to unbounded
-// bookings, and the historical behavior on this path was "capped at
-// 30", so the fallback is also the no-regression choice.
-async function loadMaxStayNights(): Promise<number> {
-  try {
-    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
-    if (!snap.exists) return resolveMaxStayNights(undefined);
-    return resolveMaxStayNights((snap.data() as Record<string, unknown> | undefined)?.maxStayNights);
-  } catch {
-    return resolveMaxStayNights(undefined);
-  }
-}
-
-/**
- * MSL-01: the shared 400 for an over-cap stay. Kept in one place so
- * the guest booking, walk-in, and reschedule paths refuse identically
- * and quote the SAME live cap the guest's picker enforced — so the
- * error names the number the guest was just shown.
- *
- * Only ever reached when a FINITE cap refused (`n > Infinity` is
- * false), so `describeMaxStayNights` always yields "N nights" here.
- */
-function buildMaxStayNightsError(res: any, maxNights: number): void {
-  res.status(400).json({
-    success: false,
-    error: `Maximum stay length is ${describeMaxStayNights(maxNights)}. Please shorten your stay.`
-  });
-}
 
   // G-02 (E2E audit 2026-07-17): enforce maximum stay length and
   // advance-booking window server-side before any Firestore work.

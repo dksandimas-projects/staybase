@@ -466,13 +466,19 @@ export type ProtectedPaymentMethod = (typeof PROTECTED_PAYMENT_METHODS)[number];
 // Enforced in the admin Payment Methods tab's file input.
 export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 
-// Maximum stay length in nights and maximum advance booking
-// window in days for public online bookings. Enforced server-side
-// before Firestore work. Walk-ins are exempt from the advance
-// window (staff may backfill past stays) but should enforce
-// stay-length limits.
-// These are documented business assumptions — review with the
-// hotel owner before changing.
+// Maximum advance-booking window in days for public online bookings.
+// Enforced server-side before Firestore work. Walk-ins are exempt
+// from the advance window (staff may backfill past stays).
+// Still a hardcoded constant — there is no admin setting for it.
+//
+// MSL-01 (2026-10-15): MAX_STAY_NIGHTS IS NO LONGER THE POLICY. The
+// stay-length cap moved to `settings/hotelConfig.maxStayNights` and is
+// read through `resolveMaxStayNights` (`shared/utils/stayRange.ts`).
+// The value below survives only as the legacy fallback for a doc that
+// has no field, so an un-migrated hotel behaves exactly as it did
+// before. Prefer `DEFAULT_MAX_STAY_NIGHTS` (same value, lives beside
+// the resolver) or `resolveMaxStayNights(...)` in new code — never
+// this constant, which no longer describes what the system enforces.
 export const MAX_STAY_NIGHTS = 30;
 export const MAX_ADVANCE_DAYS = 365;
 
