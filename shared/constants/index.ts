@@ -466,6 +466,32 @@ export type ProtectedPaymentMethod = (typeof PROTECTED_PAYMENT_METHODS)[number];
 // Enforced in the admin Payment Methods tab's file input.
 export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Per MBUX-04 (decision #256, 2026-10-15): the pre-compression size
+ * ceiling for a breakfast meal thumbnail uploaded from
+ * Settings -> Dining. Checked BEFORE compression, so a user on a slow
+ * connection gets an immediate "too large" instead of waiting on a
+ * canvas resize that will not help anyway.
+ *
+ * 8 MB rather than the QR cap's 2 MB: a meal photo is a real
+ * photograph, while a QR is deliberately monochrome. It is still an
+ * input ceiling, not a target — `compressImageFile` re-encodes to
+ * JPEG at 1200x1200 / quality 0.82, which lands well under it.
+ */
+export const MAX_BREAKFAST_MEAL_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Per MBUX-04: accepted meal-thumbnail input formats. Mirrors the
+ * spec's JPEG / PNG / WebP list. The re-encode target is always JPEG
+ * (photos, not logos), so PNG alpha and WebP source compression are
+ * flattened on upload.
+ */
+export const BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES: ReadonlyArray<string> = [
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+];
+
 // Maximum advance-booking window in days for public online bookings.
 // Enforced server-side before Firestore work. Walk-ins are exempt
 // from the advance window (staff may backfill past stays).

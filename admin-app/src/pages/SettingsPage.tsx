@@ -2283,6 +2283,8 @@ export function SettingsPage() {
     deletePaymentMethod,
     uploadPaymentMethodQr,
     resetPaymentMethodQr,
+    uploadBreakfastMealImage,
+    removeBreakfastMealImage,
     bookingSources,
     addBookingSource,
     updateBookingSource,
@@ -4453,6 +4455,51 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     ]);
   };
 
+  // Per MBUX-04 (decision #256, 2026-10-15): per-meal thumbnail
+  // upload state. Kept as a Set of meal ids rather than one global
+  // flag so an admin can see exactly which row is mid-upload in a
+  // table of rows.
+  const [uploadingMealImageIds, setUploadingMealImageIds] = useState<Set<string>>(new Set());
+
+  // Per MBUX-04: upload (or replace) one meal's thumbnail.
+  //
+  // ORDER MATTERS. The new object is uploaded FIRST and the catalog
+  // row is only repointed once the upload resolves. The superseded
+  // object is deleted LAST, after the row no longer references it.
+  // Reversing either step can leave the guest menu strip pointing at a
+  // deleted file — a broken image in front of a paying guest.
+  const handleUploadBreakfastMealImage = async (mealId: string, file: File | undefined) => {
+    if (!file) return;
+    const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
+    setUploadingMealImageIds((prev) => new Set(prev).add(mealId));
+    try {
+      const result = await uploadBreakfastMealImage(mealId, file);
+      if (result.success && result.url) {
+        handleUpdateBreakfastMeal(mealId, { imageUrl: result.url });
+        if (previousUrl) {
+          void removeBreakfastMealImage(mealId, previousUrl);
+        }
+      }
+    } finally {
+      setUploadingMealImageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(mealId);
+        return next;
+      });
+    }
+  };
+
+  // Per MBUX-04: clear a meal's thumbnail. The row is cleared first so
+  // the guest UI immediately falls back to its no-image state, then the
+  // object is best-effort removed.
+  const handleRemoveBreakfastMealImage = async (mealId: string) => {
+    const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
+    if (!previousUrl) return;
+    handleUpdateBreakfastMeal(mealId, { imageUrl: undefined });
+    await removeBreakfastMealImage(mealId, previousUrl);
+    toast.success("Meal image removed");
+  };
+
   const handleUpdateBreakfastMeal = (
     id: string,
     patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
@@ -6604,6 +6651,75 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                                 <span className="mt-1 block font-mono text-[10px] text-gray-400">
                                   id: {meal.id}
                                 </span>
+                                {/* Per MBUX-04 (decision #256, 2026-10-15):
+                                    the optional meal thumbnail. Upload /
+                                    preview / replace / remove, with
+                                    per-row progress. The image is OPTIONAL:
+                                    a meal with no file is a valid meal, and
+                                    the guest menu strip falls back to its
+                                    no-image tile rather than a broken img.
+                                    The row is saved through the ordinary
+                                    handleSaveBreakfast path, so the Zod
+                                    schema validates it like any other edit. */}
+                                <div
+                                  className="mt-2 flex items-center gap-2"
+                                  data-testid={`breakfast-meal-image-${meal.id}`}
+                                >
+                                  {meal.imageUrl ? (
+                                    <img
+                                      src={meal.imageUrl}
+                                      alt=""
+                                      // Consistent 4:3 crop per spec, so a
+                                      // mixed-format catalog still reads as
+                                      // one grid in the guest menu strip.
+                                      className="h-12 w-16 shrink-0 rounded border border-gray-200 bg-gray-100 object-cover"
+                                      style={{ aspectRatio: "4 / 3" }}
+                                    />
+                                  ) : (
+                                    <span
+                                      className="flex h-12 w-16 shrink-0 items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50 text-[9px] font-semibold uppercase tracking-wide text-gray-400"
+                                      aria-hidden="true"
+                                    >
+                                      No image
+                                    </span>
+                                  )}
+                                  <span className="flex flex-col gap-1">
+                                    <label className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded border border-primary px-2 text-[11px] font-semibold text-primary hover:bg-primary-light focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary">
+                                      {uploadingMealImageIds.has(meal.id)
+                                        ? "Uploading…"
+                                        : meal.imageUrl
+                                          ? "Replace image"
+                                          : "Upload image"}
+                                      <input
+                                        type="file"
+                                        className="sr-only"
+                                        data-testid={`breakfast-meal-image-input-${meal.id}`}
+                                        accept="image/jpeg,image/png,image/webp"
+                                        disabled={uploadingMealImageIds.has(meal.id)}
+                                        onChange={(e) => {
+                                          void handleUploadBreakfastMealImage(meal.id, e.target.files?.[0]);
+                                          // Reset so re-picking the SAME file
+                                          // fires change again — otherwise
+                                          // "replace" silently does nothing
+                                          // when the admin re-selects the
+                                          // identical file after a failed
+                                          // compression step.
+                                          e.target.value = "";
+                                        }}
+                                      />
+                                    </label>
+                                    {meal.imageUrl ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleRemoveBreakfastMealImage(meal.id)}
+                                        data-testid={`breakfast-meal-image-remove-${meal.id}`}
+                                        className="min-h-11 rounded border border-gray-200 px-2 text-[11px] font-semibold text-gray-600 hover:bg-gray-50"
+                                      >
+                                        Remove image
+                                      </button>
+                                    ) : null}
+                                  </span>
+                                </div>
                               </td>
                               <td className="px-2 py-2">
                                 <input

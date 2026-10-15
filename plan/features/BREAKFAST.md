@@ -95,10 +95,19 @@ BreakfastMeal {
   price: number                            // PHP, >= 0; "no longer offered" still shows the price as snapshot
   isActive: boolean                        // false = hidden from new orders, still shown on existing bookings
   displayOrder: number                     // asc, for the meal picker
+  imageUrl?: string                        // MBUX-04 (decision #256): OPTIONAL guest-safe thumbnail URL
   createdAt: Timestamp
   updatedAt: Timestamp
 }
 ```
+
+**Optional meal image (MBUX-04, decision #256, shipped 2026-10-15):** `imageUrl` is additive and optional — every existing meal without an image stays valid, and the guest Step 2 menu strip falls back to a no-image tile. Three contracts come with it:
+
+1. **The field must exist in `BreakfastMealSchema`, not only in the TypeScript type.** Zod's `z.object` strips unknown keys, so a schema without `imageUrl` would silently delete the admin's uploaded URL on the next dining-settings save — the upload would appear to succeed and then vanish. An empty string is rejected; "no image" is expressed by OMITTING the field.
+2. **`normalizeBreakfastConfig` drops anything that is not an absolute `http(s)` URL** and returns `undefined` rather than `""`, so a malformed catalog row degrades to the fallback tile instead of a broken `<img src>`. Only the rendered reference crosses the public boundary — Storage metadata stays admin-side.
+3. **The image is never snapshotted onto a booking.** `breakfastSelections` entries are built field-by-field (`mealId` + `mealName` + `price`), so editing or deleting a catalog image cannot rewrite the appearance of a historical booking or affect any total.
+
+Stored at `breakfast-meals/{mealId}/{fileName}` in Firebase Storage — public read (the guest menu renders it inline), staff-only write. The `{mealId}` segment prevents a replace on one meal from clobbering another's object. Admin upload order is upload → repoint the catalog row → THEN delete the superseded object, so the guest menu can never be left pointing at a deleted file.
 
 **Delete rule:** a meal with `isActive: false` cannot be reactivated to a different `price` if any `bookings/*` snapshot references it (the snapshot keeps the original price). A meal can be `isActive: false`'d but not deleted; the meal is hidden from new order UIs and stays visible in the meal catalog as "(inactive)".
 

@@ -34,6 +34,15 @@ export interface PublicBreakfastMeal {
   description: string;
   price: number;
   displayOrder: number;
+  /**
+   * Per MBUX-04 (decision #256, 2026-10-15): the guest-safe meal
+   * thumbnail URL, or omitted when the catalog has no image.
+   *
+   * Only the rendered reference crosses the public boundary — the
+   * Storage object path, metadata, size, and content type stay on the
+   * admin side. The guest needs the URL and nothing else.
+   */
+  imageUrl?: string;
 }
 
 const ADMIN_ONLY_FIELDS: ReadonlySet<keyof BreakfastConfig> = new Set([
@@ -63,6 +72,27 @@ function safeBool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+/**
+ * Per MBUX-04: normalize an optional image URL down to either a
+ * syntactically valid absolute URL or "absent".
+ *
+ * Returning `undefined` (rather than "") matters because the guest
+ * fallback thumbnail keys off the field's PRESENCE. A meal with
+ * `imageUrl: ""` would render a broken `<img src>` instead of the
+ * fallback, so a malformed value is dropped here at the read boundary
+ * rather than crashing the Step 2 menu strip later.
+ */
+function safeImageUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined;
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
 function safeMeals(meals: unknown): PublicBreakfastMeal[] {
   if (!Array.isArray(meals)) return [];
   return meals
@@ -73,7 +103,10 @@ function safeMeals(meals: unknown): PublicBreakfastMeal[] {
       name: safeString(entry.name, "Unnamed meal"),
       description: safeString(entry.description, ""),
       price: nonNegativeFinite(entry.price),
-      displayOrder: nonNegativeFinite(entry.displayOrder)
+      displayOrder: nonNegativeFinite(entry.displayOrder),
+      // `undefined` keys are dropped by JSON.stringify on the wire, so
+      // a meal without an image costs nothing in the public payload.
+      ...(safeImageUrl(entry.imageUrl) ? { imageUrl: safeImageUrl(entry.imageUrl) } : {})
     }))
     .filter((entry) => entry.id.length > 0)
     .sort((a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name));

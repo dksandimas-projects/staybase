@@ -84,6 +84,18 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
+    // Per MBUX-04 (decision #256, 2026-10-15): optional breakfast
+    // meal thumbnails, uploaded from Settings → Dining. Public read —
+    // the guest Step 2 add-ons menu strip renders them inline, and
+    // the reference is a normal Firebase download URL. Staff-only
+    // write. The `{mealId}` segment scopes each meal's folder so a
+    // replace on one meal can never overwrite another meal's object
+    // (the same discipline the payment-method QR path uses).
+    match /breakfast-meals/{mealId}/{fileName} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
     match /store-items/{itemId}/{fileName} {
       allow read: if true;
       allow write: if isStaff();

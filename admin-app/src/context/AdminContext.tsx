@@ -28,6 +28,8 @@ import {
   DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_ROOM_TYPES,
   MAX_PAYMENT_METHOD_QR_BYTES,
+  MAX_BREAKFAST_MEAL_IMAGE_BYTES,
+  BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES,
   MAX_ROOM_TYPE_PHOTOS,
   Notification,
   type NotificationType,
@@ -1150,6 +1152,21 @@ export interface AdminContextType {
     file: File
   ) => Promise<{ success: boolean; error?: string; url?: string }>;
   resetPaymentMethodQr: (method: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Per MBUX-04 (decision #256, 2026-10-15) — optional breakfast
+  // meal thumbnails managed from Settings -> Dining. Both return the
+  // new absolute URL / nothing rather than writing Firestore
+  // themselves: the caller merges `imageUrl` into the meal row and
+  // saves through the normal `handleSaveBreakfast` path, so the
+  // Zod schema validates the row like any other edit.
+  uploadBreakfastMealImage: (
+    mealId: string,
+    file: File
+  ) => Promise<{ success: boolean; error?: string; url?: string }>;
+  removeBreakfastMealImage: (
+    mealId: string,
+    previousUrl: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // Audio Notifications & Intercom Counts
   unreadIntercomCount: number;
@@ -6858,6 +6875,76 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   // The download URL is written into
   // `settings/hotelConfig.paymentMethods[i].qrUrl` via merged
   // `setDoc`. The previous QR is best-effort deleted from Storage.
+  // Per MBUX-04 (decision #256, 2026-10-15): upload the optional
+  // thumbnail for one breakfast meal.
+  //
+  // Deliberately does NOT write Firestore. The Settings meal editor
+  // owns the catalog row, so the URL is returned to the caller, which
+  // merges it into the local meal state and saves through the ordinary
+  // `handleSaveBreakfast` path. That keeps one writer for the catalog
+  // (no second code path that can bypass `BreakfastConfigSchema`) and
+  // keeps the Zod strip behaviour I had to fix in one place.
+  //
+  // Shape follows `uploadPaymentMethodQr`: compress -> upload ->
+  // resolve download URL -> best-effort delete of the superseded
+  // object. The delete is AFTER a successful upload, so a failed
+  // upload never leaves the meal pointing at a deleted file.
+  const uploadBreakfastMealImage = async (
+    mealId: string,
+    file: File
+  ): Promise<{ success: boolean; error?: string; url?: string }> => {
+    if (!BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES.includes(file.type)) {
+      const err = "Choose a JPEG, PNG, or WebP image.";
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+    if (file.size > MAX_BREAKFAST_MEAL_IMAGE_BYTES) {
+      const err = `Image must be smaller than ${Math.round(MAX_BREAKFAST_MEAL_IMAGE_BYTES / 1024 / 1024)} MB.`;
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+    try {
+      // Re-encode to JPEG at 1200x1200 / q0.82. The guest menu strip
+      // renders a small 4:3 thumbnail, so 1200px is already generous
+      // and keeps the download light on a phone connection.
+      const compressed = await compressImageFile(file, {
+        maxWidth: 1200,
+        maxHeight: 1200,
+        quality: 0.82
+      });
+      const safeName = compressed.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileRef = storageRef(storage, `breakfast-meals/${mealId}/${Date.now()}-${safeName}`);
+      await uploadBytes(fileRef, compressed.file);
+      const url = await getDownloadURL(fileRef);
+      notify.success("Meal image uploaded");
+      return { success: true, url };
+    } catch (uploadErr) {
+      const err = uploadErr instanceof Error ? uploadErr.message : "Unable to upload the image.";
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+  };
+
+  // Per MBUX-04: delete a meal's superseded thumbnail. Callers pass
+  // the PREVIOUS url and only invoke this once the catalog row already
+  // points at the replacement (or no longer points at any image), so
+  // the guest menu can never be left referencing a deleted object.
+  // Best-effort: a Storage failure logs and is swallowed, because the
+  // orphaned object is a cleanup nit, not a broken booking path.
+  const removeBreakfastMealImage = async (
+    mealId: string,
+    previousUrl: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!previousUrl) return { success: true };
+    try {
+      await deleteObject(storageRef(storage, previousUrl));
+      return { success: true };
+    } catch (storageErr) {
+      console.warn(`Storage delete for previous meal image ${previousUrl} skipped:`, storageErr);
+      return { success: true };
+    }
+  };
+
   const uploadPaymentMethodQr = async (
     method: string,
     file: File
@@ -7980,6 +8067,8 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         reorderPaymentMethods,
         deletePaymentMethod,
         uploadPaymentMethodQr,
+        uploadBreakfastMealImage,
+        removeBreakfastMealImage,
         resetPaymentMethodQr,
         bookingSources,
         addBookingSource,

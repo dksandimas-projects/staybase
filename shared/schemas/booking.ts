@@ -384,6 +384,22 @@ export const BreakfastMealSchema = z.object({
   price: z.number().min(0).max(10000),
   isActive: z.boolean(),
   displayOrder: z.number().int().min(0).max(1000),
+  /**
+   * Per MBUX-04 (decision #256, 2026-10-15): optional meal thumbnail.
+   *
+   * THIS FIELD MUST STAY IN THE SCHEMA. Zod's `z.object` STRIPS
+   * unknown keys by default, so a schema without `imageUrl` would
+   * silently delete the admin's uploaded URL on every
+   * `handleSaveBreakfast` write — the upload would appear to succeed
+   * and then vanish the next time anyone touched dining settings.
+   * That is a far worse failure than a rejected save, which is why
+   * the field is declared here rather than left to the default strip.
+   *
+   * `.url()` keeps only real absolute URLs; an empty string is
+   * rejected rather than stored, because "no image" is represented
+   * by OMITTING the field, not by an empty URL.
+   */
+  imageUrl: z.string().url().max(2000).optional(),
   createdAt: z.union([z.string(), z.any()]).optional(),
   updatedAt: z.union([z.string(), z.any()]).optional()
 });

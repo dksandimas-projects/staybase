@@ -1047,6 +1047,18 @@ export interface BreakfastMeal {
   isActive: boolean;
   /** Asc; drives the meal-picker sort. */
   displayOrder: number;
+  /**
+   * Per MBUX-04 (decision #256, 2026-10-15): optional guest-safe
+   * download URL for a meal thumbnail. OMITTED entirely (not empty
+   * string) when no image is set, so "no image" is unambiguous.
+   *
+   * Deliberately NOT snapshotted onto a booking. `breakfastSelections`
+   * entries are built field-by-field (`mealId` + `mealName` + `price`),
+   * so a catalog image can never leak into, or later mutate, a
+   * historical booking or financial record — see
+   * `BOOKING-MOBILE-UX.md §Snapshot invariant`.
+   */
+  imageUrl?: string;
   createdAt: Timestamp | string;
   updatedAt: Timestamp | string;
 }
