@@ -2202,37 +2202,51 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                         )}
                       </div>
 
-                      {/* Select Toggle — Per BR-03
-                          (2026-10-12, decision #232): the
-                          legacy "Room + Breakfast" toggle
-                          is GONE on the corporate flow too.
-                          The flat-rate breakfast model is
-                          replaced by the per-guest × per-date
-                          `breakfastSelections` rich shape —
-                          guests pick their meals (or skip)
-                          on a per-day grid in Step 2 instead
-                          of an all-or-nothing toggle here.
-                          The corporate flow currently
-                          defaults `breakfastSelections` to
-                          an empty `{}`; a follow-up ticket
-                          will add the per-guest grid (the
-                          corporate Step 2 reuses the same
-                          `BookingReviewAside` shell, so the
-                          Step 1 cleanup is the only
-                          breaking-shape change here). */}
-                      <div className="mt-5 grid grid-cols-1 gap-2">
-                        <button
-                          type="button"
-                          className={cn(
-                            "h-10 rounded-lg text-xs font-semibold border transition flex items-center justify-center",
-                            rateChoice === "room-only" && isSelected
-                              ? "bg-primary-light border-primary text-primary"
-                              : "border-gray-200 hover:border-gray-300 text-gray-700"
-                          )}
-                          onClick={() => selectRoomType(type.value, "room-only")}
-                        >
-                          Room Only
-                        </button>
+                      {/* Per MBUX-09 (decision #261): the lone "Room Only"
+                          button is the same vestigial
+                          single-option panel MBUX-02 deleted
+                          on the public flow. BR-03 (decision
+                          #232) removed "Room + Breakfast" here
+                          TOO — see the note above — so this
+                          was never a rate CHOICE. It was a
+                          "select this room type" action
+                          dressed as a rate option, which gave
+                          the guest one control that did one
+                          thing.
+
+                          It becomes a plain, honest
+                          full-width select action and the CARD
+                          carries the selected state. Quantity
+                          is deliberately NOT added here:
+                          corporate distributes guests per room
+                          in a later step (`distributedRoomCart`),
+                          so a per-type stepper at this point
+                          would be a second, conflicting source
+                          of truth. `selectRoomType` is kept
+                          as-is because it owns the
+                          `roomType`/`checkIn`/`checkOut`/
+                          `guests` URL writes that deep-link
+                          and back-navigation depend on. */}
+                      <div className="mt-5">
+                        {isSelected ? (
+                          <div
+                            data-testid="corporate-room-selected"
+                            aria-current="true"
+                            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-primary bg-primary-light px-4 text-sm font-semibold text-primary"
+                          >
+                            <Check size={16} aria-hidden="true" />
+                            Selected
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            data-testid="corporate-room-select"
+                            onClick={() => selectRoomType(type.value, "room-only")}
+                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-primary bg-primary px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                          >
+                            Select this room
+                          </button>
+                        )}
                       </div>
                     </div>
                   </motion.article>
@@ -2402,7 +2416,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
         <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
           <motion.form
             animate="visible"
-            className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
+            className="order-2 lg:order-1 rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
             initial={shouldReduceMotion ? false : "hidden"}
             variants={staggerContainer}
             onSubmit={(e) => e.preventDefault()}
@@ -2756,7 +2770,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
         </section>
 
         <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
-          <div className="space-y-6">
+          <div className="order-2 lg:order-1 space-y-6">
             
             {/* Info review block */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
@@ -3258,8 +3272,14 @@ function BookingReviewAside({
   const roomTotal = ratePerNight * nights;
   const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
 
+  // Per MBUX-09 (decision #261), mirroring MBUX-07 on the public
+  // flow: below `lg:` the grid is one column, so the summary — the
+  // thing the guest came to check — rendered BELOW the whole
+  // payment/verification form. CSS `order` moves ONE node; there is
+  // no second copy of the summary that could drift. The class lives
+  // on the <aside> itself so both review steps inherit it.
   return (
-    <aside className="lg:sticky lg:top-36 lg:self-start">
+    <aside className="order-1 lg:order-2 lg:sticky lg:top-36 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
         <img src={typeImageUrls[0]} alt={typeLabel} className="h-52 w-full object-cover" />
         <div className="p-5">
