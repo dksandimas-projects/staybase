@@ -68,6 +68,14 @@ body {
   --rdp-range_end-color: #fff;
 }
 
+.spark-date-range .rdp-months {
+  /* react-day-picker sizes `.rdp-months` with `max-width: fit-content`,
+     which left-aligns the grid and leaves a ragged dead strip down the
+     right side of the full-width sheet. Centre it; the month nav is
+     absolutely positioned inside `.rdp-months`, so it travels with it. */
+  margin-inline: auto;
+}
+
 .spark-date-range .rdp-button_previous,
 .spark-date-range .rdp-button_next {
   color: var(--rdp-accent-color);

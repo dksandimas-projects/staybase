@@ -248,8 +248,20 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
   it("layers the calendar over the page on phones only (DR-03)", () => {
     // Inline on mobile the grid fell below the fold and was clipped by
     // the sticky cart bar, so a guest could not see most of it.
-    expect(pickerSrc).toMatch(/fixed inset-x-0 bottom-0 top-16 overflow-y-auto/);
+    // Sized to its CONTENT and anchored to the bottom edge. It used to
+    // stretch `top-16` -> `bottom-0`, so a five-row month left roughly
+    // half the screen as dead white space below Done. No `top` means
+    // height:auto; `max-h` caps it and only then does it scroll.
+    expect(pickerSrc).toMatch(
+      /fixed inset-x-0 bottom-0 max-h-\[calc\(100dvh-4rem\)\] overflow-y-auto/
+    );
+    expect(pickerSrc).not.toMatch(/bottom-0 top-16/);
+    expect(pickerSrc).toMatch(/md:max-h-none/);
     expect(pickerSrc).toMatch(/md:static/);
+    // The grid is content-width by default, which left-aligned it and
+    // left a dead strip down the right of the full-width sheet.
+    expect(stylesSrc).toMatch(/\.spark-date-range \.rdp-months/);
+    expect(stylesSrc).toMatch(/margin-inline: auto/);
     // The backdrop is phone-only — dimming the page behind an inline
     // desktop card would be wrong.
     expect(pickerSrc).toMatch(/fixed inset-0 z-40 bg-gray-950\/40 md:hidden/);
@@ -257,6 +269,13 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
     expect(pickerSrc).toMatch(/aria-label="Close calendar"/);
     expect(pickerSrc).toMatch(/className="flex h-11 w-11 items-center justify-center/);
     expect(pickerSrc).toMatch(/style=\{\{ backgroundColor: config\.colors\.primary \}\}/);
+    // Full width: it is the primary action and sits in the thumb zone.
+    // And the instruction is NOT repeated below — the sheet header
+    // already carries it, so a second copy was duplicate text.
+    expect(pickerSrc).toMatch(
+      /min-h-11 w-full rounded-lg px-4 text-sm font-semibold text-white md:hidden/
+    );
+    expect(pickerSrc).toMatch(/className="hidden text-xs text-gray-500 md:inline"/);
   });
 });
 

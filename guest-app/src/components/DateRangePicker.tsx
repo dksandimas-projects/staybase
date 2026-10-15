@@ -330,13 +330,18 @@ export function DateRangePicker({
           <div
             className={cn(
               "spark-date-range z-50 border border-gray-200 bg-white shadow-sm",
-              // Phones: a full-screen sheet that scrolls on its own. Inline
-              // in the booking flow the calendar was pushed below the fold
-              // and clipped by the sticky cart bar, so a guest on a phone
-              // could not see most of the grid at all.
-              "fixed inset-x-0 bottom-0 top-16 overflow-y-auto overscroll-contain rounded-t-card p-4",
+              // Phones: a bottom sheet sized to its CONTENT and anchored to
+              // the bottom edge. It used to stretch from `top-16` to
+              // `bottom-0`, so a five-row month left roughly half the
+              // screen as dead white space below the Done button. No
+              // `top` means height:auto; `max-h` caps it for short
+              // viewports and two-month layouts, and only then does it
+              // scroll. It still has to overlay the page — inline, the
+              // grid fell below the fold and was clipped by the sticky
+              // cart bar.
+              "fixed inset-x-0 bottom-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain rounded-t-card p-4",
               // Desktop: back to an inline card in the flow.
-              "md:static md:inset-auto md:z-auto md:overflow-visible md:rounded-card md:p-3",
+              "md:static md:inset-auto md:z-auto md:max-h-none md:overflow-visible md:rounded-card md:p-3",
             )}
             // Hard rule: all primary CTAs use `config.colors.primary`.
             // react-day-picker ships a blue default for the selected
@@ -393,16 +398,23 @@ export function DateRangePicker({
               >
                 Close
               </button>
-              <span className="text-xs text-gray-500">
+              {/* Phones already show this instruction in the sheet
+                  header, so repeating it down here was duplicate text
+                  competing with the only control that matters. Desktop
+                  keeps the inline hint because it has no header row
+                  there. */}
+              <span className="hidden text-xs text-gray-500 md:inline">
                 {checkInIso && !checkOutIso
                   ? "Now pick a check-out date."
                   : "Select a check-in, then a check-out date."}
               </span>
               {/* Phones get an explicit Done affordance — the sheet has no
-                  click-outside affordance, and the header X is small. */}
+                  click-outside affordance, and the header X is small. Full
+                  width because it is the primary action and sits in the
+                  thumb zone at the bottom of the sheet. */}
               <button
                 type="button"
-                className="min-h-11 rounded-lg px-4 text-sm font-semibold text-white md:hidden"
+                className="min-h-11 w-full rounded-lg px-4 text-sm font-semibold text-white md:hidden"
                 style={{ backgroundColor: config.colors.primary }}
                 onClick={() => setOpen(false)}
               >
