@@ -688,7 +688,6 @@ export function BookingPage() {
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [paymentProofError, setPaymentProofError] = useState("");
 
-  const [termsConsent, setTermsConsent] = useState(false);
   // Per BR-03 (2026-10-12, decision #232): the new
   // per-guest × per-date `breakfastSelections` rich
   // shape. Keyed by `${date}-${guestSlot}` (e.g.
@@ -1235,6 +1234,20 @@ export function BookingPage() {
   };
   const canContinueToReview =
     Object.values(guestErrors).every((error) => !error) && guestDetails.consent && cartIsReady;
+  // Per MBUX-06: the footer summary names the FIRST outstanding
+  // correction instead of the generic "Complete required fields and
+  // consent", which told a guest nothing about what to do next. The
+  // order matches `focusFirstGuestDetailCorrection` so the summary and
+  // the focus target can never disagree.
+  const firstGuestDetailCorrectionLabel = (() => {
+    if (guestErrors.firstName) return "First name is required";
+    if (guestErrors.lastName) return "Last name is required";
+    if (guestErrors.email) return "Enter a valid email address";
+    if (guestErrors.phone) return "Phone number is required";
+    if (guestErrors.guestCount) return "Assign every guest to a room on the previous step";
+    if (!guestDetails.consent) return "Accept the privacy and terms consent below";
+    return "Complete required fields and consent";
+  })();
   // Per BR-08 (decision #238, 2026-10-14 — close-out): the
   // legacy per-night `breakfastRate × guests` display is gone.
   // The Step 2 breakfast section shows the per-meal picker
@@ -1929,7 +1942,13 @@ export function BookingPage() {
             // untouched (back-compat for any third-party
             // caller that still posts it) but the client
             // doesn't carry the input anymore.
-            consent: termsConsent
+            // Per MBUX-06 (decision #258): `guestDetails.consent`
+            // (the Step 3 checkbox) is the single authoritative
+            // consent value. The Step 4 duplicate is gone, so the wire
+            // field is written from the same source the server
+            // validates — `handleCreateBooking` throws a 400 when
+            // `guestDetails.consent` is false.
+            consent: guestDetails.consent
           },
           discountType: discountType === "none" ? "" : discountType,
           discountIdPhotoUrl: null,
@@ -2061,6 +2080,46 @@ export function BookingPage() {
       ...current,
       [field]: true
     }));
+  }
+
+  // Per MBUX-06 (decision #258): when the guest taps Continue with
+  // something still missing, identify the FIRST correction, reveal its
+  // inline error, and move focus there.
+  //
+  // The pre-MBUX-06 footer rendered a permanently `disabled` Continue
+  // button. A disabled button is unfocusable, so a keyboard or screen
+  // reader user could not reach it at all, and a tapping user got a
+  // dead control and no explanation — the only feedback was a footer
+  // summary line several scroll-heights away. The button now always
+  // reads "Continue to review"; when the form is incomplete it becomes
+  // an actionable button instead of a dead one.
+  //
+  // Field order matches visual/DOM order so focus moves to the first
+  // thing a sighted guest would fix first. The consent checkbox is
+  // last because it sits below the whole form.
+  function focusFirstGuestDetailCorrection(): void {
+    const candidates: Array<{ field: GuestField; elementId: string }> = [
+      { field: "firstName", elementId: "firstName" },
+      { field: "lastName", elementId: "lastName" },
+      { field: "email", elementId: "email" },
+      { field: "phone", elementId: "phone" },
+      // `guestCount` has no focusable control on this step — the cart
+      // lives on Step 1 — so it is surfaced through the inline guest
+      // label instead of by stealing focus.
+      { field: "guestCount", elementId: "guest-count-label" }
+    ];
+    const firstBadField = candidates.find((candidate) => guestErrors[candidate.field]);
+    if (firstBadField) {
+      markTouched(firstBadField.field);
+      const el = document.getElementById(firstBadField.elementId);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
+      return;
+    }
+    // Every field is valid, so the blocker must be consent.
+    const consentEl = document.getElementById("consentStep2");
+    consentEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+    consentEl?.focus({ preventScroll: true });
   }
 
   const getBackToPath = () => {
@@ -2782,6 +2841,13 @@ export function BookingPage() {
                   `SpecialRequestsBlock` above. */}
             </motion.div>
 
+            {/* Per MBUX-06 (decision #258): this is the SINGLE
+                authoritative booking consent control for the whole flow.
+                The duplicate Step 4 checkbox is deleted, and the create
+                payload + the Confirm gate both read `guestDetails.consent`
+                — the same field the server's `guestDetailsSchema`
+                validates. Keeping one control means a guest cannot tick
+                one box and be silently rejected on the other. */}
             <motion.div className="mt-6 rounded-card bg-primary-light p-4" variants={staggerChild}>
               <label htmlFor="consentStep2" className="flex items-start gap-3 text-sm leading-6 text-gray-700 cursor-pointer">
                 <input
@@ -2800,15 +2866,25 @@ export function BookingPage() {
                   and{" "}
                   <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
                     Terms of Service
-                  </Link>{" "}
-                  and consent to the collection of my personal data for booking purposes.
+                  </Link>
+                  , and consent to my details being used to process this booking.
                 </span>
               </label>
             </motion.div>
 
-            <motion.div className="mt-6 flex gap-3 rounded-lg bg-gray-50 p-4 text-sm text-gray-700" variants={staggerChild}>
-              <ShieldCheck size={18} className="mt-0.5 shrink-0 text-primary" />
-              <p>Your personal details are collected securely in accordance with the Data Privacy Act of 2012.</p>
+            {/* Per MBUX-06: the spec's "large privacy explanation"
+                becomes a COMPACT secure-handling line. The consent
+                checkbox above now carries the whole obligation in one
+                sentence, so a second four-line paragraph repeating it
+                was pure weight on a phone. The RA 10173 reference is
+                kept — it is the compliance-relevant fact — but the
+                layout is a single inline line rather than a boxed
+                paragraph. */}
+            <motion.div className="mt-4 flex items-center gap-2 text-xs text-gray-600" variants={staggerChild}>
+              <ShieldCheck size={14} className="shrink-0 text-primary" aria-hidden />
+              <p data-testid="booking-secure-handling-note">
+                Details are stored securely under the Data Privacy Act of 2012.
+              </p>
             </motion.div>
           </motion.form>
 
@@ -2882,7 +2958,9 @@ export function BookingPage() {
             <>
               <p className="text-sm text-gray-600">Guest details</p>
               <p className="text-lg font-semibold text-gray-950">
-                {canContinueToReview ? "Ready for review and payment" : "Complete required fields and consent"}
+                {canContinueToReview
+                  ? "Ready for review and payment"
+                  : firstGuestDetailCorrectionLabel}
               </p>
             </>
           }
@@ -2898,7 +2976,15 @@ export function BookingPage() {
                 Continue to review
               </PrimaryButton>
             ) : (
-              <PrimaryButton disabled type="button" className="sm:min-w-56">
+              // Per MBUX-06: NOT disabled. An unreachable control that
+              // silently does nothing is worse than one that says what
+              // is wrong and takes you there.
+              <PrimaryButton
+                type="button"
+                onClick={focusFirstGuestDetailCorrection}
+                className="sm:min-w-56"
+                data-testid="booking-guest-details-continue"
+              >
                 Continue to review
               </PrimaryButton>
             )}
@@ -2914,21 +3000,25 @@ export function BookingPage() {
     // until the Turnstile token has been received — submitting
     // without one is a guaranteed 400 now that the server bypass
     // is gone (BI-02).
-    // Per NBS-2026-08-08 (F5, booking-flow audit 2026-08-08):
-    // the previous `canConfirm` only read `termsConsent` (the
-    // Step 3 checkbox), but the server's `guestDetailsSchema`
-    // validates `guestDetails.consent` (the Step 2 consent
-    // field) — `handleCreateBooking:1364` throws a 400
-    // "Privacy policy consent is required." when the Step 2
-    // box is unchecked and the Step 3 box is checked. The
-    // gate now ANDs both checkboxes so the guest sees the
-    // missing-consent CTA on Step 3 instead of a server
-    // 400. The duplicate-checkbox UX (Step 2 + Step 3 both
-    // ask the same question) is a pre-existing smell — a
-    // future refactor should consolidate to a single source
-    // of truth; the fix here is the minimum that prevents
-    // the silent server 400.
-    const canConfirm = guestDetails.consent && termsConsent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
+    // HISTORY, kept because the trap it describes is still live.
+    //
+    // NBS-2026-08-08 (F5) found that the server's
+    // `guestDetailsSchema` validates `guestDetails.consent`, while
+    // the client gate was reading a DIFFERENT checkbox — so ticking
+    // the client one passed the UI and still produced a server 400
+    // ("Privacy policy consent is required."). The temporary fix
+    // was to AND both checkboxes together.
+    //
+    // MBUX-06 (decision #258) completes the consolidation that
+    // comment asked for: the duplicate checkbox is deleted and
+    // `guestDetails.consent` — the value the SERVER validates — is
+    // the single source of truth for the UI gate, the create payload,
+    // and the "confirm your consent" CTA copy.
+    //
+    // The lesson generalises: whenever the client gates on a value
+    // the server does not validate, the gate is decorative. There is
+    // now exactly one consent value and the server reads the same one.
+    const canConfirm = guestDetails.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
 
     return bookingShell(
       <>
@@ -3444,31 +3534,21 @@ export function BookingPage() {
                 </div>
               </details>
             </div>
+            {/* Per MBUX-06 (decision #258): the duplicate Step 4 terms
+                checkbox is REMOVED. Step 3's `guestDetails.consent` is
+                now the single authoritative consent control — see the
+                `canConfirm` note above.
 
-            {/* Terms and conditions */}
-            <div className="mt-6">
-              <label htmlFor="termsConsent" className="flex items-start gap-3 cursor-pointer text-sm leading-6 text-gray-700">
-                <input
-                  id="termsConsent"
-                  name="termsConsent"
-                  type="checkbox"
-                  checked={termsConsent}
-                  onChange={(e) => setTermsConsent(e.target.checked)}
-                  className="mt-1 h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                <span>
-                  I have read and agree to {config.brandName}'s{" "}
-                  <Link to="/privacy" target="_blank" className="font-semibold text-primary underline">
-                    Privacy Policy
-                  </Link>{" "}
-                  and{" "}
-                  <Link to="/terms" target="_blank" className="font-semibold text-primary underline">
-                    Terms of Service
-                  </Link>
-                  . I understand that my booking is subject to the cancellation policy selected.
-                </span>
-              </label>
-            </div>
+                The line this checkbox carried that Step 3 does NOT have
+                — "I understand that my booking is subject to the
+                cancellation policy selected" — is not silently lost:
+                the cancellation-policy disclosure sits directly above
+                and is always rendered. The guest READS the policy
+                there; they do not tick it a second time.
+
+                Kept intact: the Cloudflare Turnstile challenge below, the
+                proof-of-payment upload, and the payment-method panel.
+                None of them were part of the consent question. */}
 
             {/* Cloudflare Turnstile Challenge */}
             <div
@@ -3615,8 +3695,6 @@ export function BookingPage() {
                   // trip on the server.
                   : !guestDetails.consent
                   ? "Confirm your guest details consent on the previous step"
-                  : !termsConsent
-                  ? "Agree to terms and conditions"
                   : isIdUploadRequired
                   ? "Please upload your Senior/PWD ID"
                   : isPaymentProofRequired

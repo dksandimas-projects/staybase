@@ -284,6 +284,37 @@ Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step
 - [ ] **"Existing other add-ons as progressive cards" is vacuous** — Step 2 has breakfast only; the other-add-ons catalogue is not implemented in the guest flow. `addOnCount` is therefore derived from breakfast selections alone rather than hardcoded to a wider formula that does not exist yet.
 - [ ] The optional thumbnail **preview modal** (spec says "may open") is deferred. The strip's no-photo / loading / failed states are the contract MBUX-10 must verify.
 
+## Step 3 Essential Guest Details (MBUX-06, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #258. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 3 — Guest Details`. Public `/book` flow.
+
+### One authoritative consent control
+
+- [x] **The duplicate Step 4 terms checkbox is deleted** and `termsConsent` no longer exists. `guestDetails.consent` (the Step 3 checkbox) is the single value read by the Confirm gate, the create payload, and the server.
+- [x] **This closes a real defect, not a cosmetic one.** NBS-2026-08-08 (F5) found the server validating `guestDetails.consent` while the UI gate read a different checkbox — so a guest could pass the UI and receive a server 400. F5's workaround ANDed both boxes and deferred the real fix; this is the real fix.
+- [x] **Rule to carry forward: when the client gates on a value the server does not validate, the gate is decorative.** Gate, payload, and server now read the same field.
+- [x] The consent checkbox links both `/privacy` and `/terms`.
+- [x] The line the deleted checkbox carried ("I understand that my booking is subject to the cancellation policy selected") is not lost — the cancellation-policy disclosure is always rendered on Step 4, so the guest reads it there rather than ticking it a second time.
+- [x] The "Agree to terms and conditions" CTA branch is removed; the missing-consent copy still points at the Step 3 checkbox.
+
+### Compact secure-handling line
+
+- [x] The large privacy explanation becomes a single inline line. The RA 10173 / Data Privacy Act reference is **kept** (compliance-relevant), with a decorative `ShieldCheck`; the sentence carries the meaning, not the icon.
+
+### Incomplete states name the first correction
+
+- [x] The Continue button is **not** permanently `disabled`. A disabled button is unfocusable, so keyboard and screen-reader users could not reach it, and tapping did nothing.
+- [x] Tapping it reveals the first offending field's inline error, scrolls it into view, and moves focus there — in visual order, with the consent checkbox reached only once every field is valid.
+- [x] `guestCount` has no focusable control on this step (the cart lives on Step 1), so it surfaces through the inline guest label rather than by stealing focus.
+- [x] The footer summary names the first correction instead of the generic "Complete required fields and consent". Summary and focus order derive from the same `guestErrors` object, so they cannot disagree.
+
+### Preserved (shipped earlier, pinned as regression guards)
+
+- [x] The four primary contact fields keep their `autoComplete` tokens (`given-name` / `family-name` / `email` / `tel`) and stay autofill-friendly.
+- [x] Special requests stay collapsed by default (SR-01..05).
+- [x] Signed-in member identity fields remain prefilled and `readOnly`.
+- [x] Inline validation stays touched-field gated; the cart-readiness gate still blocks Continue to review.
+
 ## Shared Mobile Booking Shell (MBUX-01, shipped 2026-10-15)
 
 > Decision: `plan/docs/DECISIONS-FEATURES.md` #254. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`. Applies to **both** the public `/book` flow and the corporate `/corporate/book` flow. Later slices (MBUX-02..09) change each step's *content*; this section covers the *frame* they all sit in.

@@ -129,19 +129,29 @@ describe("NBS-2026-08-08 — guest /book error recovery + consent wiring + auto-
   });
 
   describe("F5 — consent wiring", () => {
-    it("the canConfirm gate ANDs guestDetails.consent + termsConsent", () => {
-      // The previous gate only read
-      // `termsConsent`; the server validates
-      // `guestDetails.consent` (the Step 2
-      // field). The F5 fix ANDs both so the
-      // gate matches the server's expectation
-      // and the guest sees the missing-consent
-      // CTA on Step 3 instead of a server
-      // 400.
+    it("the canConfirm gate reads guestDetails.consent — the SAME field the server validates", () => {
+      // HISTORY: the F5 fix ANDed `guestDetails.consent` +
+      // `termsConsent` because the server validated one field while
+      // the client gate read a different one, so ticking the client
+      // box still produced a server 400.
+      //
+      // MBUX-06 (decision #258) completed the consolidation that
+      // comment asked for: the duplicate checkbox is deleted and
+      // `guestDetails.consent` is the single source of truth. The
+      // AND is therefore gone — and so is `termsConsent`.
       const gateMatch = bookingPageSrc.match(
-        /const canConfirm = guestDetails\.consent && termsConsent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean\(turnstileToken\)/
+        /const canConfirm = guestDetails\.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean\(turnstileToken\)/
       );
       expect(gateMatch).not.toBeNull();
+      expect(bookingPageSrc).not.toMatch(/termsConsent/);
+      expect(bookingPageSrc).not.toMatch(/const \[termsConsent/);
+    });
+
+    it("the create payload writes consent from the same single source", () => {
+      // A payload reading a different value than the gate is the exact
+      // defect F5 was filed against — it must not come back.
+      expect(bookingPageSrc).toMatch(/consent: guestDetails\.consent/);
+      expect(bookingPageSrc).not.toMatch(/consent: termsConsent/);
     });
 
     it("the sticky footer status line surfaces the missing Step 2 consent before Step 3 terms", () => {
