@@ -67,6 +67,7 @@ export type StayRangeAdjustmentReason =
   | "check-out-clamped-after-check-in"
   | "nights-preserved"
   | "horizon-capped"
+  | "nights-clamped"
   | "invalid-check-in"
   | "invalid-check-out";
 
@@ -89,7 +90,11 @@ export interface NormalizeStayRangeOptions {
   defaultNights?: number;
   /** Hard cap on stay length. */
   maxNights?: number;
-  /** Latest legal check-out (booking horizon). Defaults to `minCheckIn + maxNights`. */
+  /**
+   * Latest legal check-out (booking horizon). Defaults to
+   * `minCheckIn + DEFAULT_BOOKING_HORIZON_DAYS` — deliberately NOT
+   * `maxNights`, which is the stay-LENGTH cap (DR-03).
+   */
   maxCheckOut?: string;
 }
 
@@ -103,6 +108,13 @@ export interface NormalizeStayRangeResult {
 
 export const DEFAULT_STAY_NIGHTS = 1;
 export const DEFAULT_MAX_STAY_NIGHTS = 30;
+
+// DR-03 (2026-10-15): how far AHEAD a guest may book. This is a
+// DIFFERENT limit from `DEFAULT_MAX_STAY_NIGHTS` (how long a single
+// stay may run). They were conflated, which made the calendar stop at
+// 30 days out. Booking.com's horizon is ~a year; 365 days matches
+// that and matches how far ahead a boutique hotel realistically sells.
+export const DEFAULT_BOOKING_HORIZON_DAYS = 365;
 
 /**
  * The one function every date surface should call before trusting a
@@ -132,7 +144,11 @@ export function normalizeStayRange({
   const horizon =
     isValidIsoDate(maxCheckOut ?? "") && (maxCheckOut as string) > today
       ? (maxCheckOut as string)
-      : addDaysToIsoDate(today, maxNights, addDaysToIsoDate(today, defaultNights, today));
+      : addDaysToIsoDate(
+          today,
+          DEFAULT_BOOKING_HORIZON_DAYS,
+          addDaysToIsoDate(today, defaultNights, today)
+        );
 
   // The longest stay the horizon can actually accommodate.
   const horizonNights = Math.max(diffNightsBetweenIso(today, horizon), defaultNights);
@@ -190,6 +206,26 @@ export function normalizeStayRange({
         : "check-out-clamped-after-check-in";
   } else {
     checkOutCandidate = rawOut;
+  }
+
+  // --- maximum stay length ---
+  // The stay-length cap is INDEPENDENT of the booking horizon, and both
+  // are enforced. A guest may legitimately book nine months out; what
+  // they may not do is book a 90-night stay. Before DR-03 these were
+  // the SAME number (`MAX_STAY_NIGHTS` doubling as the horizon), which
+  // capped reachable dates at 30 days ahead — so December was
+  // unreachable — while `stayCap` was applied ONLY on the inverted
+  // branch above, letting a long-but-valid range through unchecked.
+  //
+  // Deliberately clamps to `maxNights`, NOT `stayCap`: `stayCap` is
+  // `min(maxNights, horizonNights)`, so clamping to it would fold the
+  // horizon back into this branch and every over-long range would
+  // report `nights-clamped`, hiding which limit actually bound. The
+  // horizon is applied as its own step immediately below, so each
+  // limit gets its own honest reason.
+  if (diffNightsBetweenIso(nextIn, checkOutCandidate) > maxNights) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, maxNights, addDaysToIsoDate(nextIn, 1, nextIn));
+    adjustment = "nights-clamped";
   }
 
   // --- booking horizon ---
@@ -250,6 +286,8 @@ export interface ResolveRangeSelectionOptions {
   minCheckIn: string;
   /** Latest legal check-out (the booking horizon). */
   maxCheckOut: string;
+  /** Longest stay the guest may book. Defaults to `DEFAULT_MAX_STAY_NIGHTS`. */
+  maxNights?: number;
 }
 
 /**
@@ -268,7 +306,8 @@ export function resolveRangeSelection({
   from,
   to,
   minCheckIn,
-  maxCheckOut
+  maxCheckOut,
+  maxNights = DEFAULT_MAX_STAY_NIGHTS
 }: ResolveRangeSelectionOptions): StaySelection {
   if (!isValidIsoDate(from ?? "")) return { status: "cleared" };
 
@@ -290,6 +329,9 @@ export function resolveRangeSelection({
   const nights = diffNightsBetweenIso(clampedCheckIn, checkOut);
   if (nights < 1) return { status: "pending", checkIn: clampedCheckIn };
   if (checkOut > maxCheckOut) return { status: "pending", checkIn: clampedCheckIn };
+  // DR-03: the stay LENGTH cap is independent of the horizon. Widening
+  // the horizon to a year must not also allow a 200-night booking.
+  if (nights > maxNights) return { status: "pending", checkIn: clampedCheckIn };
 
   return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
 }

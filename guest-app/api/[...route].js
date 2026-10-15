@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.4.0";
+    VERSION2 = "2.5.0";
   }
 });
 
@@ -222314,7 +222314,11 @@ function normalizeStayRange({
   maxCheckOut
 }) {
   const today = isValidIsoDate(minCheckIn) ? minCheckIn : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  const horizon = isValidIsoDate(maxCheckOut ?? "") && maxCheckOut > today ? maxCheckOut : addDaysToIsoDate(today, maxNights, addDaysToIsoDate(today, defaultNights, today));
+  const horizon = isValidIsoDate(maxCheckOut ?? "") && maxCheckOut > today ? maxCheckOut : addDaysToIsoDate(
+    today,
+    DEFAULT_BOOKING_HORIZON_DAYS,
+    addDaysToIsoDate(today, defaultNights, today)
+  );
   const horizonNights = Math.max(diffNightsBetweenIso(today, horizon), defaultNights);
   const stayCap = Math.max(Math.min(maxNights, horizonNights), 1);
   const rawIn = isValidIsoDate(checkIn ?? "") ? checkIn : null;
@@ -222353,6 +222357,10 @@ function normalizeStayRange({
   } else {
     checkOutCandidate = rawOut;
   }
+  if (diffNightsBetweenIso(nextIn, checkOutCandidate) > maxNights) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, maxNights, addDaysToIsoDate(nextIn, 1, nextIn));
+    adjustment = "nights-clamped";
+  }
   if (checkOutCandidate > horizon) {
     checkOutCandidate = horizon;
     adjustment = "horizon-capped";
@@ -222378,7 +222386,8 @@ function resolveRangeSelection({
   from,
   to: to3,
   minCheckIn,
-  maxCheckOut
+  maxCheckOut,
+  maxNights = DEFAULT_MAX_STAY_NIGHTS
 }) {
   if (!isValidIsoDate(from ?? "")) return { status: "cleared" };
   const checkIn = from < minCheckIn ? minCheckIn : from;
@@ -222390,15 +222399,17 @@ function resolveRangeSelection({
   const nights = diffNightsBetweenIso(clampedCheckIn, checkOut);
   if (nights < 1) return { status: "pending", checkIn: clampedCheckIn };
   if (checkOut > maxCheckOut) return { status: "pending", checkIn: clampedCheckIn };
+  if (nights > maxNights) return { status: "pending", checkIn: clampedCheckIn };
   return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
 }
-var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS;
+var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS, DEFAULT_BOOKING_HORIZON_DAYS;
 var init_stayRange = __esm({
   "../shared/utils/stayRange.ts"() {
     "use strict";
     ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
     DEFAULT_STAY_NIGHTS = 1;
     DEFAULT_MAX_STAY_NIGHTS = 30;
+    DEFAULT_BOOKING_HORIZON_DAYS = 365;
   }
 });
 
@@ -224927,6 +224938,7 @@ __export(shared_exports, {
   CorporateContentSchema: () => CorporateContentSchema,
   CreateRoomSchema: () => CreateRoomSchema,
   DEFAULT_BED_SETUPS: () => DEFAULT_BED_SETUPS,
+  DEFAULT_BOOKING_HORIZON_DAYS: () => DEFAULT_BOOKING_HORIZON_DAYS,
   DEFAULT_BOOKING_PREFERENCES: () => DEFAULT_BOOKING_PREFERENCES,
   DEFAULT_BOOKING_SOURCES: () => DEFAULT_BOOKING_SOURCES,
   DEFAULT_BREAKFAST_CUTOFF_TIME: () => DEFAULT_BREAKFAST_CUTOFF_TIME,

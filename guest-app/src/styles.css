@@ -42,10 +42,32 @@ body {
    react-day-picker styles `.rdp-button_previous` / `.rdp-button_next`
    with its own default accent, which is not `config.colors.primary`.
    The override is scoped to `.spark-date-range` so it cannot leak into
-   any other surface, and the hex is deliberately NOT hardcoded at the
-   call site — the component sets the same value via
-   `--rdp-accent-color` from config, so a per-client white-label change
-   in `hotel.config.ts` flows through automatically. */
+   any other surface, and the hex is deliberately NOT hardcoded here —
+   the component sets `--spark-primary` from `config.colors.primary`, so
+   a per-client white-label change in `hotel.config.ts` flows through
+   automatically. */
+/* DR-03 (2026-10-15): brand the selected range itself.
+   react-day-picker declares its custom properties on `.rdp-root`, which
+   sits INSIDE this wrapper — so a value set on the wrapper is overridden
+   by `.rdp-root`'s own declarations, and the range renders its default
+   BLUE. The derived vars (`--rdp-range_start-date-background-color`)
+   additionally reference `--rdp-accent-color`, and custom-property
+   substitution resolves at the point of DECLARATION, so overriding
+   `--rdp-accent-color` on an ancestor cannot reach them either.
+   Both problems are solved by targeting `.rdp-root` itself at higher
+   specificity, and by reading the brand token set on the wrapper so no
+   hex is hardcoded and white-label still flows. */
+.spark-date-range .spark-range-root {
+  --rdp-accent-color: var(--spark-primary);
+  --rdp-accent-background-color: var(--spark-primary);
+  --rdp-today-color: var(--spark-primary);
+  --rdp-range_start-date-background-color: var(--spark-primary);
+  --rdp-range_end-date-background-color: var(--spark-primary);
+  --rdp-range_middle-background-color: var(--spark-primary);
+  --rdp-range_start-color: #fff;
+  --rdp-range_end-color: #fff;
+}
+
 .spark-date-range .rdp-button_previous,
 .spark-date-range .rdp-button_next {
   color: var(--rdp-accent-color);

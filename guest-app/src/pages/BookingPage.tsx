@@ -3612,6 +3612,11 @@ export function BookingPage() {
               <DateRangePicker
                 checkIn={checkIn}
                 checkOut={checkOut}
+                onRangeChange={(nextCheckIn, nextCheckOut) => {
+                  setCheckIn(nextCheckIn);
+                  setCheckOut(nextCheckOut);
+                  updateDateParams(nextCheckIn, nextCheckOut, adults);
+                }}
                 onCheckInChange={(value) => {
                   setCheckIn(value);
                   updateDateParams(value, checkOut, adults);

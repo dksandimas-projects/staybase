@@ -42,6 +42,7 @@ const read = (relative: string) =>
 
 const handlersSrc = read("guest-app/server/handlers/bookings.ts");
 const pickerSrc = read("guest-app/src/components/DateRangePicker.tsx");
+const stylesSrc = read("guest-app/src/styles.css");
 const bookingPageSrc = read("guest-app/src/pages/BookingPage.tsx");
 const corporateBookingSrc = read("guest-app/src/pages/CorporateBookingPage.tsx");
 const corporateStaysSrc = read("guest-app/src/pages/CorporateStaysPage.tsx");
@@ -137,8 +138,76 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
     // Hard rule: primary CTAs use config.colors.primary.
     // react-day-picker ships a blue default, which would put an
     // off-brand colour on the most prominent element in the flow.
-    expect(pickerSrc).toMatch(/"--rdp-accent-color": config\.colors\.primary/);
-    expect(pickerSrc).toMatch(/"--rdp-accent-background-color": config\.colors\.primary/);
+    //
+    // The brand token is set on the wrapper as `--spark-primary`; the
+    // `--rdp-*` mapping MUST live in the stylesheet. Setting
+    // `--rdp-accent-color` on the wrapper does not work, because
+    // react-day-picker declares its variables on `.rdp-root`, which is
+    // INSIDE the wrapper and therefore wins. The derived range vars also
+    // resolve `var(--rdp-accent-color)` at their point of DECLARATION
+    // (on `.rdp-root`), so an ancestor override cannot reach them at
+    // all. Hence `.spark-range-root` + a descendant rule.
+    expect(pickerSrc).toMatch(/"--spark-primary": config\.colors\.primary/);
+    // `rdp-root` MUST be kept: `classNames` shallow-merges over the
+    // defaults, so dropping it un-defines every `--rdp-*` variable and
+    // collapses the day cells from 42px to their text width.
+    expect(pickerSrc).toMatch(/classNames=\{\{ root: "rdp-root spark-range-root" \}\}/);
+    expect(pickerSrc).not.toMatch(/"--rdp-accent-color": config\.colors\.primary/);
+    expect(stylesSrc).toMatch(/\.spark-date-range \.spark-range-root/);
+    expect(stylesSrc).toMatch(/--rdp-range_start-date-background-color: var\(--spark-primary\)/);
+    expect(stylesSrc).toMatch(/--rdp-range_middle-background-color: var\(--spark-primary\)/);
+    expect(stylesSrc).toMatch(/--rdp-range_end-date-background-color: var\(--spark-primary\)/);
+  });
+
+  it("THE DECEMBER REGRESSION: a click starts a new stay, never extends the old one", () => {
+    // react-day-picker's `addToRange` tests `isAfter(date, from)` BEFORE
+    // `isAfter(date, to)`, so with a complete range on screen every click
+    // after the check-in is absorbed as "move the check-out here" and the
+    // old `from` is kept. A guest picking a December stay instead stretched
+    // their current one, which read as "December is unreachable". We drive
+    // the range from `onDayClick` so only a PENDING check-in can be
+    // completed by the next click.
+    expect(pickerSrc).toMatch(/onDayClick=\{handleDayClick\}/);
+    expect(pickerSrc).not.toMatch(/onSelect=\{/);
+    // (wrapped by prettier, so match the predicate without the line break)
+    expect(pickerSrc.replace(/\s+/g, " ")).toMatch(
+      /const completesPending = fromIso !== null && toIso === null && clicked > fromIso/
+    );
+    expect(pickerSrc).toMatch(/const nextFrom = completesPending \? draft!\.from! : day/);
+    expect(pickerSrc).toMatch(/const nextTo = completesPending \? day : undefined/);
+  });
+
+  it("commits the pair atomically so URL params cannot half-apply (DR-03)", () => {
+    // The picker fires onCheckInChange then onCheckOutChange. Both
+    // handlers close over the same render's `checkIn`, so the second one
+    // rewrote the URL from a STALE value and clobbered the check-in the
+    // first had written (`?checkIn=2026-10-15&checkOut=2026-12-24` on a
+    // December booking). `onRangeChange` hands over both dates at once.
+    expect(pickerSrc).toMatch(
+      /onRangeChange\?: \(checkIn: string, checkOut: string\) => void/
+    );
+    expect(pickerSrc.replace(/\s+/g, " ")).toMatch(
+      /if \(onRangeChange\) \{ onRangeChange\(selection\.checkIn, selection\.checkOut\);/
+    );
+    expect(bookingPageSrc).toMatch(
+      /onRangeChange=\{\(nextCheckIn, nextCheckOut\) => \{/
+    );
+    expect(bookingPageSrc).toMatch(
+      /updateDateParams\(nextCheckIn, nextCheckOut, adults\)/
+    );
+    expect(corporateBookingSrc).toMatch(
+      /updateDateParams\(nextCheckIn, nextCheckOut, guests\)/
+    );
+  });
+
+  it("pins the calendar to the hotel timezone (DR-03)", () => {
+    // Every date handed to `DayPicker` is a `TZDate` built for
+    // `config.timezone`. Without `timeZone`, the picker's internal DateLib
+    // runs in the BROWSER's timezone, so its day cells and our `selected`
+    // values disagree: a deep-linked December stay rendered with nothing
+    // selected, and a picked one painted `range_middle` across every day
+    // from the start of the grid. Passing the zone makes both sides agree.
+    expect(pickerSrc).toMatch(/timeZone=\{config\.timezone\}/);
   });
 
   it("shows the resolved range and night count as text", () => {
@@ -159,7 +228,35 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
 
   it("only explains corrections the guest cannot infer", () => {
     expect(pickerSrc).toMatch(/Check-in can't be in the past/);
-    expect(pickerSrc).toMatch(/nights ahead, so check-out was capped\./);
+  });
+
+  it("separates the booking horizon from the stay-length cap (DR-03)", () => {
+    // THE DECEMBER REGRESSION. `MAX_STAY_NIGHTS` doubled as the booking
+    // horizon, so `maxCheckOut = today + 30` capped the calendar at
+    // Nov 14 and December could not be reached at all.
+    expect(pickerSrc).toMatch(/const MAX_STAY_NIGHTS = 30/);
+    expect(pickerSrc).toMatch(/const BOOKING_HORIZON_DAYS = DEFAULT_BOOKING_HORIZON_DAYS/);
+    expect(pickerSrc).toMatch(/addDaysToIsoDate\(todayIso, BOOKING_HORIZON_DAYS\)/);
+    // The night cap must still reach the resolver, or widening the
+    // horizon to a year would silently allow a 200-night booking.
+    expect(pickerSrc).toMatch(/maxNights: MAX_STAY_NIGHTS/);
+    // Neither message may quote the other's number.
+    expect(pickerSrc).toMatch(/Bookings open \$\{BOOKING_HORIZON_DAYS\} days ahead/);
+    expect(pickerSrc).toMatch(/at most \$\{MAX_STAY_NIGHTS\} nights/);
+  });
+
+  it("layers the calendar over the page on phones only (DR-03)", () => {
+    // Inline on mobile the grid fell below the fold and was clipped by
+    // the sticky cart bar, so a guest could not see most of it.
+    expect(pickerSrc).toMatch(/fixed inset-x-0 bottom-0 top-16 overflow-y-auto/);
+    expect(pickerSrc).toMatch(/md:static/);
+    // The backdrop is phone-only — dimming the page behind an inline
+    // desktop card would be wrong.
+    expect(pickerSrc).toMatch(/fixed inset-0 z-40 bg-gray-950\/40 md:hidden/);
+    // Touch targets: the sheet's only exits are the header X and Done.
+    expect(pickerSrc).toMatch(/aria-label="Close calendar"/);
+    expect(pickerSrc).toMatch(/className="flex h-11 w-11 items-center justify-center/);
+    expect(pickerSrc).toMatch(/style=\{\{ backgroundColor: config\.colors\.primary \}\}/);
   });
 });
 

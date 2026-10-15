@@ -1844,6 +1844,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                 <DateRangePicker
                   checkIn={checkIn}
                   checkOut={checkOut}
+                  onRangeChange={(nextCheckIn, nextCheckOut) => {
+                    setCheckIn(nextCheckIn);
+                    setCheckOut(nextCheckOut);
+                    updateDateParams(nextCheckIn, nextCheckOut, guests);
+                  }}
                   onCheckInChange={(value) => {
                     setCheckIn(value);
                     updateDateParams(value, checkOut, guests);

@@ -6,6 +6,7 @@ import {
   addDaysToIsoDate,
   diffNightsBetweenIso,
   DEFAULT_MAX_STAY_NIGHTS,
+  DEFAULT_BOOKING_HORIZON_DAYS,
   resolveRangeSelection
 } from "../utils/stayRange";
 
@@ -146,10 +147,12 @@ describe("stayRange — normalizeStayRange (DR-01)", () => {
     expect(result.nights).toBe(2);
   });
 
-  it("caps an absurd night count at the booking horizon", () => {
-    // Check-in is 2 days after today, so the 30-night horizon only
-    // accommodates 28 nights from that check-in. The cap must be
-    // measured from the check-in, not from today.
+  it("caps an absurd night count at the stay-length cap, measured from check-in", () => {
+    // DR-03 changed this test's premise. It used to assert the cap came
+    // from the 30-day booking HORIZON, trimming a 30-night stay that
+    // started 2 days after today down to 28 nights. The horizon is now a
+    // YEAR, so it no longer binds here — the stay-LENGTH cap does, and it
+    // is measured from the check-in rather than from today.
     const result = normalizeStayRange({
       checkIn: "2026-10-16",
       checkOut: "2026-10-09",
@@ -157,21 +160,26 @@ describe("stayRange — normalizeStayRange (DR-01)", () => {
       previousNights: 4000,
       maxNights: 30
     });
-    expect(result.nights).toBeLessThanOrEqual(DEFAULT_MAX_STAY_NIGHTS);
-    expect(result.checkOut).toBe("2026-11-13");
+    expect(result.nights).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(result.checkOut).toBe("2026-11-15");
     expect(result.nights).toBe(diffNightsBetweenIso(result.checkIn, result.checkOut));
+    expect(result.adjustment).toBe("nights-preserved");
   });
 
   it("caps check-out at the booking horizon", () => {
+    // `maxNights` is raised so the HORIZON is the binding constraint.
+    // With the default 30-night cap the night clamp always wins first
+    // (any range past a 365-day horizon is necessarily >30 nights),
+    // so this test must opt out of the cap to exercise this branch.
     const result = normalizeStayRange({
       checkIn: "2026-11-01",
-      checkOut: "2027-06-01",
+      checkOut: "2028-01-01",
       minCheckIn: TODAY,
-      maxNights: 30
+      maxNights: 400
     });
     expect(result.adjustment).toBe("horizon-capped");
-    expect(result.checkOut).toBe("2026-11-13");
-    expect(result.nights).toBe(12);
+    expect(result.checkOut).toBe(addDaysToIsoDate(TODAY, DEFAULT_BOOKING_HORIZON_DAYS));
+    expect(result.nights).toBe(diffNightsBetweenIso(result.checkIn, result.checkOut));
   });
 
   it("never returns an inverted or zero-night range for any input pair", () => {
@@ -310,5 +318,124 @@ describe("stayRange — resolveRangeSelection (DR-02)", () => {
     const a = select("2026-10-20", "2026-10-23");
     const b = select("2026-10-20", "2026-10-23");
     expect(a).toEqual(b);
+  });
+});
+
+describe("stayRange — booking horizon vs. stay length (DR-03)", () => {
+  // DR-03 (2026-10-15). `MAX_STAY_NIGHTS` doubled as the booking
+  // horizon, so `maxCheckOut = today + 30` capped the calendar at
+  // Nov 14 and December was unreachable — the owner read a working
+  // pager as a broken one. These two limits are separate policies.
+
+  it("reaches December with the default horizon", () => {
+    const result = normalizeStayRange({
+      checkIn: "2026-12-01",
+      checkOut: "2026-12-05",
+      minCheckIn: TODAY
+    });
+    expect(result.adjustment).toBeNull();
+    expect(result.checkIn).toBe("2026-12-01");
+    expect(result.checkOut).toBe("2026-12-05");
+    expect(result.nights).toBe(4);
+  });
+
+  it("defaults the horizon to a year, not to maxNights", () => {
+    const far = addDaysToIsoDate(TODAY, DEFAULT_BOOKING_HORIZON_DAYS);
+    expect(far).toBe("2027-10-14");
+    // The old bug: the horizon fell back to `today + maxNights`.
+    expect(far).not.toBe(addDaysToIsoDate(TODAY, DEFAULT_MAX_STAY_NIGHTS));
+    const result = normalizeStayRange({
+      checkIn: "2027-10-13",
+      checkOut: "2027-10-14",
+      minCheckIn: TODAY
+    });
+    expect(result.checkOut).toBe("2027-10-14");
+    expect(result.adjustment).toBeNull();
+  });
+
+  it("enforces the horizon when the night cap is not the binding limit", () => {
+    const result = normalizeStayRange({
+      checkIn: TODAY,
+      checkOut: "2028-10-14",
+      minCheckIn: TODAY,
+      maxNights: 400
+    });
+    expect(result.checkOut).toBe(addDaysToIsoDate(TODAY, DEFAULT_BOOKING_HORIZON_DAYS));
+    expect(result.adjustment).toBe("horizon-capped");
+  });
+
+  it("lets the horizon override the night clamp near the far edge", () => {
+    // check-in sits 4 days before the horizon, so a 30-night stay
+    // overshoots it and the horizon becomes the binding constraint.
+    const checkIn = "2027-10-10";
+    const result = normalizeStayRange({
+      checkIn,
+      checkOut: "2027-11-20",
+      minCheckIn: TODAY
+    });
+    expect(result.checkIn).toBe(checkIn);
+    expect(result.checkOut).toBe("2027-10-14");
+    expect(result.adjustment).toBe("horizon-capped");
+    expect(result.nights).toBe(4);
+  });
+
+  it("THE REGRESSION: clamps a long-but-valid stay to the night cap", () => {
+    // Oct 1 + 60 nights is within the (now-year-wide) horizon, so
+    // nothing else caught it: `stayCap` used to apply ONLY on the
+    // inverted branch, letting an over-long stay through unchecked.
+    const result = normalizeStayRange({
+      checkIn: "2026-12-01",
+      checkOut: "2027-01-30",
+      minCheckIn: TODAY
+    });
+    expect(result.checkIn).toBe("2026-12-01");
+    expect(result.checkOut).toBe("2026-12-31");
+    expect(result.nights).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(result.adjustment).toBe("nights-clamped");
+  });
+
+  it("does not clamp a stay at exactly the cap", () => {
+    const result = normalizeStayRange({
+      checkIn: "2026-12-01",
+      checkOut: "2026-12-31",
+      minCheckIn: TODAY
+    });
+    expect(result.nights).toBe(DEFAULT_MAX_STAY_NIGHTS);
+    expect(result.adjustment).toBeNull();
+  });
+
+  it("resolveRangeSelection refuses an over-long stay beyond the horizon", () => {
+    const resolved = resolveRangeSelection({
+      from: "2027-10-01",
+      to: "2027-10-20",
+      minCheckIn: TODAY,
+      maxCheckOut: "2027-10-14"
+    });
+    // The horizon check fires first for this pair.
+    expect(resolved.status).toBe("pending");
+
+    // Within the horizon but over the night cap: must stay pending.
+    const overLong = resolveRangeSelection({
+      from: "2026-12-01",
+      to: "2027-01-30",
+      minCheckIn: TODAY,
+      maxCheckOut: "2027-10-14",
+      maxNights: DEFAULT_MAX_STAY_NIGHTS
+    });
+    expect(overLong).toEqual({ status: "pending", checkIn: "2026-12-01" });
+  });
+
+  it("still completes a normal stay well past the old 30-day wall", () => {
+    // Nov 20 is beyond `today + 30` — the exact date range the guest
+    // reported as unreachable.
+    expect(
+      resolveRangeSelection({
+        from: "2026-11-20",
+        to: "2026-11-24",
+        minCheckIn: TODAY,
+        maxCheckOut: "2027-10-14",
+        maxNights: DEFAULT_MAX_STAY_NIGHTS
+      })
+    ).toEqual({ status: "complete", checkIn: "2026-11-20", checkOut: "2026-11-24", nights: 4 });
   });
 });
