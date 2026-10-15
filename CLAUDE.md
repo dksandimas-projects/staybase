@@ -49,6 +49,7 @@ Load only the bundle for your task type — do not read all MDs.
 | Task type | Read these MDs |
 |---|---|
 | Guest UI task | `plan/docs/FRONTEND.md` + `plan/guest-app/CLAUDE.md` + relevant feature MD |
+| Guest booking mobile UX | `plan/features/BOOKING-MOBILE-UX.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/FRONTEND.md` |
 | Admin UI task | `plan/docs/FRONTEND.md` + `plan/admin-app/CLAUDE.md §Mobile UX building blocks` + `plan/features/ADMIN-MOBILE.md` + relevant feature MD |
 | Data / API task | `plan/docs/BACKEND.md` + `plan/docs/TYPES.md` + `plan/docs/API-ROUTES.md` |
 | Full feature build | All of the above + `plan/docs/DECISIONS-FEATURES.md` |
@@ -97,7 +98,8 @@ Load only the bundle for your task type — do not read all MDs.
 ### plan/features/ — Guest App
 - `plan/features/HOMEPAGE.md` — Hero, availability checker, featured rooms, amenities, map
 - `plan/features/ROOMS-PAGE.md` — Room grid, filters, availability badges, detail modal
-- `plan/features/BOOKING-FLOW.md` — 4-step booking flow including voucher input
+- `plan/features/BOOKING-FLOW.md` — Five-step booking flow including add-ons and voucher input
+- `plan/features/BOOKING-MOBILE-UX.md` — Phase 15 mobile-first refresh of the five-step guest booking flow, including multi-room cards and breakfast meal thumbnails
 - `plan/features/CORPORATE-BOOKING.md` — `/corporate/book`, flat rate + access code flow
 - `plan/features/BOOKING-LOOKUP.md` — `/my-booking`, ref + email lookup
 - `plan/features/INTERCOM-GUEST.md` — QR chat, quick request panel
