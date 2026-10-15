@@ -320,7 +320,9 @@ export function BookingPage() {
   // `feat/special-requests-redirect` contact override
   // read is retired. The contact hook is still used
   // for `hotelCheckInTime` (the arrival-time dropdown).
-  const { hotelCheckInTime } = usePublicSiteContent();
+  // Per MSL-01 (2026-10-15): `maxStayNights` is the admin's
+  // stay-length cap (raw; `null` = no field = 30-night default).
+  const { hotelCheckInTime, maxStayNights } = usePublicSiteContent();
   const currentStepKey = normalizeStepKey(searchParams.get("step"));
   const isAddOnsStep = currentStepKey === STEP_KEYS.addOns;
   const isGuestDetailsStep = currentStepKey === STEP_KEYS.guestDetails;
@@ -3612,6 +3614,7 @@ export function BookingPage() {
               <DateRangePicker
                 checkIn={checkIn}
                 checkOut={checkOut}
+                maxStayNights={maxStayNights}
                 onRangeChange={(nextCheckIn, nextCheckOut) => {
                   setCheckIn(nextCheckIn);
                   setCheckOut(nextCheckOut);

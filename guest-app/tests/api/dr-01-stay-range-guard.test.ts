@@ -219,15 +219,19 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
   });
 
   it("explains a click it cannot complete instead of swallowing it (DR-04)", () => {
-    // A stay longer than MAX_STAY_NIGHTS used to drop the check-out with
+    // A stay longer than the cap used to drop the check-out with
     // no feedback: the field simply stayed empty, which reads as a broken
     // picker. It now says why and KEEPS the check-in so the guest can pick
     // again. It does not silently clamp the check-out -- an invisible date
     // move is the DR-01 failure mode.
+    //
+    // MSL-01: the number is now `describeMaxStayNights(maxNights)` so it
+    // tracks the admin's live setting rather than a baked-in literal.
     expect(pickerSrc).toMatch(/const \[selectionError, setSelectionError\] = useState/);
     expect(pickerSrc).toMatch(
-      /at most \$\{MAX_STAY_NIGHTS\} nights — pick a check-out within/
+      /at most \$\{cap\} — pick a check-out within \$\{cap\} of your check-in/
     );
+    expect(pickerSrc).toMatch(/const cap = describeMaxStayNights\(maxNights\)/);
     // Rendered in the page flow AND inside the sheet -- on phones the
     // sheet covers the flow area, so the flow copy alone is not seen.
     expect(pickerSrc).toMatch(/role="alert"/);
@@ -258,15 +262,40 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
     // THE DECEMBER REGRESSION. `MAX_STAY_NIGHTS` doubled as the booking
     // horizon, so `maxCheckOut = today + 30` capped the calendar at
     // Nov 14 and December could not be reached at all.
-    expect(pickerSrc).toMatch(/const MAX_STAY_NIGHTS = 30/);
+    //
+    // MSL-01 (2026-10-15) CHANGED WHAT THIS TEST PINS, on purpose. The
+    // stay cap is no longer a literal `30` in this file — it arrives as
+    // the `maxStayNights` prop from
+    // `settings/hotelConfig.maxStayNights`. This suite used to assert
+    // `const MAX_STAY_NIGHTS = 30`, which a future agent seeing it fail
+    // after MSL-01 would most naturally "fix" by re-hardcoding 30 —
+    // silently resurrecting the bug this file exists to prevent. It now
+    // asserts the INVERSE: the picker must never hardcode the cap.
+    expect(pickerSrc).not.toMatch(/const MAX_STAY_NIGHTS/);
+    expect(pickerSrc).not.toMatch(/maxNights: 30/);
     expect(pickerSrc).toMatch(/const BOOKING_HORIZON_DAYS = DEFAULT_BOOKING_HORIZON_DAYS/);
     expect(pickerSrc).toMatch(/addDaysToIsoDate\(todayIso, BOOKING_HORIZON_DAYS\)/);
-    // The night cap must still reach the resolver, or widening the
-    // horizon to a year would silently allow a 200-night booking.
-    expect(pickerSrc).toMatch(/maxNights: MAX_STAY_NIGHTS/);
+    // The night cap must still reach BOTH the normalizer and the
+    // resolver, or widening the horizon to a year would silently allow
+    // a 200-night booking.
+    expect(pickerSrc).toMatch(/maxNights,/);
     // Neither message may quote the other's number.
     expect(pickerSrc).toMatch(/Bookings open \$\{BOOKING_HORIZON_DAYS\} days ahead/);
-    expect(pickerSrc).toMatch(/at most \$\{MAX_STAY_NIGHTS\} nights/);
+    expect(pickerSrc).toMatch(/at most \$\{cap\}/);
+  });
+
+  it("resolves the cap through the shared resolver, never the raw prop (MSL-01)", () => {
+    // The raw Firestore value must not reach the clamp arithmetic: a
+    // literal `0` means "no limit" to the admin and would collapse
+    // every stay to one night in `Math.max(Math.min(0, horizon), 1)`.
+    expect(pickerSrc).toMatch(/resolveMaxStayNights\(maxStayNights \?\? undefined\)/);
+    // Copy quotes the shared describer so the server 400 and this
+    // banner name the same live number.
+    expect(pickerSrc).toMatch(/describeMaxStayNights\(maxNights\)/);
+    // The prop must be threaded from the settings hook, not invented.
+    expect(pickerSrc).toMatch(/maxStayNights\?: number \| null/);
+    expect(bookingPageSrc).toMatch(/maxStayNights\s*\}\s*=\s*usePublicSiteContent\(\)/);
+    expect(bookingPageSrc).toMatch(/maxStayNights=\{maxStayNights\}/);
   });
 
   it("layers the calendar over the page on phones only (DR-03)", () => {
@@ -337,11 +366,16 @@ describe("DR-02 — the horizon always leaves selectable days ahead", () => {
   // — so the invariant to protect is that the horizon always sits
   // strictly ahead of today, leaving real room to move.
   const TODAY = "2026-10-15";
-  const MAX_STAY_NIGHTS = 30; // must mirror the component constant
-  const maxCheckOut = addDaysToIsoDate(TODAY, MAX_STAY_NIGHTS);
+  // A far-future horizon fixture — deliberately NOT the stay-length cap.
+  // MSL-01 moved the cap to the `maxStayNights` prop, so this constant
+  // no longer mirrors anything in the component; it only has to sit far
+  // enough ahead that the default 30-night cap is never the binding
+  // constraint in these assertions.
+  const FAR_HORIZON_DAYS = 30;
+  const maxCheckOut = addDaysToIsoDate(TODAY, FAR_HORIZON_DAYS);
 
   it("the horizon is strictly ahead of today", () => {
-    expect(diffNightsBetweenIso(TODAY, maxCheckOut)).toBe(MAX_STAY_NIGHTS);
+    expect(diffNightsBetweenIso(TODAY, maxCheckOut)).toBe(FAR_HORIZON_DAYS);
   });
 
   it("never bounds a selection by the other endpoint", () => {

@@ -161,6 +161,20 @@ export interface PublicSiteContent {
   // legacy settings hydrate byte-equivalent (the same
   // default every other VAT-01 surface uses).
   vatConfig: VatConfig;
+  /**
+   * Per MSL-01 (2026-10-15): the admin-editable maximum stay length
+   * from `settings/hotelConfig.maxStayNights`, surfaced RAW (as the
+   * Firestore override, or `null` when the doc has no field).
+   *
+   * Deliberately NOT resolved here. `usePublicSiteContent` is a dumb
+   * override layer — it hands consumers the same value the admin
+   * saved and lets them decide. `DateRangePicker` runs it through
+   * `resolveMaxStayNights` at the boundary, which is the only place
+   * that knows `0` means "no limit" and must not reach the clamp
+   * arithmetic as a literal. `null` means "legacy doc, no field" and
+   * resolves to the 30-night default.
+   */
+  maxStayNights: number | null;
 }
 
 const FALLBACK_HERO_HEADING = "Your sanctuary in Bohol";
@@ -357,7 +371,13 @@ function buildFallback(): PublicSiteContent {
     // for the VAT toggle is the BIR-compliant state. The
     // `applyFirestoreData` merge below overrides this with
     // the admin's actual setting once the snapshot lands.
-    vatConfig: { ...DEFAULT_VAT_CONFIG }
+    vatConfig: { ...DEFAULT_VAT_CONFIG },
+    // Per MSL-01: the fallback shape carries the SAME 30 the picker
+    // would use anyway, so a pre-load render and a post-load render
+    // with no admin override agree. `0` here would mean "unlimited",
+    // which must never be the implicit state of a hotel that never
+    // touched the setting.
+    maxStayNights: null
   };
 }
 
@@ -469,7 +489,11 @@ function buildEmptyState(): PublicSiteContent {
     // cold-load window before Firestore resolves — the
     // hook never shows a guest "VAT is off" based on
     // stale data.
-    vatConfig: { ...DEFAULT_VAT_CONFIG }
+    vatConfig: { ...DEFAULT_VAT_CONFIG },
+    // Per MSL-01: unknown until Firestore resolves. The picker
+    // resolves `null` to the 30-night default, so the cold-load
+    // window behaves exactly as it did before this setting existed.
+    maxStayNights: null
   };
 }
 
@@ -752,6 +776,20 @@ export function usePublicSiteContent(): PublicSiteContent {
             return { enabled: false };
           }
           return { ...DEFAULT_VAT_CONFIG };
+        })(),
+        // Per MSL-01: pass the admin's saved value through RAW.
+        // `undefined`/`null` (field absent) stays `null` so the
+        // consumer applies the 30-night default; a stored `0` is
+        // preserved verbatim because it is the admin's explicit
+        // "no limit" choice and must not be confused with absence.
+        // Anything non-numeric is dropped to `null` rather than
+        // coerced — a hand-edited string should not silently become
+        // a cap.
+        maxStayNights: (() => {
+          const raw = hc?.maxStayNights;
+          if (raw === undefined || raw === null || raw === "") return null;
+          const value = Number(raw);
+          return Number.isFinite(value) && value >= 0 ? value : null;
         })()
       };
 

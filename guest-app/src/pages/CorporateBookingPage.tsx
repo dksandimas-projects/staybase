@@ -370,7 +370,9 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   // Live rooms from Firestore
   const { rooms, loading: roomsLoading } = useRooms();
   const { roomTypes, bedSetups, bookingPreferences } = useRoomTypes();
-  const { hotelCheckInTime } = usePublicSiteContent();
+  // Per MSL-01 (2026-10-15): `maxStayNights` is the admin's
+  // stay-length cap (raw; `null` = no field = 30-night default).
+  const { hotelCheckInTime, maxStayNights } = usePublicSiteContent();
 
   // Corporate specific details
   const [guestDetails, setGuestDetails] = useState({
@@ -1844,6 +1846,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                 <DateRangePicker
                   checkIn={checkIn}
                   checkOut={checkOut}
+                  maxStayNights={maxStayNights}
                   onRangeChange={(nextCheckIn, nextCheckOut) => {
                     setCheckIn(nextCheckIn);
                     setCheckOut(nextCheckOut);

@@ -6,6 +6,8 @@ import {
   isValidIsoDate,
   normalizeStayRange,
   resolveRangeSelection,
+  resolveMaxStayNights,
+  describeMaxStayNights,
   DEFAULT_BOOKING_HORIZON_DAYS,
   type StayRangeAdjustmentReason,
 } from "@spark-inn/shared";
@@ -37,15 +39,28 @@ interface DateRangePickerProps {
    */
   onRangeChange?: (checkIn: string, checkOut: string) => void;
   orientation?: DateRangePickerOrientation;
+  /**
+   * MSL-01 (2026-10-15): the RAW `settings/hotelConfig.maxStayNights`
+   * value (undefined until the hook resolves). It is resolved INSIDE
+   * this component via `resolveMaxStayNights` rather than by the
+   * parent, so no call site can hand a literal `0` to the clamp
+   * arithmetic — see the `0` trap in `stayRange.ts`. `0` means "no
+   * limit"; omitting the prop keeps the historical 30-night default.
+   */
+  maxStayNights?: number | null;
 }
 
-// DR-01 (2026-10-14): longest stay a guest may book in one go.
-const MAX_STAY_NIGHTS = 30;
-
 // DR-03 (2026-10-15): furthest AHEAD a guest may book. This is a
-// separate limit from MAX_STAY_NIGHTS and used to be the same number,
-// which capped the calendar at 30 days out — the owner could not reach
-// December at all and read it as a broken pager rather than a policy.
+// separate limit from the stay-LENGTH cap and used to be the same
+// number, which capped the calendar at 30 days out — the owner could
+// not reach December at all and read it as a broken pager rather than a
+// policy.
+//
+// MSL-01 (2026-10-15): the stay-length cap is NO LONGER a module
+// constant. It arrives as the `maxStayNights` prop (the raw
+// `settings/hotelConfig` value) and is resolved once per render below.
+// The `dr-01` suite deliberately no longer pins a literal `30` here —
+// see its "picker must not hardcode the cap" test.
 const BOOKING_HORIZON_DAYS = DEFAULT_BOOKING_HORIZON_DAYS;
 
 /**
@@ -96,12 +111,17 @@ function formatStayDate(iso: string): string {
  * arrived from outside the picker (a shared `?checkIn=` link, a
  * past date, a horizon overrun).
  */
-function describeAdjustment(reason: StayRangeAdjustmentReason): string | null {
+function describeAdjustment(
+  reason: StayRangeAdjustmentReason,
+  maxNights: number,
+): string | null {
   switch (reason) {
     case "check-in-clamped-to-today":
       return "Check-in can't be in the past — moved to today.";
     case "nights-clamped":
-      return `A single stay can run at most ${MAX_STAY_NIGHTS} nights, so check-out was moved.`;
+      // Unreachable when unlimited — `nights-clamped` requires a finite
+      // cap to have fired.
+      return `A single stay can run at most ${describeMaxStayNights(maxNights)}, so check-out was moved.`;
     case "horizon-capped":
       return `Bookings open ${BOOKING_HORIZON_DAYS} days ahead, so check-out was capped.`;
     case "invalid-check-in":
@@ -136,10 +156,18 @@ export function DateRangePicker({
   onCheckOutChange,
   onRangeChange,
   orientation = "vertical",
+  maxStayNights,
 }: DateRangePickerProps) {
   const todayIso = useMemo(() => getDateKeyInTimezone(config.timezone), []);
+  // MSL-01: resolve the raw setting ONCE, here, so every clamp site
+  // below receives a safe number. `Infinity` = unlimited; a missing
+  // prop resolves to the historical 30-night default.
+  const maxNights = useMemo(
+    () => resolveMaxStayNights(maxStayNights ?? undefined),
+    [maxStayNights],
+  );
   // Horizon = how far ahead you may book. Stay length is capped
-  // separately by MAX_STAY_NIGHTS inside the normalizer / resolver.
+  // separately by `maxNights` inside the normalizer / resolver.
   const maxCheckOut = useMemo(
     () => addDaysToIsoDate(todayIso, BOOKING_HORIZON_DAYS),
     [todayIso],
@@ -156,8 +184,9 @@ export function DateRangePicker({
         checkOut,
         minCheckIn: todayIso,
         maxCheckOut,
+        maxNights,
       }),
-    [checkIn, checkOut, todayIso, maxCheckOut],
+    [checkIn, checkOut, todayIso, maxCheckOut, maxNights],
   );
 
   const [open, setOpen] = useState(false);
@@ -191,7 +220,7 @@ export function DateRangePicker({
   useEffect(() => {
     if (resolved.adjustment) setHint(resolved.adjustment);
   }, [resolved.adjustment]);
-  const hintText = hint ? describeAdjustment(hint) : null;
+  const hintText = hint ? describeAdjustment(hint, maxNights) : null;
 
   // DR-04: why the last click could not complete the range. Rendered in
   // BOTH the page flow and the sheet, because on phones the sheet covers
@@ -238,7 +267,7 @@ export function DateRangePicker({
         to: nextTo ? tzDateToIso(nextTo) : null,
         minCheckIn: todayIso,
         maxCheckOut,
-        maxNights: MAX_STAY_NIGHTS,
+        maxNights,
       });
 
       if (selection.status === "complete") {
@@ -269,20 +298,24 @@ export function DateRangePicker({
       setDraft({ from: isoToTzDate(selection.checkIn), to: undefined });
 
       // DR-04: a click that CANNOT complete the range (here: a stay
-      // longer than MAX_STAY_NIGHTS) used to be swallowed with no
+      // longer than the cap) used to be swallowed with no
       // feedback at all — the check-out box simply stayed empty, which
       // reads as a broken picker. Say so, and keep the check-in so the
       // guest can immediately pick again. We do NOT silently clamp the
       // check-out: an invisible date move is the DR-01 failure mode.
+      // Unreachable when unlimited: an over-cap range cannot exist if
+      // `maxNights` is `Infinity`, so this branch stays quiet.
+      const cap = describeMaxStayNights(maxNights);
       setSelectionError(
         completesPending
-          ? `A single stay can run at most ${MAX_STAY_NIGHTS} nights — pick a check-out within ${MAX_STAY_NIGHTS} days of your check-in.`
+          ? `A single stay can run at most ${cap} — pick a check-out within ${cap} of your check-in.`
           : null,
       );
     },
     [
       draft,
       maxCheckOut,
+      maxNights,
       onCheckInChange,
       onCheckOutChange,
       onRangeChange,
