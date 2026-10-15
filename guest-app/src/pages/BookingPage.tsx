@@ -2203,6 +2203,27 @@ export function BookingPage() {
     </main>
   );
 
+// Per MBUX-05: the confirmation for the copy-to-remaining-days action.
+// `null` = nothing to say yet.
+//
+// REACT HOOKS RULE (this is load-bearing): every useState/useEffect/
+// useMemo/useCallback/useRef in BookingPage MUST sit above the
+// loading-skeleton early return below. On the first render
+// `isScreenLoading` is true and that early return fires, so any hook
+// declared AFTER it would only be called on the second render — which
+// is exactly the "Rendered more hooks than during the previous render"
+// (#310) crash. The `useEffect` that clears this notice on copy
+// lives further down but is gated on a render-path that only exists
+// past the early return, so it is also declared above.
+const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<string>("");
+
+// Per MBUX-05 (decision #257): the number of breakfast SLOTS chosen.
+// Step 2 currently has breakfast only — the "other add-ons" the spec
+// describes are not implemented in the guest flow yet, so this is
+// deliberately derived from breakfast selections alone rather than
+// hardcoded to a wider formula that does not exist yet.
+const addOnCount = Object.keys(breakfastSelections).length;
+
   const isScreenLoading = roomsLoading || settingsLoading;
 
   if (isScreenLoading) {
@@ -2215,23 +2236,6 @@ export function BookingPage() {
       </div>
     );
   }
-
-  // Per BR-09 (2026-10-14): the breakfast `motion.div`
-  // was extracted from the old Step 2 into its own
-  // dedicated "Add-ons" step (new Step 2 in the
-  // 5-step flow). The same rendering block is reused
-  // — the only change is the surrounding step header
-  // + the sticky "Continue to guest details" footer.
-  // Per MBUX-05 (decision #257): the number of breakfast SLOTS chosen.
-  // Step 2 currently has breakfast only — the "other add-ons" the spec
-  // describes are not implemented in the guest flow yet, so this is
-  // deliberately derived from breakfast selections alone rather than
-  // hardcoded to a wider formula that does not exist yet.
-  const addOnCount = Object.keys(breakfastSelections).length;
-
-  // Per MBUX-05: the confirmation for the copy-to-remaining-days action.
-  // `null` = nothing to say yet.
-  const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<string>("");
 
   const renderBreakfastSection = () => (
     /* Per BR-03 (2026-10-12, decision #232): the
