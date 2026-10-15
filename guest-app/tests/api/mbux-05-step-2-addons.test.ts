@@ -262,10 +262,15 @@ describe("MBUX-05 — the Breakfast menu strip", () => {
     );
   });
 
-  it("scrolls horizontally with overscroll containment", () => {
-    expect(menuStripSrc).toMatch(/overflow-x-auto/);
-    expect(menuStripSrc).toMatch(/overscroll-x-contain/);
-    expect(menuStripSrc).toMatch(/snap-x/);
+  it("uses a responsive grid (2 cols mobile / 3 sm: / 4 lg:) per MBUX-12", () => {
+    // Per MBUX-12 (decision #265, 2026-10-16): the pre-MBUX-12
+    // horizontal-scroll carousel was replaced with a responsive
+    // grid because on a 375px phone the 128px cards cut the
+    // third meal in half. The strip no longer carries
+    // `overflow-x-auto` / `snap-x` / `overscroll-x-contain` —
+    // see `tests/api/mbux-12-breakfast-menu-grid.test.ts` for
+    // the negative pins. Here we pin the positive grid shape.
+    expect(menuStripSrc).toMatch(/grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4/);
   });
 
   it("lazy-loads thumbnails", () => {

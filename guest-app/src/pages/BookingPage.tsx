@@ -2319,8 +2319,11 @@ const addOnCount = Object.keys(breakfastSelections).length;
           />
           {/* The skip explanation appears ONCE here rather than as a
               40-character string repeated inside every native option on
-              every date card. */}
-          <p className="mt-4 text-xs text-gray-600">
+              every date card. The mt-5 (was mt-4) keeps the breathing
+              room now that the MBUX-12 menu grid replaces the
+              pre-MBUX-12 horizontal-scroll carousel (which had `pb-1`
+              inside the strip). */}
+          <p className="mt-5 text-xs text-gray-600">
             Skipping a day is fine — leave any slot as “No breakfast”.
           </p>
           <div className="mt-4 space-y-4">

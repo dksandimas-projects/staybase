@@ -32,10 +32,15 @@ interface BreakfastMenuStripProps {
  * slots repeat the same catalogue, which is the exact repetition the
  * mobile refresh set out to remove.
  *
- * **Scroll cue.** The row is horizontally scrollable and the last card
- * is deliberately allowed to sit partially visible
- * (`pr-[35%]` + `-mx-4 px-4`) — a fully visible row reads as "that is
- * everything" and hides the fact that more meals exist.
+ * **Layout — per MBUX-12 (decision #265, 2026-10-16).** Pre-MBUX-12
+ * the strip was a horizontal-scroll carousel (`flex snap-x
+ * overflow-x-auto` with 128px cards on mobile). On a 375px phone that
+ * put 2.5 cards visible and cut the third one in half — exactly the
+ * "Longsilog is half off-screen" shape the owner flagged on Step 2.
+ * The fix is a responsive CSS grid: 2 cols on mobile, 3 cols on `sm:`,
+ * 4 cols on `lg:`. The `UtensilsCrossed` fallback icon stays for
+ * missing/404 meal photos (a content gap, not a code gap — see MBUX-04
+ * for the admin upload path).
  *
  * **Image states.** `loading="lazy"` (a breakfast catalogue is rarely
  * needed before the guest scrolls to it), a card-shaped skeleton while
@@ -61,15 +66,18 @@ export function BreakfastMenuStrip({ meals, formatPrice }: BreakfastMenuStripPro
       data-testid="breakfast-menu-strip"
     >
       <h3 className="text-sm font-semibold text-gray-950">Breakfast menu</h3>
-      {/* `overscroll-x-contain` stops a horizontal flick here from
-          chaining into the page's vertical scroll on iOS. */}
-      <div className="-mx-4 mt-2 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 overscroll-x-contain sm:mx-0 sm:px-0">
+      {/* Per MBUX-12: responsive grid replacing the pre-MBUX-12
+          horizontal-scroll carousel. 2 cols on mobile so guests
+          see the catalogue without a swipe, 3 cols on `sm:` (the
+          catalog's typical meal count fits comfortably), 4 cols on
+          `lg:` so the desktop sidebar + menu can share the row. */}
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {meals.map((meal) => {
           const showFallback = !meal.imageUrl || failedIds[meal.id];
           return (
             <div
               key={meal.id}
-              className="w-32 shrink-0 snap-start sm:w-40"
+              className="w-full"
               data-testid={`breakfast-menu-card-${meal.id}`}
             >
               <div
