@@ -33,6 +33,12 @@ import {
   MAX_IN_FLOW_HOLD_MINUTES,
   MIN_IN_FLOW_HOLD_MINUTES,
   clampIntegerInRange,
+  // Per MSL-01 (2026-10-15): bounds for the stay-length cap editor.
+  // `0` is legal here and means "no limit", so `clampIntegerInRange`
+  // (which requires `min >= 1`) cannot be reused for this field.
+  MAX_MAX_STAY_NIGHTS,
+  MIN_MAX_STAY_NIGHTS,
+  DEFAULT_MAX_STAY_NIGHTS,
   type BookingSourceConfig,
   type DiscountScope,
   type PaymentMethodConfig,
@@ -2550,6 +2556,29 @@ export function SettingsPage() {
     String(hotelConfig.inFlowHoldMinutes)
   );
 
+  // Per MSL-01 (2026-10-15): the maximum stay length. `AdminContext`
+  // holds the RESOLVED value, so "no limit" arrives as `Infinity` and
+  // is rendered back as the literal `0` the admin actually saved.
+  const [maxStayNightsInput, setMaxStayNightsInput] = useState<string>(() =>
+    Number.isFinite(hotelConfig.maxStayNights)
+      ? String(hotelConfig.maxStayNights)
+      : "0"
+  );
+
+  // `0` = no limit is a LEGAL value here, so this cannot use
+  // `clampIntegerInRange` (whose `min` is >= 1 for every other field).
+  // Rejects: blank, non-numeric, fractional, negative, and anything
+  // past the booking horizon (a stay longer than the horizon is
+  // unreachable, so the horizon is the honest upper bound).
+  const maxStayNightsValid = (() => {
+    const trimmed = maxStayNightsInput.trim();
+    if (trimmed === "") return null;
+    const value = Number(trimmed);
+    if (!Number.isInteger(value)) return null;
+    if (value < 0 || value > MAX_MAX_STAY_NIGHTS) return null;
+    return value;
+  })();
+
   // Validate at the form layer. `clampIntegerInRange`
   // returns `null` for out-of-range / non-finite /
   // non-integer — the form surfaces an inline error
@@ -2567,7 +2596,9 @@ export function SettingsPage() {
     MAX_IN_FLOW_HOLD_MINUTES
   );
   const holdsFormValid =
-    paymentHoldWindowHoursValid !== null && inFlowHoldMinutesValid !== null;
+    paymentHoldWindowHoursValid !== null &&
+    inFlowHoldMinutesValid !== null &&
+    maxStayNightsValid !== null;
 
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
@@ -4152,13 +4183,19 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!holdsFormValid) {
       toast.error(
-        "Please enter a valid hold window — payment hold must be 1..72 hours, in-flow hold must be 5..30 minutes."
+        "Please enter a valid value — payment hold must be 1..72 hours, in-flow hold must be 5..30 minutes, and maximum stay must be 0 (no limit) or 1..365 nights."
       );
       return;
     }
-    await runSettingsSave("holds", "Hold windows saved", () => updateSettings("hotelConfig", {
+    await runSettingsSave("holds", "Booking limits saved", () => updateSettings("hotelConfig", {
       paymentHoldWindowHours: paymentHoldWindowHoursValid!,
-      inFlowHoldMinutes: inFlowHoldMinutesValid!
+      inFlowHoldMinutes: inFlowHoldMinutesValid!,
+      // Per MSL-01 (2026-10-15): written as the literal integer the
+      // admin typed, including `0` for "no limit". `resolveMaxStayNights`
+      // on the read side turns that `0` into `Infinity` for the clamp
+      // arithmetic; storing `Infinity` here would be meaningless in
+      // Firestore and would break the reader.
+      maxStayNights: maxStayNightsValid!
     }));
   };
 
@@ -9672,10 +9709,13 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                   <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Booking &amp; Holds</h3>
                   <p className="text-[10px] text-gray-500 mt-0.5">
                     Two hold windows that control how long a guest's room reservation stays
-                    locked. Both values are snapshotted at the moment they matter (booking
-                    create for the payment hold, hold start for the in-flow hold), so changing
-                    either value here never shortens or lengthens a promise already in
-                    flight. Front-desk users cannot reach this editor.
+                    locked, plus the longest stay a guest may book. The hold values are
+                    snapshotted at the moment they matter (booking create for the payment
+                    hold, hold start for the in-flow hold), so changing either here never
+                    shortens or lengthens a promise already in flight. The maximum stay
+                    length is NOT snapshotted — it applies to every booking from the moment
+                    you save it, including stays already checked in. Front-desk users
+                    cannot reach this editor.
                   </p>
                 </div>
 
@@ -9771,6 +9811,57 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       </p>
                     </div>
                   </div>
+
+                  {/* Per MSL-01 (2026-10-15): maximum stay length.
+                      Full-width because `0` = "no limit" needs more
+                      explanation than the two bounded windows above,
+                      and a half-width cell would truncate that copy. */}
+                  <div className="border-t border-gray-100 p-5">
+                    <label htmlFor="maxStayNights" className="block text-xs font-bold text-gray-800">
+                      Maximum stay length
+                    </label>
+                    <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">
+                      The longest single stay a guest may book on the public site. Enter{" "}
+                      <code className="rounded bg-gray-100 px-1 py-0.5">0</code> for{" "}
+                      <strong>no limit</strong>. Default{" "}
+                      {DEFAULT_MAX_STAY_NIGHTS}, maximum {MAX_MAX_STAY_NIGHTS} (anything longer is
+                      unreachable — the calendar stops at the booking horizon anyway).
+                      Enforced by the server on guest booking, walk-in, and reschedule.
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <input
+                        id="maxStayNights"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={MAX_MAX_STAY_NIGHTS}
+                        step={1}
+                        required
+                        value={maxStayNightsInput}
+                        onChange={(e) => setMaxStayNightsInput(e.target.value)}
+                        aria-invalid={maxStayNightsValid === null}
+                        aria-describedby="maxStayNights-help"
+                        className={`min-h-11 w-32 rounded-lg border bg-white px-3 py-2 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 ${
+                          maxStayNightsValid === null
+                            ? "border-red-300 focus:ring-red-200"
+                            : "border-gray-200 focus:ring-primary/30"
+                        }`}
+                      />
+                      <span className="text-xs text-gray-600">
+                        {maxStayNightsValid === 0 ? "no limit" : "nights"}
+                      </span>
+                    </div>
+                    <p
+                      id="maxStayNights-help"
+                      className="mt-2 text-[10px] text-gray-500"
+                    >
+                      {maxStayNightsValid === null
+                        ? `Enter 0 for no limit, or a whole number between ${MIN_MAX_STAY_NIGHTS} and ${MAX_MAX_STAY_NIGHTS}.`
+                        : maxStayNightsValid === 0
+                          ? "Unlimited — the guest can book any stay length the horizon allows."
+                          : "Looks good."}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3 text-[10px] text-blue-900/80 leading-relaxed">
@@ -9786,7 +9877,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                 </div>
 
                 <SaveActionFooter
-                  label="Save Hold Windows"
+                  label="Save Booking Limits"
                   status={getSaveStatus("holds")}
                   disabled={!holdsFormValid}
                 />
@@ -9795,10 +9886,11 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
                 <p className="font-semibold">Admin-only section</p>
                 <p className="mt-1 leading-relaxed">
-                  The hold windows are restricted to admin accounts. The payment hold
-                  deadline is a guest-facing promise (PEX-01); the in-flow hold controls
-                  the Steps 2 + 3 countdown banner on the public booking flow (IFH-01).
-                  Ask a hotel owner to make hold-window changes.
+                  The hold windows and the maximum stay length are restricted to admin
+                  accounts. The payment hold deadline is a guest-facing promise (PEX-01);
+                  the in-flow hold controls the Steps 2 + 3 countdown banner on the public
+                  booking flow (IFH-01); the maximum stay length decides what the public
+                  date picker will accept (MSL-01). Ask a hotel owner to change these.
                 </p>
               </div>
             )

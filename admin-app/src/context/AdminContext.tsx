@@ -80,6 +80,12 @@ import {
   getEffectiveVatRate,
   normalizeVatConfig,
   type VatConfig,
+  // Per MSL-01 (2026-10-15): the stay-length cap. Stored RESOLVED
+  // (`Infinity` when the admin chose "no limit"), so every admin
+  // read gets a safe number. The Settings editor maps `Infinity` back
+  // to a literal `0` for display.
+  resolveMaxStayNights,
+  DEFAULT_MAX_STAY_NIGHTS,
   // Per BR-08 (decision #238, 2026-10-14 — close-out):
   // `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` import
   // removed — the constant was deleted from
@@ -5909,6 +5915,13 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // default via `normalizeVatConfig` in the onSnapshot
     // merge below — byte-equivalent to pre-VAT-01 behavior.
     vatConfig: { ...DEFAULT_VAT_CONFIG },
+    // Per MSL-01 (2026-10-15): the hotel's maximum stay length, in
+    // nights. The historical value (and the fallback for legacy docs
+    // with no field) is 30 — the constant `MAX_STAY_NIGHTS` used to
+    // hardcode. `0` in Firestore means "no limit"; this state holds
+    // the RESOLVED value, so `Infinity` here is the admin's explicit
+    // unlimited choice and must never be written back verbatim.
+    maxStayNights: DEFAULT_MAX_STAY_NIGHTS,
     // Per EXB-10 (2026-08-01, per decision #157): the
     // hotel-wide rollaway-bed inventory. The server-side
     // `handleCreateBooking` / `handleCreateWalkin` /
@@ -6296,7 +6309,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
