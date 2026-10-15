@@ -96,6 +96,8 @@ import { StepIndicator } from "../components/StepIndicator";
 import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { RoomCartLines } from "../components/RoomCartLines";
 import { RoomCartTray } from "../components/RoomCartTray";
+import { BreakfastMenuStrip } from "../components/BreakfastMenuStrip";
+import { copyBreakfastDateToRemaining } from "../utils/breakfastCopy";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -2160,6 +2162,17 @@ export function BookingPage() {
   // 5-step flow). The same rendering block is reused
   // — the only change is the surrounding step header
   // + the sticky "Continue to guest details" footer.
+  // Per MBUX-05 (decision #257): the number of breakfast SLOTS chosen.
+  // Step 2 currently has breakfast only — the "other add-ons" the spec
+  // describes are not implemented in the guest flow yet, so this is
+  // deliberately derived from breakfast selections alone rather than
+  // hardcoded to a wider formula that does not exist yet.
+  const addOnCount = Object.keys(breakfastSelections).length;
+
+  // Per MBUX-05: the confirmation for the copy-to-remaining-days action.
+  // `null` = nothing to say yet.
+  const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<string>("");
+
   const renderBreakfastSection = () => (
     /* Per BR-03 (2026-10-12, decision #232): the
         new "Breakfast" section. Renders ONLY when
@@ -2179,11 +2192,45 @@ export function BookingPage() {
       const dates = enumerateBreakfastDates(checkIn, checkOut);
       const slots = enumerateGuestSlots(distributedRoomCart);
       if (dates.length === 0 || slots.length === 0) return null;
+      // Per MBUX-05: the menu strip renders the SAME active, ordered
+      // catalogue the selectors read, so a photo can never appear for
+      // a meal that cannot actually be chosen.
+      const activeBreakfastMeals = [...(breakfastConfig.meals || [])]
+        .filter((meal) => meal.isActive !== false)
+        .sort(
+          (a, b) =>
+            (Number(a.displayOrder) || 0) - (Number(b.displayOrder) || 0) ||
+            String(a.name || "").localeCompare(String(b.name || ""))
+        );
       return (
         <motion.div className="mb-6 rounded-card border border-primary/20 bg-primary/5 p-5" variants={staggerChild}>
           <h2 className="font-heading text-xl text-gray-950">Breakfast</h2>
-          <p className="mt-1 text-sm text-gray-600">
-            {breakfastConfig.defaultMealInstructions || "Pick a meal for each guest on each day, or skip the day entirely."}
+          {/* Per MBUX-05 (decision #257): ONE short instruction owns the
+              first screen. The longer hotel-configured text is kept but
+              demoted below the fold of this card — on a phone it was
+              pushing the first date card out of view. */}
+          <p className="mt-1 text-sm text-gray-600">Choose breakfast for each guest.</p>
+          {breakfastConfig.defaultMealInstructions ? (
+            <details className="mt-2 group">
+              <summary className="min-h-11 cursor-pointer text-xs font-semibold text-primary">
+                Breakfast notes
+              </summary>
+              <p className="mt-1 text-xs leading-5 text-gray-600">
+                {breakfastConfig.defaultMealInstructions}
+              </p>
+            </details>
+          ) : null}
+          {/* Per MBUX-04 + MBUX-05: the optional meal photos render here,
+              ABOVE the selectors, never inside a native <option>. */}
+          <BreakfastMenuStrip
+            meals={activeBreakfastMeals}
+            formatPrice={formatPrice}
+          />
+          {/* The skip explanation appears ONCE here rather than as a
+              40-character string repeated inside every native option on
+              every date card. */}
+          <p className="mt-4 text-xs text-gray-600">
+            Skipping a day is fine — leave any slot as “No breakfast”.
           </p>
           <div className="mt-4 space-y-4">
             {dates.map((date) => {
@@ -2202,7 +2249,7 @@ export function BookingPage() {
               });
               return (
                 <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
                     <p className="text-xs text-gray-600">
                       {cutoff.isLocked
@@ -2210,19 +2257,103 @@ export function BookingPage() {
                         : `Order by ${formatStayDate(date)}`}
                     </p>
                   </div>
+                  {/* Per MBUX-05 (decision #257): "Use these choices for
+                      all remaining days". A multi-night stay repeats the
+                      same guest matrix N times, which is the most tedious
+                      thing in the booking flow on a phone.
+
+                      Placement rules:
+                      - only on the FIRST date that has at least one
+                        explicit selection (a guest who has not chosen
+                        anything has nothing to copy);
+                      - only when at least one LATER date is still
+                        editable (a single-night stay has nothing to
+                        copy onto);
+                      - the targets exclude locked dates, so a copy can
+                        never overwrite a closed cut-off.
+
+                      The helper returns how many dates actually CHANGED
+                      (a target that already held the same choices is
+                      not counted), so the confirmation never overstates
+                      what happened. Copied dates stay fully editable —
+                      this writes the same map the selectors write. */}
+                  {(() => {
+                    const sourceHasChoice = slots.some((slot) =>
+                      Boolean(breakfastSelections[`${date}-${slot.id}`])
+                    );
+                    if (!sourceHasChoice || cutoff.isLocked) return null;
+                    const laterEditableDates = dates.filter((later) => {
+                      if (later <= date) return false;
+                      const laterCutoff = computeBreakfastCutoffState({
+                        serviceDate: later,
+                        now: new Date(),
+                        cutoffTime: breakfastConfig.cutoffTime || "20:00",
+                        timezone: breakfastConfig.cutoffTimezone || "Asia/Manila",
+                        cutoffsEnabled: breakfastConfig.cutoffsEnabled !== false
+                      });
+                      return !laterCutoff.isLocked;
+                    });
+                    if (laterEditableDates.length === 0) return null;
+                    return (
+                      <button
+                        type="button"
+                        data-testid={`breakfast-copy-to-remaining-${date}`}
+                        className="mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-primary px-3 text-xs font-semibold text-primary hover:bg-primary-light sm:w-auto"
+                        onClick={() => {
+                          const result = copyBreakfastDateToRemaining({
+                            selections: breakfastSelections,
+                            sourceDate: date,
+                            targetDates: laterEditableDates,
+                            slotIds: slots.map((slot) => slot.id),
+                            now: new Date().toISOString()
+                          });
+                          setBreakfastSelections(result.selections);
+                          // The guest app has no toast system (per
+                          // `FRONTEND.md`), so the confirmation is an
+                          // inline `role="status"` message. It reports the
+                          // number of dates that ACTUALLY changed, so it
+                          // can never overstate what the tap did.
+                          setBreakfastCopyNotice(
+                            result.updatedDates === 0
+                              ? "Those choices are already set on every remaining day."
+                              : `Applied these choices to ${result.updatedDates} remaining day${result.updatedDates === 1 ? "" : "s"}.`
+                          );
+                        }}
+                      >
+                        Use these choices for all remaining days
+                      </button>
+                    );
+                  })()}
+                  {breakfastCopyNotice ? (
+                    <p
+                      role="status"
+                      aria-live="polite"
+                      data-testid={`breakfast-copy-notice-${date}`}
+                      className="mt-2 text-xs font-medium text-gray-700"
+                    >
+                      {breakfastCopyNotice}
+                    </p>
+                  ) : null}
                   <div className="mt-3 space-y-2">
                     {slots.map((slot) => {
                       const key = `${date}-${slot.id}`;
                       const selected = breakfastSelections[key]?.mealId || "";
+                      // Per MBUX-05: the pre-MBUX-05 row was a fixed
+                      // `min-w-[160px]` label beside a `flex-1` select. At
+                      // 360px that left the native select roughly 150px
+                      // wide, so the option text truncated and the whole
+                      // control read as broken. Stacked on mobile (label
+                      // above, full-width select) and side-by-side from
+                      // `sm:` up, where there is room for the old shape.
                       return (
-                        <div key={key} className="flex items-center gap-3">
-                          <label className="min-w-[160px] text-sm text-gray-700" htmlFor={`bf-${key}`}>
+                        <div key={key} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+                          <label className="text-sm text-gray-700 sm:min-w-[160px]" htmlFor={`bf-${key}`}>
                             {slot.label}
                           </label>
                           <select
                             id={`bf-${key}`}
                             data-testid={`breakfast-select-${key}`}
-                            className="h-11 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                            className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1"
                             value={selected}
                             disabled={cutoff.isLocked}
                             onChange={(event) => {
@@ -2264,7 +2395,7 @@ export function BookingPage() {
                               });
                             }}
                           >
-                            <option value="">No meal — skip breakfast for this guest on this day</option>
+                            <option value="">No breakfast</option>
                             {(breakfastConfig.meals || []).map((meal) => (
                               <option key={meal.id} value={meal.id}>
                                 {meal.name} — {formatPrice(meal.price)}
@@ -2439,79 +2570,57 @@ export function BookingPage() {
           />
         </section>
 
-        {/* Per MBUX-01: shell standardised only. The BR-10 dual CTA is
-            consolidated into one context-aware action in MBUX-05. */}
+        {/* Per MBUX-01: the shell is standardised. Per MBUX-05 the
+            BR-10 dual CTA is consolidated into the one context-aware
+            action below. */}
         <BookingStickyFooter
           summary={
             <>
               <p className="text-sm text-gray-600">Add-ons</p>
               <p className="text-lg font-semibold text-gray-950">
-                Continue to guest details when you&apos;re ready.
+                {addOnCount === 0
+                  ? "No add-ons selected"
+                  : `${addOnCount} breakfast selection${addOnCount === 1 ? "" : "s"} · ${formatPrice(breakfastTotal)}`}
               </p>
             </>
           }
         >
-            {/* Per BR-10 (decision #244 reserved, 2026-10-14
-                — Phase 14): the Add-ons step now renders TWO
-                parallel CTAs that both advance to the same
-                `guest-details` step. They differ only in
-                visual style + label:
-                  - **Primary**  "Continue to guest details"
-                    — for the user who is ready to finish.
-                  - **Ghost**    "No add-ons, continue"
-                    — for the user who skipped the breakfast
-                    grid entirely and wants an explicit
-                    "skip" affordance.
-                Both buttons advance to the identical
-                `/book?step=guest-details` URL (the same
-                pre-BR-10 destination), so the URL-side guard
-                + the per-step payload validation are
-                exercised by both paths. No new step-key is
-                minted.
-                Layout: stacked vertically on mobile (primary
-                above ghost so primary reads first) and
-                side-by-side on `sm:` breakpoints. The choice
-                of `sm:flex-row` + the gap comment is the same
-                pattern the FilterChip row uses in the Rooms
-                page — verified against FRONTEND.md
-                §Button Variants (ghost is `bg-transparent
-                text-gray-500 border border-gray-300
-                hover:bg-gray-50`). Per-date breakfast lock
-                (when cut-offs are enforced) still applies
-                to BOTH buttons — the meal picker is the only
-                path forward and the grid renders locked or
-                edit per `computeBreakfastCutoffState`. */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              {/* Primary CTA — mirrors the pre-BR-10 single button. */}
-              <PrimaryButton
-                to={`/book?${guestDetailsParams.toString()}`}
-                className="sm:min-w-56"
-                data-testid="booking-addons-continue-primary"
-              >
-                Continue to guest details <ArrowRight size={16} />
-              </PrimaryButton>
-              {/* Ghost CTA — the BR-10 "skip" affordance. Same
-                  URL as the primary (so the same URL-side guard +
-                  step payload validation runs), different label.
-                  Uses `react-router-dom`'s `Link` to keep the
-                  navigation client-side (a raw `<a href>` would
-                  full-reload and discard `breakfastSelections` +
-                  `breakfastTotal` + the IMT timer state). The
-                  muted gray-ghost styling (`bg-transparent
-                  text-gray-500 border border-gray-300`) matches
-                  FRONTEND.md §Button Variants — the existing
-                  `GhostButton` component uses `border-primary
-                  text-primary` which would visually compete with
-                  the primary "Continue" CTA, so we inline the
-                  muted recipe instead. */}
-              <Link
-                to={`/book?${guestDetailsParams.toString()}`}
-                data-testid="booking-addons-skip-addons"
-                className="inline-flex w-full items-center justify-center gap-2 self-center rounded-lg border border-gray-300 bg-transparent px-5 py-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto sm:min-w-56"
-              >
-                No add-ons, continue
-              </Link>
-            </div>
+            {/* Per MBUX-05 (decision #257): the BR-10 pair of parallel
+                CTAs is RETIRED in favour of ONE context-aware action.
+                Both BR-10 buttons advanced to the identical
+                `/book?step=guest-details` URL and differed only in
+                visual style + label, so the pair told a guest who had
+                skipped breakfast that there was a special "skip" button
+                — implying the other one would do something different
+                with their choices. It would not. One action whose label
+                states what will actually happen:
+
+                  - no selections  -> "Continue without add-ons"
+                  - any selections -> "Continue with N add-ons · total"
+
+                The count is the number of BREAKFAST SLOTS chosen and the
+                figure is `breakfastTotal` — the SAME value the review
+                step and the create payload use, so the CTA can never
+                quote a total that differs from the bill.
+
+                SCOPE: this is the public `/book` flow only. The
+                corporate flow keeps its BR-10 pair until MBUX-09 does
+                the parity pass — `br-10-dual-add-ons-buttons.test.ts`
+                pins that distinction deliberately. */}
+            <PrimaryButton
+              to={`/book?${guestDetailsParams.toString()}`}
+              className="sm:min-w-56"
+              data-testid="booking-addons-continue-primary"
+            >
+              {addOnCount === 0 ? (
+                "Continue without add-ons"
+              ) : (
+                <>
+                  Continue with {addOnCount} add-on{addOnCount === 1 ? "" : "s"} ·{" "}
+                  {formatPrice(breakfastTotal)}
+                </>
+              )}
+            </PrimaryButton>
         </BookingStickyFooter>
       </>
     );

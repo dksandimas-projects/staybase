@@ -245,6 +245,45 @@ Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step
 - [x] EXB-11.4's extra-bed stepper and its soft floor.
 - [x] BR-03's room-rate-only breakfast preview on the card; WRV-01's mixed-rate breakdown panel.
 
+## Step 2 Add-ons for Phones (MBUX-05, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #257. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 2 — Add-ons`. Public `/book` flow only; the corporate flow keeps its BR-10 dual CTA until MBUX-09.
+
+### Breakfast menu strip
+
+- [x] A single `Breakfast menu` strip renders **above every date card**, never inside a native `<option>` — mobile browsers render image-rich native options inconsistently, and the spec rejected that outright.
+- [x] Horizontally scrollable with `overscroll-x-contain` so a horizontal flick does not chain into the page's vertical scroll on iOS. Lazy-loaded thumbnails on a consistent 4:3 crop.
+- [x] Missing or failed images fall back to a branded-neutral tile. The meal **name is always rendered as text**, so a missing photo never removes information.
+- [x] Cards are non-interactive `<div>`s. A tappable photo beside a selector is indistinguishable from "pick this meal", and the strip must not become a second selection path.
+- [x] It reads the same active, display-ordered catalogue the selectors read, so a photo can never appear for a meal that cannot be chosen.
+
+### Per-guest selectors
+
+- [x] The row is stacked on mobile (label above, full-width select) and side-by-side from `sm:` up. The pre-MBUX-05 fixed `min-w-[160px]` label left the native select ~150px wide at 360px, truncating the option text.
+- [x] The empty option is `No breakfast`. The longer "skipping is allowed" explanation appears **once above the grid**, not inside every option on every date card.
+- [x] Locked dates remain visible and read-only; the server remains authoritative on cut-offs.
+
+### Copy to remaining days
+
+- [x] `Use these choices for all remaining days` appears only on a date with at least one explicit selection, and only when a later **editable** date exists.
+- [x] **`No breakfast` copies as a choice** — an empty source slot CLEARS the matching target slot rather than leaving a stale meal. Copying only filled slots would produce a result differing from what the guest actually chose.
+- [x] Locked dates are never overwritten. The lock filter is owned by the caller (it already computes cut-off state); the helper deliberately does not re-derive it.
+- [x] Copied entries are **re-stamped**, not shared by reference, so mutating one date's entry cannot rewrite another's.
+- [x] `updatedDates` counts only dates that actually changed, so the inline `role="status"` confirmation cannot overstate what the tap did. (The guest app has no toast system.)
+- [x] Copied dates remain fully editable — the helper writes the same selections map the selectors write.
+
+### One context-aware Continue action (BR-10 retired)
+
+- [x] The ghost `No add-ons, continue` link is removed from the public flow. Both BR-10 buttons advanced to the IDENTICAL `step=guest-details` URL and differed only in style and label, which implied the primary handled skipped breakfast differently. It did not.
+- [x] One action: `Continue without add-ons` at zero selections, `Continue with N add-ons · total` otherwise. Skipping is now simply "have no selections and press Continue" — no capability is lost.
+- [x] The quoted total is `breakfastTotal`, the same value the review step and create payload use, so the CTA cannot display a figure that differs from the bill.
+- [x] No new step key is minted; navigation stays a client-side `PrimaryButton` so `breakfastSelections` + `breakfastTotal` survive the route change.
+
+### Not shipped in this slice
+
+- [ ] **"Existing other add-ons as progressive cards" is vacuous** — Step 2 has breakfast only; the other-add-ons catalogue is not implemented in the guest flow. `addOnCount` is therefore derived from breakfast selections alone rather than hardcoded to a wider formula that does not exist yet.
+- [ ] The optional thumbnail **preview modal** (spec says "may open") is deferred. The strip's no-photo / loading / failed states are the contract MBUX-10 must verify.
+
 ## Shared Mobile Booking Shell (MBUX-01, shipped 2026-10-15)
 
 > Decision: `plan/docs/DECISIONS-FEATURES.md` #254. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`. Applies to **both** the public `/book` flow and the corporate `/corporate/book` flow. Later slices (MBUX-02..09) change each step's *content*; this section covers the *frame* they all sit in.

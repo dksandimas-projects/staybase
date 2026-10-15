@@ -38,117 +38,80 @@ const corporateBookingPageSrc = readFileSync(
   resolve(__dirname, "../../src/pages/CorporateBookingPage.tsx"),
   "utf8"
 );
-
-describe("BR-10 — dual 'Continue to guest details' / 'No add-ons, continue' on BookingPage.tsx", () => {
-  /**
-   * Extract the Add-ons step's dual-button container
-   * block from BookingPage.tsx. The block is anchored
-   * on the unique `data-testid="booking-addons-skip-addons"`
-   * attribute on the ghost CTA `<Link>` — no other
-   * element in the file carries that testid. The block
-   * extends backwards to the enclosing `<div
-   * className="flex flex-col gap-2 sm:flex-row sm:items-center">`
-   * container that holds both buttons, and forwards to
-   * the closing `</div></div></div>` of the bottom-bar
-   * wrapper. This anchors the tripwire on the
-   * data-testid rather than a free-form comment so it
-   * survives copy edits to the surrounding comments.
-   */
-  const skipAnchorIdx = bookingPageSrc.indexOf(
-    'data-testid="booking-addons-skip-addons"'
-  );
-  const startAnchorIdx = bookingPageSrc.lastIndexOf(
-    '<div className="flex flex-col gap-2 sm:flex-row sm:items-center">',
-    skipAnchorIdx
-  );
-  // The block ends after the bottom-bar's
-  // `</div></div></div>` chain — but `</Link>` itself
-  // is a clear, unique anchor for the ghost button.
-  const endAnchorIdx = bookingPageSrc.indexOf("</Link>", skipAnchorIdx) + "</Link>".length;
-  const addOnsBlock =
-    startAnchorIdx >= 0 && skipAnchorIdx >= 0 && endAnchorIdx > skipAnchorIdx
-      ? bookingPageSrc.slice(startAnchorIdx, endAnchorIdx)
-      : null;
-
-  it("renders the primary 'Continue to guest details' CTA label on the Add-ons step", () => {
-    // The label is the BR-10 invariant: a future
-    // copy edit that drops the word "guest details"
-    // would obscure the destination step (the
-    // skip-button label is "No add-ons, continue" —
-    // both must stay unambiguous). The tripwire is
-    // strict-mode literal: the exact string.
-    expect(bookingPageSrc).toMatch(/Continue to guest details/);
+// MBUX-05 supersession (see the block comment above).
+//
+// BR-10 shipped two parallel CTAs on the Add-ons step —
+// "Continue to guest details" (primary) and "No add-ons,
+// continue" (ghost) — that advanced to the IDENTICAL
+// `/book?step=guest-details` URL and differed only in
+// visual style and label.
+//
+// MBUX-05 (decision #257, 2026-10-15) retires the pair on
+// the PUBLIC flow in favour of ONE context-aware action
+// whose label states what will actually happen.
+//
+// Why the pair was wrong: the ghost button implied that
+// the primary would do something different with the
+// guest's breakfast choices. It would not. A guest who
+// had skipped the grid was being told there was a
+// special "skip" affordance, which is a distinction the
+// destination does not honour. One action removes the
+// implication without removing any capability — skipping
+// is now simply "have no selections and press Continue".
+//
+// SCOPE: the public `/book` flow ONLY. The corporate flow
+// keeps its BR-10 pair until MBUX-09 does the parity
+// pass; the corporate describe block below still asserts
+// it, deliberately.
+describe("MBUX-05 — one context-aware Add-ons CTA on BookingPage.tsx", () => {
+  it("the ghost 'No add-ons, continue' CTA is GONE from the public flow", () => {
+    expect(bookingPageSrc).not.toMatch(/No add-ons, continue/);
+    expect(bookingPageSrc).not.toMatch(/data-testid="booking-addons-skip-addons"/);
   });
 
-  it("renders the ghost 'No add-ons, continue' CTA label on the Add-ons step", () => {
-    // Per BR-10 (decision #244 reserved, 2026-10-14):
-    // the verbatim label is a user-requested string
-    // (not paraphrased). Pinning the literal keeps
-    // the CTA copy stable across copy edits.
-    expect(bookingPageSrc).toMatch(/No add-ons, continue/);
+  it("renders one context-aware action that states the real outcome", () => {
+    expect(bookingPageSrc).toMatch(/Continue without add-ons/);
+    expect(bookingPageSrc).toMatch(/Continue with \{addOnCount\} add-on/);
   });
 
-  it("routes both buttons to the same `/book?step=guest-details` destination", () => {
-    // Both buttons must navigate to the same URL so
-    // the same URL-side guard runs and the per-step
-    // payload validation is exercised by both paths.
-    // The brief is explicit: "no shortcut for skip".
-    expect(addOnsBlock, "Add-ons dual-button block not found in BookingPage.tsx").not.toBeNull();
-    const block = addOnsBlock!;
-    const occurrences = block.match(/to=\{`\/book\?\$\{guestDetailsParams\.toString\(\)\}`/g) || [];
-    expect(occurrences.length).toBe(2);
-  });
-
-  it("ghost button uses the muted ghost-variant classes (not `components/GhostButton.tsx`)", () => {
-    // The existing `GhostButton` component renders
-    // with `border-primary text-primary`, which
-    // would visually compete with the primary
-    // "Continue" CTA. FRONTEND.md §Button Variants
-    // specifies the muted ghost recipe
-    // (`bg-transparent text-gray-500 border
-    // border-gray-300 hover:bg-gray-50`) for the
-    // skip-affordance case.
-    expect(addOnsBlock).not.toBeNull();
-    const block = addOnsBlock!;
-    expect(block).toMatch(/text-gray-500/);
-    expect(block).toMatch(/border-gray-300/);
-    expect(block).toMatch(/bg-transparent/);
-    expect(block).toMatch(/hover:bg-gray-50/);
-  });
-
-  it("ghost `<Link>` element does NOT carry the brand-primary ghost-variant class names", () => {
-    // Strong pin: extract the ghost `<Link>`'s
-    // `className` attribute (the one with the
-    // `booking-addons-skip-addons` data-testid) and
-    // assert the className does not contain
-    // `border-primary` or `text-primary`. This
-    // avoids tripping on the BR-10 comment block
-    // text that intentionally mentions
-    // `border-primary` to describe the recipe we
-    // DIDN'T use.
-    expect(addOnsBlock).not.toBeNull();
-    const block = addOnsBlock!;
-    const linkClassMatch = block.match(
-      /<Link[\s\S]*?data-testid="booking-addons-skip-addons"[\s\S]*?className="([^"]+)"/
+  it("the no-selection label and the with-selection label are mutually exclusive", () => {
+    expect(bookingPageSrc).toMatch(
+      /addOnCount === 0\s*\?\s*\(\s*"Continue without add-ons"/
     );
-    expect(linkClassMatch, "ghost <Link> className not found").not.toBeNull();
-    const ghostClassName = linkClassMatch![1];
-    expect(ghostClassName).not.toMatch(/\bborder-primary\b/);
-    expect(ghostClassName).not.toMatch(/\btext-primary\b/);
   });
 
-  it("primary CTA + ghost CTA both carry testids for render tests", () => {
-    // The primary CTA is wrapped in a `<PrimaryButton>`
-    // with `data-testid="booking-addons-continue-primary"`.
-    // The ghost CTA is a plain `<Link>` with
-    // `data-testid="booking-addons-skip-addons"`. Both
-    // testids exist for future render tests.
+  it("derives the count from the breakfast selections, not a hardcoded number", () => {
+    expect(bookingPageSrc).toMatch(
+      /const addOnCount = Object\.keys\(breakfastSelections\)\.length/
+    );
+  });
+
+  it("quotes `breakfastTotal` — the SAME value the review step and create payload use", () => {
+    // A CTA total that can disagree with the bill is worse than no
+    // total, so this pins the shared source rather than a copy.
+    expect(bookingPageSrc).toMatch(/formatPrice\(breakfastTotal\)/);
+  });
+
+  it("still advances to `guest-details` — retiring the ghost button mints no new step key", () => {
+    expect(bookingPageSrc).not.toMatch(/STEP_KEYS\.skipAddOns/);
+    expect(bookingPageSrc).not.toMatch(/"skip-addons"/);
+    expect(bookingPageSrc).not.toMatch(/"skip_addons"/);
     expect(bookingPageSrc).toMatch(
       /data-testid="booking-addons-continue-primary"/
     );
+    // ...and it is still a client-side <Link>-backed PrimaryButton, so
+    // breakfastSelections + breakfastTotal survive the route change.
     expect(bookingPageSrc).toMatch(
-      /data-testid="booking-addons-skip-addons"/
+      /<PrimaryButton\s+to=\{`\/book\?\$\{guestDetailsParams\.toString\(\)\}`\}/
     );
+  });
+
+  it("the footer summary states the selection count and total honestly", () => {
+    // The pre-MBUX-05 summary said "Continue to guest details when
+    // you're ready." — true but useless next to a CTA that already
+    // says where you are going.
+    expect(bookingPageSrc).not.toMatch(/Continue to guest details when you&apos;re ready\./);
+    expect(bookingPageSrc).toMatch(/No add-ons selected/);
   });
 });
 
@@ -261,12 +224,16 @@ describe("BR-10 — Add-ons step does NOT introduce a new step key (no shortcut 
     // elsewhere — see the second assertion.
     const startAnchor = "if (isAddOnsStep) {";
     const startIdx = bookingPageSrc.lastIndexOf(startAnchor);
+    // MBUX-05 (decision #257) retired the ghost "skip" button, so the
+    // block is now delimited by the surviving single CTA's testid
+    // rather than the removed one. The invariant is unchanged: the
+    // Add-ons rendering branch must not mint a new step key.
     const skipIdx = bookingPageSrc.indexOf(
-      'data-testid="booking-addons-skip-addons"'
+      'data-testid="booking-addons-continue-primary"'
     );
     expect(startIdx, "isAddOnsStep guard not found").toBeGreaterThanOrEqual(0);
-    expect(skipIdx, "Skip testid not found").toBeGreaterThanOrEqual(0);
-    expect(startIdx, "start anchor must come before skip testid").toBeLessThan(skipIdx);
+    expect(skipIdx, "Add-ons CTA testid not found").toBeGreaterThanOrEqual(0);
+    expect(startIdx, "start anchor must come before the CTA testid").toBeLessThan(skipIdx);
     const block = bookingPageSrc.slice(startIdx, skipIdx);
     // The rendering branch must NOT mint a
     // `STEP_KEYS.skipAddOns` (or any literal
