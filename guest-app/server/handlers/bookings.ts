@@ -44,7 +44,6 @@ import {
   WalkinBookingSchema,
   RescheduleBookingSchema,
   AddRoomBookingSchema,
-  MAX_STAY_NIGHTS,
   MAX_ADVANCE_DAYS,
   // Per PEX-02 (2026-08-01, per decision #147): the shared
   // occupancy rule — one place that decides whether a booking
@@ -202,7 +201,14 @@ import {
   // HH:MM values for the 24h window — same helper
   // shape the guest dropdown uses so the two can
   // never drift apart).
-  buildArrivalTimeOptions
+  buildArrivalTimeOptions,
+  // Per MSL-01 (2026-10-15): the stay-length cap is a per-hotel
+  // setting, so the server resolves the raw Firestore value through
+  // `resolveMaxStayNights` before any clamp arithmetic. Never pass
+  // the raw value — `0` means "no limit" and would otherwise
+  // collapse every stay to one night.
+  resolveMaxStayNights,
+  describeMaxStayNights
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 
@@ -1683,15 +1689,61 @@ export async function handleCreateBooking(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
 
+// Per MSL-01 (2026-10-15): the maximum stay length is a per-hotel
+// setting (`settings/hotelConfig.maxStayNights`), not a compile-time
+// constant, so the hotel raises or removes the cap from Settings
+// without a deploy.
+//
+// `resolveMaxStayNights` owns the whole raw-value mapping — in
+// particular `0` means "no limit" and must NEVER reach the clamp
+// arithmetic as a literal, where `Math.max(Math.min(0, horizon), 1)`
+// would collapse every stay to one night. Callers pass the RESOLVED
+// value only.
+//
+// Fails SAFE: any read error falls back to the default cap rather than
+// to unlimited. A Firestore blip must not open the hotel to unbounded
+// bookings, and the historical behavior on this path was "capped at
+// 30", so the fallback is also the no-regression choice.
+async function loadMaxStayNights(): Promise<number> {
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (!snap.exists) return resolveMaxStayNights(undefined);
+    return resolveMaxStayNights((snap.data() as Record<string, unknown> | undefined)?.maxStayNights);
+  } catch {
+    return resolveMaxStayNights(undefined);
+  }
+}
+
+/**
+ * MSL-01: the shared 400 for an over-cap stay. Kept in one place so
+ * the guest booking, walk-in, and reschedule paths refuse identically
+ * and quote the SAME live cap the guest's picker enforced — so the
+ * error names the number the guest was just shown.
+ *
+ * Only ever reached when a FINITE cap refused (`n > Infinity` is
+ * false), so `describeMaxStayNights` always yields "N nights" here.
+ */
+function buildMaxStayNightsError(res: any, maxNights: number): void {
+  res.status(400).json({
+    success: false,
+    error: `Maximum stay length is ${describeMaxStayNights(maxNights)}. Please shorten your stay.`
+  });
+}
+
   // G-02 (E2E audit 2026-07-17): enforce maximum stay length and
   // advance-booking window server-side before any Firestore work.
   // Permits same-day bookings (checkIn === manilaToday). Walk-ins
   // are exempt from the advance window.
-  if (numNights > MAX_STAY_NIGHTS) {
-    return res.status(400).json({
-      success: false,
-      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten your stay.`
-    });
+  //
+  // MSL-01: the cap itself now comes from
+  // `settings/hotelConfig.maxStayNights` (resolved via
+  // `loadMaxStayNights`) instead of a constant. `Infinity` = the
+  // admin set `0` = no limit, and `numNights > Infinity` is false, so
+  // an unlimited hotel skips this branch entirely.
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
 
   const advanceDays = Math.round((checkInDate.getTime() - currentManilaDate.getTime()) / 86400000);
@@ -4519,11 +4571,16 @@ export async function handleCreateWalkin(req: any, res: any) {
   // G-02 (E2E audit 2026-07-17): enforce maximum stay length for
   // walk-ins. Walk-ins are exempt from the advance-booking window
   // since staff may legitimately backfill past stays.
-  if (numNights > MAX_STAY_NIGHTS) {
-    return res.status(400).json({
-      success: false,
-      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten the stay.`
-    });
+  //
+  // MSL-01: resolved from `settings/hotelConfig.maxStayNights`, same
+  // as the guest path. NOTE (MSL-01): walk-ins ARE capped — this
+  // guard predates MSL-01. If the hotel needs to register a genuine
+  // long-stay relocation it can raise or zero the setting, which is
+  // why the cap is admin-editable rather than hardcoded.
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
 
   // Per PEX-01 + PEX-03 (2026-08-01, per decision #147): the
@@ -11842,6 +11899,20 @@ export async function handleRescheduleBooking(req: any, res: any) {
   const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // MSL-01 (2026-10-15): maximum stay length on the RESCHEDULE path.
+  // This guard was genuinely MISSING before MSL-01 — `handleCreateBooking`
+  // and `handleCreateWalkin` both capped `numNights`, but reschedule
+  // only ever checked the lower bound (`< 1`). A front-desk user could
+  // therefore stretch a legal 2-night booking to 200 nights and
+  // completely bypass the cap the guest-facing flow enforced. Resolved
+  // from the same `settings/hotelConfig.maxStayNights` as the other two
+  // paths, so all three agree.
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
 
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
