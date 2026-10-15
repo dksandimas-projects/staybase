@@ -200,6 +200,51 @@ Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step
 - [x] **Per NBS-2026-08-08 (F2, booking-flow audit 2026-08-08): every server-side 4xx surfaces a matching recovery CTA on the Step 3 sticky footer.** The previous catch only auto-redirected for the "Room no longer available" message; every other 4xx (rate-limit 429, `MAX_STAY_NIGHTS`, `MAX_ADVANCE_DAYS`, past-checkin, etc.) stranded the user on Step 3 with a generic message and no next step. The fix maps the server error to one of three recovery actions via a `submitErrorAction: "back-to-step-1" | "retry" | "none"` discriminator: `back-to-step-1` for the stay/date-validation cases (room not available, max stay length, advance window, past check-in); `retry` for transient cases (rate limit, network); `none` for everything else (with a Dismiss button). The auto-redirect for the "Room no longer available" path now holds its timer on a `useRef` so a user-initiated nav (clicking the back CTA or the browser back button) cancels the timer (F11).
 - [x] **Per NBS-2026-08-08 (F11, booking-flow audit 2026-08-08): the 5s auto-redirect for "Room no longer available" is cancellable.** The previous bare `setTimeout` raced a user-initiated nav (the user clicks the back CTA before 5s elapses) and clobbered the URL the user already moved to. The timer is held on `redirectTimerRef: useRef<number | null>(null)`. The cleanup effect cancels any pending timer on unmount; the manual-nav CTA cancels the timer before navigating; a fresh `handleConfirmBooking` submit cancels the timer before re-firing the request.
 
+## Step 1 Room Discovery + Mobile Cart Tray (MBUX-02 + MBUX-03, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #255. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 1 — Select Rooms`.
+
+### Card is the selection target
+
+- [x] The visible `Room Only` rate panel, the `selectRoomType` handler, and the `RateOption` component are **deleted**. After BR-03 (decision #232) removed `Room + Breakfast`, `Room Only` was the only rate option and therefore represented no choice — the panel duplicated the `Rooms` quantity stepper directly above it.
+- [x] `rateChoice: "room-only"` **remains** on every cart item. The API payload, `serializeBookingRoomCart` URL state, and server validation are unchanged — only the guest-facing label is gone.
+- [x] The duplicate type pill (rendering the same `type.label` as the heading directly beneath it) is removed, as is the copy `Click a rate to add a room. Click the same rate again to remove it.`
+- [x] `updateRoomQuantity` is the single mutation path for add AND remove. An unselected card shows one full-width `Select this room`; a selected card shows `N selected`, the per-type stay total, and the stepper.
+- [x] Decrementing to zero restores the unselected state automatically — `isSelected` derives from `cartQuantityByType`, so there is no separate clear path.
+- [x] A selected card takes a primary border. It is marked `aria-current="true"` — deliberately **not** `aria-current="step"`, because a card selection is not a navigation position.
+
+### EXB-11.5 supersession (read this before touching Step 1)
+
+- [x] EXB-11.5's per-type rate-option toggle is **superseded by MBUX-02, not merely refactored**. With one rate option left, its untick branch was reachable only by clicking the same lone panel twice (a gesture with nothing to toggle between) and its switch-rate branch was unreachable entirely.
+- [x] `guest-app/tests/api/exb-11-5-rate-option-toggle.test.ts` **keeps its filename** (referenced by this file and the roadmap) and now records the supersession, pins the new surface, and carries **negative pins so the panel cannot quietly return**.
+- [x] The **EXB-11.3 invariant is preserved and re-pinned**: no room may be pre-selected on page load; `Select this room` is the user-explicit add. `guest-app/tests/api/exb-11-3-no-default-room-type-on-load.test.ts` was retargeted to that path.
+- [x] **The selection-sync effect is now load-bearing.** The untick branch that explicitly skipped `setSelectedRoomType` / `setRateChoice` is gone, so the sync effect is the only thing keeping `selectedRoomType` coherent after a decrement-to-zero.
+- [x] **A "click the same card again to remove" gesture must not be reintroduced** — it would restore the meaningless double-tick MBUX-02 removed. Removal happens through the stepper.
+
+### Shared cart read surface
+
+- [x] `groupCartByType` + `RoomCartLines` were **extracted**, not copied, out of an IIFE inside the Step 1 sidebar. The desktop sidebar and the mobile tray render the same component and the same single `deriveRoomTypeCapacityFit` helper, so the tray cannot contradict the room-type card's Fits / Tight / Doesn't fit chip.
+- [x] Lines are grouped by room TYPE and render `N× <type label>` — never positional `Room 1` / `Room 2` (CHD-12).
+- [x] The two instances coexist via `idPrefix` (`cart-line` in the sidebar, `cart-tray-line` in the tray).
+
+### Mobile cart tray
+
+- [x] Mounted directly above the sticky footer, `lg:hidden` — from `lg:` up the sticky sidebar already shows the full cart, so both are never on screen at once.
+- [x] It sits above the footer because that is the only region a thumb reaches and the only region that does not scroll away. A body-positioned tray would scroll off, which is the regression MBUX-01 just fixed elsewhere.
+- [x] Renders nothing when the cart is empty.
+- [x] Collapsed by default; carries room count, adults/children rollup, fit state, and aggregate total. Expanded it shows the same grouped lines as the sidebar.
+- [x] Collapsed lines use the `hidden` attribute, not a visual clip, so they stay out of the accessibility tree.
+- [x] Its aggregate total is the **same `displayTotal`** the sticky footer shows — a second total derivation would be free to disagree with the figure the guest is about to be charged.
+- [x] The expand control is a 44px touch target with `aria-expanded` + `aria-controls`.
+
+### Preserved unchanged
+
+- [x] CHD-11's per-type Fits / Tight / Doesn't fit chip and the `You'd need N of [type]` nudge.
+- [x] CHD-11's occupancy gate: `step-one-occupancy-error`, `adjust-room-cta`, and `aria-describedby` on the disabled submit.
+- [x] The availability bound on increment (`disabled={typeQuantity >= entry.availableCount}`) — the cap is availability, not the fit state.
+- [x] EXB-11.4's extra-bed stepper and its soft floor.
+- [x] BR-03's room-rate-only breakfast preview on the card; WRV-01's mixed-rate breakdown panel.
+
 ## Shared Mobile Booking Shell (MBUX-01, shipped 2026-10-15)
 
 > Decision: `plan/docs/DECISIONS-FEATURES.md` #254. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`. Applies to **both** the public `/book` flow and the corporate `/corporate/book` flow. Later slices (MBUX-02..09) change each step's *content*; this section covers the *frame* they all sit in.

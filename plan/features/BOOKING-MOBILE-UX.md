@@ -1,7 +1,7 @@
 # Guest Booking Mobile UX Refresh (MBUX)
 > Requires: `CLAUDE.md`, `plan/docs/FRONTEND.md`, `plan/features/BOOKING-FLOW.md`, `plan/features/BREAKFAST.md`, `plan/features/OTHER-ADD-ONS.md`, `plan/features/CORPORATE-BOOKING.md`
 >
-> **Status:** In progress 2026-10-15. Owner-approved design direction; **MBUX-01 shipped** (shared booking shell) — see `plan/docs/DECISIONS-FEATURES.md` #254. MBUX-02..10 not started. Roadmap owner: `plan/project/ROADMAP.md §Phase 15`. **Numbering note:** this plan originally reserved decision **#253**, but MSL-01 shipped the same day and consumed it; the reservation was stale, so the MBUX implementation record is **#254**.
+> **Status:** In progress 2026-10-15. Owner-approved design direction; **MBUX-01 shipped** (shared booking shell, decision #254) and **MBUX-02 + MBUX-03 shipped** (Step 1 room cards + mobile cart tray, decision #255). MBUX-04..10 not started. Roadmap owner: `plan/project/ROADMAP.md §Phase 15`. **Numbering note:** this plan originally reserved decision **#253**, but MSL-01 shipped the same day and consumed it; the reservation was stale, so the MBUX implementation record is **#254**.
 
 ---
 

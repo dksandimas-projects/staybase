@@ -80,15 +80,24 @@ describe("EXB-11.3 — no default room-type selection on /book page load", () =>
     );
   });
 
-  it("the `selectRoomType` function (user click handler) is unchanged", () => {
-    // The user-explicit path: user clicks a rate
-    // option on a card → `selectRoomType` is called →
-    // the type is added to the cart (if not present)
-    // and the selection is set. This is the path
+  it("the user-explicit add path still exists (now via the card, not a rate option)", () => {
+    // The user-explicit path: the user clicks `Select this room`
+    // on a card → `updateRoomQuantity` is called → the
+    // type is added to the cart. This is the path
     // EXB-11.3 wants the user to take.
+    //
+    // MBUX-02 (decision #255) removed the visible rate-option
+    // panel and the `selectRoomType` handler with it, because
+    // after BR-03 removed the second rate option the panel
+    // represented no choice and merely duplicated this
+    // quantity control. The INVARIANT is unchanged: the first
+    // room still requires an explicit click. See
+    // `exb-11-5-rate-option-toggle.test.ts`, which records
+    // the supersession and re-pins the invariant.
     expect(bookingPageSrc).toMatch(
-      /function selectRoomType\(typeValue: string, nextRateChoice: RateChoice\)/
+      /onClick=\{\(\) => updateRoomQuantity\(type\.value, 1, entry\.availableCount\)\}/
     );
+    expect(bookingPageSrc).toMatch(/Select this room/);
   });
 
   it("the `updateRoomQuantity` function (user changes quantity) is unchanged", () => {

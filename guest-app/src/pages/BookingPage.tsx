@@ -94,6 +94,8 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { PriceBreakdown } from "../components/PriceBreakdown";
 import { StepIndicator } from "../components/StepIndicator";
 import { BookingStickyFooter } from "../components/BookingStickyFooter";
+import { RoomCartLines } from "../components/RoomCartLines";
+import { RoomCartTray } from "../components/RoomCartTray";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -1477,74 +1479,6 @@ export function BookingPage() {
       return null;
     });
   }
-
-  // Per EXB-11.5 (2026-08-06, per decision #198): the rate
-  // option is a per-type toggle. Click to add 1 of that type
-  // to the cart (with the chosen rate); click the same rate
-  // again to remove all rooms of that type from the cart;
-  // click a different rate to switch the rate in place. The
-  // user is in full control of the room-type selection, same
-  // shape as the extra-bed toggle in EXB-11.4. The
-  // `selectedRoomType` / `rateChoice` state sync is skipped
-  // on the untick path — the `useEffect` at `BookingPage.tsx:865`
-  // picks another type (or clears) when the current selection
-  // is no longer in the cart. The `setSearchParams` call
-  // stays inside the `setRoomCart` callback to match the
-  // existing pattern (idempotent in React 18 StrictMode).
-  function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
-    let shouldSyncSelection = false;
-    setRoomCart((current) => {
-      const existingRoom = current.find((room) => room.roomType === typeValue);
-      let next;
-      if (!existingRoom) {
-        // Type not in cart: add 1 room with the chosen rate.
-        shouldSyncSelection = true;
-        next = [
-          ...current,
-          {
-            bookingId: doc(collection(db, "bookings")).id,
-            roomType: typeValue,
-            rateChoice: nextRateChoice,
-            numAdults: 0,
-            numChildren: 0,
-            extraBedCount: 0
-            // Per BR-08: the legacy `extraBedBreakfast: false`
-            // default is gone — extra-bed occupants are
-            // ordinary meal slots in Step 2 (the per-meal
-            // picker). The `breakfastSelections` map is the
-            // single source of truth for "which meal slots
-            // the guest selected", not the cart shape.
-          }
-        ];
-      } else if (existingRoom.rateChoice === nextRateChoice) {
-        // Type in cart with the same rate: untick (per-type
-        // toggle) — remove ALL rooms of this type. Don't
-        // sync `selectedRoomType` / `rateChoice` here; the
-        // useEffect at `BookingPage.tsx:865` will pick
-        // another type (or clear) when the current selection
-        // is no longer in the cart.
-        next = current.filter((room) => room.roomType !== typeValue);
-      } else {
-        // Type in cart with a different rate: switch the
-        // rate in place (update every room of this type).
-        shouldSyncSelection = true;
-        next = current.map((room) =>
-          room.roomType === typeValue
-            ? { ...room, rateChoice: nextRateChoice }
-            : room
-        );
-      }
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("rooms", serializeBookingRoomCart(next));
-      setSearchParams(nextParams, { replace: true });
-      return next;
-    });
-    if (shouldSyncSelection) {
-      setSelectedRoomType(typeValue);
-      setRateChoice(nextRateChoice);
-    }
-  }
-
   function updateRoomQuantity(typeValue: string, nextQuantity: number, maxQuantity: number) {
     const safeQuantity = Math.min(Math.max(Math.floor(nextQuantity), 0), maxQuantity);
     setSelectedRoomType(typeValue);
@@ -3746,61 +3680,17 @@ export function BookingPage() {
                   (per CHD-11) is wired below on each card. */}
               <div className="rounded-card border border-gray-200 bg-gray-50 p-4">
                 <p className="text-sm font-semibold text-gray-950">Your cart</p>
-                {distributedRoomCart.length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    {(() => {
-                      // Group distributedRoomCart by roomType.
-                      // Per-type: quantity + sum(numAdults) +
-                      // sum(numChildren) + sum(extraBedCount).
-                      // Re-derives the per-type capacity
-                      // indicator from the same helper the
-                      // room-type card uses (per CHD-11 +
-                      // CHD-12 composition).
-                      const byType = new Map<string, { quantity: number; adults: number; children: number; extraBeds: number; label: string }>();
-                      for (const room of distributedRoomCart) {
-                        const entry = byType.get(room.roomType) || { quantity: 0, adults: 0, children: 0, extraBeds: 0, label: "" };
-                        const type = roomTypes.find((t) => t.value === room.roomType);
-                        entry.quantity += 1;
-                        entry.adults += room.numAdults;
-                        entry.children += room.numChildren;
-                        entry.extraBeds += room.extraBedCount || 0;
-                        if (!entry.label && type) entry.label = type.label;
-                        byType.set(room.roomType, entry);
-                      }
-                      return Array.from(byType.entries()).map(([roomType, agg]) => {
-                        const fit = deriveRoomTypeCapacityFit({
-                          type: roomTypes.find((t) => t.value === roomType) || { maxCapacity: 0, maxChildren: 0, maxExtraBeds: 0 },
-                          numAdults: agg.adults,
-                          numChildren: agg.children,
-                          currentCartCount: agg.quantity
-                        });
-                        const fitChip =
-                          fit.state === "fits"
-                            ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Fits</span>
-                            : fit.state === "tight"
-                              ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Tight</span>
-                              : <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">Doesn't fit</span>;
-                        return (
-                          <div key={roomType} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
-                            <span className="flex-1">
-                              <span className="block font-semibold text-gray-900">
-                                {agg.quantity}× {agg.label || roomType} {fitChip}
-                              </span>
-                              {agg.adults} adult{agg.adults === 1 ? "" : "s"}{agg.children > 0 ? ` · ${agg.children} child${agg.children === 1 ? "" : "ren"}` : ""}
-                            </span>
-                            {agg.extraBeds > 0 ? (
-                              <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
-                                {agg.extraBeds} extra bed{agg.extraBeds === 1 ? "" : "s"}
-                              </span>
-                            ) : null}
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-gray-500">Add at least one room to begin.</p>
-                )}
+                {/* Per MBUX-03: the grouping moved into the shared
+                    `<RoomCartLines>` so the desktop sidebar and the new
+                    mobile tray cannot drift. The single
+                    `deriveRoomTypeCapacityFit` helper still drives both
+                    this surface and the room-type card's Fits / Tight /
+                    Doesn't fit chip (CHD-11 + CHD-12 composition). */}
+                <RoomCartLines
+                  rooms={distributedRoomCart}
+                  roomTypes={roomTypes}
+                  idPrefix="cart-line"
+                />
                 {!cartDistributionComplete ? (
                   <p className="mt-3 text-xs font-medium text-amber-700" role="status" aria-live="polite">
                     Add enough rooms to place every guest. Each room must include at least one adult.
@@ -3821,7 +3711,12 @@ export function BookingPage() {
             <p className="font-semibold text-gray-950">
               {availableRoomTypes.length} {availableRoomTypes.length === 1 ? "room type" : "room types"} available
             </p>
-            <p className="text-sm text-gray-600">Click a rate to add a room. Click the same rate again to remove it.</p>
+            {/* Per MBUX-02: the pre-MBUX-02 hint taught a control that
+                no longer exists. The selection action is now on the
+                card itself. */}
+            <p className="text-sm text-gray-600">
+              Choose a room to add it to your stay. Use the stepper on a selected room to change how many you need.
+            </p>
           </div>
 
           {availableRoomTypes.length > 0 ? (
@@ -3893,7 +3788,15 @@ export function BookingPage() {
                 return (
                   <motion.article
                     key={type.value}
-                    className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200"
+                    // Per MBUX-02: the selected card gets a primary
+                    // border + shadow so the selection state is visible
+                    // on the card itself, not only inside the action
+                    // block. `aria-current` is deliberately NOT used
+                    // here — this is not a navigation position.
+                    aria-current={isSelected ? "true" : undefined}
+                    className={`overflow-hidden rounded-card bg-white shadow-sm ring-1 ${
+                      isSelected ? "ring-primary shadow-md" : "ring-gray-200"
+                    }`}
                     variants={staggerChild}
                     whileHover={shouldReduceMotion ? undefined : { y: -4 }}
                     transition={{ duration: 0.2, ease: "easeOut" }}
@@ -3915,10 +3818,11 @@ export function BookingPage() {
                       <div className="p-5 sm:p-6">
                         <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
                           <div>
-                            <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                              {type.label}
-                            </span>
-                            <h2 className="mt-3 text-2xl font-semibold text-gray-950">{type.label}</h2>
+                            {/* Per MBUX-02: the type pill is GONE. It
+                                rendered the same `type.label` string as
+                                the heading directly beneath it, twice in
+                                a row, for no added meaning. */}
+                            <h2 className="text-2xl font-semibold text-gray-950">{type.label}</h2>
                             <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{type.description || ""}</p>
                           </div>
                           <div className="sm:text-right">
@@ -3992,48 +3896,90 @@ export function BookingPage() {
                           );
                         })()}
 
+                        {/* Per MBUX-02: the CARD is the selection target.
+                            Pre-MBUX-02 this card showed two controls for one
+                            decision — a "Rooms" quantity stepper AND a
+                            "Room Only" `RateOption`. Since BR-03 (decision
+                            #232) removed the "Room + Breakfast" alternative,
+                            `Room Only` was the only rate option left and so
+                            represented no choice at all; the panel merely
+                            duplicated the stepper. `Room Only` survives as
+                            the INTERNAL `rateChoice` on the cart item
+                            (unchanged — API + backward compatibility); only
+                            its visible panel is gone.
+
+                            `updateRoomQuantity` is now the single mutation
+                            path for add/remove. The pre-MBUX-02
+                            `selectRoomType` handler is deleted with the
+                            panel: with a single rate option its "untick"
+                            branch was reachable only by clicking the same
+                            lone panel twice, and its "switch rate in
+                            place" branch had become unreachable entirely.
+
+                            Per EXB-11.3 (decision #197) the EXB-11.3
+                            invariant survives unchanged: NO room is
+                            pre-selected on load. `Select this room` is the
+                            user-explicit action that adds the first one. */}
                         <div className="mt-6 grid gap-3">
-                          <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
-                            <span>
-                              <span className="block text-sm font-semibold text-gray-950">Rooms</span>
-                              <span className="block text-xs text-gray-500">Up to {entry.availableCount} available</span>
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                aria-label={`Remove one ${type.label} room`}
-                                className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                disabled={typeQuantity === 0}
-                                onClick={() => updateRoomQuantity(type.value, typeQuantity - 1, entry.availableCount)}
-                              >
-                                <Minus size={16} />
-                              </button>
-                              <span className="min-w-8 text-center text-lg font-semibold text-gray-950" aria-live="polite">
-                                {typeQuantity}
+                          {isSelected ? (
+                            <div
+                              className="flex min-h-14 items-center justify-between gap-3 rounded-lg border border-primary bg-primary-light px-4"
+                              data-testid={`room-type-selected-${type.value}`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block text-sm font-semibold text-gray-950">
+                                  {typeQuantity} selected
+                                </span>
+                                <span className="block text-xs text-gray-600">
+                                  {formatPrice(roomOnlyTotal)} × {typeQuantity} for {nights}{" "}
+                                  {nights === 1 ? "night" : "nights"}
+                                </span>
                               </span>
-                              <button
+                              <span className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  aria-label={`Remove one ${type.label} room`}
+                                  className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary"
+                                  onClick={() => updateRoomQuantity(type.value, typeQuantity - 1, entry.availableCount)}
+                                >
+                                  <Minus size={16} />
+                                </button>
+                                <span
+                                  className="min-w-8 text-center text-lg font-semibold text-gray-950"
+                                  aria-live="polite"
+                                  data-testid={`room-type-quantity-${type.value}`}
+                                >
+                                  {typeQuantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label={`Add one ${type.label} room`}
+                                  className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                  disabled={typeQuantity >= entry.availableCount}
+                                  onClick={() => updateRoomQuantity(type.value, typeQuantity + 1, entry.availableCount)}
+                                >
+                                  <Plus size={16} />
+                                </button>
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm text-gray-600">
+                                {formatPrice(roomOnlyTotal)} for {nights} {nights === 1 ? "night" : "nights"} ·
+                                up to {typeMaxCapacity} adult{typeMaxCapacity === 1 ? "" : "s"} ·{" "}
+                                {entry.availableCount} available
+                              </p>
+                              <PrimaryButton
                                 type="button"
-                                aria-label={`Add one ${type.label} room`}
-                                className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                disabled={typeQuantity >= entry.availableCount}
-                                onClick={() => updateRoomQuantity(type.value, typeQuantity + 1, entry.availableCount)}
+                                onClick={() => updateRoomQuantity(type.value, 1, entry.availableCount)}
+                                className="w-full"
+                                data-testid={`select-room-${type.value}`}
                               >
-                                <Plus size={16} />
-                              </button>
-                            </span>
-                          </div>
-                          <RateOption
-                            active={isSelected && selectedTypeRateChoice === "room-only"}
-                            label="Room Only"
-                            helper="Simple stay, flexible payment at the hotel"
-                            // Per WRV-02: the option price matches the
-                            // selected stay — the single source's nightly
-                            // amount for a one-source stay, or a "From"
-                            // prefix for a multi-source stay.
-                            priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate)} / night`}
-                            totalLabel={`${formatPrice(roomOnlyTotal)} total`}
-                            onSelect={() => selectRoomType(type.value, "room-only")}
-                          />
+                                Select this room
+                              </PrimaryButton>
+                            </>
+                          )}
+                        </div>
                           {/* Per BR-03 (2026-10-12, decision
                               #232): the legacy "Room + Breakfast"
                               toggle is GONE. The flat-rate
@@ -4047,7 +3993,6 @@ export function BookingPage() {
                               `usePublicSiteContent().breakfastConfig`
                               so the guest sees the per-meal prices
                               before they get to Step 2. */}
-                        </div>
                         {hasNonRegularRate ? (
                           <div className="mt-4 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
                             {isSingleSource ? (
@@ -4388,6 +4333,23 @@ export function BookingPage() {
           )}
         </div>
       </section>
+
+      {/* Per MBUX-03: the mobile multi-room cart tray. Gated to
+          `lg:hidden` because from `lg:` up the sticky sidebar already
+          renders the full cart — showing both would put the same lines
+          on screen twice. Sits directly above the sticky footer: it is
+          the only region a thumb reaches and the only region that does
+          not scroll away, which is what makes the MBUX-02 card-level
+          selection trustworthy on a phone. */}
+      <div className="mx-auto max-w-7xl px-4 pb-4 lg:hidden">
+        <RoomCartTray
+          rooms={distributedRoomCart}
+          roomTypes={roomTypes}
+          formatTotal={formatPrice}
+          aggregateTotal={displayTotal}
+          fitComplete={cartDistributionComplete}
+        />
+      </div>
 
       <BookingStickyFooter
         summary={
@@ -4959,43 +4921,3 @@ function SummaryCell({ alignEnd, label, value }: { alignEnd?: boolean; label: st
   );
 }
 
-interface RateOptionProps {
-  active: boolean;
-  label: string;
-  helper: string;
-  priceLabel: string;
-  totalLabel: string;
-  onSelect: () => void;
-}
-
-function RateOption({ active, label, helper, priceLabel, totalLabel, onSelect }: RateOptionProps) {
-  return (
-    <button
-      className={cn(
-        "flex min-h-20 w-full items-start justify-between gap-4 rounded-lg border p-4 text-left transition",
-        active ? "border-primary bg-primary-light ring-1 ring-primary" : "border-gray-200 bg-white hover:border-primary"
-      )}
-      type="button"
-      onClick={onSelect}
-    >
-      <span className="flex gap-3">
-        <span
-          className={cn(
-            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
-            active ? "border-primary bg-primary text-white" : "border-gray-300"
-          )}
-        >
-          {active ? <Check size={13} /> : null}
-        </span>
-        <span>
-          <span className="block text-sm font-semibold text-gray-950">{label}</span>
-          <span className="mt-1 block text-sm text-gray-600">{helper}</span>
-        </span>
-      </span>
-      <span className="shrink-0 text-right">
-        <span className="block text-sm font-semibold text-gray-950">{priceLabel}</span>
-        <span className="mt-1 block text-xs text-gray-500">{totalLabel}</span>
-      </span>
-    </button>
-  );
-}
