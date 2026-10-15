@@ -3124,6 +3124,37 @@ const addOnCount = Object.keys(breakfastSelections).length;
                 collapsed by default — this slice only reorders
                 the placement, not the collapse-vs-expand state. */}
             <details
+              // Per MBUX-14 (decision #267, 2026-10-16): the
+              // disclosure is now OPEN by default. MBUX-13
+              // deferred this state change (it was a placement
+              // slice only); MBUX-14 picks up the deferred
+              // state flip. Pre-MBUX-14 the guest had to tap
+              // "Have a voucher, points, or discount?" to
+              // even see the picker; on mobile this hid the
+              // Senior/PWD + voucher + points options from
+              // guests in a hurry, who would submit their
+              // booking without realizing a discount was
+              // available. MBUX-07 (decision #259) introduced
+              // the collapsed-by-default shape to keep the
+              // desktop Step 4 form compact; MBUX-13 reversed
+              // the placement to put the disclosure ABOVE the
+              // payment method card (so guests see it before
+              // committing to a payment path); MBUX-14 flips
+              // the default state so the disclosure is visible
+              // without an extra tap. The disclosure's outer
+              // style, chevron rotation, `appliedSavingsLabels`
+              // line, and inner content are unchanged; only
+              // the `open` attribute is added.
+              //
+              // Trade-off accepted: on desktop Step 4 the
+              // expanded disclosure makes the form ~3 cards
+              // longer. The added length is justified because
+              // a missed discount is a worse outcome than a
+              // longer form. The disclosure still collapses on
+              // tap (chevron rotates back), so a guest who has
+              // already applied nothing and doesn't want to
+              // can collapse it.
+              open
               className="group rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
               data-testid="optional-savings-disclosure"
             >

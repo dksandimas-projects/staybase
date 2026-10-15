@@ -123,21 +123,39 @@ describe("MBUX-07 — optional savings disclosure (placement + collapse)", () =>
     expect(savings).toBeLessThan(cancellation);
   });
 
-  it("one collapsed disclosure wraps voucher, points, and discount", () => {
+  it("one disclosure (open or closed) wraps voucher, points, and discount", () => {
+    // Per MBUX-14: the disclosure is now open by default.
+    // This assertion pins the SHAPE (one disclosure, the right
+    // className, the right summary text), not the state. The
+    // state is asserted by the test below.
     expect(bookingPageSrc).toMatch(/data-testid="optional-savings-disclosure"/);
-    expect(bookingPageSrc).toMatch(/<details\s+className="group rounded-card/);
+    // The className can be on the same line OR on a later
+    // line (multi-line tag formatting per MBUX-14's added
+    // rationale comment). Anchor to the testid and read the
+    // opening tag directly.
+    const testidIdx = bookingPageSrc.indexOf('data-testid="optional-savings-disclosure"');
+    const tagStart = bookingPageSrc.lastIndexOf("<details", testidIdx);
+    const tagEnd = bookingPageSrc.indexOf(">", testidIdx);
+    const openingTag = bookingPageSrc.slice(tagStart, tagEnd);
+    expect(openingTag).toMatch(/className="group rounded-card/);
     expect(bookingPageSrc).toMatch(/Have a voucher, points, or discount\?/);
   });
 
-  it("the disclosure is COLLAPSED by default — the opening `<details>` tag has no `open` attribute", () => {
-    // Read the opening tag directly: the word "open" also appears in
-    // `group-open:rotate-180`, so a naive substring search is useless.
+  it("the disclosure is OPEN by default — the opening `<details>` tag carries an `open` attribute (per MBUX-14, decision #267)", () => {
+    // Per MBUX-14: the disclosure is open by default so guests
+    // see the voucher / points / Senior-PWD options before
+    // committing to a payment path. Read the opening tag
+    // directly: the word "open" also appears in
+    // `group-open:rotate-180`, so a naive substring search is
+    // useless. Pin the ATTRIBUTE shape (`open` followed by
+    // whitespace / `=` / `>`) so the negative space of the
+    // `group-open` Tailwind class doesn't satisfy the regex.
     const disclosureIdx = bookingPageSrc.indexOf('data-testid="optional-savings-disclosure"');
     const tagStart = bookingPageSrc.lastIndexOf("<details", disclosureIdx);
     const tagEnd = bookingPageSrc.indexOf(">", disclosureIdx);
     const openingTag = bookingPageSrc.slice(tagStart, tagEnd);
     expect(openingTag).toMatch(/^<details\b/);
-    expect(openingTag).not.toMatch(/\sopen(\s|=|>)/);
+    expect(openingTag, "the disclosure <details> opening tag must carry an `open` attribute (MBUX-14)").toMatch(/\sopen(\s|=|>)/);
   });
 
   it("the summary control is a real 44px disclosure affordance", () => {

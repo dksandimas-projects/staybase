@@ -92,19 +92,30 @@ describe("MBUX-13 — savings disclosure sits ABOVE the payment method card on S
     expect(bookingPageSrc).toMatch(/Have a voucher, points, or discount\?/);
   });
 
-  it("the disclosure's `<details>` does NOT carry an `open` attribute (stays collapsed by default — MBUX-13 is a placement fix only, not a state fix)", () => {
-    // The expand-by-default behaviour is a SEPARATE future slice
-    // (MBUX-14, if ever requested). MBUX-13 only reorders; the
-    // collapse-vs-expand state from MBUX-07 (decision #259) is
-    // preserved. A future edit that adds `open` here must be a
-    // deliberate decision entry, not a silent change.
-    const disclosureMatch = bookingPageCode.match(/<details[\s\S]+?data-testid="optional-savings-disclosure"/);
-    expect(disclosureMatch, "the disclosure <details> must exist").not.toBeNull();
-    // The opening tag is everything from `<details` up to (but
-    // not including) the `>` that closes it. Strip line breaks to
-    // make the regex robust to multi-line tag formatting.
-    const openingTag = disclosureMatch![0].split(">")[0];
-    expect(openingTag, "the disclosure <details> opening tag must not carry an `open` attribute").not.toMatch(/\bopen\b/);
+  it("the disclosure's `<details>` carries an `open` attribute (MBUX-14: expanded by default)", () => {
+    // Per MBUX-14 (decision #267, 2026-10-16): the disclosure is
+    // open by default so guests see the voucher / points /
+    // Senior-PWD options before committing to a payment path.
+    // MBUX-13 deferred this state change (it was a placement
+    // slice only); MBUX-14 picks up the deferred flip. A future
+    // edit that REMOVES `open` must be a deliberate decision
+    // entry, not a silent change.
+    //
+    // Anchor the regex at the <details> opening tag whose
+    // CLOSING tag ends at the disclosure's testid. The
+    // bookingPage has multiple <details> (the hold-countdown
+    // banner at L2305, the optional-savings disclosure at
+    // L3126, the cancellation policy at L3622), so a naive
+    // `<details[\s\S]+?data-testid="optional-savings-disclosure"`
+    // regex with non-greedy `[\s\S]+?` matches from the FIRST
+    // <details> to the disclosure's testid — openingTag would
+    // include the wrong start. Anchor to the LAST <details>
+    // before the testid instead.
+    const testidIdx = bookingPageCode.indexOf('data-testid="optional-savings-disclosure"');
+    const tagStart = bookingPageCode.lastIndexOf("<details", testidIdx);
+    const tagEnd = bookingPageCode.indexOf(">", testidIdx);
+    const openingTag = bookingPageCode.slice(tagStart, tagEnd);
+    expect(openingTag, "the disclosure <details> opening tag must carry an `open` attribute (MBUX-14)").toMatch(/\sopen(\s|=|\/>)/);
   });
 
   it("the disclosure still renders the 'Applied:' line for guests who applied a voucher/points/discount (data-testid=\"optional-savings-applied\")", () => {
@@ -167,9 +178,16 @@ describe("MBUX-13 — savings disclosure sits ABOVE the payment method card on S
   // assertions the MBUX-07 test relies on are still satisfiable.
 
   it("the disclosure carries the same outer wrapper className that the MBUX-07 test pins (rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6)", () => {
-    expect(bookingPageSrc).toMatch(
-      /<details\s+className="group rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"/
-    );
+    // The className can be on the same line OR on a later
+    // line (multi-line tag formatting per MBUX-14's added
+    // rationale comment + per the MBUX-14 `open` attribute).
+    // Anchor to the disclosure testid and read the opening
+    // tag directly.
+    const testidIdx = bookingPageSrc.indexOf('data-testid="optional-savings-disclosure"');
+    const tagStart = bookingPageSrc.lastIndexOf("<details", testidIdx);
+    const tagEnd = bookingPageSrc.indexOf(">", testidIdx);
+    const openingTag = bookingPageSrc.slice(tagStart, tagEnd);
+    expect(openingTag).toMatch(/className="group rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"/);
   });
 
   it("the disclosure's `<summary>` carries the same flex/min-h-11/list-none styling the MBUX-07 test pins", () => {
