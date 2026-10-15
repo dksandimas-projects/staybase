@@ -87,17 +87,34 @@ describe("MBUX-07 — mobile order is summary-first", () => {
   });
 });
 
-describe("MBUX-07 — optional savings are below payment and collapsed", () => {
-  it("the payment method renders BEFORE the savings disclosure", () => {
-    const payment = offsetOf("Payment Method Section");
+describe("MBUX-07 — optional savings disclosure (placement + collapse)", () => {
+  // Per MBUX-13 (decision #266, 2026-10-16): the disclosure
+  // moved FROM below the payment proof upload TO above the
+  // payment method card. The previous "below payment" shape
+  // (savings after payment) is reversed; the COLLAPSED
+  // state (single disclosure wrapping voucher / points /
+  // discount + ID upload) is preserved. The full positive
+  // surface for the new placement lives in
+  // `mbux-13-savings-disclosure-above-payment.test.ts`.
+
+  it("the savings disclosure renders BEFORE the payment method card (per MBUX-13)", () => {
     const savings = offsetOf('data-testid="optional-savings-disclosure"');
-    expect(payment).toBeLessThan(savings);
+    // Pin the actual heading text "Payment Method" preceded by
+    // the JSX heading tag, not the first plain "Payment Method"
+    // text occurrence — the MBUX-13 comment block at the new
+    // disclosure site references "payment method card" by name,
+    // which would otherwise satisfy a naive indexOf first. The
+    // heading tag prefix rules out the disclosure's inner
+    // <h3>Voucher or Promo Code</h3> / <h3>Apply Your Points</h3>
+    // / <h3>Discount Options</h3> headings.
+    const payment = offsetOf('font-semibold text-gray-950">Payment Method<');
+    expect(savings).toBeLessThan(payment);
   });
 
-  it("the proof/ID upload renders before the savings disclosure", () => {
-    const upload = offsetOf("Proof of Payment Upload box");
+  it("the savings disclosure renders BEFORE the payment proof upload (per MBUX-13)", () => {
     const savings = offsetOf('data-testid="optional-savings-disclosure"');
-    expect(upload).toBeLessThan(savings);
+    const upload = offsetOf("Proof of Payment Upload box");
+    expect(savings).toBeLessThan(upload);
   });
 
   it("the cancellation policy stays last among the disclosure blocks", () => {
