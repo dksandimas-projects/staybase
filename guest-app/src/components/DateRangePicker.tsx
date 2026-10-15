@@ -193,29 +193,45 @@ export function DateRangePicker({
   }, [resolved.adjustment]);
   const hintText = hint ? describeAdjustment(hint) : null;
 
-  // DR-03 (2026-10-15): we drive the range ourselves instead of using
-  // react-day-picker's `onSelect`.
+  // DR-04: why the last click could not complete the range. Rendered in
+  // BOTH the page flow and the sheet, because on phones the sheet covers
+  // the flow area.
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+
+  // Why the calendar is driven from `onSelect` and NOT `onDayClick`
+  // (DR-04, owner-reported 2026-10-15). Two separate traps.
   //
-  // `addToRange` checks `isAfter(date, from)` BEFORE `isAfter(date, to)`,
-  // so once a complete range exists, EVERY click later than its check-in
-  // is absorbed as "move the check-out here" — the old `from` is kept.
-  // A guest who wanted a different December stay silently stretched their
-  // current one instead, which is why far-future months looked unreachable.
-  // Booking sites treat a click as "start here" unless it completes a
-  // pending check-in, which is what this does.
-  const handleDayClick = useCallback(
-    (day: Date) => {
-      const clicked = tzDateToIso(day);
+  // (1) THE PHANTOM BAND. `useRange` decides controlled vs uncontrolled
+  //     with `useControlledValue(selected, onSelect ? selected : undefined)`.
+  //     With NO `onSelect` the controlled value is `undefined`, so the
+  //     component falls back to its OWN internal state and calls
+  //     `setSelected(addToRange(...))` on every click — `selected={draft}`
+  //     is read ONCE as an initial value and then ignored. The band the
+  //     guest saw was react-day-picker painting its own stale range (old
+  //     check-in -> clicked day) on top of a draft that had already
+  //     moved. Passing `onSelect` puts it in controlled mode, so the
+  //     painted range is always exactly our `draft`.
+  // (2) WE IGNORE ITS RANGE ANYWAY. `addToRange` checks
+  //     `isAfter(date, from)` BEFORE `isAfter(date, to)`, so once a
+  //     complete range exists, EVERY click later than its check-in is
+  //     absorbed as "move the check-out here" and the old `from` is kept.
+  //     A guest who wanted a different stay silently stretched the current
+  //     one. So we take only `triggerDate` (the clicked day) and derive the
+  //     range ourselves: a click completes a range ONLY while a pending
+  //     check-in is waiting, and otherwise starts a new stay.
+  const handleSelect = useCallback(
+    (
+      _rangeByLibrary: DateRange | undefined,
+      clicked: Date,
+    ) => {
+      const clickedIso = tzDateToIso(clicked);
       const fromIso = draft?.from ? tzDateToIso(draft.from) : null;
       const toIso = draft?.to ? tzDateToIso(draft.to) : null;
 
-      // Only a PENDING check-in gets completed by the next click. When a
-      // full range is already on screen the click always begins a new one,
-      // so `from` moves to the clicked day.
       const completesPending =
-        fromIso !== null && toIso === null && clicked > fromIso;
-      const nextFrom = completesPending ? draft!.from! : day;
-      const nextTo = completesPending ? day : undefined;
+        fromIso !== null && toIso === null && clickedIso > fromIso;
+      const nextFrom = completesPending ? draft!.from! : clicked;
+      const nextTo = completesPending ? clicked : undefined;
 
       const selection = resolveRangeSelection({
         from: tzDateToIso(nextFrom),
@@ -231,6 +247,7 @@ export function DateRangePicker({
           to: isoToTzDate(selection.checkOut),
         });
         setHint(null);
+        setSelectionError(null);
         if (onRangeChange) {
           onRangeChange(selection.checkIn, selection.checkOut);
         } else {
@@ -241,6 +258,7 @@ export function DateRangePicker({
       }
       if (selection.status === "cleared") {
         setDraft(undefined);
+        setSelectionError(null);
         return;
       }
       // First click of a new selection — hold it as a pending check-in.
@@ -249,8 +267,27 @@ export function DateRangePicker({
       // availability…" loader that unmounts this picker, discarding the
       // half-made selection. The guest's single click would vanish.
       setDraft({ from: isoToTzDate(selection.checkIn), to: undefined });
+
+      // DR-04: a click that CANNOT complete the range (here: a stay
+      // longer than MAX_STAY_NIGHTS) used to be swallowed with no
+      // feedback at all — the check-out box simply stayed empty, which
+      // reads as a broken picker. Say so, and keep the check-in so the
+      // guest can immediately pick again. We do NOT silently clamp the
+      // check-out: an invisible date move is the DR-01 failure mode.
+      setSelectionError(
+        completesPending
+          ? `A single stay can run at most ${MAX_STAY_NIGHTS} nights — pick a check-out within ${MAX_STAY_NIGHTS} days of your check-in.`
+          : null,
+      );
     },
-    [draft, maxCheckOut, onCheckInChange, onCheckOutChange, todayIso],
+    [
+      draft,
+      maxCheckOut,
+      onCheckInChange,
+      onCheckOutChange,
+      onRangeChange,
+      todayIso,
+    ],
   );
 
   const startMonth = isoToTzDate(todayIso);
@@ -312,6 +349,12 @@ export function DateRangePicker({
         )}
       </p>
 
+      {selectionError ? (
+        <p role="alert" className="text-xs font-medium text-red-600">
+          {selectionError}
+        </p>
+      ) : null}
+
       {hintText ? (
         <p role="status" className="text-xs font-medium text-primary">
           {hintText}
@@ -355,6 +398,14 @@ export function DateRangePicker({
               } as React.CSSProperties
             }
           >
+            {selectionError ? (
+              <p
+                role="alert"
+                className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 md:hidden"
+              >
+                {selectionError}
+              </p>
+            ) : null}
             <div className="mb-2 flex items-center justify-between md:hidden">
               <p className="text-sm font-semibold text-gray-950">
                 {checkInIso && !checkOutIso
@@ -382,7 +433,7 @@ export function DateRangePicker({
               classNames={{ root: "rdp-root spark-range-root" }}
               autoFocus
               selected={draft}
-              onDayClick={handleDayClick}
+              onSelect={handleSelect}
               defaultMonth={startMonth}
               startMonth={startMonth}
               endMonth={endMonth}

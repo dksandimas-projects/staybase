@@ -165,16 +165,24 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
     // after the check-in is absorbed as "move the check-out here" and the
     // old `from` is kept. A guest picking a December stay instead stretched
     // their current one, which read as "December is unreachable". We drive
-    // the range from `onDayClick` so only a PENDING check-in can be
+    // the range from `onSelect` so only a PENDING check-in can be
     // completed by the next click.
-    expect(pickerSrc).toMatch(/onDayClick=\{handleDayClick\}/);
-    expect(pickerSrc).not.toMatch(/onSelect=\{/);
+    // DR-04: the range must be driven from `onSelect`, NOT `onDayClick`.
+    // `useRange` picks controlled vs uncontrolled with
+    // `useControlledValue(selected, onSelect ? selected : undefined)`, so
+    // WITHOUT `onSelect` the `selected` prop is read once as an initial
+    // value and then IGNORED -- the component runs its own internal
+    // `addToRange` and painted a phantom band over our real draft.
+    expect(pickerSrc).toMatch(/onSelect=\{handleSelect\}/);
+    expect(pickerSrc).not.toMatch(/onDayClick=\{/);
+    // Its computed range is ignored; only the clicked day is used.
+    expect(pickerSrc).toMatch(/_rangeByLibrary: DateRange \| undefined/);
     // (wrapped by prettier, so match the predicate without the line break)
     expect(pickerSrc.replace(/\s+/g, " ")).toMatch(
-      /const completesPending = fromIso !== null && toIso === null && clicked > fromIso/
+      /const completesPending = fromIso !== null && toIso === null && clickedIso > fromIso/
     );
-    expect(pickerSrc).toMatch(/const nextFrom = completesPending \? draft!\.from! : day/);
-    expect(pickerSrc).toMatch(/const nextTo = completesPending \? day : undefined/);
+    expect(pickerSrc).toMatch(/const nextFrom = completesPending \? draft!\.from! : clicked/);
+    expect(pickerSrc).toMatch(/const nextTo = completesPending \? clicked : undefined/);
   });
 
   it("commits the pair atomically so URL params cannot half-apply (DR-03)", () => {
@@ -208,6 +216,22 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
     // selected, and a picked one painted `range_middle` across every day
     // from the start of the grid. Passing the zone makes both sides agree.
     expect(pickerSrc).toMatch(/timeZone=\{config\.timezone\}/);
+  });
+
+  it("explains a click it cannot complete instead of swallowing it (DR-04)", () => {
+    // A stay longer than MAX_STAY_NIGHTS used to drop the check-out with
+    // no feedback: the field simply stayed empty, which reads as a broken
+    // picker. It now says why and KEEPS the check-in so the guest can pick
+    // again. It does not silently clamp the check-out -- an invisible date
+    // move is the DR-01 failure mode.
+    expect(pickerSrc).toMatch(/const \[selectionError, setSelectionError\] = useState/);
+    expect(pickerSrc).toMatch(
+      /at most \$\{MAX_STAY_NIGHTS\} nights — pick a check-out within/
+    );
+    // Rendered in the page flow AND inside the sheet -- on phones the
+    // sheet covers the flow area, so the flow copy alone is not seen.
+    expect(pickerSrc).toMatch(/role="alert"/);
+    expect(pickerSrc).toMatch(/md:hidden/);
   });
 
   it("shows the resolved range and night count as text", () => {
