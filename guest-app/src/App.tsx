@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import config from "@config";
 import { Analytics } from "./components/Analytics";
@@ -27,16 +27,35 @@ import { TermsPage } from "./pages/TermsPage";
 
 export function ScrollToTop() {
   const { pathname, search } = useLocation();
-
+  // Per MBUX-11 (decision #264, 2026-10-16): the original
+  // implementation watched the whole `search` string and
+  // called `window.scrollTo(0, 0)` on every change. That was
+  // wrong — the booking flow persists cart state
+  // (`adults`, `children`, `quantity`, etc.) into the same
+  // search string, so every +/- button and every room-card
+  // selection triggered a scroll-to-top, which the user
+  // reported as "scrolling back to top every time I change a
+  // quantity". The intent was to scroll on in-page STEP
+  // changes (the booking flow advances `?step=...` without
+  // changing the pathname); the implementation overreached
+  // by also scrolling on every other search mutation.
+  //
+  // The fix: track the previous pathname and the previous
+  // `step` query-param value via refs. Only scroll when
+  // either changed. Cart mutations and guest-count steppers
+  // no longer touch the scroll position.
+  const prevPathRef = useRef<string | null>(null);
+  const prevStepRef = useRef<string | null>(null);
   useEffect(() => {
-    // Scroll to top on every route change — including in-page step changes
-    // driven by search params (e.g. the booking flow at `/book` advances
-    // steps via `?step=guest-details|review|...` without changing the
-    // pathname). Without watching `search`, advancing a step leaves the
-    // viewport pinned at the previous step's scroll offset, which is
-    // confusing on long forms where the next step's primary CTA sits
-    // at the top of the new view.
-    window.scrollTo(0, 0);
+    const currentStep = new URLSearchParams(search).get("step");
+    const isFirstRender = prevPathRef.current === null;
+    const pathnameChanged = prevPathRef.current !== pathname;
+    const stepChanged = prevStepRef.current !== currentStep;
+    if (isFirstRender || pathnameChanged || stepChanged) {
+      window.scrollTo(0, 0);
+    }
+    prevPathRef.current = pathname;
+    prevStepRef.current = currentStep;
   }, [pathname, search]);
 
   return null;

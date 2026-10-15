@@ -54,8 +54,14 @@ describe("MBUX-07 — mobile order is summary-first", () => {
   });
 
   it("the summary aside is order-1 on mobile and order-2 from lg:", () => {
+    // Per MBUX-11 (decision #264, 2026-10-16): the aside
+    // now carries `id="booking-stay-details-aside"` (the
+    // scroll target for the StaySummaryStrip Edit button).
+    // The order classes still matter — this pins the layout
+    // contract. The id attribute may appear BEFORE or AFTER
+    // the className; either is structurally valid JSX.
     expect(bookingPageSrc).toMatch(
-      /<aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">/
+      /<aside[^>]*className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start[^"]*"[^>]*>/
     );
   });
 
@@ -68,8 +74,11 @@ describe("MBUX-07 — mobile order is summary-first", () => {
 
   it("no DOM reorder and no duplicated summary component", () => {
     // Two renders of the summary would let the desktop sidebar drift
-    // from the mobile card. `order` moves the SAME node.
-    const asideCount = (bookingPageSrc.match(/<aside className="order-1 lg:order-2/g) ?? []).length;
+    // from the mobile card. `order` moves the SAME node. The MBUX-11
+    // aside carries an additional `id` attribute; the structural
+    // contract is "exactly one aside with order-1 lg:order-2",
+    // regardless of which attribute appears first.
+    const asideCount = (bookingPageSrc.match(/<aside[^>]*order-1 lg:order-2/g) ?? []).length;
     expect(asideCount).toBe(1);
   });
 

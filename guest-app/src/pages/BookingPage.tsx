@@ -97,6 +97,7 @@ import { StepIndicator } from "../components/StepIndicator";
 import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { RoomCartLines } from "../components/RoomCartLines";
 import { RoomCartTray } from "../components/RoomCartTray";
+import { StaySummaryStrip } from "../components/StaySummaryStrip";
 import { BreakfastMenuStrip } from "../components/BreakfastMenuStrip";
 import { copyBreakfastDateToRemaining } from "../utils/breakfastCopy";
 import { useRooms } from "../hooks/useRooms";
@@ -939,6 +940,32 @@ export function BookingPage() {
     ? roomTypes.find((t) => t.value === firstFailingRoom.roomType)
     : null;
   const cartIsReady = cartHasAvailability && cartDistributionComplete && cartFitsGroup;
+  // Per MBUX-11 (decision #264, 2026-10-16): the cart-distribution
+  // failure message used to be a single generic sentence regardless
+  // of the actual cause. Branched into specific causes so the guest
+  // sees exactly why their selection doesn't fit. Precedence:
+  //   1. no rooms at all → "pick at least one room"
+  //   2. more rooms than guests can fill → "each room needs an adult"
+  //   3. unassigned adults remain → "...adults aren't assigned..."
+  //   4. unassigned children remain → "...children aren't assigned..."
+  //   5. legacy fallback (defensive; should not fire in normal use)
+  const cartDistributionErrorMessage = (() => {
+    if (distributedRoomCart.length === 0) {
+      return "Pick at least one room to start your stay.";
+    }
+    if (distributedRoomCart.length > guests) {
+      return `You have ${distributedRoomCart.length} rooms but only ${guests} ${guests === 1 ? "guest" : "guests"} — each room needs at least one adult. Remove a room or add another guest.`;
+    }
+    if (cartDistribution.unassignedAdults > 0) {
+      const n = cartDistribution.unassignedAdults;
+      return `${n} ${n === 1 ? "adult is" : "adults are"} not assigned to a room yet — pick a different room or remove a guest.`;
+    }
+    if (cartDistribution.unassignedChildren > 0) {
+      const n = cartDistribution.unassignedChildren;
+      return `${n} ${n === 1 ? "child is" : "children are"} not assigned to a room yet — pick a different room or remove a child.`;
+    }
+    return "Add enough available rooms to fit every guest, with at least one adult assigned to each room.";
+  })();
   const selectedTypeIsAvailable = Boolean(
     selectedTypeEntry
     && availableRoomTypes.some((entry) => entry.type.value === selectedTypeEntry.value)
@@ -3810,19 +3837,34 @@ const addOnCount = Object.keys(breakfastSelections).length;
               Choose dates, guests, and a room option. We will show room types available for your stay.
             </p>
           </div>
-          <div className="rounded-card bg-white p-4 text-sm shadow-sm ring-1 ring-gray-200">
-            <p className="font-semibold text-gray-950">{formatStayDate(checkIn)} - {formatStayDate(checkOut)}</p>
-            <p className="mt-1 text-gray-600">
-              {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
-            </p>
-          </div>
+          {/* Per MBUX-11 (decision #264, 2026-10-16): the
+              inline date strip is gone. The mobile-first
+              StaySummaryStrip below renders directly under
+              the StepIndicator on mobile (the user wanted the
+              summary "on top part of the page for mobile" +
+              an "Edit" affordance). On `lg:` the strip is
+              hidden — the sidebar becomes the primary surface
+              and the user already interacts with the picker
+              there, so no Edit affordance is needed. The
+              `lg:hidden` Tailwind utility on the strip
+              prevents duplicate surfaces. */}
+          <StaySummaryStrip
+            checkIn={checkIn}
+            checkOut={checkOut}
+            nights={nights}
+            guests={guests}
+          />
         </div>
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[320px_1fr] lg:px-8">
         {/* Per MBUX-07: `order-1` puts the summary above the controls on
-            mobile; `lg:order-2` restores the right-hand sidebar. */}
-        <aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">
+            mobile; `lg:order-2` restores the right-hand sidebar.
+            Per MBUX-11 (decision #264, 2026-10-16): the `id` is the
+            scroll target for the StaySummaryStrip's Edit button on
+            mobile (the strip is hidden on `lg:` so the user uses the
+            sidebar directly on desktop, no Edit affordance needed). */}
+        <aside id="booking-stay-details-aside" className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start scroll-mt-32">
           <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
             <h2 className="text-lg font-semibold text-gray-950">Stay details</h2>
             <div className="mt-5 space-y-6">
@@ -4665,9 +4707,10 @@ const addOnCount = Object.keys(breakfastSelections).length;
             ) : (
               <p
                 id="step-one-occupancy-error"
+                role="alert"
                 className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700"
               >
-                Add enough available rooms to fit every guest, with at least one adult assigned to each room.
+                {cartDistributionErrorMessage}
               </p>
             )
           ) : null
