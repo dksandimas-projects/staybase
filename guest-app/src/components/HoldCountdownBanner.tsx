@@ -3,7 +3,12 @@
 //
 // Surfaces:
 //   * **active** + time left: brand-tinted banner with a
-//     live MM:SS countdown. Honest copy: "Your room is
+//     live MM:SS countdown. Per MBUX-01 (2026-10-15) the
+//     active state is COMPACT on mobile — a single line
+//     reading `Room held · 13:21 remaining`, with the full
+//     explanation behind a `What is this?` disclosure. From
+//     `sm:` up the full copy is shown unconditionally, so
+//     desktop is unchanged. Honest copy: "Your room is
 //     held for you while you finish and pay. We'll lock
 //     it in the moment you confirm — if another guest
 //     books first, we'll let you know and you can pick
@@ -50,7 +55,7 @@
 // with `replace: true` so the user lands back on Step 1
 // without stacking history.
 
-import { Clock4, Hourglass, RefreshCcw, TimerReset } from "lucide-react";
+import { Clock4, Hourglass, Info, RefreshCcw, TimerReset } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useCallback, useState } from "react";
 import { useInFlowHold, type InFlowHoldStartInput } from "../hooks/useInFlowHold";
@@ -159,6 +164,14 @@ export function HoldCountdownBanner({
    * meaningful, infrequent messages go through this state.
    */
   const [announcement, setAnnouncement] = useState<string>("");
+
+  /**
+   * MBUX-01 (2026-10-15): whether the mobile guest has expanded the
+   * full hold explanation. Desktop (`sm:` and up) never consults
+   * this — the copy is always visible there — so the flag only ever
+   * changes the phone layout.
+   */
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   const handleExtend = useCallback(async () => {
     // Clear first so re-announcing the same outcome (e.g. the guest
@@ -311,25 +324,52 @@ export function HoldCountdownBanner({
       data-state="active"
       data-seconds-left={secondsLeft}
     >
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2">
         <Clock4 className="h-4 w-4 shrink-0 text-primary-dark" aria-hidden />
-        <div className="min-w-0 flex-1">
+
+        {/* MBUX-01: the compact mobile state — ONE line carrying the
+            same "held / how long" facts the desktop block leads with.
+            Pre-MBUX-01 this banner opened with a two-line headline and
+            a two-line paragraph, which on a 375px phone pushed the
+            Step 2 content below the fold on every single render. */}
+        <p className="min-w-0 flex-1 text-sm font-semibold text-gray-900 sm:hidden">
+          Room held · {formatCountdown(secondsLeft)} remaining
+        </p>
+
+        {/* The full explanation. Always visible from `sm:` up; on mobile
+            it sits behind the info affordance below. NOTE the countdown
+            is NOT duplicated: the mobile line above reads it, the pill
+            below reads it from `sm:` up, and `display:none` keeps only
+            one of them in the accessibility tree at any width — so the
+            ticking digits are never announced twice. */}
+        <div
+          id="hold-help-text"
+          className={cn("min-w-0 sm:flex-1 sm:block", isHelpOpen ? "block w-full" : "hidden")}
+        >
           <p className="font-semibold text-gray-900">
             Your room is held for you until {expiresAt || "the hold expires"}.
           </p>
           <p className="text-xs text-gray-700">
             We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room.
           </p>
-          {extendError ? (
-            <p className="mt-1 text-xs font-medium text-amber-700" data-testid="hold-extend-error">
-              {extendError}
-            </p>
-          ) : null}
         </div>
+
+        {/* Per MBUX-01: an extension failure is NOT allowed to hide
+            behind the collapsed explanation. A mobile guest who
+            expanded nothing and still needs to know the extend button
+            failed would otherwise meet a silently broken CTA. */}
+        {extendError ? (
+          <p className="w-full text-xs font-medium text-amber-700" data-testid="hold-extend-error">
+            {extendError}
+          </p>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-2">
+          {/* Countdown pill — `sm:` and up only; the compact line
+              above carries the same MM:SS on mobile. */}
           <div
             className={cn(
-              "rounded-full bg-white px-3 py-1 text-sm font-semibold tabular-nums ring-1 ring-inset",
+              "hidden rounded-full bg-white px-3 py-1 text-sm font-semibold tabular-nums ring-1 ring-inset sm:inline-flex",
               secondsLeft <= 60
                 ? "text-red-700 ring-red-200"
                 : secondsLeft <= 180
@@ -341,6 +381,20 @@ export function HoldCountdownBanner({
             <span className="text-xs font-medium text-gray-500">Time left&nbsp;</span>
             {formatCountdown(secondsLeft)}
           </div>
+          {/* MBUX-01: mobile-only information affordance. 44px target;
+              `aria-expanded` + `aria-controls` carry the state without
+              relying on the label change alone. */}
+          <button
+            type="button"
+            onClick={() => setIsHelpOpen((v) => !v)}
+            aria-expanded={isHelpOpen}
+            aria-controls="hold-help-text"
+            data-testid="hold-info-toggle"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-primary/40 bg-white px-2.5 text-xs font-semibold text-gray-900 sm:hidden"
+          >
+            <Info className="h-3.5 w-3.5" aria-hidden />
+            {isHelpOpen ? "Hide" : "What is this?"}
+          </button>
           {/* Secondary affordance while the hold is still running — the
               guest gets more room than the full 15 minutes without ever
               having to hit zero. Hidden once the cap is spent so the

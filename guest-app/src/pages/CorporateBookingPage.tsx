@@ -91,6 +91,7 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
+import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -1604,8 +1605,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
     }
   };
 
+  // Per MBUX-01: the bottom reserve matches the sticky footer's own
+  // safe-area padding, so the last interactive element is never
+  // hidden behind the fixed bar on a notched iPhone.
   const bookingShell = (content: React.ReactNode) => (
-    <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
+    <main className="min-h-screen bg-gray-50 pb-[calc(8rem+env(safe-area-inset-bottom))] font-body text-gray-900">
       {/* Dark Corporate Header */}
       <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-950 px-4 py-4 shadow-sm backdrop-blur sm:px-6 text-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -1828,7 +1832,8 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
             <StepIndicator steps={steps} currentStep={1} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 5</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select Corporate Room</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Browse negotiated configurations and availability. Room rates shown are corporate rates matching your contract agreement.
@@ -2239,35 +2244,36 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
         </section>
 
         {/* Footer sticky bar */}
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-gray-500">
-                {/* Per MRB-08 (2026-08-02, per decision #167):
-                    the sticky footer copy switches to a
-                    multi-room shape when the cart has
-                    more than one stay. The N=1 wording
-                    is preserved byte-equivalent. */}
-                {distributedRoomCart.length > 1
-                  ? `Corporate block of ${distributedRoomCart.length} rooms · ${nights} ${nights === 1 ? "night" : "nights"} · ${guests} guest${guests === 1 ? "" : "s"} total${hasBreakfast ? " (Breakfast included)" : ""}`
-                  : `Corporate rate for ${nights} ${nights === 1 ? "night" : "nights"}, ${guests} ${guests === 1 ? "guest" : "guests"}${hasBreakfast ? " (Breakfast included)" : ""}`}
-              </p>
-              <p className="text-xl font-bold text-gray-950">
-                {formatPrice(total)} <span className="text-xs font-normal text-gray-500">{distributedRoomCart.length > 1 ? "negotiated total" : "negotiated total"}</span>
-              </p>
-            </div>
-            <PrimaryButton to={`/corporate/book?${continueParams.toString()}`} className="sm:min-w-56">
-              {/* Per BR-09 (2026-10-14): the Step 1 →
-                  Step 2 transition copy uses the
-                  destination step name ("add-ons"), not
-                  a numbered "Step N" reference. The
-                  `continueParams` URL stamp already
-                  points at `step=add-ons` (see
-                  `continueParams` above). */}
-              Continue to add-ons
-            </PrimaryButton>
-          </div>
-        </div>
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-xs text-gray-500">
+            {/* Per MRB-08 (2026-08-02, per decision #167):
+                the sticky footer copy switches to a
+                multi-room shape when the cart has
+                more than one stay. The N=1 wording
+                is preserved byte-equivalent. */}
+            {distributedRoomCart.length > 1
+              ? `Corporate block of ${distributedRoomCart.length} rooms · ${nights} ${nights === 1 ? "night" : "nights"} · ${guests} guest${guests === 1 ? "" : "s"} total${hasBreakfast ? " (Breakfast included)" : ""}`
+              : `Corporate rate for ${nights} ${nights === 1 ? "night" : "nights"}, ${guests} ${guests === 1 ? "guest" : "guests"}${hasBreakfast ? " (Breakfast included)" : ""}`}
+          </p>
+          <p className="text-xl font-bold text-gray-950">
+            {formatPrice(total)} <span className="text-xs font-normal text-gray-500">{distributedRoomCart.length > 1 ? "negotiated total" : "negotiated total"}</span>
+          </p>
+            </>
+          }
+        >
+        <PrimaryButton to={`/corporate/book?${continueParams.toString()}`} className="sm:min-w-56">
+          {/* Per BR-09 (2026-10-14): the Step 1 →
+              Step 2 transition copy uses the
+              destination step name ("add-ons"), not
+              a numbered "Step N" reference. The
+              `continueParams` URL stamp already
+              points at `step=add-ons` (see
+              `continueParams` above). */}
+          Continue to add-ons
+        </PrimaryButton>
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2292,7 +2298,8 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
             <StepIndicator steps={steps} currentStep={2} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 5</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 2 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Optional extras for your stay. The negotiated corporate rate doesn&apos;t include per-day add-ons — continue to provide your employee and billing details.
@@ -2309,61 +2316,62 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
           </div>
         </section>
 
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Add-ons</p>
-              <p className="text-lg font-semibold text-gray-950">
-                Continue to provide employee + billing details.
-              </p>
-            </div>
-            {/* Per BR-10 (decision #244 reserved, 2026-10-14
-                — Phase 14): parity with the public booking
-                Add-ons step — TWO parallel CTAs that both
-                advance to the same `guest-details` step.
-                  - **Primary**  "Continue to guest details"
-                    — mirrored from the pre-BR-10 single
-                    button.
-                  - **Ghost**    "No add-ons, continue"
-                    — the skip affordance, kept consistent
-                    with the public flow even though the
-                    corporate Add-ons step has no
-                    configurable meals (the rate is a flat
-                    rate). The parity is intentional so
-                    future per-stay add-ons (BR-12
-                    airport transfer, etc.) drop into both
-                    pages identically without renaming.
-                Both buttons target the identical
-                `/corporate/book?step=guest-details` URL, so
-                the URL-side guard + the per-step payload
-                validation are exercised by both paths. The
-                muted `bg-transparent text-gray-500
-                border border-gray-300 hover:bg-gray-50`
-                ghost recipe is the FRONTEND.md §Button
-                Variants — the existing `GhostButton`
-                component uses `border-primary text-primary`
-                which would visually compete with the
-                primary, so we inline the muted variant
-                here (matching the same call-site shape in
-                the public booking flow). */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <PrimaryButton
-                to={`/corporate/book?${addOnsNext.toString()}`}
-                className="sm:min-w-56"
-                data-testid="corporate-addons-continue-primary"
-              >
-                Continue to guest details <ArrowRight size={16} />
-              </PrimaryButton>
-              <Link
-                to={`/corporate/book?${addOnsNext.toString()}`}
-                data-testid="corporate-addons-skip-addons"
-                className="inline-flex w-full items-center justify-center gap-2 self-center rounded-lg border border-gray-300 bg-transparent px-5 py-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto sm:min-w-56"
-              >
-                No add-ons, continue
-              </Link>
-            </div>
-          </div>
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-sm text-gray-600">Add-ons</p>
+          <p className="text-lg font-semibold text-gray-950">
+            Continue to provide employee + billing details.
+          </p>
+            </>
+          }
+        >
+        {/* Per BR-10 (decision #244 reserved, 2026-10-14
+            — Phase 14): parity with the public booking
+            Add-ons step — TWO parallel CTAs that both
+            advance to the same `guest-details` step.
+              - **Primary**  "Continue to guest details"
+                — mirrored from the pre-BR-10 single
+                button.
+              - **Ghost**    "No add-ons, continue"
+                — the skip affordance, kept consistent
+                with the public flow even though the
+                corporate Add-ons step has no
+                configurable meals (the rate is a flat
+                rate). The parity is intentional so
+                future per-stay add-ons (BR-12
+                airport transfer, etc.) drop into both
+                pages identically without renaming.
+            Both buttons target the identical
+            `/corporate/book?step=guest-details` URL, so
+            the URL-side guard + the per-step payload
+            validation are exercised by both paths. The
+            muted `bg-transparent text-gray-500
+            border border-gray-300 hover:bg-gray-50`
+            ghost recipe is the FRONTEND.md §Button
+            Variants — the existing `GhostButton`
+            component uses `border-primary text-primary`
+            which would visually compete with the
+            primary, so we inline the muted variant
+            here (matching the same call-site shape in
+            the public booking flow). */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <PrimaryButton
+            to={`/corporate/book?${addOnsNext.toString()}`}
+            className="sm:min-w-56"
+            data-testid="corporate-addons-continue-primary"
+          >
+            Continue to guest details <ArrowRight size={16} />
+          </PrimaryButton>
+          <Link
+            to={`/corporate/book?${addOnsNext.toString()}`}
+            data-testid="corporate-addons-skip-addons"
+            className="inline-flex w-full items-center justify-center gap-2 self-center rounded-lg border border-gray-300 bg-transparent px-5 py-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto sm:min-w-56"
+          >
+            No add-ons, continue
+          </Link>
         </div>
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2382,7 +2390,8 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
             <StepIndicator steps={steps} currentStep={3} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 5</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 3 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Corporate details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Provide employee guest details along with company references and billing arrangements.
@@ -2680,31 +2689,32 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
         </section>
 
         {/* Footer sticky bar */}
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-gray-600">Company Billing Registration</p>
-              <p className="text-base font-semibold text-gray-950">
-                {canContinueToReview ? "Details verified" : "Fill details, complete consent"}
-              </p>
-            </div>
-            {canContinueToReview ? (
-              // Per BR-09 (2026-10-14): the corporate
-              // Step 3 → Step 4 transition copy uses the
-              // destination step name ("review"), not a
-              // numbered "Step N" reference. The
-              // 5-step refactor doesn't leave stale
-              // numbering in the CTA.
-              <PrimaryButton to={`/corporate/book?${reviewParams.toString()}`} className="sm:min-w-56">
-                Continue to review
-              </PrimaryButton>
-            ) : (
-              <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Continue to review
-              </PrimaryButton>
-            )}
-          </div>
-        </div>
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-xs text-gray-600">Company Billing Registration</p>
+          <p className="text-base font-semibold text-gray-950">
+            {canContinueToReview ? "Details verified" : "Fill details, complete consent"}
+          </p>
+            </>
+          }
+        >
+        {canContinueToReview ? (
+          // Per BR-09 (2026-10-14): the corporate
+          // Step 3 → Step 4 transition copy uses the
+          // destination step name ("review"), not a
+          // numbered "Step N" reference. The
+          // 5-step refactor doesn't leave stale
+          // numbering in the CTA.
+          <PrimaryButton to={`/corporate/book?${reviewParams.toString()}`} className="sm:min-w-56">
+            Continue to review
+          </PrimaryButton>
+        ) : (
+          <PrimaryButton disabled type="button" className="sm:min-w-56">
+            Continue to review
+          </PrimaryButton>
+        )}
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2736,7 +2746,8 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
             <StepIndicator steps={steps} currentStep={4} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 4 of 5</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 4 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Confirm your corporate profile details and upload the required verification files to complete the request.
@@ -2992,55 +3003,56 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
         </section>
 
         {/* Footer sticky bar */}
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-gray-600">
-                {isPersonalPay ? "Personal payment verification" : "Authorization via email after booking"}
-              </p>
-              <p className="text-sm font-semibold text-gray-950">
-                {isPersonalPay && uploadingProof
-                  ? "Uploading payment receipt..."
-                  : isPersonalPay && !proofUpload
-                  ? "Payment receipt upload required"
-                  : !termsConsent
-                  ? "Agree to the terms to continue"
-                  : !reviewTurnstile.token
-                  ? "Running a quick security check..."
-                  : isPersonalPay
-                  ? "Payment receipt uploaded"
-                  : "No LOU upload needed — accounts team will email you"}
-              </p>
-            </div>
-            {canConfirm ? (
-              <PrimaryButton 
-                type="button" 
-                className="sm:min-w-56" 
-                onClick={handleConfirmSubmit}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <span className="flex items-center gap-2">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Processing booking...
-                  </span>
-                ) : (
-                  // Per BR-09 (2026-10-14): the
-                  // corporate review-step CTA copy
-                  // matches the public flow's
-                  // "Place booking" wording so both
-                  // flows land in the same mental
-                  // model at the create-call moment.
-                  "Place booking"
-                )}
-              </PrimaryButton>
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-xs text-gray-600">
+            {isPersonalPay ? "Personal payment verification" : "Authorization via email after booking"}
+          </p>
+          <p className="text-sm font-semibold text-gray-950">
+            {isPersonalPay && uploadingProof
+              ? "Uploading payment receipt..."
+              : isPersonalPay && !proofUpload
+              ? "Payment receipt upload required"
+              : !termsConsent
+              ? "Agree to the terms to continue"
+              : !reviewTurnstile.token
+              ? "Running a quick security check..."
+              : isPersonalPay
+              ? "Payment receipt uploaded"
+              : "No LOU upload needed — accounts team will email you"}
+          </p>
+            </>
+          }
+        >
+        {canConfirm ? (
+          <PrimaryButton 
+            type="button" 
+            className="sm:min-w-56" 
+            onClick={handleConfirmSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <span className="flex items-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Processing booking...
+              </span>
             ) : (
-              <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Place booking
-              </PrimaryButton>
+              // Per BR-09 (2026-10-14): the
+              // corporate review-step CTA copy
+              // matches the public flow's
+              // "Place booking" wording so both
+              // flows land in the same mental
+              // model at the create-call moment.
+              "Place booking"
             )}
-          </div>
-        </div>
+          </PrimaryButton>
+        ) : (
+          <PrimaryButton disabled type="button" className="sm:min-w-56">
+            Place booking
+          </PrimaryButton>
+        )}
+        </BookingStickyFooter>
       </>
     );
   }

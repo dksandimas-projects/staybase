@@ -1,7 +1,7 @@
 # Guest Booking Mobile UX Refresh (MBUX)
 > Requires: `CLAUDE.md`, `plan/docs/FRONTEND.md`, `plan/features/BOOKING-FLOW.md`, `plan/features/BREAKFAST.md`, `plan/features/OTHER-ADD-ONS.md`, `plan/features/CORPORATE-BOOKING.md`
 >
-> **Status:** Proposed 2026-10-15. Owner-approved design direction; implementation not started. Roadmap owner: `plan/project/ROADMAP.md §Phase 15`. Decision **#253 reserved** for the implementation record.
+> **Status:** In progress 2026-10-15. Owner-approved design direction; **MBUX-01 shipped** (shared booking shell) — see `plan/docs/DECISIONS-FEATURES.md` #254. MBUX-02..10 not started. Roadmap owner: `plan/project/ROADMAP.md §Phase 15`. **Numbering note:** this plan originally reserved decision **#253**, but MSL-01 shipped the same day and consumed it; the reservation was stale, so the MBUX implementation record is **#254**.
 
 ---
 
@@ -578,7 +578,7 @@ Exact extraction boundaries are implementation decisions. Large reusable UI piec
 
 ## Documentation Sync Required When Implemented
 
-- Record decision #253 in `plan/docs/DECISIONS-FEATURES.md`.
+- Record decision #254 in `plan/docs/DECISIONS-FEATURES.md` (#254, renumbered from the stale #253 reservation — see the numbering note above).
 - Update `plan/features/BREAKFAST.md` for the optional meal image contract.
 - Update `plan/features/BOOKING-FLOW.md` for the shipped mobile step behavior.
 - Update `plan/features/CORPORATE-BOOKING.md` for parity decisions.

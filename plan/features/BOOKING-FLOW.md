@@ -200,6 +200,29 @@ Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step
 - [x] **Per NBS-2026-08-08 (F2, booking-flow audit 2026-08-08): every server-side 4xx surfaces a matching recovery CTA on the Step 3 sticky footer.** The previous catch only auto-redirected for the "Room no longer available" message; every other 4xx (rate-limit 429, `MAX_STAY_NIGHTS`, `MAX_ADVANCE_DAYS`, past-checkin, etc.) stranded the user on Step 3 with a generic message and no next step. The fix maps the server error to one of three recovery actions via a `submitErrorAction: "back-to-step-1" | "retry" | "none"` discriminator: `back-to-step-1` for the stay/date-validation cases (room not available, max stay length, advance window, past check-in); `retry` for transient cases (rate limit, network); `none` for everything else (with a Dismiss button). The auto-redirect for the "Room no longer available" path now holds its timer on a `useRef` so a user-initiated nav (clicking the back CTA or the browser back button) cancels the timer (F11).
 - [x] **Per NBS-2026-08-08 (F11, booking-flow audit 2026-08-08): the 5s auto-redirect for "Room no longer available" is cancellable.** The previous bare `setTimeout` raced a user-initiated nav (the user clicks the back CTA before 5s elapses) and clobbered the URL the user already moved to. The timer is held on `redirectTimerRef: useRef<number | null>(null)`. The cleanup effect cancels any pending timer on unmount; the manual-nav CTA cancels the timer before navigating; a fresh `handleConfirmBooking` submit cancels the timer before re-firing the request.
 
+## Shared Mobile Booking Shell (MBUX-01, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #254. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`. Applies to **both** the public `/book` flow and the corporate `/corporate/book` flow. Later slices (MBUX-02..09) change each step's *content*; this section covers the *frame* they all sit in.
+
+### Progress indicator
+
+- [x] Below `sm:` the stepper renders five connected circles sharing one row via `flex-1`, joined by 1px connectors, with a single `aria-hidden` caption beneath: `Step N of 5 · Current step name`. The pre-MBUX-01 component kept all five labels visible in a `flex flex-wrap` row, which cannot fit one line at phone width — it wrapped into a two- or three-row block above the fold on every render.
+- [x] From `sm:` up every label is visible and the layout is byte-equivalent to the pre-MBUX-01 component, so desktop and the existing wide-screen QA matrix are unchanged.
+- [x] The separate `Step N of 5` eyebrow on each step is `hidden sm:block`. On mobile the position is now stated **once** (in the caption); collapsing it at every width would delete the desktop position statement.
+- [x] Ordered-list semantics are preserved (`<ol>`/`<li>`) and the current item carries `aria-current="step"`.
+- [x] Every step keeps an accessible name even when its label is not painted: the label element is `sr-only` and flips to `sm:not-sr-only`. Rewriting it as `hidden sm:inline` would remove every step's name from the accessibility tree on phones.
+- [x] State is never carried by colour alone. A completed step pairs the check glyph with an `sr-only` "Completed"; the **current** step keeps its number (checks-only circles were rejected — they make the current position ambiguous); an upcoming step keeps its number in gray.
+- [x] The step count is never hardcoded — `steps.length` drives the caption, preserving BR-09's variable-count contract.
+- [x] No animation, so reduced-motion is respected by construction. A connector transition would need a `useReducedMotion()` guard; the connector is a static rule.
+
+### Sticky action footer
+
+- [x] All eight footers (four steps × public + corporate) render through the shared `BookingStickyFooter` — `summary` for the compact state, children for the action slot, optional `detail` for a full-width strip (Step 1's occupancy-recovery guidance).
+- [x] The footer applies `pb-[calc(1rem+env(safe-area-inset-bottom))]`. This fixes a real defect: the flat `py-4` meant a notched iPhone's home indicator sat **on top of** the primary action, which `plan/docs/FRONTEND.md §Admin App — Mobile UX Checklist` already forbids on sticky footers.
+- [x] Both booking shells reserve matching space (`pb-[calc(8rem+env(safe-area-inset-bottom))]` instead of `pb-32`), so the fixed bar never covers the last interactive element.
+- [x] The action slot is `w-full` below `sm:` so a single primary action clears the 44px minimum touch height on its own.
+- [x] **Scope boundary:** this extraction standardises the footer's *shell* only. Step 2's two post-BR-10 CTAs and Step 4's `Place booking` are unchanged — consolidating them into one context-aware action is MBUX-05 / MBUX-07, which is a behaviour change and its own task.
+
 ## In-flow Hold (Steps 2 + 3 Countdown Banner)
 
 > Decision: `plan/docs/DECISIONS-FEATURES.md` entry that ships with the feature. The booking flow's Steps 2 and 3 show a live countdown banner so the guest has a visible signal that the room is being held for them while they finish and pay. The hold is **soft** — it does not block the public availability query, and the authoritative double-booking guarantee is unchanged (the Firestore transaction in `handleCreateBooking` is still the only safety net). The banner is honest about this in the copy: "We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room."
@@ -216,6 +239,7 @@ Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step
 
 ### Data & Logic Checklist
 
+- [x] **Per MBUX-01 (decision #254, 2026-10-15): the `active` banner state is COMPACT below `sm:`** — one line reading `Room held · 13:21 remaining`, with the full explanation behind an `aria-expanded` info affordance (`hold-info-toggle` → `hold-help-text`). From `sm:` up the explanation is unconditional and the pre-MBUX-01 layout is unchanged. The `MM:SS` pill is `sm:inline-flex` so the mobile line and the pill are never both in the accessibility tree — two live copies of a ticking counter would be announced twice a second. `extendError` renders as a sibling of the collapsible region, never inside it: a guest who expanded nothing must still see that their extend failed. The expired state's two explicit actions, the `role="region"` wrapper, and the single `sr-only` announcement live region are unchanged. See `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`.
 - [x] Client preallocates a `holdId` (UUIDv4) on Step 1 mount via `generateHoldId()` — same pattern as `bookingId` + `reservationId`
 - [x] `continueParams` URLSearchParams includes `hold=<id>` so the id survives the Step 1 → Step 2 route change
 - [x] `useInFlowHold(holdId, startInput)` hook fires `GET /api/holds/read` on mount; on 404, fires `POST /api/holds/start` (idempotent on the same `holdId`)

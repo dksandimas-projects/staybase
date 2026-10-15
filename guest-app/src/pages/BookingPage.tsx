@@ -93,6 +93,7 @@ import { Modal } from "../components/Modal";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { PriceBreakdown } from "../components/PriceBreakdown";
 import { StepIndicator } from "../components/StepIndicator";
+import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -2149,8 +2150,11 @@ export function BookingPage() {
     return "/rooms";
   };
 
+  // Per MBUX-01: the bottom reserve matches the sticky footer's
+  // own safe-area padding, so the last interactive element is never
+  // hidden behind the fixed bar on a notched iPhone.
   const bookingShell = (content: React.ReactNode) => (
-    <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
+    <main className="min-h-screen bg-gray-50 pb-[calc(8rem+env(safe-area-inset-bottom))] font-body text-gray-900">
       <BookingHeader backTo={getBackToPath()} />
       {/* In-flow hold (Steps 2 + 3 countdown banner). Only
           renders when the user is past Step 1 and the URL
@@ -2408,7 +2412,11 @@ export function BookingPage() {
             <StepIndicator steps={steps} currentStep={2} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 5</p>
+            {/* Per MBUX-01: hidden on mobile because the compact
+                stepper now states the position once, in its
+                `Step N of 5 · Name` caption. Retained from
+                `sm:` up, where the stepper shows every label. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 2 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Optional extras for your stay.
@@ -2497,14 +2505,18 @@ export function BookingPage() {
           />
         </section>
 
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+        {/* Per MBUX-01: shell standardised only. The BR-10 dual CTA is
+            consolidated into one context-aware action in MBUX-05. */}
+        <BookingStickyFooter
+          summary={
+            <>
               <p className="text-sm text-gray-600">Add-ons</p>
               <p className="text-lg font-semibold text-gray-950">
                 Continue to guest details when you&apos;re ready.
               </p>
-            </div>
+            </>
+          }
+        >
             {/* Per BR-10 (decision #244 reserved, 2026-10-14
                 — Phase 14): the Add-ons step now renders TWO
                 parallel CTAs that both advance to the same
@@ -2566,8 +2578,7 @@ export function BookingPage() {
                 No add-ons, continue
               </Link>
             </div>
-          </div>
-        </div>
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2580,7 +2591,8 @@ export function BookingPage() {
             <StepIndicator steps={steps} currentStep={3} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 5</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 3 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Guest details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Add the guest information for this stay. Required fields show inline validation once touched.
@@ -2822,14 +2834,16 @@ export function BookingPage() {
           />
         </section>
 
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+        <BookingStickyFooter
+          summary={
+            <>
               <p className="text-sm text-gray-600">Guest details</p>
               <p className="text-lg font-semibold text-gray-950">
                 {canContinueToReview ? "Ready for review and payment" : "Complete required fields and consent"}
               </p>
-            </div>
+            </>
+          }
+        >
             {canContinueToReview ? (
               // Per BR-09 (2026-10-14): the step-3 →
               // step-4 transition copy uses the
@@ -2845,8 +2859,7 @@ export function BookingPage() {
                 Continue to review
               </PrimaryButton>
             )}
-          </div>
-        </div>
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2881,7 +2894,8 @@ export function BookingPage() {
             <StepIndicator steps={steps} currentStep={4} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 4 of 5</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 4 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & Pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Review your details, select a discount or enter a voucher, and choose your payment method.
@@ -3540,9 +3554,9 @@ export function BookingPage() {
           />
         </section>
 
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+        <BookingStickyFooter
+          summary={
+            <>
               <p className="text-sm text-gray-600">Review & Pay</p>
               <p className="text-lg font-semibold text-gray-950">
                 {isSubmitting
@@ -3568,17 +3582,18 @@ export function BookingPage() {
                   ? "Running a quick security check..."
                   : "Ready to confirm booking"}
               </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleConfirmBooking}
-              disabled={!canConfirm || isSubmitting || uploadingDiscountId || uploadingPaymentProof}
-              className="flex min-h-11 items-center justify-center rounded-lg bg-primary text-white font-semibold px-6 hover:bg-primary-dark transition disabled:bg-gray-300 disabled:text-gray-500 sm:min-w-56"
-            >
-              {isSubmitting ? "Processing..." : "Place booking"}
-            </button>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <button
+            type="button"
+            onClick={handleConfirmBooking}
+            disabled={!canConfirm || isSubmitting || uploadingDiscountId || uploadingPaymentProof}
+            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-primary text-white font-semibold px-6 hover:bg-primary-dark transition disabled:bg-gray-300 disabled:text-gray-500 sm:min-w-56"
+          >
+            {isSubmitting ? "Processing..." : "Place booking"}
+          </button>
+        </BookingStickyFooter>
       </>
     );
   }
@@ -3591,7 +3606,8 @@ export function BookingPage() {
         </div>
         <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 5</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select your stay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Choose dates, guests, and a room option. We will show room types available for your stay.
@@ -4373,9 +4389,9 @@ export function BookingPage() {
         </div>
       </section>
 
-      <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+      <BookingStickyFooter
+        summary={
+          <>
             <p className="text-sm text-gray-600">
               Total for {distributedRoomCart.length} {distributedRoomCart.length === 1 ? "room" : "rooms"},{" "}
               {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
@@ -4383,69 +4399,79 @@ export function BookingPage() {
             <p className="text-2xl font-semibold text-gray-950">
               {formatPrice(displayTotal)} <span className="text-sm font-normal text-gray-500">including selected options</span>
             </p>
-          </div>
-	          {cartIsReady ? (
-	            // Per BR-09 (2026-10-14): the Step 1 →
-	            // Step 2 transition copy now uses the
-	            // destination step name ("add-ons"), not a
-	            // numbered "Step N" reference. The
-	            // `continueParams` URL stamp already points
-	            // at `step=add-ons` (see `continueParams`
-	            // above).
-	            <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
-	              Continue to add-ons
-	            </PrimaryButton>
-	          ) : (
-	            <PrimaryButton
-	              type="button"
-	              disabled
-	              aria-describedby="step-one-occupancy-error"
-	              className="sm:min-w-56"
-	            >
-	              {!cartFitsGroup
-	                ? "Adjust room"
-	                : distributedRoomCart.length > 0
-	                  ? "Assign every guest"
-	                  : "Add at least one room"}
-	            </PrimaryButton>
-	          )}
-	        </div>
-	        {!cartIsReady ? (
-          // Per CHD-11 (2026-08-04, per decision #184):
-          // the error message references the type label
-          // (matching the CHD-12 cart-style summary) plus
-          // a three-action "Adjust room" CTA that scrolls
-          // to and highlights the offending room-type
-          // card. The legacy "Add enough available rooms..."
-          // text stays for the cart-distribution failure
-          // case.
-          firstFailingType && firstFailingRoom ? (
-            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700" role="alert">
-              {firstFailingType.label} maxes at {firstFailingType.maxChildren} child{firstFailingType.maxChildren === 1 ? "" : "ren"}.{" "}
-              <button
-                type="button"
-                className="underline hover:text-amber-900"
-                data-testid="adjust-room-cta"
-                onClick={() => {
-                  const el = document.querySelector(
-                    `[data-testid="room-type-fit-${firstFailingType.value}"]`
-                  );
-                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  el?.classList.add("ring-2", "ring-amber-400");
-                  setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400"), 2000);
-                }}
+          </>
+}
+        detail={
+          !cartIsReady ? (
+            // Per CHD-11 (2026-08-04, per decision #184):
+            // the error message references the type label
+            // (matching the CHD-12 cart-style summary) plus
+            // a three-action "Adjust room" CTA that scrolls
+            // to and highlights the offending room-type
+            // card. The legacy "Add enough available rooms..."
+            // text stays for the cart-distribution failure
+            // case.
+            firstFailingType && firstFailingRoom ? (
+              <p
+                id="step-one-occupancy-error"
+                className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700"
+                role="alert"
               >
-                Adjust room
-              </button>
-              {" "}or pick a different room type, or remove a guest.
-            </p>
-          ) : (
-            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
-              Add enough available rooms to fit every guest, with at least one adult assigned to each room.
-            </p>
-          )
-	        ) : null}
-	      </div>
+                {firstFailingType.label} maxes at {firstFailingType.maxChildren} child{firstFailingType.maxChildren === 1 ? "" : "ren"}.{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-amber-900"
+                  data-testid="adjust-room-cta"
+                  onClick={() => {
+                    const el = document.querySelector(
+                      `[data-testid="room-type-fit-${firstFailingType.value}"]`
+                    );
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el?.classList.add("ring-2", "ring-amber-400");
+                    setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400"), 2000);
+                  }}
+                >
+                  Adjust room
+                </button>
+                {" "}or pick a different room type, or remove a guest.
+              </p>
+            ) : (
+              <p
+                id="step-one-occupancy-error"
+                className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700"
+              >
+                Add enough available rooms to fit every guest, with at least one adult assigned to each room.
+              </p>
+            )
+          ) : null
+        }
+      >
+        {cartIsReady ? (
+          // Per BR-09 (2026-10-14): the Step 1 →
+          // Step 2 transition copy now uses the
+          // destination step name ("add-ons"), not a
+          // numbered "Step N" reference. The
+          // `continueParams` URL stamp already points
+          // at `step=add-ons` (see `continueParams`
+          // above).
+          <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
+            Continue to add-ons
+          </PrimaryButton>
+        ) : (
+          <PrimaryButton
+            type="button"
+            disabled
+            aria-describedby="step-one-occupancy-error"
+            className="sm:min-w-56"
+          >
+            {!cartFitsGroup
+              ? "Adjust room"
+              : distributedRoomCart.length > 0
+                ? "Assign every guest"
+                : "Add at least one room"}
+          </PrimaryButton>
+        )}
+      </BookingStickyFooter>
     </>
   );
 }
