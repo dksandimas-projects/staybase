@@ -39,6 +39,50 @@ export const AIRPORT_TRANSFER_PRESEED: Omit<AddOn, "id" | "updatedAt" | "updated
 };
 
 /**
+ * Per BR-13.x (Phase 14 — Seaport transfer v1, decision
+ * #250): the second pre-seed catalog row. Cruise arrivals
+ * are spikier than airports (a ferry from Cebu / Cagayan
+ * de Oro / Manila / Palawan arrives in clusters), so the
+ * cut-off is bumped to 48h instead of the 24h airport
+ * default. The unit is `per-stay` (one transfer per
+ * booking, NOT one per guest per day) — the structural
+ * delta vs airport. Renders in the booking-drawer
+ * "Other Add-Ons" tab + the WalkinOtherAddOnGrid as a
+ * single row keyed on `checkIn`, not a per-day grid.
+ *
+ * Display order sits one above the airport row so the
+ * catalog list reads transport-method-ascending on a
+ * fresh install (airport first, seaport second).
+ */
+export const SEAPORT_TRANSFER_PRESEED: Omit<AddOn, "id" | "updatedAt" | "updatedBy"> = {
+  name: "Seaport transfer",
+  description:
+    "Round-trip seaport transfer at Tagbilaran Pier (TAG) or the new Panglao Bay ferry terminal. Driver meets you at disembarkation with a name board. Price is per booking (one transfer covers the whole stay, regardless of guest count).",
+  price: 1500,
+  unit: "per-stay",
+  isEnabled: true,
+  cutoffHoursBeforeCheckIn: 48,
+  displayOrder: 20
+};
+
+/**
+ * Per BR-13.x: the ordered list of pre-seed rows the
+ * admin Settings tab + the public `/api/bookings/addons/config`
+ * endpoint write / fall back to when the catalog is empty.
+ * The admin write path uses this list as the source of truth
+ * (a single `writeBatch` writes every entry atomically); the
+ * public read path concatenates a `SeaportTransferPreseed`
+ * entry when the live `addOns` collection is missing or
+ * truncated.
+ */
+export const ADDON_PRESEEDS: Array<
+  Omit<AddOn, "updatedAt" | "updatedBy"> & { id: string }
+> = [
+  { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+  { id: "seaport-transfer", ...SEAPORT_TRANSFER_PRESEED }
+];
+
+/**
  * Normalize one `addOns/{id}` doc into the canonical
  * `AddOn` shape. Defensive against missing fields so
  * legacy / partial docs from a partial BR-12 rollout

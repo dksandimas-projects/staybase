@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.4.0";
+    VERSION2 = "2.5.0";
   }
 });
 
@@ -224761,6 +224761,28 @@ function parseOtherAddOnSelectionKey(key) {
   if (!addOnId) return null;
   return { date, addOnId };
 }
+function getSelectionKeysForAddOn(addOn, checkIn, checkOut) {
+  const ci3 = String(checkIn || "").slice(0, 10);
+  const co3 = String(checkOut || "").slice(0, 10);
+  if (!ci3) return [];
+  if (addOn && addOn.unit === "per-stay") {
+    return [ci3];
+  }
+  if (!co3 || co3 <= ci3) return [ci3];
+  const startMs = Date.parse(`${ci3}T00:00:00Z`);
+  const endMs = Date.parse(`${co3}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return [ci3];
+  }
+  const out = [];
+  for (let ms2 = startMs, i2 = 0; ms2 < endMs && i2 < 60; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    out.push(
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
+    );
+  }
+  return out;
+}
 var init_otherAddOnTotal = __esm({
   "../shared/utils/otherAddOnTotal.ts"() {
     "use strict";
@@ -224811,7 +224833,7 @@ function sortAddOnsByDisplayOrder(addOns) {
     return String(a.name || "").localeCompare(String(b3.name || ""));
   });
 }
-var AIRPORT_TRANSFER_PRESEED;
+var AIRPORT_TRANSFER_PRESEED, SEAPORT_TRANSFER_PRESEED, ADDON_PRESEEDS;
 var init_addOns = __esm({
   "../shared/utils/addOns.ts"() {
     "use strict";
@@ -224824,6 +224846,19 @@ var init_addOns = __esm({
       cutoffHoursBeforeCheckIn: 24,
       displayOrder: 10
     };
+    SEAPORT_TRANSFER_PRESEED = {
+      name: "Seaport transfer",
+      description: "Round-trip seaport transfer at Tagbilaran Pier (TAG) or the new Panglao Bay ferry terminal. Driver meets you at disembarkation with a name board. Price is per booking (one transfer covers the whole stay, regardless of guest count).",
+      price: 1500,
+      unit: "per-stay",
+      isEnabled: true,
+      cutoffHoursBeforeCheckIn: 48,
+      displayOrder: 20
+    };
+    ADDON_PRESEEDS = [
+      { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+      { id: "seaport-transfer", ...SEAPORT_TRANSFER_PRESEED }
+    ];
   }
 });
 
@@ -224902,6 +224937,7 @@ var shared_exports = {};
 __export(shared_exports, {
   ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
   ADDITIONAL_REQUEST_MAX_LENGTH: () => ADDITIONAL_REQUEST_MAX_LENGTH,
+  ADDON_PRESEEDS: () => ADDON_PRESEEDS,
   AIRPORT_TRANSFER_PRESEED: () => AIRPORT_TRANSFER_PRESEED,
   ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
   AboutContentSchema: () => AboutContentSchema,
@@ -224992,6 +225028,7 @@ __export(shared_exports, {
   RewardsConfigSchema: () => RewardsConfigSchema,
   RewardsContentSchema: () => RewardsContentSchema,
   RoomStatusEnum: () => RoomStatusEnum,
+  SEAPORT_TRANSFER_PRESEED: () => SEAPORT_TRANSFER_PRESEED,
   STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
   SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
   SeoPublishSchema: () => SeoPublishSchema,
@@ -225086,6 +225123,7 @@ __export(shared_exports, {
   getReservationFolioSummary: () => getReservationFolioSummary,
   getReservationRevenueStreams: () => getReservationRevenueStreams,
   getSeasonalRateForNight: () => getSeasonalRateForNight,
+  getSelectionKeysForAddOn: () => getSelectionKeysForAddOn,
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   hasAnyOtherAddOns: () => hasAnyOtherAddOns,
@@ -242822,13 +242860,14 @@ async function handleGetAddOnsConfig(req, res) {
       if (norm) rawAddOns.push(norm);
     }
     if (rawAddOns.length === 0) {
-      const pre = {
-        id: "airport-transfer",
-        ...AIRPORT_TRANSFER_PRESEED,
-        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        updatedBy: "pre-seed"
-      };
-      rawAddOns.push(pre);
+      const fallbackStamp = (/* @__PURE__ */ new Date()).toISOString();
+      for (const seed of ADDON_PRESEEDS) {
+        rawAddOns.push({
+          ...seed,
+          updatedAt: fallbackStamp,
+          updatedBy: "pre-seed"
+        });
+      }
     }
     const enabled = getEnabledAddOnsByHotel(rawAddOns);
     res.setHeader("Cache-Control", "public, max-age=60");
@@ -242843,7 +242882,7 @@ async function handleGetAddOnsConfig(req, res) {
         cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
         displayOrder: a.displayOrder
       })),
-      preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
+      preSeeded: rawAddOns.length === ADDON_PRESEEDS.length && ADDON_PRESEEDS.every((s4) => rawAddOns.some((r3) => r3.id === s4.id))
     });
   } catch (err) {
     return res.status(500).json({

@@ -62,6 +62,14 @@ import {
   // pre-seed constant seeds the first "Airport transfer" row
   // on a brand-new install.
   AIRPORT_TRANSFER_PRESEED,
+  // Per BR-13.x (Phase 14 — Seaport transfer v1,
+  // decision #250): the ordered list of pre-seed
+  // rows the Settings tab + the public
+  // `/api/bookings/addons/config` fallback write when
+  // the catalog is empty. Today: airport + seaport.
+  // Adding a new `AddOnType` = adding one more entry
+  // here + importing the matching preset.
+  ADDON_PRESEEDS,
   type AddOn,
   // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
   // Zod schema + inferred types for the settings/rewardsConfig
@@ -104,7 +112,7 @@ import config from "@config";
 import { auth } from "../firebase/auth";
 import { db, storage } from "../firebase/config";
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
-import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { ConfirmForm } from "../components/ConfirmForm";
@@ -2863,14 +2871,20 @@ export function SettingsPage() {
     return () => unsub();
   }, []);
 
-  // Per BR-12.1: pre-seed the catalog with the
-  // "Airport transfer" row on first visit if the
+  // Per BR-13.x (decision #250): pre-seed the catalog
+  // with EVERY entry in `ADDON_PRESEEDS` (today:
+  // airport + seaport) on first visit when the
   // collection is empty. The seed is best-effort:
   // a failed write is logged + swallowed so a
   // permission-denied edge case doesn't crash the
   // tab. The check is reactive (re-runs on every
   // snapshot) but the write only fires once because
-  // `getDocs(addOns).empty` is the gate.
+  // `getDocs(addOns).empty` is the gate. BOTH rows
+  // land in a single `writeBatch` (per the BR-12 v1
+  // "`addOns` is a collection, NOT a single doc"
+  // shape, and per the GOTCHAS "fan-out = single
+  // writer" rule applied to the pre-seed case) so
+  // either both seed rows commit or neither does.
   useEffect(() => {
     if (addOnsCatalogLoading) return;
     if (addOnsCatalog.length > 0) return;
@@ -2878,13 +2892,17 @@ export function SettingsPage() {
       try {
         const snap = await getDocs(query(collection(db, "addOns")));
         if (!snap.empty) return;
-        const now = new Date().toISOString();
-        const seed = {
-          ...AIRPORT_TRANSFER_PRESEED,
-          updatedAt: now,
-          updatedBy: currentUser?.uid || "seed"
-        };
-        await setDoc(doc(db, "addOns", "airport-transfer"), seed);
+        const seedStamp = new Date().toISOString();
+        const updatedBy = currentUser?.uid || "seed";
+        const batch = writeBatch(db);
+        for (const seed of ADDON_PRESEEDS) {
+          batch.set(doc(db, "addOns", seed.id), {
+            ...seed,
+            updatedAt: seedStamp,
+            updatedBy
+          });
+        }
+        await batch.commit();
       } catch (err) {
         // The pre-seed is best-effort. A failure
         // here is non-blocking — the admin can

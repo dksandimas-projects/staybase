@@ -19,7 +19,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminDb } from "../lib/firebase-admin";
 import {
-  AIRPORT_TRANSFER_PRESEED,
+  ADDON_PRESEEDS,
   normalizeAddOn,
   getEnabledAddOnsByHotel,
   type AddOn
@@ -41,21 +41,26 @@ export async function handleGetAddOnsConfig(
       if (norm) rawAddOns.push(norm);
     }
 
-    // Per BR-12: if the catalog is empty, return the
-    // pre-seed row as a public fallback so a fresh
-    // deployment can render the Step 2 + Manage Other
-    // Add-Ons UI without waiting for the admin to visit
-    // Settings. The actual write happens in the admin
-    // Settings tab (`handleSaveAddOns`) — until then the
-    // pre-seed is read-only.
+    // Per BR-12 + BR-13.x (decision #250): if the catalog
+    // is empty, return every `ADDON_PRESEEDS` row as a
+    // public fallback so a fresh deployment can render
+    // the Step 2 + Manage Other Add-Ons UI without
+    // waiting for the admin to visit Settings. The actual
+    // write happens in the admin Settings tab — until
+    // then the pre-seed is read-only. `preSeeded` in the
+    // response signals the read-only fallback so the
+    // guest-side cache + the dashboard confirm-the-catalog
+    // logic can distinguish "saw defaults" from "saw an
+    // admin-curated catalog".
     if (rawAddOns.length === 0) {
-      const pre: AddOn = {
-        id: "airport-transfer",
-        ...AIRPORT_TRANSFER_PRESEED,
-        updatedAt: new Date().toISOString(),
-        updatedBy: "pre-seed"
-      };
-      rawAddOns.push(pre);
+      const fallbackStamp = new Date().toISOString();
+      for (const seed of ADDON_PRESEEDS) {
+        rawAddOns.push({
+          ...seed,
+          updatedAt: fallbackStamp,
+          updatedBy: "pre-seed"
+        });
+      }
     }
 
     const enabled = getEnabledAddOnsByHotel(rawAddOns);
@@ -72,7 +77,9 @@ export async function handleGetAddOnsConfig(
         cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
         displayOrder: a.displayOrder
       })),
-      preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
+      preSeeded:
+        rawAddOns.length === ADDON_PRESEEDS.length &&
+        ADDON_PRESEEDS.every((s) => rawAddOns.some((r) => r.id === s.id))
     });
   } catch (err: any) {
     return res.status(500).json({

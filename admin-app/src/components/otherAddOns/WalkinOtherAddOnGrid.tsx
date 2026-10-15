@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import {
   getEnabledAddOnsByHotel,
+  getSelectionKeysForAddOn,
   type AddOn
 } from "@spark-inn/shared";
 import { cn } from "../../utils/cn";
@@ -124,6 +125,20 @@ export function WalkinOtherAddOnGrid({
     }
     return out;
   }, [checkIn, checkOut]);
+
+  // Per BR-13.x (decision #250): the date key set for
+  // each add-on — per-person = all stay dates, per-stay
+  // = `[checkIn]` only. The data model
+  // (`Record<dateKey, OtherAddOnSelectionEntry[]>`) is
+  // shared; the rendering path branches here.
+  const keySetByAddOnId = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    if (!addOns || addOns.length === 0) return out;
+    for (const a of addOns) {
+      out[a.id] = getSelectionKeysForAddOn(a, checkIn, checkOut);
+    }
+    return out;
+  }, [addOns, checkIn, checkOut]);
 
   // Build the rich `otherAddOnSelections` shape + total
   // and surface to the parent on every change.
@@ -252,9 +267,18 @@ export function WalkinOtherAddOnGrid({
           const day = live[date] || {};
           const entries = Object.entries(day);
           const pending = pendingAdd[date] || { addOnId: "", quantity: 1 };
-          // Filter out add-ons already in the day's list
-          // so the "add" select doesn't offer duplicates.
-          const available = addOns.filter((a) => !day[a.id]);
+          // Per BR-13.x (decision #250): per-stay add-ons
+          // (e.g. seaport transfer) only appear at the
+          // check-in date — the per-day grid suppresses
+          // them on every other night. Available → add
+          // select mirrors the same gate so the operator
+          // can't queue a per-stay add-on on a non-check-in
+          // date.
+          const available = addOns.filter(
+            (a) =>
+              !day[a.id] &&
+              (keySetByAddOnId[a.id] || []).includes(date)
+          );
           return (
             <section
               key={date}
@@ -279,6 +303,11 @@ export function WalkinOtherAddOnGrid({
                     const cat = addOns.find((a) => a.id === addOnId);
                     if (!cat) return null;
                     const subtotal = cat.price * quantity;
+                    // Per-stay add-ons cap at qty 1 (one
+                    // transfer per booking); per-person
+                    // add-ons cap at guest count.
+                    const qtyMax = cat.unit === "per-stay" ? 1 : maxGuests;
+                    const isPerStay = cat.unit === "per-stay";
                     return (
                       <li
                         key={addOnId}
@@ -291,14 +320,27 @@ export function WalkinOtherAddOnGrid({
                           </p>
                           <p className="text-[10px] text-gray-500">
                             ₱{cat.price.toLocaleString()} / {cat.unit === "per-person" ? "guest" : "stay"}
+                            {isPerStay ? (
+                              <span className="ml-1 text-[9px] uppercase tracking-wide text-gray-400">
+                                · once per booking
+                              </span>
+                            ) : null}
                           </p>
                         </div>
                         <input
                           type="number"
                           min={0}
-                          max={maxGuests}
+                          max={qtyMax}
                           value={quantity}
-                          onChange={(e) => handleSetQuantity(date, addOnId, Number(e.target.value))}
+                          onChange={(e) =>
+                            handleSetQuantity(
+                              date,
+                              addOnId,
+                              isPerStay
+                                ? Math.max(0, Math.min(1, Number(e.target.value) || 0))
+                                : Number(e.target.value)
+                            )
+                          }
                           aria-label={`${cat.name} quantity for ${date}`}
                           className="min-h-[36px] w-full rounded border border-gray-250 bg-white px-2 text-center text-[11px]"
                         />
@@ -334,24 +376,36 @@ export function WalkinOtherAddOnGrid({
                     <option value="">— Select add-on —</option>
                     {available.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.name} — ₱{a.price.toLocaleString()}
+                        {a.name} — ₱{a.price.toLocaleString()} / {a.unit === "per-person" ? "guest" : "stay"}
                       </option>
                     ))}
                   </select>
-                  <input
-                    type="number"
-                    min={1}
-                    max={maxGuests}
-                    value={pending.quantity}
-                    onChange={(e) =>
-                      setPendingAdd((p) => ({
-                        ...p,
-                        [date]: { ...pending, quantity: Math.max(1, Math.min(maxGuests, Number(e.target.value) || 1)) }
-                      }))
-                    }
-                    aria-label={`Quantity for ${date}`}
-                    className="min-h-[36px] w-16 rounded border border-gray-250 bg-white px-2 text-center text-[11px]"
-                  />
+                  {(() => {
+                    const pendingCat = available.find((a) => a.id === pending.addOnId);
+                    const pendingMax = pendingCat?.unit === "per-stay" ? 1 : maxGuests;
+                    return (
+                      <input
+                        type="number"
+                        min={1}
+                        max={pendingMax}
+                        value={pending.quantity}
+                        onChange={(e) =>
+                          setPendingAdd((p) => ({
+                            ...p,
+                            [date]: {
+                              ...pending,
+                              quantity: Math.max(
+                                1,
+                                Math.min(pendingMax, Number(e.target.value) || 1)
+                              )
+                            }
+                          }))
+                        }
+                        aria-label={`Quantity for ${date}`}
+                        className="min-h-[36px] w-16 rounded border border-gray-250 bg-white px-2 text-center text-[11px]"
+                      />
+                    );
+                  })()}
                   <button
                     type="button"
                     onClick={() => handleAdd(date)}

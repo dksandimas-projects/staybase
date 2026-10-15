@@ -30,11 +30,12 @@ import {
   // booking-drawer "Other Add-Ons" tab full edit UI
   // uses the same shared helpers as the public
   // booking flow (`getEnabledAddOnsByHotel`,
-  // `computeOtherAddOnCutoffState`, `recomputeOtherAddOnTotal`)
-  // — the source of truth is shared across the
-  // guest-app + admin-app surfaces.
+  // `computeOtherAddOnCutoffState`, `recomputeOtherAddOnTotal`,
+  // `getSelectionKeysForAddOn`) — the source of truth
+  // is shared across the guest-app + admin-app surfaces.
   computeOtherAddOnCutoffState,
   getEnabledAddOnsByHotel,
+  getSelectionKeysForAddOn,
   recomputeOtherAddOnTotal,
   type AddOn,
   type BreakfastSelectionEntry,
@@ -2044,6 +2045,22 @@ export function BookingDrawerOtherAddOnsTab({
     return out;
   }, [booking.checkIn, booking.checkOut]);
 
+  // Per BR-13.x (decision #250): the date key set for
+  // each add-on in the catalog — per-person = all stay
+  // dates, per-stay = `[checkIn]` only. Gates the
+  // per-date "Add row" so the operator cannot queue a
+  // seaport transfer (per-stay) on a non-check-in night.
+  const keySetByAddOnId = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    if (!catalog) return out;
+    const ci = String(booking.checkIn || "").slice(0, 10);
+    const co = String(booking.checkOut || "").slice(0, 10);
+    for (const a of catalog) {
+      out[a.id] = getSelectionKeysForAddOn(a, ci, co);
+    }
+    return out;
+  }, [catalog, booking.checkIn, booking.checkOut]);
+
   // Existing selections (per day) — these are the rows
   // the staff can edit. Removed entries (`removedAt !==
   // null`) are still visible (read-only) for audit
@@ -2107,7 +2124,11 @@ export function BookingDrawerOtherAddOnsTab({
 
   const handleQuantityChange = (date: string, addOn: AddOn, nextQty: number) => {
     const key = `${date}-${addOn.id}`;
-    const q = Math.max(0, Math.min(50, Math.floor(Number(nextQty) || 0)));
+    // Per BR-13.x (decision #250): per-stay add-ons cap
+    // the row-level quantity at 1; per-person keeps the
+    // legacy 50 ceiling.
+    const cap = addOn.unit === "per-stay" ? 1 : 50;
+    const q = Math.max(0, Math.min(cap, Math.floor(Number(nextQty) || 0)));
     const prior = (selections[date] || []).find((e) => e && e.addOnId === addOn.id);
     if (!prior) {
       // No prior — queue as `add`.
@@ -2172,7 +2193,11 @@ export function BookingDrawerOtherAddOnsTab({
     if (!catalog) return;
     const cat = catalog.find((a) => a.id === addOnId);
     if (!cat) return;
-    const q = Math.max(0, Math.min(50, Math.floor(Number(qty) || 0)));
+    // Per BR-13.x (decision #250): per-stay add-ons cap
+    // the row-level quantity at 1; per-person keeps the
+    // legacy 50 ceiling.
+    const cap = cat.unit === "per-stay" ? 1 : 50;
+    const q = Math.max(0, Math.min(cap, Math.floor(Number(qty) || 0)));
     if (q <= 0) return;
     const key = `${date}-${addOnId}`;
     setRowPending(key, {
@@ -2349,6 +2374,15 @@ export function BookingDrawerOtherAddOnsTab({
                       Number(pendingOp?.priceSnapshot ?? entry.priceSnapshot) || 0
                     );
                     const isServed = Boolean(served[key]);
+                    // Per BR-13.x (decision #250): per-stay
+                    // entries cap the input at 1 (one
+                    // transfer per booking); per-person
+                    // keeps the legacy 50 ceiling.
+                    const entryUnit = entry.unitSnapshot || "per-person";
+                    const qtyMax = entryUnit === "per-stay" ? 1 : 50;
+                    const qtyHint = entryUnit === "per-stay"
+                      ? "once per booking"
+                      : `guest${effectiveQty === 1 ? "" : "s"}`;
                     return (
                       <div
                         key={key}
@@ -2367,7 +2401,7 @@ export function BookingDrawerOtherAddOnsTab({
                             {entry.nameSnapshot || entry.addOnId}
                           </p>
                           <p className="text-xs text-gray-600">
-                            {effectiveQty} guest{effectiveQty === 1 ? "" : "s"} · ₱{price.toLocaleString()} / unit
+                            {effectiveQty} {qtyHint} · ₱{price.toLocaleString()} / unit
                           </p>
                           {isLocked ? (
                             <p
@@ -2382,7 +2416,7 @@ export function BookingDrawerOtherAddOnsTab({
                           <input
                             type="number"
                             min={0}
-                            max={50}
+                            max={qtyMax}
                             value={effectiveQty}
                             disabled={isLocked}
                             onChange={(e) => handleQuantityChange(date, {
@@ -2437,11 +2471,24 @@ export function BookingDrawerOtherAddOnsTab({
                 )}
               </div>
               {/* "Add" row for this date — surfaces the
-                  enabled catalog not already on the day. */}
+                  enabled catalog not already on the day.
+                  `allowedAddOnIdsForDate` is the
+                  per-addOnId key set filtered to this date,
+                  so per-stay add-ons (e.g. seaport) only
+                  appear on the check-in night. */}
               <OtherAddOnAddRow
                 date={date}
                 catalog={catalog}
                 alreadyAddedIds={list.map((e: any) => e.addOnId)}
+                allowedAddOnIdsForDate={
+                  catalog
+                    ? catalog
+                        .map((a) => a.id)
+                        .filter((id) =>
+                          (keySetByAddOnId[id] || []).includes(date)
+                        )
+                    : []
+                }
                 onAdd={(addOnId, qty) => handleAdd(date, addOnId, qty)}
               />
             </div>
@@ -2521,14 +2568,24 @@ function OtherAddOnAddRow({
   date,
   catalog,
   alreadyAddedIds,
+  allowedAddOnIdsForDate,
   onAdd
 }: {
   date: string;
   catalog: AddOn[];
   alreadyAddedIds: string[];
+  // Per BR-13.x (decision #250): the add-on IDs valid
+  // on THIS date. Per-stay add-ons (e.g. seaport) are
+  // included ONLY for the check-in date — the row hides
+  // them on every other night so the operator can't queue
+  // an off-day per-stay entry by mistake.
+  allowedAddOnIdsForDate: string[];
   onAdd: (addOnId: string, qty: number) => void;
 }) {
-  const available = catalog.filter((a) => !alreadyAddedIds.includes(a.id));
+  const allowed = new Set(allowedAddOnIdsForDate);
+  const available = catalog.filter(
+    (a) => !alreadyAddedIds.includes(a.id) && allowed.has(a.id)
+  );
   const [selectedId, setSelectedId] = useState("");
   const [qty, setQty] = useState(1);
   if (available.length === 0) {
@@ -2538,6 +2595,10 @@ function OtherAddOnAddRow({
       </p>
     );
   }
+  const selected = available.find((a) => a.id === selectedId);
+  // Per-stay add-ons cap at qty 1 (one transfer per
+  // booking); per-person keeps the legacy 50 ceiling.
+  const qtyMax = selected?.unit === "per-stay" ? 1 : 50;
   return (
     <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-2">
       <select
@@ -2556,9 +2617,9 @@ function OtherAddOnAddRow({
       <input
         type="number"
         min={1}
-        max={50}
+        max={qtyMax}
         value={qty}
-        onChange={(e) => setQty(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+        onChange={(e) => setQty(Math.max(1, Math.min(qtyMax, Number(e.target.value) || 1)))}
         aria-label={`Quantity for ${date}`}
         className="min-h-[36px] w-16 rounded border border-gray-250 bg-white px-2 text-center text-[11px]"
       />

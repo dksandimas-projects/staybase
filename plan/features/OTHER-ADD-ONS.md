@@ -250,13 +250,63 @@ Back-compat: pre-BR-12 bookings have no `otherAddOnSelections`. The guest Manage
 
 1. ✅ **Email template dedicated to other add-on refund paid** — the BR-12 v1 piggy-backs on the existing breakfast `mark-refund-paid` email copy. A dedicated `add-on-refund-paid` template is a follow-up if operations finds the conflation confusing. *(Follow-up unchanged; intentionally deferred per the BR-12 spec.)*
 
-2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 (2026-10-15, decision #247) ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2.
+2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 (2026-10-15, decision #247) ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2. BR-13.x extends this grid to handle the `unit: "per-stay"` rendering path (the seaport transfer renders ONE quantity input at the `checkIn` date, not the per-day × per-guest grid the airport transfer uses).
 
-3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1. The BR-13 refactor may add the toggle when a second add-on **type** (seaport) lands with its own semantics. *(BR-12.1 ships the Settings tab's "Add-ons enabled" UI affordance as a v1 placeholder; the underlying helper still returns `[]` on an empty catalog. Persisting the toggle to `settings/hotelConfig` is a follow-up.)*
+3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1. The BR-13 refactor may add the toggle when a second add-on **type** (seaport) lands with its own semantics. **BR-13.x lands seaport at 48h cut-off vs the airport 24h — the divergent per-add-on semantics now exist, but the hotel-wide toggle stays deferred per the BR-13 trigger evaluation (decision #250): the divergent surfaces (cut-off + unit rendering + qty cap) are small enough that the per-add-on `isEnabled` switch is still operationally equivalent for the operator. Add the toggle only if operations asks.** *(BR-12.1 ships the Settings tab's "Add-ons enabled" UI affordance as a v1 placeholder; the underlying helper still returns `[]` on an empty catalog. Persisting the toggle to `settings/hotelConfig` is a follow-up.)*
 
-4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 (2026-10-15, decision #247) ships the new sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table.
+4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 (2026-10-15, decision #247) ships the new sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table. **BR-13.x lands: the chart is data-driven over the catalog (no per-type code), so the seaport row slots into the existing metric cards + top-add-ons chart without a follow-up.**
 
-5. ✅ **Admin edit UI for individual selections** — BR-12.1 (2026-10-15, decision #247) replaces the BR-12 read-only booking-drawer tab with the full edit UI: per-day × per-add-on grid with quantity inputs + add row + remove + locked-date badges + override modal + Save changes button. The drawer now writes through `/api/bookings/addons/staff-update`.
+5. ✅ **Admin edit UI for individual selections** — BR-12.1 (2026-10-15, decision #247) replaces the BR-12 read-only booking-drawer tab with the full edit UI: per-day × per-add-on grid with quantity inputs + add row + remove + locked-date badges + override modal + Save changes button. The drawer now writes through `/api/bookings/addons/staff-update`. **BR-13.x extends this UI to handle per-stay entries: the rendering loop filters the per-date "Add Row" by the add-on's key set (per-stay = `[checkIn]` only), so the operator cannot queue a seaport transfer on a non-check-in night; the per-row `max` caps at 1 for per-stay (one transfer per booking).**
+
+---
+
+## Seaport Transfer (BR-13.x, v2.5.0, 2026-10-15)
+
+> **Owner-requested second non-breakfast add-on type.** The whole point of v1 is to validate or invalidate the BR-13 generic-add-on refactor trigger by introducing a real second type with at least one meaningful structural difference. Lives on `feature/br-13-x-seaport` (decision **#250**); not yet merged to dev — parent decides after reviewing the decision entry.
+
+### Why seaport is structurally different
+
+Airport transfer (BR-12 v1) is **per-person × per-day** — each booking night is its own selection slot, quantity defaults to total guests, the operator can opt a date in or out independently. Cruise arrivals are spikier (one ferry = one transfer, regardless of guest count or night), so seaport transfer is **per-stay** — one quantity, one entry attached to `checkIn`, no per-day grid.
+
+Three dimensions that diverge from airport:
+
+| Dimension | Airport (per-person) | Seaport (per-stay) |
+|---|---|---|
+| `unit` | `"per-person"` | `"per-stay"` |
+| `cutoffHoursBeforeCheckIn` | 24h | 48h (cruise ferries book further in advance) |
+| Row quantity input | `max={maxGuests}` | `max={1}` |
+| Per-day render | N nights × N rows | 1 row at `checkIn` only |
+
+The data model (`Record<dateKey, OtherAddOnSelectionEntry[]>`) is **unchanged** — the divergence lives entirely in the rendering path + the per-add-on input cap. Per-day keys that aren't in the add-on's key set are simply not rendered.
+
+### Shared helper
+
+The single new shared function — `getSelectionKeysForAddOn(addOn, checkIn, checkOut)` in `shared/utils/otherAddOnTotal.ts` — returns the date keys a booking should render for ONE add-on:
+
+- `unit === "per-stay"` → `[checkIn]` only
+- otherwise (per-person + defensive null/unit fallback) → `[checkIn, checkIn+1, …, checkOut-1]`
+
+Both `WalkinOtherAddOnGrid` + `BookingDrawerOtherAddOnsTab` call this helper. The booking-drawer's "Add Row" sub-component (`OtherAddOnAddRow`) takes an `allowedAddOnIdsForDate` prop that filters the catalog down to the add-ons whose key set includes that date — so a per-stay add-on never appears in the "add" select on a non-check-in night.
+
+### Pre-seed
+
+`ADDON_PRESEEDS` (in `shared/utils/addOns.ts`) is the load-bearing list. Today: airport + seaport. The admin `Settings → Other Add-Ons` tab pre-seed writes BOTH rows in a single `writeBatch` when `addOns/` is empty (gated on `getDocs(addOns).empty`). The public `/api/bookings/addons/config` endpoint's read-time fallback iterates the same array. Adding a third add-on type = adding one entry to the array (one preset + the array row); the spec author touches no other file.
+
+### Decision entry
+
+See `plan/docs/DECISIONS-FEATURES.md #250` for the empirical evaluation of the BR-13 refactor trigger — short version: **the divergent surfaces are small enough (a ~10-line helper + a per-row render branch) that the cost of duplication is low and BR-13's added abstraction has only marginal value at this scale. Defer BR-13 until a third add-on type, or a meaningfully different rendering rule, lands.**
+
+### Tripwires
+
+**50 new BR-13.x `it()` blocks across 3 files:**
+
+- `shared/__tests__/br-13-x-addons-preseed.test.ts` — `SEAPORT_TRANSFER_PRESEED` + `ADDON_PRESEEDS` + the atomic `writeBatch` + the read-time fallback (14 `it()`s).
+- `shared/__tests__/br-13-x-unit-rendering.test.ts` — `getSelectionKeysForAddOn` math + WalkinOtherAddOnGrid / BookingDrawerOtherAddOnsTab render branches (20 `it()`s).
+- `guest-app/tests/api/br-13-x-seaport-cutoff.test.ts` — `computeOtherAddOnCutoffState` for per-stay at 48h + `ADDON_PRESEEDS` exposure + add-on-enabled filter (16 `it()`s).
+
+Plus **1 BR-12.1 tripwire rewritten** in `admin-app/src/__tests__/br-12-1-other-addons-settings.test.ts` to assert the new `ADDON_PRESEEDS` loop instead of the legacy `"airport-transfer"` literal.
+
+Total project it-block count after the merge: 51 → 53 shared test files (771 → 797 = +26); 175 → 176 guest-app api test files (2049 → 2063 = +14); 152 → 152 admin-app test files (1846 → 1846 — the rewritten BR-12.1 tripwire is a no-op count-wise). Pre-existing test failures unchanged: `br-06-refunds-extension` (`BR-06/BR-08` frozen, out of scope) + `dashboard-overdue-checkouts` (Firebase emulator infra, unrelated).
 
 ---
 

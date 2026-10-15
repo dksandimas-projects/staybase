@@ -112,9 +112,23 @@ describe("BR-12.1 — Admin Settings: Other Add-Ons tab", () => {
   });
 
   describe("pre-seed", () => {
-    it("the pre-seed hooks the AIRPORT_TRANSFER_PRESEED constant", () => {
-      expect(addOnsState).toContain("AIRPORT_TRANSFER_PRESEED");
-      expect(addOnsState).toContain('"airport-transfer"');
+    it("the pre-seed iterates ADDON_PRESEEDS so a BR-13.x addition lands without editing SettingsPage", () => {
+      // The contract (post-BR-13.x, decision #250):
+      // the pre-seed iterates `ADDON_PRESEEDS` (which
+      // has both airport + seaport entries) instead of
+      // writing a single hardcoded airport literal.
+      // Adding a new entry to the array is the new
+      // load-bearing surface for any future add-on
+      // type — SettingsPage does not need to be edited.
+      expect(addOnsState).toContain("ADDON_PRESEEDS");
+      expect(addOnsState).toMatch(
+        /for\s*\(\s*const\s+seed\s+of\s+ADDON_PRESEEDS\s*\)/
+      );
+      // The doc id now comes from the array row, not a
+      // hardcoded literal — the legacy
+      // `"airport-transfer"` literal in the pre-seed
+      // block is gone.
+      expect(addOnsState).not.toMatch(/id:\s*"airport-transfer"/);
     });
 
     it("the pre-seed guard checks getDocs(addOns).empty before writing", () => {
