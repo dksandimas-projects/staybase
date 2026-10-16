@@ -308,6 +308,15 @@ function formatBreakfastDateLabel(date: string): string {
   return `${monthDay} (${weekday})`;
 }
 
+// Per MBUX-16 (decision #269, 2026-10-16): the cut-off-time
+// formatter lives in its own utility module (so it can be
+// imported by the test suite directly without an indirection
+// through this file's compilation). The import is below the
+// existing `formatBreakfastDateLabel` helper; the function
+// signature + behaviour are pinned in
+// `tests/api/mbux-16-breakfast-cutoff-explanation.test.ts`.
+import { formatCutoffTime } from "../utils/formatCutoffTime";
+
 function createPrivateUploadFileName(fileName: string) {
   const extension = fileName.match(/\.[a-z0-9]+$/i)?.[0].toLowerCase() ?? "";
   return `${crypto.randomUUID()}${extension}`;
@@ -2317,12 +2326,52 @@ const addOnCount = Object.keys(breakfastSelections).length;
             meals={activeBreakfastMeals}
             formatPrice={formatPrice}
           />
+          {/* Per MBUX-16 (decision #269, 2026-10-16): when at
+              least one date in the stay has crossed the cut-off,
+              show a one-line help text above the skip
+              explanation. The text is amber-700 (the existing
+              cut-off / Fits-invalidity accent) and only appears
+              when needed — when every date is still open, the
+              "Order by 24 Oct, 8:00 PM" per-date headers
+              already carry the deadline signal and the help
+              text would be noise.
+
+              The text names the cut-off TIME so the guest
+              doesn't have to guess what "cut-off" means in
+              their timezone. The "still editable" suffix is
+              important — without it a guest might think the
+              WHOLE breakfast flow is locked, when actually
+              only the one past-deadline date is. */}
+          {dates.some((d) => {
+            const c = computeBreakfastCutoffState({
+              serviceDate: d,
+              now: new Date(),
+              cutoffTime: breakfastConfig.cutoffTime || "20:00",
+              timezone: breakfastConfig.cutoffTimezone || "Asia/Manila",
+              cutoffsEnabled: breakfastConfig.cutoffsEnabled !== false
+            });
+            return c.isLocked;
+          }) ? (
+            <p
+              className="mt-5 text-xs text-amber-700"
+              data-testid="breakfast-cutoff-help"
+            >
+              {`Breakfast has a per-day cut-off (${formatCutoffTime(breakfastConfig.cutoffTime || "20:00")} the day before) — when it passes, that day's menu locks but the rest of the stay is still editable.`}
+            </p>
+          ) : null}
+
           {/* The skip explanation appears ONCE here rather than as a
               40-character string repeated inside every native option on
               every date card. The mt-5 (was mt-4) keeps the breathing
               room now that the MBUX-12 menu grid replaces the
               pre-MBUX-12 horizontal-scroll carousel (which had `pb-1`
-              inside the strip). */}
+              inside the strip). The mbux-16 cut-off help text
+              (above) takes the same `mt-5` slot when present —
+              they don't stack because the cut-off help text is
+              only rendered when at least one date is locked
+              (the `dates.some(...)` check above), and the
+              existing one-time reassurance line below always
+              renders as a separate instruction. */}
           <p className="mt-5 text-xs text-gray-600">
             Skipping a day is fine — leave any slot as “No breakfast”.
           </p>
@@ -2345,11 +2394,33 @@ const addOnCount = Object.keys(breakfastSelections).length;
                 <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
-                    <p className="text-xs text-gray-600">
-                      {cutoff.isLocked
-                        ? "Ordering closed"
-                        : `Order by ${formatStayDate(date)}`}
-                    </p>
+                    {/* Per MBUX-16: the locked-status line keeps
+                        "Ordering closed" as line 1, plus a new
+                        line 2 (text-amber-700) that names the cut-off
+                        time + suggests the two workarounds
+                        ("skip this day" or "contact the front
+                        desk"). The unlocked-state line stays
+                        byte-equivalent: "Order by Oct 24". The
+                        sub-line is conditional on `cutoff.isLocked`
+                        so unlocked dates don't get an extra
+                        sentence — it would just be visual noise
+                        that competes with the existing
+                        "Order by ..." deadline. */}
+                    <div className="text-right">
+                      <p className="text-xs text-gray-600">
+                        {cutoff.isLocked
+                          ? "Ordering closed"
+                          : `Order by ${formatStayDate(date)}`}
+                      </p>
+                      {cutoff.isLocked ? (
+                        <p
+                          className="mt-0.5 text-xs text-amber-700"
+                          data-testid="breakfast-cutoff-explanation"
+                        >
+                          {`Cut-off was ${formatCutoffTime(breakfastConfig.cutoffTime || "20:00")} the day before — skip this day or contact the front desk.`}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                   {/* Per MBUX-05 (decision #257): "Use these choices for
                       all remaining days". A multi-night stay repeats the
