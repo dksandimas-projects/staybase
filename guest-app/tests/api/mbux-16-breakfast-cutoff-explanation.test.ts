@@ -6,17 +6,29 @@
 // explanation why the breakfast add-ons is unavailable or
 // closed due to the cut off policy?"
 //
+// MBUX-17 (decision #272, 2026-10-16) — the MBUX-16 surface
+// produced visible duplication on mobile (the cut-off TIME
+// appeared in the top-of-section help text AND in every locked
+// date card's sub-line). MBUX-17 collapses the per-date
+// sub-line into a single compact pill ("Ordering closed due
+// to cut-off") and removes the pre-MBUX-17 "Skipping a day is
+// fine — leave any slot as 'No breakfast'" reassurance line
+// (the default `<option>` on every guest slot is already "No
+// breakfast", so the instruction was redundant). The top
+// help text is now the single source for the cut-off time.
+//
 // Why this is source-text rather than DOM:
 // guest-app has no jsdom / testing-library dependency (see
 // `guest-app/package.json`), so the established convention for
 // guest-app UI contracts is source-text pinning — the same
 // approach the MBUX-* / BR-* / DR-01 suites use. These tests
-// pin the SHAPE (the new formatCutoffTime helper, the per-date
-// sub-line on locked dates, the help text when at least one
-// date is locked, the conditional rendering so unlocked dates
-// don't get an extra sentence), not the pixels; the visual
-// acceptance is the MBUX-10 manual browser pass when the
-// owner confirms the Firebase env.
+// pin the SHAPE (the new formatCutoffTime helper, the
+// per-date pill on locked dates, the help text when at least
+// one date is locked, the conditional rendering so unlocked
+// dates don't get the pill, the negative-space pins for the
+// removed sub-line + reassure line), not the pixels; the
+// visual acceptance is the MBUX-10 manual browser pass when
+// the owner confirms the Firebase env.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -99,49 +111,91 @@ describe("MBUX-16 — breakfast cut-off explanation", () => {
     expect(helperSrc).toMatch(/export\s+function\s+formatCutoffTime\s*\(\s*hhmm:\s*string\s*\)/);
   });
 
-  it("BookingPage uses formatCutoffTime in the cut-off explanation", () => {
+  it("BookingPage uses formatCutoffTime in the cut-off help text (top-of-section, rendered only when at least one date is locked)", () => {
     expect(bookingPageSrc).toMatch(/formatCutoffTime\(breakfastConfig\.cutoffTime \|\| "20:00"\)/);
   });
 
-  // ── The per-date sub-line on locked dates ─────────────────
+  // ── The per-date locked marker is a single compact pill ───
   //
-  // The pre-MBUX-16 status text on locked dates was a single
-  // `<p>` carrying "Ordering closed". MBUX-16 keeps that as
-  // line 1 (so the existing `Order by 24 Oct, 8:00 PM` test
-  // surface doesn't churn) and adds a new line 2 (text-amber-700,
-  // data-testid="breakfast-cutoff-explanation") that names the
-  // cut-off time + suggests two workarounds ("skip this day"
-  // or "contact the front desk"). The sub-line is conditional
-  // on `cutoff.isLocked` so unlocked dates don't get an extra
-  // sentence — that would be visual noise competing with the
-  // existing deadline text.
+  // MBUX-17 (decision #272, 2026-10-16) replaces the
+  // pre-MBUX-17 two-line stack ("Ordering closed" + an
+  // amber-700 sub-line that named the cut-off time + the
+  // "skip this day / contact the front desk" workarounds) with
+  // a single compact pill that carries the full reason inline:
+  // "Ordering closed due to cut-off". The top-of-section help
+  // text is the single source for the cut-off TIME so it does
+  // not need to be duplicated per-date. Style mirrors the
+  // in-file "Tight — at the cap" / "Doesn't fit your group"
+  // pills (rounded-full + amber-100 + amber-800 + the same
+  // inline-flex items-center gap-1 + px-2.5 py-1 text-xs
+  // font-semibold shape) so the cut-off indicator reads as part
+  // of the same vocabulary rather than a separate one-off
+  // element.
 
-  it("the locked-state sub-line carries `data-testid=\"breakfast-cutoff-explanation\"` for the test surface", () => {
-    expect(bookingPageSrc).toMatch(/data-testid="breakfast-cutoff-explanation"/);
+  it("the locked-state marker carries `data-testid=\"breakfast-cutoff-pill\"` for the test surface", () => {
+    expect(bookingPageSrc).toMatch(/data-testid="breakfast-cutoff-pill"/);
   });
 
-  it("the locked-state sub-line names the cut-off time + the 'skip this day or contact the front desk' workaround", () => {
-    // The text is the explanation itself — anchor it on the
-    // unique phrase "skip this day or contact the front desk"
-    // (vs the title line which says "Ordering closed"). The
-    // cut-off time is interpolated via formatCutoffTime so the
-    // actual rendered time is config-driven.
-    expect(bookingPageSrc).toMatch(/skip this day or contact the front desk/);
+  it("the locked-state pill reads exactly `Ordering closed due to cut-off` (no per-date time duplication — the top help text is the single source for the cut-off time)", () => {
+    expect(bookingPageSrc).toMatch(/Ordering closed due to cut-off/);
   });
 
-  it("the locked-state sub-line uses the `text-amber-700` accent (matches the existing cut-off / Fits-invalidity banner)", () => {
-    expect(bookingPageSrc).toMatch(/breakfast-cutoff-explanation[\s\S]+?text-amber-700/);
+  it("the locked-state pill uses the in-file pill vocabulary (rounded-full + amber-100 + amber-800 + inline-flex items-center gap-1 + px-2.5 py-1 text-xs font-semibold) — matches the existing `Tight — at the cap` / `Fits your group` pills", () => {
+    expect(bookingPageSrc).toMatch(
+      /inline-flex items-center gap-1 rounded-full bg-amber-100 px-2\.5 py-1 text-xs font-semibold text-amber-800/
+    );
+  });
+
+  it("the locked-state pill is rendered with a `<span>` (inline — the A-B comparison vs the unlocked state's `<p>` matters for the right-aligned layout)", () => {
+    expect(bookingPageSrc).toMatch(/<span[\s\S]+?data-testid="breakfast-cutoff-pill"/);
+  });
+
+  // ── The pre-MBUX-17 per-date sub-line is gone ─────────────
+  //
+  // The pre-MBUX-17 sub-line (`data-testid="breakfast-cutoff-explanation"`)
+  // and the unique "skip this day or contact the front desk"
+  // workaround text are removed — the pill is the only locked
+  // marker. The pre-MBUX-17 sub-line was the source of the
+  // duplication the owner flagged: the cut-off time appeared
+  // both in the top-of-section help text AND in every locked
+  // date card.
+
+  it("the pre-MBUX-17 per-date sub-line (data-testid=\"breakfast-cutoff-explanation\") is removed — the pill is the only locked marker", () => {
+    expect(bookingPageSrc).not.toMatch(/data-testid="breakfast-cutoff-explanation"/);
+  });
+
+  it("the pre-MBUX-17 `skip this day or contact the front desk` workaround text is removed (the pill replaces it)", () => {
+    expect(bookingPageSrc).not.toMatch(/skip this day or contact the front desk/);
+  });
+
+  it("the pre-MBUX-17 standalone `Ordering closed` title line is removed (the pill's first word IS `Ordering closed` — no need for a separate title)", () => {
+    expect(bookingPageSrc).not.toMatch(/["']Ordering closed["']/);
   });
 
   // ── The unlocked-state line stays byte-equivalent ─────────
   //
-  // MBUX-16 is locked-only. The pre-MBUX-16 line
+  // MBUX-17 is locked-only. The pre-MBUX-16 line
   // `Order by ${formatStayDate(date)}` (just the date — no
   // time) is the existing unlocked contract and must be
-  // preserved.
+  // preserved. MBUX-17 keeps it byte-equivalent.
 
-  it("the unlocked state still renders `Order by ${formatStayDate(date)}` (byte-equivalent to pre-MBUX-16)", () => {
+  it("the unlocked state still renders `Order by ${formatStayDate(date)}` (byte-equivalent to pre-MBUX-17)", () => {
     expect(bookingPageSrc).toMatch(/Order by \$\{formatStayDate\(date\)\}/);
+  });
+
+  // ── The "Skipping a day is fine" reassurance line is gone ──
+  //
+  // MBUX-17 removes the pre-MBUX-17 "Skipping a day is fine —
+  // leave any slot as 'No breakfast'" line above the date cards.
+  // The default `<option>` on every guest slot is "No breakfast"
+  // (the first entry in the meal list), so the instruction was
+  // redundant — a guest who never opens a dropdown already gets
+  // "No breakfast" for that guest/date. Saying it again above
+  // the date cards added an extra sentence of mobile real estate
+  // without changing any outcome.
+
+  it("the pre-MBUX-17 `Skipping a day is fine` reassurance line is removed (default `No breakfast` selection already implies it)", () => {
+    expect(bookingPageSrc).not.toMatch(/Skipping a day is fine/);
   });
 
   // ── The new help text appears only when at least one date
@@ -174,9 +228,7 @@ describe("MBUX-16 — breakfast cut-off explanation", () => {
     expect(bookingPageSrc).toMatch(/the rest of the stay is still editable/);
   });
 
-  // ── The existing "Skipping a day is fine" line is preserved ─
-
-  it("the existing `Skipping a day is fine` line is still rendered (MBUX-16 is additive, not a replacement)", () => {
-    expect(bookingPageSrc).toMatch(/Skipping a day is fine — leave any slot as .No breakfast./);
-  });
+  // ── The pre-MBUX-17 "Skipping a day is fine" reassurance line is
+  //    now gone (MBUX-17 removed it). The negative-space pin above
+  //    is the contract.
 });

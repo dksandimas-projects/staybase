@@ -2284,10 +2284,11 @@ const addOnCount = Object.keys(breakfastSelections).length;
         meal populates `breakfastSelections[key]`
         via `recomputeBreakfastTotal`. Locked
         dates render a disabled dropdown +
-        "Ordering closed" label. The server is
-        authoritative — a clock-mismatched client
-        is still rejected at create time (per open
-        item #7). */
+        a compact "Ordering closed due to cut-off"
+        pill (per MBUX-17, decision #272). The
+        server is authoritative — a
+        clock-mismatched client is still rejected
+        at create time (per open item #7). */
     breakfastConfig.isEnabled ? (() => {
       const dates = enumerateBreakfastDates(checkIn, checkOut);
       const slots = enumerateGuestSlots(distributedRoomCart);
@@ -2326,22 +2327,25 @@ const addOnCount = Object.keys(breakfastSelections).length;
             meals={activeBreakfastMeals}
             formatPrice={formatPrice}
           />
-          {/* Per MBUX-16 (decision #269, 2026-10-16): when at
-              least one date in the stay has crossed the cut-off,
-              show a one-line help text above the skip
-              explanation. The text is amber-700 (the existing
-              cut-off / Fits-invalidity accent) and only appears
-              when needed — when every date is still open, the
-              "Order by 24 Oct, 8:00 PM" per-date headers
-              already carry the deadline signal and the help
-              text would be noise.
+          {/* Per MBUX-16 (decision #269, 2026-10-16) + MBUX-17
+              (decision #272, 2026-10-16): when at least one date
+              in the stay has crossed the cut-off, show a one-line
+              help text that names the cut-off TIME so the guest
+              doesn't have to guess what "cut-off" means in their
+              timezone. The text is amber-700 (the existing cut-off
+              / Fits-invalidity accent) and only appears when
+              needed — when every date is still open, the "Order
+              by 24 Oct, 8:00 PM" per-date headers already carry
+              the deadline signal and the help text would be noise.
 
-              The text names the cut-off TIME so the guest
-              doesn't have to guess what "cut-off" means in
-              their timezone. The "still editable" suffix is
-              important — without it a guest might think the
-              WHOLE breakfast flow is locked, when actually
-              only the one past-deadline date is. */}
+              The "still editable" suffix is important — without
+              it a guest might think the WHOLE breakfast flow is
+              locked, when actually only the one past-deadline
+              date is. MBUX-17 paired this help text with the
+              compact per-date "Ordering closed due to cut-off"
+              pill below so the cut-off time appears exactly ONCE
+              on the page (here), not also inside every locked
+              date card. */}
           {dates.some((d) => {
             const c = computeBreakfastCutoffState({
               serviceDate: d,
@@ -2360,21 +2364,18 @@ const addOnCount = Object.keys(breakfastSelections).length;
             </p>
           ) : null}
 
-          {/* The skip explanation appears ONCE here rather than as a
-              40-character string repeated inside every native option on
-              every date card. The mt-5 (was mt-4) keeps the breathing
-              room now that the MBUX-12 menu grid replaces the
-              pre-MBUX-12 horizontal-scroll carousel (which had `pb-1`
-              inside the strip). The mbux-16 cut-off help text
-              (above) takes the same `mt-5` slot when present —
-              they don't stack because the cut-off help text is
-              only rendered when at least one date is locked
-              (the `dates.some(...)` check above), and the
-              existing one-time reassurance line below always
-              renders as a separate instruction. */}
-          <p className="mt-5 text-xs text-gray-600">
-            Skipping a day is fine — leave any slot as “No breakfast”.
-          </p>
+          {/* Per MBUX-17 (decision #272, 2026-10-16): the
+              pre-MBUX-17 one-line reassurance above the date cards
+              (the line that read like a sentence reminding guests
+              that skipping is OK) is REMOVED. The default `<option>`
+              on every guest slot is the no-meal choice (the first
+              entry in the meal list), so the instruction was
+              redundant — a guest who never opens a dropdown already
+              gets the no-meal option for that guest/date. Saying it
+              again above the date cards added an extra sentence of
+              mobile real estate without changing any outcome. The
+              mbux-16 help text (above) keeps the `mt-5` slot it
+              took; the spacing downstream of it is unchanged. */}
           <div className="mt-4 space-y-4">
             {dates.map((date) => {
               const cutoff = computeBreakfastCutoffState({
@@ -2394,32 +2395,50 @@ const addOnCount = Object.keys(breakfastSelections).length;
                 <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
-                    {/* Per MBUX-16: the locked-status line keeps
-                        "Ordering closed" as line 1, plus a new
-                        line 2 (text-amber-700) that names the cut-off
-                        time + suggests the two workarounds
-                        ("skip this day" or "contact the front
-                        desk"). The unlocked-state line stays
-                        byte-equivalent: "Order by Oct 24". The
-                        sub-line is conditional on `cutoff.isLocked`
-                        so unlocked dates don't get an extra
-                        sentence — it would just be visual noise
-                        that competes with the existing
-                        "Order by ..." deadline. */}
+                    {/* Per MBUX-17 (decision #272, 2026-10-16): the
+                        pre-MBUX-17 two-line stack (a status title +
+                        an amber sub-line that named the cut-off time
+                        AND the workarounds) is replaced with a single
+                        compact pill — see the
+                        `<div className="text-right">` block below. The
+                        unlocked-state line stays byte-equivalent
+                        ("Order by Oct 24"). The cut-off TIME used to
+                        appear here AND in the top-of-section help
+                        text, which was the duplication the owner
+                        flagged; the pill carries the reason inline
+                        and the
+                        help text is the single source for the time. */}
                     <div className="text-right">
-                      <p className="text-xs text-gray-600">
-                        {cutoff.isLocked
-                          ? "Ordering closed"
-                          : `Order by ${formatStayDate(date)}`}
-                      </p>
+                      {/* Per MBUX-17 (decision #272, 2026-10-16): the
+                          locked-date marker is a single compact pill
+                          (reads "Ordering closed due to cut-off")
+                          instead of the pre-MBUX-17 two-line stack
+                          (a status title + an amber sub-line that
+                          named the cut-off time AND listed the
+                          workarounds). The pill carries the full
+                          reason inline; the top-of-section help
+                          text already names the cut-off time, so
+                          duplicating it per-date was noise. Style
+                          mirrors the in-file "Tight — at the cap" /
+                          "Doesn't fit your group" pills (same
+                          rounded-full + amber-100 / amber-800 pair)
+                          so the cut-off indicator reads as part of
+                          the same vocabulary rather than a separate
+                          one-off element. Unlocked dates stay
+                          byte-equivalent (the "Order by Oct 24"
+                          deadline line). */}
                       {cutoff.isLocked ? (
-                        <p
-                          className="mt-0.5 text-xs text-amber-700"
-                          data-testid="breakfast-cutoff-explanation"
+                        <span
+                          data-testid="breakfast-cutoff-pill"
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
                         >
-                          {`Cut-off was ${formatCutoffTime(breakfastConfig.cutoffTime || "20:00")} the day before — skip this day or contact the front desk.`}
+                          Ordering closed due to cut-off
+                        </span>
+                      ) : (
+                        <p className="text-xs text-gray-600">
+                          {`Order by ${formatStayDate(date)}`}
                         </p>
-                      ) : null}
+                      )}
                     </div>
                   </div>
                   {/* Per MBUX-05 (decision #257): "Use these choices for

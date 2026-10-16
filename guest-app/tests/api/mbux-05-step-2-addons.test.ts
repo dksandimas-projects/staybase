@@ -311,17 +311,20 @@ describe("MBUX-05 — responsive per-guest selectors", () => {
     expect(bookingPageSrc).not.toMatch(/className="min-w-\[160px\] text-sm text-gray-700"/);
   });
 
-  it("the empty option is short, with the explanation stated once above the grid", () => {
+  it("the empty option is short and self-explanatory (no extra reassurance paragraph needed above the grid)", () => {
     expect(bookingPageSrc).toMatch(/<option value="">No breakfast<\/option>/);
     expect(bookingPageSrc).not.toMatch(
       /<option value="">No meal — skip breakfast for this guest on this day<\/option>/
     );
-    expect(bookingPageSrc).toMatch(/Skipping a day is fine/);
   });
 
-  it("the skip explanation appears ONCE, outside the dates map", () => {
-    const occurrences = bookingPageSrc.match(/Skipping a day is fine/g) ?? [];
-    expect(occurrences).toHaveLength(1);
+  it("the pre-MBUX-17 `Skipping a day is fine` reassurance line is REMOVED — MBUX-17 (decision #272) drops it because the default `No breakfast` option already implies it", () => {
+    // The default `<option value="">No breakfast</option>` on every
+    // guest slot makes the pre-MBUX-17 reassurance paragraph
+    // redundant. MBUX-17 removes the line entirely so mobile gets
+    // back the ~40px of vertical real estate it took above the
+    // per-date grid.
+    expect(bookingPageSrc).not.toMatch(/Skipping a day is fine/);
   });
 });
 

@@ -137,14 +137,22 @@ describe("MBUX-12 — breakfast menu switches from horizontal scroll to responsi
   // The skip-a-day explanation copy below the strip moved from
   // mt-4 to mt-5 in MBUX-12 so the breathing room is preserved
   // now that the strip no longer has its own internal `pb-1`.
+  // MBUX-17 (decision #272, 2026-10-16) removes that paragraph
+  // entirely — the default `<option value="">No breakfast</option>`
+  // on every guest slot already implies it, so the reassurance
+  // was redundant mobile real estate. The `mt-5` slot the line
+  // used to occupy is now taken by the mbux-16 help text when
+  // at least one date is locked (mutually exclusive — the help
+  // text only appears when a date is locked, otherwise the gap
+  // collapses).
 
-  it("the skip-a-day explanation below the strip has mt-5 (was mt-4 pre-MBUX-12)", () => {
-    expect(bookingPageSrc).toMatch(
+  it("the pre-MBUX-17 skip-a-day explanation below the strip is REMOVED (MBUX-17, decision #272)", () => {
+    expect(bookingPageSrc).not.toMatch(
       /Skipping a day is fine — leave any slot as \u201cNo breakfast\u201d\./
     );
-    // Pin the mt-5 on the explanation paragraph — the breathing
-    // room above the per-day grid must match the new strip's
-    // bottom edge.
-    expect(bookingPageSrc).toMatch(/mt-5 text-xs text-gray-600">\s*\n\s*Skipping a day is fine/);
+    // Pin the absence of the `mt-5 text-xs text-gray-600` paragraph
+    // that used to wrap the line — a future refactor that
+    // re-introduces it under any text must surface here.
+    expect(bookingPageSrc).not.toMatch(/mt-5 text-xs text-gray-600">\s*\n\s*Skipping a day is fine/);
   });
 });
