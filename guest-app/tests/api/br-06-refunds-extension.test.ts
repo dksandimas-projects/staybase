@@ -117,9 +117,17 @@ describe("BR-06 — Refunds extension (source-text + smoke tripwires)", () => {
   it("markRefundPaid writes the breakfastAudit row with mark-refund-paid:{refundId} reason", () => {
     const source = readSource("guest-app/server/lib/refunds.ts");
     expect(source).toContain('reason: `mark-refund-paid:${refundId}`');
-    // The audit collection is `breakfastAudit`
-    // (matches the BR-04 / BR-05 contract).
-    expect(source).toContain(".collection(\"breakfastAudit\")");
+    // The audit collection is `breakfastAudit` for the breakfast
+    // category (matches the BR-04 / BR-05 contract). After BR-12
+    // the helper routes via a category-derived variable
+    // (`auditCollection = category === "breakfast" ? "breakfastAudit"
+    // : "otherAddOnAudit"`) so the `otherAddOn` category can share
+    // the same path — the breakfast literal is still pinned as a
+    // string in the helper so the routing stays correct.
+    expect(source).toMatch(
+      /auditCollection\s*=\s*category\s*===\s*"breakfast"\s*\?\s*"breakfastAudit"\s*:\s*"otherAddOnAudit"/
+    );
+    expect(source).toContain('.collection(auditCollection)');
   });
 
   // 6. The refund entry's `paidAt + paidBy + method +
