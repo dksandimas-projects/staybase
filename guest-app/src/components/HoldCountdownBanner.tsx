@@ -255,7 +255,7 @@ export function HoldCountdownBanner({
         data-testid="hold-countdown-banner"
         data-state="expired"
       >
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
+        <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
           <Clock4 className="h-4 w-4 shrink-0 text-red-600" aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="font-semibold">Your hold has expired.</p>
@@ -270,7 +270,7 @@ export function HoldCountdownBanner({
               </p>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
             {canExtend ? (
               <button
                 type="button"
@@ -278,7 +278,7 @@ export function HoldCountdownBanner({
                 disabled={isExtending}
                 data-testid="hold-extend-cta"
                 data-state={isExtending ? "extending" : "idle"}
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-gray-900 hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-gray-900 hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 <TimerReset className="h-3.5 w-3.5" aria-hidden />
                 {isExtending ? "Adding time…" : "I need more time"}
@@ -289,7 +289,7 @@ export function HoldCountdownBanner({
                 type="button"
                 onClick={onPickNewRoom}
                 data-testid="hold-pick-new-room-cta"
-                className="inline-flex min-h-11 items-center rounded-lg border border-red-300 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-100"
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-red-300 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-100 sm:w-auto"
               >
                 Pick a new room
               </button>
