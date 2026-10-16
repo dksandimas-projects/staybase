@@ -3546,7 +3546,44 @@ const addOnCount = Object.keys(breakfastSelections).length;
                 </div>
               ) : (
                 <>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {/* Per UX-DESK-01 (2026-10-16, decision #270):
+                      adaptive columns based on the count of
+                      payment methods. The pre-UX-DESK-01 grid
+                      was `sm:grid-cols-2 lg:grid-cols-4`
+                      (added by BF-10 to fit PayPal as a 4th
+                      method). With the typical 2-method
+                      config (GCash + Bank Transfer), `lg:grid-cols-4`
+                      forced each button into 25% of the
+                      container width — in the pre-UX-DESK-01
+                      Step 4 sidebar (380px) that worked out to
+                      ~80px per button, where "Bank Transfer"
+                      wrapped onto three lines and the buttons
+                      became visually unreadable. After the
+                      Step 4 layout flip (UX-DESK-01) the
+                      controls column is ~800px wide, but a
+                      4-col grid with only 2 items still
+                      leaves 2 dead columns on the right.
+
+                      Rules: 1 method → 1 col (full-width
+                      button); 2 methods → 2 cols at sm+; 3
+                      methods → 2 cols at sm, 3 cols at lg; 4+
+                      methods → 2 cols at sm, 4 cols at lg.
+                      Tailwind needs the full class names in
+                      source for the JIT to pick them up, so
+                      each `lg:grid-cols-N` is gated by an
+                      explicit count predicate rather than a
+                      dynamic template-literal class. The
+                      `sm:grid-cols-2` fallback covers the
+                      typical 2-method config without any
+                      additional predicate. */}
+                  <div
+                    className={cn(
+                      "mt-4 grid gap-4",
+                      availablePaymentMethods.length >= 2 && "sm:grid-cols-2",
+                      availablePaymentMethods.length === 3 && "lg:grid-cols-3",
+                      availablePaymentMethods.length >= 4 && "lg:grid-cols-4"
+                    )}
+                  >
                     {availablePaymentMethods.map((pm) => {
                       const Icon =
                         pm.method === "gcash" || pm.method === "maya"
@@ -3963,7 +4000,29 @@ const addOnCount = Object.keys(breakfastSelections).length;
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[320px_1fr] lg:px-8">
+      {/* Per UX-DESK-01 (2026-10-16, decision #270): the lg
+          grid template swapped from `[320px_1fr]` to
+          `[1fr_320px]`. The pre-UX-DESK-01 template put the
+          320px column on column 1 and the 1fr column on
+          column 2. Combined with the aside's `lg:order-2`
+          (which puts the Stay details aside second → column 2)
+          and the room-cards `<div>` (default `order: 0` →
+          first → column 1), the room cards ended up in the
+          320px column — `md:grid-cols-[280px_1fr]` inside
+          each card then reserved 280px for the image and only
+          ~40px for the text, so room type names like
+          "Standard Room" wrapped to one letter per line and
+          the desktop column went visually unreadable.
+          Flipping the template makes the aside land in the
+          320px column (column 2, RIGHT sidebar) and the room
+          cards in the 1fr column (column 1, LEFT main), so
+          each card has the full ~800px width the original
+          design intended. Mobile behaviour is unchanged:
+          below `lg:` the section collapses to a single column
+          and the existing `order-1` / default `order: 0`
+          stack (room cards first, Stay details below) still
+          applies. */}
+      <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_320px] lg:px-8">
         {/* Per MBUX-07: `order-1` puts the summary above the controls on
             mobile; `lg:order-2` restores the right-hand sidebar.
             Per MBUX-11 (decision #264, 2026-10-16): the `id` is the
@@ -5178,8 +5237,41 @@ function BookingReviewAside({
   const afterVoucher = afterSeniorPwd - voucherDiscount;
   const memberDiscountAmount = calculatePercentDiscount(afterVoucher, memberDiscountPct);
 
+  // Per UX-DESK-01 (2026-10-16, decision #270): the summary
+  // aside gets `order-1 lg:order-2` to mirror the controls
+  // column's `order-2 lg:order-1` (per MBUX-07,
+  // BOOKING-FLOW.md:356). Without these classes the aside
+  // defaulted to `order: 0`, which is LOWER than the
+  // controls' `lg:order-1` (= 1) — so the auto-placement rule
+  // "lower order → column 1" sent the aside into the 1fr main
+  // column and the payment column into the 380px sidebar,
+  // inverting the desktop layout the spec calls for. With
+  // `order-1 lg:order-2`:
+  //
+  //   - Mobile (single column): aside (1) FIRST → TOP,
+  //     controls (2) SECOND → BELOW. Matches MBUX-07's
+  //     "summary first on mobile" rule.
+  //   - `lg:` (two-column grid): aside (2) SECOND → column 2
+  //     (380px RIGHT sidebar), controls (1) FIRST → column 1
+  //     (1fr LEFT main). The controls + payment + upload now
+  //     own the wide main column where the guest commits the
+  //     booking, and the room summary is the reference
+  //     sidebar on the right.
+  //
+  // The pre-UX-DESK-01 code only had the matching classes on
+  // the controls column; the summary aside was missing its
+  // half, which is what produced the inverted layout on
+  // `/book` Step 4.
+  //
+  // Safe for Steps 2 + 3 (which render the same aside)
+  // because their forms come first in DOM order with default
+  // `order: 0`; the aside at order 2 on lg still lands in
+  // column 2 the way it did before, and at mobile the aside
+  // at order 1 still lands below the form (form-first, not
+  // summary-first, on Steps 2 + 3 — matches existing design;
+  // only Step 4 needed "summary first on mobile").
   return (
-    <aside className="lg:sticky lg:top-28 lg:self-start">
+    <aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
         <img src={typeImageUrls[0]} alt={typeLabel} className="h-52 w-full object-cover" />
         <div className="p-5">

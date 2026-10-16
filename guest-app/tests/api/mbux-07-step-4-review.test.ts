@@ -54,20 +54,41 @@ describe("MBUX-07 — mobile order is summary-first", () => {
   });
 
   it("the summary aside is order-1 on mobile and order-2 from lg:", () => {
-    // Per MBUX-11 (decision #264, 2026-10-16): the aside
-    // now carries `id="booking-stay-details-aside"` (the
-    // scroll target for the StaySummaryStrip Edit button).
-    // The order classes still matter — this pins the layout
-    // contract. The id attribute may appear BEFORE or AFTER
-    // the className; either is structurally valid JSX.
+    // Per MBUX-11 (decision #264, 2026-10-16): the
+    // `BookingReviewAside` component (which renders in
+    // Steps 2, 3, and 4) is the aside this assertion
+    // targets. Step 1 also has its own aside that
+    // happens to carry `order-1 lg:order-2` (the
+    // mobile-first pattern MBUX-11 added) but with an
+    // extra `id="booking-stay-details-aside"` and a
+    // trailing `scroll-mt-32` — those extras are not
+    // present on the `BookingReviewAside`, so the
+    // pattern below pins the component specifically.
+    // Per UX-DESK-01 (2026-10-16, decision #270): the
+    // `BookingReviewAside` was missing its half of the
+    // matching order classes before this slice, which
+    // is what produced the inverted Step 4 desktop
+    // layout (room summary on the wide main column,
+    // payment on the narrow sidebar). The slice adds
+    // `order-1 lg:order-2` here to mirror the controls
+    // column's `order-2 lg:order-1` and put the
+    // summary back in the right-hand sidebar at lg.
     expect(bookingPageSrc).toMatch(
-      /<aside[^>]*className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start[^"]*"[^>]*>/
+      /<aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">/
     );
   });
 
   it("the two orders are complementary — exactly one of each per breakpoint", () => {
+    // The control column (`order-2 space-y-6 lg:order-1`) only
+    // appears on Step 4, so a whole-file count stays at 1.
     const controls = bookingPageSrc.match(/order-2 space-y-6 lg:order-1/g) ?? [];
-    const summary = bookingPageSrc.match(/order-1 lg:order-2 lg:sticky/g) ?? [];
+    // The summary pattern is narrowed to its exact
+    // `BookingReviewAside` className (no id, no scroll-mt-32) so
+    // it does not also catch the Step 1 aside MBUX-11 added.
+    const summary =
+      bookingPageSrc.match(
+        /<aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">/g
+      ) ?? [];
     expect(controls).toHaveLength(1);
     expect(summary).toHaveLength(1);
   });
@@ -75,10 +96,16 @@ describe("MBUX-07 — mobile order is summary-first", () => {
   it("no DOM reorder and no duplicated summary component", () => {
     // Two renders of the summary would let the desktop sidebar drift
     // from the mobile card. `order` moves the SAME node. The MBUX-11
-    // aside carries an additional `id` attribute; the structural
-    // contract is "exactly one aside with order-1 lg:order-2",
-    // regardless of which attribute appears first.
-    const asideCount = (bookingPageSrc.match(/<aside[^>]*order-1 lg:order-2/g) ?? []).length;
+    // aside carries an `id` and a `scroll-mt-32`; the structural
+    // contract is "exactly one `BookingReviewAside`-style aside with
+    // order-1 lg:order-2" — the BookingsReviewAside has none of the
+    // MBUX-11 extras, so the pattern below pins the MBUX-07 / UX-DESK-01
+    // contract specifically.
+    const asideCount = (
+      bookingPageSrc.match(
+        /<aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">/g
+      ) ?? []
+    ).length;
     expect(asideCount).toBe(1);
   });
 

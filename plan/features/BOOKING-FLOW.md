@@ -373,6 +373,7 @@ next step, payment-status label, payment-status detail and email-status sentence
 
 - [x] Only the **selected** payment method expands its instructions (`isPayAtHotel` derives from the current selection).
 - [x] The cancellation policy stays a collapsed `<details>`.
+- [x] **The payment-method button strip never gets squashed.** Grid columns are adaptive to the enabled method count (decision #271 / UX-DESK-01): 1 method → 1 col (full-width button), 2 methods → 2 cols at `sm:`, 3 methods → 2 cols at `sm:` + 3 cols at `lg:`, 4+ methods → 2 cols at `sm:` + 4 cols at `lg:`. The pre-UX-DESK-01 grid was hard-pinned to `lg:grid-cols-4` (BF-10, 2026-06-26 — left over from the PayPal-as-4th-method audit), which forced each button into 25% of the container width. With the typical 2-method config that worked out to ~80px per button in the pre-UX-DESK-01 Step 4 sidebar (380px), where "Bank Transfer" wrapped onto three lines. The adaptive shape keeps each button proportional to the enabled count rather than the design-time ceiling.
 - [x] Proof and ID uploads accept JPEG/PNG/WebP and show format + size guidance. There is deliberately **no `capture` attribute** — on mobile a file input with image `accept` already offers "Take Photo" beside the library, and forcing `capture` would remove the library option.
 - [x] The duplicate consent checkbox stays removed (MBUX-06).
 
