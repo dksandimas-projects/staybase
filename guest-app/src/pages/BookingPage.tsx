@@ -4161,109 +4161,150 @@ const addOnCount = Object.keys(breakfastSelections).length;
           <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
             <h2 className="text-lg font-semibold text-gray-950">Stay details</h2>
             <div className="mt-5 space-y-6">
-              <DateRangePicker
-                checkIn={checkIn}
-                checkOut={checkOut}
-                maxStayNights={maxStayNights}
-                onRangeChange={(nextCheckIn, nextCheckOut) => {
-                  setCheckIn(nextCheckIn);
-                  setCheckOut(nextCheckOut);
-                  updateDateParams(nextCheckIn, nextCheckOut, adults);
-                }}
-                onCheckInChange={(value) => {
-                  setCheckIn(value);
-                  updateDateParams(value, checkOut, adults);
-                }}
-                onCheckOutChange={(value) => {
-                  setCheckOut(value);
-                  updateDateParams(checkIn, value, adults);
-                }}
-              />
+              {/* Per MBUX-19 (decision #276, 2026-10-16): the
+                  aside's three editable blocks (DateRangePicker
+                  + Adults stepper + Children stepper) are
+                  `hidden lg:contents` on mobile because the
+                  MBUX-18 mobile bottom sheet (`EditStayDetailsSheet`,
+                  decision #275) is now the canonical edit
+                  surface there — keeping them visible would
+                  duplicate the same `<DateRangePicker>` +
+                  steppers in two surfaces (the strip's Edit
+                  pencil at the top, the aside below it), which
+                  the BOOKING-MOBILE-UX.md:139 rule explicitly
+                  forbids (*"The page does not repeat the same
+                  stay summary in both a header card and sidebar
+                  card."*). On `lg:` the strip itself is
+                  `lg:hidden`, so the sheet cannot open on
+                  desktop, and the aside becomes the edit
+                  surface there — the controls stay visible
+                  because nothing else exposes them.
 
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
-                Adults
-                <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-                  <button
-                    aria-label="Remove one adult"
-                    className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={adults <= 1}
-                    type="button"
-                    onClick={() => updateAdults(adults - 1)}
-                  >
-                    <Minus size={16} />
-                  </button>
-                  <span className="flex items-center gap-2 text-sm text-gray-700">
-                    <Users size={16} className="text-primary" />
-                    {adults} {adults === 1 ? "adult" : "adults"}
-                  </span>
-                  <button
-                    aria-label="Add one adult"
-                    className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={adults >= maxGuestCapacity}
-                    type="button"
-                    onClick={() => updateAdults(adults + 1)}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </label>
+                  Why a wrapper `<div>` with `hidden lg:contents`
+                  rather than `hidden lg:block`:
+                  - `hidden lg:block` would change the wrapper's
+                    `display` to `block`, which breaks the
+                    parent's `space-y-6` stacking context (a
+                    `<div>` becoming `display: block` is the
+                    same as its default but introduces an extra
+                    anonymous box that adds spacing).
+                  - `hidden lg:contents` removes the wrapper
+                    entirely from the layout on `lg:`, so the
+                    three editable controls slot back into the
+                    parent's `space-y-6` stacking context
+                    without an extra wrapper box.
+                  - On `< lg:` the wrapper is `display: none`,
+                    which removes all three blocks together — a
+                    single CSS rule does the work.
+                  - `lg:contents` is the right primitive for
+                    "invisible wrapper at the narrow viewport,
+                    gone at the next one" without the layout-shift
+                    risk of a `display: block` swap. */}
+              <div className="hidden lg:contents">
+                <DateRangePicker
+                  checkIn={checkIn}
+                  checkOut={checkOut}
+                  maxStayNights={maxStayNights}
+                  onRangeChange={(nextCheckIn, nextCheckOut) => {
+                    setCheckIn(nextCheckIn);
+                    setCheckOut(nextCheckOut);
+                    updateDateParams(nextCheckIn, nextCheckOut, adults);
+                  }}
+                  onCheckInChange={(value) => {
+                    setCheckIn(value);
+                    updateDateParams(value, checkOut, adults);
+                  }}
+                  onCheckOutChange={(value) => {
+                    setCheckOut(value);
+                    updateDateParams(checkIn, value, adults);
+                  }}
+                />
 
-              {/* Per CHD-11 (2026-08-04, per decision #184): the
-                  children picker is no longer bounded by the
-                  per-type `maxChildren` cap. The hard cap was a
-                  dead-end at the exploration stage — the guest
-                  is still choosing room type and/or quantity,
-                  and the cap belongs at the commit surface
-                  (the Step 1 → Step 2 submit gate + the
-                  room-type card's Fits/Tight/Doesn't fit
-                  indicator), not at the picker. Per CHD-11.2
-                  (decision #193): the soft cap is `10` (a
-                  sanity guard, not a domain constraint). Per
-                  CHD-11.5 (decision #196): the picker is
-                  Adults + Children directly; the children
-                  cap of 10 stays (the historical "at least
-                  one adult" floor is no longer needed — the
-                  Adults stepper's min 1 enforces the rule). */}
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
-                Children (0–11)
-                <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-                  <button
-                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
-                    type="button"
-                    aria-label="Decrease children count"
-                    onClick={() => updateChildren(numChildren - 1)}
-                    disabled={numChildren <= 0}
-                  >
-                    <Minus size={16} />
-                  </button>
-                  <span className="flex items-center gap-2 text-sm text-gray-700">
-                    {numChildren} {numChildren === 1 ? "child" : "children"}
-                  </span>
-                  <button
-                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
-                    type="button"
-                    aria-label="Increase children count"
-                    onClick={() => updateChildren(numChildren + 1)}
-                    // Per CHD-11.2 (2026-08-05, per decision
-                    // #193): the cap is the soft 10 (the
-                    // CHD-11 sanity guard, not a domain
-                    // constraint). The pre-CHD-11.2 shape
-                    // capped at the room's
-                    // `selectedMaxSelectableChildren` (per
-                    // CHD-11.1), which made the picker an
-                    // enforcement layer instead of an
-                    // exploration layer. The "Fits your
-                    // group" chip + the submit gate are the
-                    // commit surfaces — the picker is the
-                    // exploration surface. The user can pick
-                    // any number up to 10; the chip + submit
-                    // gate tell them if it works.
-                    disabled={numChildren >= 10}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </label>
+                <label className="grid gap-2 text-sm font-medium text-gray-700">
+                  Adults
+                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
+                    <button
+                      aria-label="Remove one adult"
+                      className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={adults <= 1}
+                      type="button"
+                      onClick={() => updateAdults(adults - 1)}
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="flex items-center gap-2 text-sm text-gray-700">
+                      <Users size={16} className="text-primary" />
+                      {adults} {adults === 1 ? "adult" : "adults"}
+                    </span>
+                    <button
+                      aria-label="Add one adult"
+                      className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={adults >= maxGuestCapacity}
+                      type="button"
+                      onClick={() => updateAdults(adults + 1)}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </label>
+
+                {/* Per CHD-11 (2026-08-04, per decision #184): the
+                    children picker is no longer bounded by the
+                    per-type `maxChildren` cap. The hard cap was a
+                    dead-end at the exploration stage — the guest
+                    is still choosing room type and/or quantity,
+                    and the cap belongs at the commit surface
+                    (the Step 1 → Step 2 submit gate + the
+                    room-type card's Fits/Tight/Doesn't fit
+                    indicator), not at the picker. Per CHD-11.2
+                    (decision #193): the soft cap is `10` (a
+                    sanity guard, not a domain constraint). Per
+                    CHD-11.5 (decision #196): the picker is
+                    Adults + Children directly; the children
+                    cap of 10 stays (the historical "at least
+                    one adult" floor is no longer needed — the
+                    Adults stepper's min 1 enforces the rule). */}
+                <label className="grid gap-2 text-sm font-medium text-gray-700">
+                  Children (0–11)
+                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
+                    <button
+                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
+                      type="button"
+                      aria-label="Decrease children count"
+                      onClick={() => updateChildren(numChildren - 1)}
+                      disabled={numChildren <= 0}
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="flex items-center gap-2 text-sm text-gray-700">
+                      {numChildren} {numChildren === 1 ? "child" : "children"}
+                    </span>
+                    <button
+                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
+                      type="button"
+                      aria-label="Increase children count"
+                      onClick={() => updateChildren(numChildren + 1)}
+                      // Per CHD-11.2 (2026-08-05, per decision
+                      // #193): the cap is the soft 10 (the
+                      // CHD-11 sanity guard, not a domain
+                      // constraint). The pre-CHD-11.2 shape
+                      // capped at the room's
+                      // `selectedMaxSelectableChildren` (per
+                      // CHD-11.1), which made the picker an
+                      // enforcement layer instead of an
+                      // exploration layer. The "Fits your
+                      // group" chip + the submit gate are the
+                      // commit surfaces — the picker is the
+                      // exploration surface. The user can pick
+                      // any number up to 10; the chip + submit
+                      // gate tell them if it works.
+                      disabled={numChildren >= 10}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </label>
+              </div>
 
               {/* Per CHD-12 (2026-08-04, per decision #185):
                   cart-style summary that lists one line per
