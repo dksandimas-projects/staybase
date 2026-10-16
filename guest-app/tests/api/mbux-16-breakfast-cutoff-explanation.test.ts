@@ -136,13 +136,22 @@ describe("MBUX-16 — breakfast cut-off explanation", () => {
     expect(bookingPageSrc).toMatch(/data-testid="breakfast-cutoff-pill"/);
   });
 
-  it("the locked-state pill reads exactly `Ordering closed due to cut-off` (no per-date time duplication — the top help text is the single source for the cut-off time)", () => {
-    expect(bookingPageSrc).toMatch(/Ordering closed due to cut-off/);
+  it("the locked-state pill reads exactly `Past cut-off` (MBUX-17.1 shortened it from `Ordering closed due to cut-off`, which wrapped to `cut-/off` on a 375px phone)", () => {
+    // The MBUX-17.1 follow-up shortened the pre-#### four-word pill
+    // copy to a two-word short-form label that fits one line on
+    // every viewport. Asserted by a literal substring match — the
+    // BookingPage source intentionally does not mention the phrase
+    // elsewhere, so a substring match is safe.
+    expect(bookingPageSrc).toMatch(/Past cut-off/);
   });
 
-  it("the locked-state pill uses the in-file pill vocabulary (rounded-full + amber-100 + amber-800 + inline-flex items-center gap-1 + px-2.5 py-1 text-xs font-semibold) — matches the existing `Tight — at the cap` / `Fits your group` pills", () => {
+  it("the pre-MBUX-17.1 `Ordering closed due to cut-off` copy is removed", () => {
+    expect(bookingPageSrc).not.toMatch(/Ordering closed due to cut-off/);
+  });
+
+  it("the locked-state pill carries `whitespace-nowrap` so a future copy edit cannot reintroduce the wrap on mobile", () => {
     expect(bookingPageSrc).toMatch(
-      /inline-flex items-center gap-1 rounded-full bg-amber-100 px-2\.5 py-1 text-xs font-semibold text-amber-800/
+      /inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-100 px-2\.5 py-1 text-xs font-semibold text-amber-800/
     );
   });
 

@@ -2284,9 +2284,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
         meal populates `breakfastSelections[key]`
         via `recomputeBreakfastTotal`. Locked
         dates render a disabled dropdown +
-        a compact "Ordering closed due to cut-off"
-        pill (per MBUX-17, decision #272). The
-        server is authoritative — a
+        a compact "Past cut-off" pill (per
+        MBUX-17 + MBUX-17.1, decisions #272 +
+        #273). The server is authoritative — a
         clock-mismatched client is still rejected
         at create time (per open item #7). */
     breakfastConfig.isEnabled ? (() => {
@@ -2342,9 +2342,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
               it a guest might think the WHOLE breakfast flow is
               locked, when actually only the one past-deadline
               date is. MBUX-17 paired this help text with the
-              compact per-date "Ordering closed due to cut-off"
-              pill below so the cut-off time appears exactly ONCE
-              on the page (here), not also inside every locked
+              compact per-date cut-off pill below so the cut-off
+              time appears exactly ONCE on the page (here), not
+              also inside every locked
               date card. */}
           {dates.some((d) => {
             const c = computeBreakfastCutoffState({
@@ -2409,18 +2409,28 @@ const addOnCount = Object.keys(breakfastSelections).length;
                         and the
                         help text is the single source for the time. */}
                     <div className="text-right">
-                      {/* Per MBUX-17 (decision #272, 2026-10-16): the
+                      {/* Per MBUX-17 (decision #272, 2026-10-16) +
+                          MBUX-17.1 (decision #273, 2026-10-16): the
                           locked-date marker is a single compact pill
-                          (reads "Ordering closed due to cut-off")
-                          instead of the pre-MBUX-17 two-line stack
-                          (a status title + an amber sub-line that
-                          named the cut-off time AND listed the
-                          workarounds). The pill carries the full
-                          reason inline; the top-of-section help
-                          text already names the cut-off time, so
-                          duplicating it per-date was noise. Style
-                          mirrors the in-file "Tight — at the cap" /
-                          "Doesn't fit your group" pills (same
+                          whose copy reads as a two-word short-form
+                          state label instead of the
+                          pre-MBUX-17 two-line stack (a status title
+                          + an amber sub-line that named the cut-off
+                          time AND listed the workarounds). The pill
+                          carries the reason inline; the top-of-
+                          section help text already names the cut-off
+                          time, so duplicating it per-date was
+                          noise. MBUX-17.1 shortened the pill text
+                          from the pre-MBUX-17.1 four-word copy
+                          (which wrapped to two lines on a 375px
+                          phone) to a two-word short-form copy that
+                          fits one line on every viewport +
+                          added `whitespace-nowrap` as a guard so a
+                          future copy edit cannot reintroduce the
+                          wrap.
+
+                          Style mirrors the in-file "Tight — at the
+                          cap" / "Doesn't fit your group" pills (same
                           rounded-full + amber-100 / amber-800 pair)
                           so the cut-off indicator reads as part of
                           the same vocabulary rather than a separate
@@ -2430,9 +2440,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
                       {cutoff.isLocked ? (
                         <span
                           data-testid="breakfast-cutoff-pill"
-                          className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
                         >
-                          Ordering closed due to cut-off
+                          Past cut-off
                         </span>
                       ) : (
                         <p className="text-xs text-gray-600">
