@@ -1,9 +1,24 @@
-// MBUX-11 (decision #264, 2026-10-16) — the new
+// MBUX-11 (decision #264, 2026-10-16) — the
 // StaySummaryStrip mobile-first persistent top strip on the
 // booking flow's Step 1. The strip sits directly under the
 // StepIndicator, shows the date range + nights + guests, and
-// offers an Edit affordance that smooth-scrolls to the existing
-// `<aside>` "Stay details" sidebar.
+// offers an Edit affordance.
+//
+// MBUX-18 (decision #275, 2026-10-16) replaced the original
+// scroll-to-aside Edit behaviour with a mobile bottom sheet
+// (`EditStayDetailsSheet`). The original scroll/ring/restore
+// assertions below were INVERTED to MBUX-18:
+//   - the `targetId` prop + `scrollIntoView` + ring + setTimeout
+//     pattern is RETIRED; the Edit pencil now calls `onEdit`
+//     and the parent owns the sheet state.
+//   - the `id="booking-stay-details-aside"` on the BookingPage
+//     `<aside>` stays (defensive fallback for deep links that
+//     jump straight to the aside) — see the comment at
+//     BookingPage.tsx:4147.
+//
+// The MBUX-18 shape is pinned in a separate tripwire file
+// (`mbux-18-edit-stay-details-sheet.test.ts`) so the two
+// contracts don't fight each other.
 //
 // Why this is source-text rather than DOM:
 // guest-app has no jsdom / testing-library dependency (see
@@ -41,15 +56,19 @@ describe("MBUX-11 — StaySummaryStrip mobile-first top strip", () => {
   // names must remain.
 
   it("StaySummaryStrip accepts checkIn / checkOut / nights / guests props", () => {
-    expect(stripSrc).toMatch(/checkIn: string/);
-    expect(stripSrc).toMatch(/checkOut: string/);
-    expect(stripSrc).toMatch(/nights: number/);
-    expect(stripSrc).toMatch(/guests: number/);
+    expect(stripSrc).toMatch(/checkIn:\s*string/);
+    expect(stripSrc).toMatch(/checkOut:\s*string/);
+    expect(stripSrc).toMatch(/nights:\s*number/);
+    expect(stripSrc).toMatch(/guests:\s*number/);
   });
 
-  it("StaySummaryStrip exposes a targetId prop defaulting to 'booking-stay-details-aside'", () => {
-    expect(stripSrc).toMatch(/targetId\?:\s*string/);
-    expect(stripSrc).toMatch(/targetId\s*=\s*["']booking-stay-details-aside["']/);
+  it("StaySummaryStrip exposes an onEdit prop (the MBUX-18 sheet trigger)", () => {
+    // Per MBUX-18: the parent owns the sheet state; the strip
+    // is a dumb trigger that calls `onEdit?.()` on tap. The
+    // optional-chain is in the file so a parent that forgets
+    // to wire the prop is a silent no-op rather than a crash.
+    expect(stripSrc).toMatch(/onEdit\?:/);
+    expect(stripSrc).toMatch(/onEdit\?\.\(\)/);
   });
 
   // ── The strip is mobile-first ─────────────────────────────
@@ -72,25 +91,35 @@ describe("MBUX-11 — StaySummaryStrip mobile-first top strip", () => {
 
   // ── The Edit affordance ───────────────────────────────────
   //
-  // The Edit button must be a real <button type="button">
-  // (not a div, not a Link — those would not work for the
-  // scroll-into-view + ring + setTimeout behaviour), and the
-  // handler must smooth-scroll to the target aside + apply a
-  // brief ring highlight + remove it after a timeout.
+  // The Edit button must be a real <button type="button"> (not
+  // a div, not a Link — those would not work for the onEdit
+  // callback firing), and per MBUX-18 it dispatches to the
+  // parent's onEdit prop, NOT to a scrollIntoView + ring +
+  // setTimeout dance.
 
   it("the Edit button is a real <button type=\"button\"> with a Pencil icon", () => {
     expect(stripSrc).toMatch(/<button[\s\S]+?type=["']button["'][\s\S]+?<\/button>/);
     expect(stripSrc).toMatch(/Pencil/);
   });
 
-  it("the Edit handler calls scrollIntoView with smooth behaviour on the target element", () => {
-    expect(stripSrc).toMatch(/el\.scrollIntoView\(\{\s*behavior:\s*["']smooth["']/);
+  it("the Edit handler calls the onEdit prop (MBUX-18 — sheet trigger, not scroll)", () => {
+    // Per MBUX-18: the strip's handleEdit is now a thin
+    // wrapper around `onEdit?.()`. The pre-MBUX-18 scroll +
+    // ring + setTimeout dance is retired and lives in a
+    // comment block in the file (so a future agent reading the
+    // file learns the history).
+    expect(stripSrc).toMatch(/function\s+handleEdit[\s\S]*?onEdit\?\.\(\)/);
   });
 
-  it("the Edit handler applies a ring highlight then removes it after a timeout (mirrors the Adjust-room CTA at BookingPage.tsx:4656)", () => {
-    expect(stripSrc).toMatch(/el\.classList\.add\(["']ring-2["']/);
-    expect(stripSrc).toMatch(/window\.setTimeout/);
-    expect(stripSrc).toMatch(/el\.classList\.remove\(["']ring-2["']/);
+  it("the Edit button does NOT call scrollIntoView / classList / setTimeout (pre-MBUX-18 behaviour is RETIRED)", () => {
+    // The pre-MBUX-18 Edit handler smooth-scrolled to the
+    // aside + added `ring-2 ring-primary ring-offset-2` for
+    // 2000ms. MBUX-18 retired that pattern (the sheet opens
+    // instead). Pin the negative space so a future refactor
+    // can't quietly reintroduce the scroll behaviour.
+    expect(stripSrc).not.toMatch(/scrollIntoView/);
+    expect(stripSrc).not.toMatch(/classList\.add/);
+    expect(stripSrc).not.toMatch(/window\.setTimeout/);
   });
 
   it("the Edit button has an aria-label so screen readers announce the action", () => {
@@ -112,20 +141,22 @@ describe("MBUX-11 — StaySummaryStrip mobile-first top strip", () => {
   // ── BookingPage integration ──────────────────────────────
   //
   // The strip must mount under the StepIndicator on Step 1,
-  // the legacy inline date strip must be gone, and the sidebar
-  // <aside> must carry the scroll target id so the Edit
-  // handler can find it.
+  // the legacy inline date strip must be gone, the BookingPage
+  // must pass an `onEdit` callback that opens the sheet, and
+  // the `<aside>` retains its `id` (defensive fallback for
+  // deep links per MBUX-18's aside comment at line 4147).
 
   it("BookingPage imports the new StaySummaryStrip component", () => {
     expect(bookingPageSrc).toMatch(/import\s*\{[^}]*\bStaySummaryStrip\b[^}]*\}\s*from\s*["']\.\.\/components\/StaySummaryStrip["']/);
   });
 
-  it("BookingPage renders <StaySummaryStrip /> with the four required props", () => {
+  it("BookingPage renders <StaySummaryStrip /> with the four required props + an onEdit callback", () => {
     expect(bookingPageSrc).toMatch(/<StaySummaryStrip[\s\S]+?\/>/);
     expect(bookingPageSrc).toMatch(/checkIn=\{checkIn\}/);
     expect(bookingPageSrc).toMatch(/checkOut=\{checkOut\}/);
     expect(bookingPageSrc).toMatch(/nights=\{nights\}/);
     expect(bookingPageSrc).toMatch(/guests=\{guests\}/);
+    expect(bookingPageSrc).toMatch(/onEdit=\{[\s\S]*?setIsEditStayDetailsOpen\(true\)[\s\S]*?\}/);
   });
 
   it("the legacy inline date strip at the old location is GONE (no formatStayDate(checkIn) - formatStayDate(checkOut) inline JSX)", () => {
@@ -134,15 +165,21 @@ describe("MBUX-11 — StaySummaryStrip mobile-first top strip", () => {
     expect(bookingPageSrc).not.toMatch(/formatStayDate\(checkIn\)\s*-\s*\{formatStayDate\(checkOut\)\}/);
   });
 
-  it("the BookingPage <aside> has id=\"booking-stay-details-aside\" so the Edit button can target it", () => {
+  it("the BookingPage <aside> still carries id=\"booking-stay-details-aside\" as a defensive deep-link target", () => {
+    // Per MBUX-18: the Edit pencil no longer scrolls to the
+    // aside, but the id stays for deep links that jump
+    // straight to the aside (BookingStickyFooter URL-driven
+    // scroll, accessibility tools). A future refactor that
+    // drops the id would lose that contract.
     expect(bookingPageSrc).toMatch(/<aside\s+id=["']booking-stay-details-aside["']/);
   });
 
-  it("the BookingPage <aside> uses scroll-mt-* so the smooth-scroll lands below the sticky header", () => {
-    // The strip's scroll target is the aside. Without
-    // scroll-mt-*, the smooth scroll would land with the
-    // aside's top edge pinned to the very top of the viewport,
-    // which can land the heading under the sticky page header.
+  it("the BookingPage <aside> uses scroll-mt-* so a deep-link scroll lands below the sticky header", () => {
+    // Defensive fallback for the deep-link path described in
+    // the previous test. Without scroll-mt-*, a smooth scroll
+    // would land with the aside's top edge pinned to the very
+    // top of the viewport, which can land the heading under
+    // the sticky page header.
     expect(bookingPageSrc).toMatch(/<aside[^>]*scroll-mt-/);
   });
 });
