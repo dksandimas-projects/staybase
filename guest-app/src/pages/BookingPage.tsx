@@ -2360,7 +2360,49 @@ const addOnCount = Object.keys(breakfastSelections).length;
               className="mt-5 text-xs text-amber-700"
               data-testid="breakfast-cutoff-help"
             >
-              {`Breakfast has a per-day cut-off (${formatCutoffTime(breakfastConfig.cutoffTime || "20:00")} the day before) — when it passes, that day's menu locks but the rest of the stay is still editable.`}
+              {/* Per MBUX-17.2 (decision #274, 2026-10-16): the
+                  pre-MBUX-17.2 first-sentence policy + em-dash
+                  hedge (a subordinate clause that warned the
+                  guest the menu locks per date) is replaced with
+                  a second sentence that turns the hedge into a
+                  guest-facing ACTION: "If you booked beyond the
+                  cut-off time, you may not be able to order —
+                  but you can still order breakfast for other
+                  days." The first sentence ("Breakfast has a
+                  per-day cut-off ({time} the day before)") is
+                  preserved verbatim — it carries the cut-off TIME
+                  (interpolated via `formatCutoffTime` so the
+                  rendered time always matches the admin-configured
+                  value) AND tells the guest WHEN the cut-off fires
+                  relative to the service date. The em-dash in the
+                  second sentence carries the contrast ("can't for
+                  this date" → "but can for other dates") more
+                  cheaply than the pre-MBUX-17.2 subordinate clause
+                  did.
+
+                  Owner's verbatim ask: "kindly enhance" the help
+                  text into two sentences — the first is the policy
+                  (kept), the second is the consequence the guest
+                  can act on (added). The MBUX-17.2 copy is
+                  light-edited from the owner's words: typos fixed
+                  ("beyonf" → "beyond", "other day's" → "other
+                  days'"), a missing modal verb restored ("you CAN
+                  still order" rather than "you may still order"),
+                  and the comma splice between the consequence and
+                  the contrast replaced with an em-dash to match
+                  the file's existing em-dash usage. The rendered
+                  copy is:
+
+                    Breakfast has a per-day cut-off ({time} the
+                    day before). If you booked beyond the cut-off
+                    time, you may not be able to order — but you
+                    can still order breakfast for other days.
+
+                  Pill (`Past cut-off`, per MBUX-17.1 decision
+                  #273) is unchanged — MBUX-17.2 is help-text only.
+                  The pill is the per-date state marker; the help
+                  text is the policy anchor. */}
+              {`Breakfast has a per-day cut-off (${formatCutoffTime(breakfastConfig.cutoffTime || "20:00")} the day before). If you booked beyond the cut-off time, you may not be able to order — but you can still order breakfast for other days.`}
             </p>
           ) : null}
 

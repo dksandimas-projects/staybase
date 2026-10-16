@@ -226,15 +226,38 @@ describe("MBUX-16 — breakfast cut-off explanation", () => {
     expect(bookingPageSrc).toMatch(/breakfast-cutoff-help[\s\S]+?text-amber-700/);
   });
 
-  it("the help text names the cut-off time + the 'when it passes, that day's menu locks' contract + 'the rest of the stay is still editable'", () => {
-    // The "rest of the stay is still editable" suffix is
-    // critical — without it a guest might think the WHOLE
-    // breakfast flow is locked, when actually only the one
-    // past-deadline date is. The "per-day" prefix makes the
-    // cut-off shape clear (it is NOT a global lock).
+  it("the help text names the cut-off time (interpolated via `formatCutoffTime`) + the 'per-day cut-off' shape contract", () => {
+    // The first sentence ("Breakfast has a per-day cut-off ({time}
+    // the day before).") is the policy anchor — it carries the
+    // cut-off TIME (interpolated via `formatCutoffTime` so the
+    // rendered time always matches the admin-configured value)
+    // AND the "per-day" prefix that makes the cut-off shape
+    // clear (it is NOT a global lock).
     expect(bookingPageSrc).toMatch(/per-day cut-off/);
-    expect(bookingPageSrc).toMatch(/that day's menu locks/);
-    expect(bookingPageSrc).toMatch(/the rest of the stay is still editable/);
+    expect(bookingPageSrc).toMatch(/formatCutoffTime\(breakfastConfig\.cutoffTime \|\| "20:00"\)/);
+  });
+
+  it("the help text second sentence (MBUX-17.2) names the guest-actionable consequence: 'beyond the cut-off time, you may not be able to order — but you can still order breakfast for other days'", () => {
+    // The pre-MBUX-17.2 subordinate-clause hedge ("when it passes,
+    // that day's menu locks but the rest of the stay is still
+    // editable") was rewritten into a guest-facing action sentence
+    // that tells the guest what they CAN and CAN'T do — owner
+    // flagged "kindly enhance" the help text so the consequence
+    // is explicit, not implicit. The em-dash carries the contrast
+    // ("can't for this date" → "but can for other dates").
+    expect(bookingPageSrc).toMatch(/If you booked beyond the cut-off time/);
+    expect(bookingPageSrc).toMatch(/you may not be able to order/);
+    expect(bookingPageSrc).toMatch(/you can still order breakfast for other days/);
+  });
+
+  it("the pre-MBUX-17.2 hedge copy ('that day's menu locks' + 'the rest of the stay is still editable') is removed — replaced by the MBUX-17.2 guest-facing action sentence", () => {
+    // The pre-MBUX-17.2 em-dash hedge ("when it passes, that
+    // day's menu locks but the rest of the stay is still
+    // editable") is a subordinate clause; MBUX-17.2 replaces
+    // it with the second sentence above. The negative-space
+    // pins keep the removal honest.
+    expect(bookingPageSrc).not.toMatch(/that day's menu locks/);
+    expect(bookingPageSrc).not.toMatch(/the rest of the stay is still editable/);
   });
 
   // ── The pre-MBUX-17 "Skipping a day is fine" reassurance line is
