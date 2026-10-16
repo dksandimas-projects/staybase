@@ -283,10 +283,14 @@ describe("IFH-01 — Source-text pins", () => {
   });
 
   it("the banner is honest about NOT being a hard inventory lock", () => {
-    // The copy must mention the "if another guest books
-    // first" hedge so a future "tighten the copy" change
-    // is forced to also update the decision entry.
-    expect(bannerSrc).toMatch(/another guest books first/);
+    // The escape-hatch phrase ("If it goes through") is the
+    // honesty signal. A future copy change that removes the
+    // conditional must update the HCT-01 decision entry
+    // (plan/docs/DECISIONS-FEATURES.md #270) alongside it —
+    // the previous version of this test pinned "another guest
+    // books first" and the tripwire was the trigger that
+    // forced decision #270 to land with this slice.
+    expect(bannerSrc).toMatch(/If it goes through/);
   });
 
   it("the hook ticks every 1 second + resyncs every 30 seconds", () => {

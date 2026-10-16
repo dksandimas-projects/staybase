@@ -10,9 +10,14 @@
 //     `sm:` up the full copy is shown unconditionally, so
 //     desktop is unchanged. Honest copy: "Your room is
 //     held for you while you finish and pay. We'll lock
-//     it in the moment you confirm — if another guest
-//     books first, we'll let you know and you can pick
-//     a new room."
+//     it in the moment you confirm. If it goes through,
+//     you're set." (Tightened in HCT-01, decision #270 —
+//     the previous "if another guest books first, we'll
+//     let you know and you can pick a new room" spelling
+//     was longer than necessary; "If it goes through" is
+//     the same honesty escape hatch in a shorter form.
+//     See decision #270 for the CCCS precedent that the
+//     conditional protects against.)
 //   * **expired** (or the local clock has crossed
 //     `expiresAt`): red banner. "Your hold has expired."
 //     Per IMT-03 the PRIMARY action here is "I need more
@@ -350,7 +355,7 @@ export function HoldCountdownBanner({
             Your room is held for you until {expiresAt || "the hold expires"}.
           </p>
           <p className="text-xs text-gray-700">
-            We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room.
+            We'll lock it in the moment you confirm. If it goes through, you're set.
           </p>
         </div>
 

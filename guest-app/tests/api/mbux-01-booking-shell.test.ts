@@ -226,8 +226,14 @@ describe("MBUX-01 — HoldCountdownBanner compact active state", () => {
     expect(bannerSrc).toMatch(/hidden rounded-full bg-white px-3 py-1 text-sm font-semibold tabular-nums ring-1 ring-inset sm:inline-flex/);
   });
 
-  it("keeps the honest copy — 'another guest books first' still ships", () => {
-    expect(bannerSrc).toMatch(/another guest books first/);
+  it("keeps the honest copy — the 'If it goes through' escape hatch still ships", () => {
+    // HCT-01 (decision #270) tightened the banner's escape-hatch
+    // sentence from "if another guest books first, we'll let you
+    // know and you can pick a new room" to "If it goes through,
+    // you're set" — shorter copy, same honesty signal. A future
+    // copy change that drops the conditional must update
+    // decision #270 alongside it.
+    expect(bannerSrc).toMatch(/If it goes through/);
   });
 
   it("never hides an extend failure behind the collapsed explanation", () => {
