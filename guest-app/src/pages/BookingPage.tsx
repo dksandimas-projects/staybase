@@ -98,6 +98,7 @@ import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { RoomCartLines } from "../components/RoomCartLines";
 import { RoomCartTray } from "../components/RoomCartTray";
 import { StaySummaryStrip } from "../components/StaySummaryStrip";
+import { EditStayDetailsSheet } from "../components/EditStayDetailsSheet";
 import { BreakfastMenuStrip } from "../components/BreakfastMenuStrip";
 import { copyBreakfastDateToRemaining } from "../utils/breakfastCopy";
 import { useRooms } from "../hooks/useRooms";
@@ -398,6 +399,14 @@ export function BookingPage() {
   // (IMT-03). See `plan/features/BOOKING-FLOW.md
   // §In-flow Hold` + `plan/project/ROADMAP.md §IMT`.
   const [holdId, setHoldId] = useState(() => generateHoldId());
+
+  // Per MBUX-18 (decision #275, 2026-10-16): the mobile-only
+  // bottom sheet that the StaySummaryStrip's Edit pencil opens.
+  // Lives at the top of the component (not inside the
+  // isSelectRoomStep branch) because React hooks must run in
+  // the same order every render. Initial value `false` — the
+  // sheet never opens without an explicit Edit tap.
+  const [isEditStayDetailsOpen, setIsEditStayDetailsOpen] = useState(false);
 
   // Dynamic config states loaded from Firestore
   // Per BR-03 (2026-10-12, decision #232) + BR-08 (decision
@@ -4067,6 +4076,47 @@ const addOnCount = Object.keys(breakfastSelections).length;
             checkOut={checkOut}
             nights={nights}
             guests={guests}
+            // Per MBUX-18 (decision #275, 2026-10-16): the
+            // Edit pencil opens the mobile bottom sheet
+            // instead of smooth-scrolling to the aside. The
+            // sheet is rendered just below this strip so the
+            // open/close state lives next to the trigger in
+            // the source tree.
+            onEdit={() => setIsEditStayDetailsOpen(true)}
+          />
+          {/* Per MBUX-18 (decision #275, 2026-10-16): the
+              mobile-only bottom sheet that the StaySummaryStrip's
+              Edit pencil opens. The component is `lg:hidden`-
+              guarded internally so the parent doesn't need to
+              gate the render — on desktop the strip itself is
+              hidden, so the sheet never opens. Threads the same
+              state + handlers the aside uses so the live
+              adults/children/date writes don't fork into a
+              separate code path. */}
+          <EditStayDetailsSheet
+            open={isEditStayDetailsOpen}
+            onClose={() => setIsEditStayDetailsOpen(false)}
+            checkIn={checkIn}
+            checkOut={checkOut}
+            maxStayNights={maxStayNights}
+            onRangeChange={(nextCheckIn, nextCheckOut) => {
+              setCheckIn(nextCheckIn);
+              setCheckOut(nextCheckOut);
+              updateDateParams(nextCheckIn, nextCheckOut, adults);
+            }}
+            onCheckInChange={(value) => {
+              setCheckIn(value);
+              updateDateParams(value, checkOut, adults);
+            }}
+            onCheckOutChange={(value) => {
+              setCheckOut(value);
+              updateDateParams(checkIn, value, adults);
+            }}
+            adults={adults}
+            maxGuestCapacity={maxGuestCapacity}
+            onAdultsChange={updateAdults}
+            numChildren={numChildren}
+            onChildrenChange={updateChildren}
           />
         </div>
       </section>
@@ -4099,7 +4149,14 @@ const addOnCount = Object.keys(breakfastSelections).length;
             Per MBUX-11 (decision #264, 2026-10-16): the `id` is the
             scroll target for the StaySummaryStrip's Edit button on
             mobile (the strip is hidden on `lg:` so the user uses the
-            sidebar directly on desktop, no Edit affordance needed). */}
+            sidebar directly on desktop, no Edit affordance needed).
+            Per MBUX-18 (decision #275, 2026-10-16): the Edit pencil
+            no longer scrolls here — it opens the EditStayDetailsSheet
+            mobile bottom sheet instead. The `id` + `scroll-mt-32`
+            remain as a defensive fallback for any deep link that
+            jumps straight to the aside (the BookingStickyFooter's
+            URL-driven scroll, accessibility tools, etc.) so a future
+            regression that drops the id would still surface. */}
         <aside id="booking-stay-details-aside" className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start scroll-mt-32">
           <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
             <h2 className="text-lg font-semibold text-gray-950">Stay details</h2>

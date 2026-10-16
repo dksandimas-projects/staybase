@@ -2,29 +2,25 @@
 // mobile-first persistent top strip that sits directly under
 // the StepIndicator on the booking flow's Step 1. Carries the
 // selected date range + night count + guest count + an "Edit"
-// affordance that smooth-scrolls to the existing
-// `<aside>` "Stay details" sidebar and briefly rings it for
-// visibility. On `lg:` the strip is hidden because the
-// sidebar is already the primary surface — rendering both
-// would put the same lines on screen twice.
+// affordance.
 //
-// Why a top strip instead of a sticky bottom strip:
-// the pre-MBUX-11 strip lived in the middle of the page
-// (right of the hero on `md:`, stacked below on mobile).
-// Agoda's pattern puts it on top with an "Edit" pencil so
-// the guest never has to scroll to find their stay summary.
-// The user explicitly asked for this in the MBUX-11 review:
-// "the date selection should I think be on top part of the
-// page for mobile but maybe make it hidden or collapsed by
-// default since it was already populated before step 1,
-// maybe add an edit button of something like that just
-// like Agoda."
+// Per MBUX-18 (decision #275, 2026-10-16): the Edit pencil
+// opens the EditStayDetailsSheet mobile bottom sheet (own
+// component) instead of smooth-scrolling to the existing
+// `<aside>` "Stay details" sidebar. The pre-MBUX-18 Edit
+// handler scrolled to the aside + briefly rang it; on a phone
+// the aside sits below the room-card list, so a long room list
+// meant a long scroll and the guest lost the room-card context
+// for the few seconds they fiddled with dates. The MBUX-11 spec
+// already contemplated the alternative — *"Edit opens the
+// existing range calendar and occupancy controls in a
+// mobile-appropriate expandable area or sheet"* (BOOKING-MOBILE-UX.md:137).
+// MBUX-18 ships the sheet.
 //
-// The Edit button does NOT open a modal — it reuses the
-// existing in-page picker (the `<DateRangePicker>` and the
-// Adults/Children steppers) and just draws the guest's eye
-// to it. This matches the existing Adjust-room CTA pattern
-// at BookingPage.tsx:4656 (scroll + ring + 2-second timeout).
+// On `lg:` the strip is hidden because the sidebar is already
+// the primary surface — rendering both would put the same lines
+// on screen twice. The strip is therefore MOBILE-ONLY by
+// construction: the Edit pencil never mounts on desktop.
 
 import { CalendarDays, Pencil, Users } from "lucide-react";
 import config from "@config";
@@ -34,11 +30,16 @@ interface StaySummaryStripProps {
   checkOut: string;
   nights: number;
   guests: number;
-  /** Element id of the stay-details sidebar; the Edit button
-   * scrolls to this id and rings it. Defaults to
-   * `"booking-stay-details-aside"` which BookingPage must
-   * supply on its `<aside>`. */
-  targetId?: string;
+  /**
+   * Per MBUX-18: the parent (BookingPage) owns the sheet
+   * visibility state and supplies this callback. Tapping
+   * Edit opens the mobile bottom sheet containing the same
+   * DateRangePicker + Adults/Children steppers the sidebar
+   * renders inline. The strip is `lg:hidden` so this handler
+   * never fires on desktop — desktop uses the sidebar
+   * directly.
+   */
+  onEdit?: () => void;
 }
 
 function formatStayDate(value: string): string {
@@ -54,16 +55,16 @@ export function StaySummaryStrip({
   checkOut,
   nights,
   guests,
-  targetId = "booking-stay-details-aside"
+  onEdit
 }: StaySummaryStripProps) {
   function handleEdit(): void {
-    const el = document.getElementById(targetId);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-    el.classList.add("ring-2", "ring-primary", "ring-offset-2");
-    window.setTimeout(() => {
-      el.classList.remove("ring-2", "ring-primary", "ring-offset-2");
-    }, 2000);
+    // Per MBUX-18: the parent owns the sheet; the strip is a
+    // dumb trigger. If a parent forgets to wire `onEdit` the
+    // button is a silent no-op rather than a broken scroll —
+    // the worst case is the parent never updated its call
+    // site, which is a developer-visible regression rather
+    // than a guest-visible dead control.
+    onEdit?.();
   }
 
   return (
