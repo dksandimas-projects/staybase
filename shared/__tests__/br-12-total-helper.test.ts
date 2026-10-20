@@ -60,11 +60,41 @@ describe("BR-12 — recomputeOtherAddOnTotal", () => {
     expect(recomputeOtherAddOnTotal(undefined)).toBe(0);
   });
 
-  it("rounds to integer (no floating-point noise)", () => {
+  // Per OCT-L3 (2026-10-20, decision #299): the total rounds to 2
+  // decimal places, NOT to whole pesos.
+  //
+  // This case used to assert `1000` — 333.33 × 3 = 999.99 was rounded
+  // UP to a whole peso. That was the bug: the billed total (whole
+  // pesos) and the refund liability for the SAME selection (full
+  // precision) never reconciled, so a ₱499.99 add-on billed ₱500 and
+  // refunded ₱499.99.
+  //
+  // The test name is inverted on purpose: a future agent who sees the
+  // 2dp rule broken would most naturally "fix" it by restoring
+  // `Math.round(total)` and re-pointing this assertion to 1000. The
+  // name + comment below say what the rule IS, so the wrong direction
+  // is obvious.
+  it("rounds to 2 decimal places (never to whole pesos)", () => {
     const sel: Record<string, OtherAddOnSelectionEntry[]> = {
       "2026-12-01": [mkEntry("a", 333.33, 3)]
     };
-    expect(recomputeOtherAddOnTotal(sel)).toBe(1000);
+    expect(recomputeOtherAddOnTotal(sel)).toBe(999.99);
+  });
+
+  it("absorbs floating-point drift at 2dp (0.1 + 0.2 style)", () => {
+    const sel: Record<string, OtherAddOnSelectionEntry[]> = {
+      "2026-12-01": [mkEntry("a", 0.1, 1), mkEntry("b", 0.2, 1)]
+    };
+    expect(recomputeOtherAddOnTotal(sel)).toBe(0.3);
+  });
+
+  it("keeps the breakdown subtotal on the SAME 2dp rule as the total", () => {
+    const sel: Record<string, OtherAddOnSelectionEntry[]> = {
+      "2026-12-01": [mkEntry("a", 333.33, 3)]
+    };
+    const rows = otherAddOnBreakdownByDate(sel);
+    expect(rows[0].subtotal).toBe(999.99);
+    expect(rows[0].subtotal).toBe(recomputeOtherAddOnTotal(sel));
   });
 
   it("clamps negative price to 0 (defensive)", () => {

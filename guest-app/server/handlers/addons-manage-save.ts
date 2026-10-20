@@ -64,6 +64,9 @@ import {
   // Per OCT-M5 (2026-10-20, decision #292): the shared UTC
   // calendar-date key helper (the cut-off anchor).
   toUtcDateKey,
+  // Per OCT-L3 (2026-10-20, decision #299): the shared 2dp money
+  // rule — the refund amount must match the billed total.
+  roundToTwoDecimals,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -326,13 +329,32 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           opCode = `SERVE_BLOCKED:${op.selectionKey}`;
           return;
         }
-        assertSelectionForChange(next, op.selectionKey);
+        // Per OCT-L4 (2026-10-20, decision #299): this call is now
+        // WRAPPED, like the change op below and like the staff
+        // handler's remove op.
+        //
+        // `assertSelectionForChange` throws `SELECTION_NOT_ORDERED`
+        // when the selection is missing or already removed. Unwrapped,
+        // the throw escaped the transaction and the outer catch
+        // answered 500 "Failed to save add-on changes." — a client
+        // error dressed up as a server fault. The staff handler
+        // (`addons-staff-update.ts`) already wrapped the same call
+        // and answered 400; the guest path now agrees.
+        try {
+          assertSelectionForChange(next, op.selectionKey);
+        } catch (err: any) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+          return;
+        }
         const dateKey = parsedKey.date;
         const prior = (next[dateKey] || []).find((e) => e && e.addOnId === parsedKey.addOnId);
         if (!prior) continue;
         const quantity = Math.max(0, Math.floor(Number(prior.quantity) || 0));
         const price = Math.max(0, Number(prior.priceSnapshot) || 0);
-        const totalAmt = price * quantity;
+        // Per OCT-L3 (2026-10-20, decision #299): the refund amount
+        // uses the shared 2dp money rule, so it matches the billed
+        // total exactly.
+        const totalAmt = roundToTwoDecimals(price * quantity);
         const marked: OtherAddOnSelectionEntry = {
           ...prior,
           removedAt: nowIso,

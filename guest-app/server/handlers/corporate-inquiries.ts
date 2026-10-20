@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
 import { sendCorporateInquiryTrigger, sendBookingTrigger, sendCorporateInquiryConfirmationTrigger } from "./email";
-import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
+import { toDateOrNull, getManilaDateInfo, generateLookupToken, isValidIsoDate } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 // C-03 (E2E audit 2026-07-17): canonical structured date shape.
@@ -143,6 +143,17 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
+
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation.
+  // The schema validates the field LENGTH only, and
+  // `new Date("2026-02-31T00:00:00Z")` ROLLS OVER to Mar 3 rather
+  // than producing an Invalid Date — so the `isNaN(getTime())` guard
+  // never fired and the inquiry's calendar-block overlap check ran
+  // against a day the client never asked for. `isValidIsoDate` (the
+  // shared helper) rejects it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
 
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });

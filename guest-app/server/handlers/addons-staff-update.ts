@@ -34,6 +34,9 @@ import {
   // Per OCT-M5 (2026-10-20, decision #292): the shared UTC
   // calendar-date key helper (the cut-off anchor).
   toUtcDateKey,
+  // Per OCT-L3 (2026-10-20, decision #299): the shared 2dp money
+  // rule — the refund liability must match the billed total.
+  roundToTwoDecimals,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -254,7 +257,10 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
           if (!prior) return true;
           const price = Math.max(0, Number(prior.priceSnapshot) || 0);
           const quantity = Math.max(0, Math.floor(Number(prior.quantity) || 0));
-          const totalAmt = price * quantity;
+          // Per OCT-L3 (2026-10-20, decision #299): the shared 2dp
+          // money rule — the refund liability must match the billed
+          // total exactly.
+          const totalAmt = roundToTwoDecimals(price * quantity);
           const marked: OtherAddOnSelectionEntry = {
             ...prior,
             removedAt: nowIso,

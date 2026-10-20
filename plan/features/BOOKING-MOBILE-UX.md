@@ -179,6 +179,8 @@ Decrementing to zero restores the unselected state. The room count remains bound
 
 Once at least one room is selected, mobile displays a compact cart tray above the footer or as part of the action area.
 
+> **Implementation note (2026-10-20, decision #299 — OCT-L1):** the tray uses the **"as part of the action area"** branch. It originally rendered as the last element of the Step 1 page body while the footer is `fixed`, so the tray scrolled away and the footer stayed pinned — on a phone with 4+ room types the guest tapped "+" and got no aggregate feedback near the thumb. It now renders inside `BookingStickyFooter`'s `aboveAction` slot, so it is pinned with the footer. The expanded lines are capped at `40vh` with an internal scroll (inside a fixed bar an uncapped list grows the footer until it swallows the screen), and Step 1's `<main>` bottom reserve grew from `8rem` to `13rem` so the taller footer never covers the last room card.
+
 The tray shows:
 
 - Total number of rooms selected.

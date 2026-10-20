@@ -57,7 +57,7 @@ const confirmPage = readFileSync(
  * never be mistaken for the removal failing.
  */
 function codeOnly(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return src.replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 const confirmCode = codeOnly(confirmPage);

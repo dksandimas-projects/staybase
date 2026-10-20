@@ -83,7 +83,7 @@ A **CHANGE** op may only alter the `quantity`. The name / price / unit stay the 
 
 ### Cut-off anchor (OCT-M5, 2026-10-20; decision #292)
 
-The cut-off is `cutoffHoursBeforeCheckIn` hours before the **BOOKING's check-in date** — for EVERY service date, not the selection's own date. The old code anchored on the selection's service date, so the lock slid forward one day per row and the guest could buy a transfer a full day past the hotel's stated cut-off. The Manage page had the SAME wrong anchor, so it showed the same wrong lock state.
+The cut-off is `cutoffHoursBeforeCheckIn` hours before the **BOOKING's check-in date** — for EVERY service date, not the selection's own date. The old code anchored on the selection's service date, so the lock slid forward one day per row and the guest could buy a transfer a full day past the stated cut-off. The Manage page had the SAME wrong anchor, so it showed the same wrong lock state.
 
 `AssertNotLockedInput.checkInDate` is now **REQUIRED** and the `checkInDate || parsed.date` fallback is deleted, so the compiler forces every caller to pass the booking's check-in. A booking with no usable check-in is refused (`BOOKING_CHECK_IN_MISSING`) rather than silently defaulted.
 
@@ -124,7 +124,20 @@ interface Booking {
    * pre-BR-12 bookings; reads as `null` per `normalizeBooking`.
    */
   otherAddOnSelections?: Record<string, OtherAddOnSelectionEntry[]> | null;
-  /** Denormalized sum, PHP. Recomputed by `recomputeOtherAddOnTotal`. */
+  /**
+   * Denormalized sum, PHP. Recomputed by `recomputeOtherAddOnTotal`.
+   *
+   * Per OCT-L3 (2026-10-20, decision #301): stored at **2 decimal
+   * places**, the same rule every other money path in the repo uses
+   * (`roundToTwoDecimals`, `shared/utils/money.ts`). It previously
+   * rounded to WHOLE PESOS while the refund liability for the same
+   * selection was computed at full precision — so a ₱499.99 add-on
+   * billed ₱500 but refunded ₱499.99.
+   *
+   * The repo rule is **store at 2dp, display at 0dp**: both apps'
+   * `formatPrice` uses `maximumFractionDigits: 0`, so the rendered
+   * amount is unchanged. Breakfast already worked this way.
+   */
   otherAddOnTotal?: number;
   /** O(1) "is there any other add-on on this booking" flag. */
   hasAnyOtherAddOns?: boolean;
@@ -288,19 +301,19 @@ Mirrors the breakfast tab's read pattern. Shows per-day selections + per-add-on 
 | Case | Behavior |
 |---|---|
 | Catalog empty | Pre-seed falls back to `AIRPORT_TRANSFER_PRESEED` (read-only). The admin's first Settings save promotes it to a real doc. |
-| Booking checked-out / cancelled | Both guest + staff update endpoints reject with 400 "Booking is read-only." Per OCT-M3 (decision #291) ONE shared helper (`isOtherAddOnBookingMutable`) covers the guest save path, the staff path AND mark-served — the guest path previously had NO check. The comparison is case-insensitive. |
+| Booking checked-out / cancelled | Both guest + staff update endpoints reject with 400 "Booking is read-only." Per OCT-M3 (decision #291) ONE shared helper (`isOtherAddOnBookingMutable`) covers the guest save path, the staff path AND mark-served — the guest path previously had NO check. Case-insensitive. |
 | Add-on disabled in catalog | `addons-disabled` reason — every date is locked. |
 | Hotel-wide "Add-ons enabled" switch OFF | Per OCT-M1 (decision #295): empty catalog on the public endpoint + the guest Manage page; the guest save path refuses with a 400. The STAFF path stays open. |
 | Guest books with an add-on, then the hotel disables it | Per OCT-M4 (decision #297): the create path rebuilds from the live catalog and refuses an add-on that is not on sale with a 400. The guest returns to Step 2, drops it and resubmits. |
-| Cut-off passed | `cutoff-passed` reason — the lock is per ADD-ON (anchored on the booking's check-in for every date), not per date. Per OCT-M5 (decision #292) the anchor is the booking's check-in; the old per-service-date anchor slid forward a day per row. |
+| Cut-off passed | `cutoff-passed` reason — the lock is per ADD-ON (anchored on the booking's check-in for every date), not per date. Per OCT-M5 (decision #292); the old per-service-date anchor slid forward a day per row. |
 | Past cut-off + staff write | Allowed only with `overrideReason` (≥8 chars). Audit row stamped with `action: "override-*"`. |
 | Quantity > 50 | Zod schema rejects. |
 | `clientBatchId` replay within 60s | Returns prior result without re-applying. |
 | Missing `turnstileToken` in non-test mode | 400 from the apiRouter gate. |
 | Same add-on id, multiple dates | Each date gets its own entry array in `otherAddOnSelections[date]`. |
 | Catalog price change after order | Existing entries keep the snapshotted `priceSnapshot`. |
-| Stay dates change (reschedule / extend) | Per OCT-H8 (2026-10-20, decision #287): a selection whose service date falls outside the NEW window is auto-cancelled (marked `removedAt`, kept in the map for the audit trail). A PAID removal opens a `category: "otherAddOn"` refund liability; an UNPAID removal simply comes off the bill. The other add-ons are NOT inside `totalPrice` (they are added on top of it for the balance), so removing one does not change the room bill — the liability is the only money effect. The `mode: "extend"` wrapper only GROWS the window, so nothing is ever cancelled there. |
-| Booking cancelled | Per OCT-H8 (2026-10-20, decision #287): future-date selections (service date ≥ today in the hotel timezone) are dropped; past-date selections are left alone and never refunded. The cancel path does NOT rewrite `totalPrice` (the CRL-07 policy liability is computed from the collected amount), and the add-on liability is opened ONLY when the cancellation policy refunded NOTHING — the policy refund is a percentage of the collected money, which already includes the add-ons, so a second liability would refund the same add-on twice. |
+| Stay dates change (reschedule / extend) | Per OCT-H8 (decision #287): a selection whose service date falls outside the NEW window is auto-cancelled (marked `removedAt`, kept for audit). A PAID removal opens a `category: "otherAddOn"` refund liability; an UNPAID one comes off the bill. The add-ons are NOT inside `totalPrice`, so removing one does not change the room bill — the liability is the only money effect. `mode: "extend"` only GROWS the window, so nothing is cancelled there. |
+| Booking cancelled | Per OCT-H8 (decision #287): future-date selections (service date ≥ today in the hotel timezone) are dropped; past-date selections are left alone and never refunded. The cancel path does NOT rewrite `totalPrice` (the CRL-07 policy liability is computed from the collected amount), and the add-on liability opens ONLY when the policy refunded NOTHING — the policy refund is a percentage of the collected money, which already includes the add-ons, so a second liability would refund them twice. |
 
 ---
 
@@ -311,7 +324,7 @@ Mirrors the breakfast tab's read pattern. Shows per-day selections + per-add-on 
 - The `addOns` collection is brand new — pre-seed runs on first Settings load.
 - The `markRefundPaid` helper adds the `"otherAddOn"` union member; existing callers are unaffected.
 
-Back-compat: pre-BR-12 bookings have no `otherAddOnSelections`. The guest Manage Other Add-Ons page renders the catalog + zero selections + "Saved." The booking drawer's Other Add-Ons tab shows "No add-ons ordered." Both reads are safe.
+Back-compat: pre-BR-12 bookings have no `otherAddOnSelections` — the guest Manage page renders the catalog + zero selections + "Saved." and the drawer's tab shows "No add-ons ordered." Both reads are safe.
 
 ---
 
@@ -321,7 +334,7 @@ Back-compat: pre-BR-12 bookings have no `otherAddOnSelections`. The guest Manage
 
 2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 (decision #247) ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2.
 
-3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1. The BR-13 refactor may add the toggle when a second add-on **type** (seaport) lands with its own semantics. *(The Settings tab's "Add-ons enabled" affordance shipped as a v1 placeholder in BR-12.1; **OCT-M1 (decision #295) made it real** — it persists to `settings/hotelConfig.otherAddOnsEnabled` and gates the public catalog endpoint, the guest Manage page and the guest save path. See §Hotel-wide master switch above.)*
+3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1; the BR-13 refactor may add it when a second add-on **type** (seaport) lands with its own semantics. *(The Settings tab's "Add-ons enabled" affordance shipped as a v1 placeholder in BR-12.1; **OCT-M1 (decision #295) made it real** — it persists to `settings/hotelConfig.otherAddOnsEnabled` and gates the public catalog endpoint, the guest Manage page and the guest save path.)*
 
 4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 (decision #247) ships the new sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table.
 
@@ -331,9 +344,7 @@ Back-compat: pre-BR-12 bookings have no `otherAddOnSelections`. The guest Manage
 
 ## Implementation Order
 
-The BR-12 build shipped in a single `feat(breakfast): BR-12` commit, in this order: shared types + helpers + schemas → server lib (assertions / audit / refund-liability writer) → the 5 server handlers + apiRouter wiring → the guest Manage Other Add-Ons page + the booking-drawer tab → tests → this spec + decision entry #245 + the ROADMAP update. The per-step file map is in `plan/docs/DECISIONS-FEATURES.md` #245.
-
-The BR-13 refactor (when a second add-on **type** — seaport — lands) will extract the common patterns into a shared abstraction. This is the day BR-12's flexible-enough catalog pays off — the BR-13 refactor is a non-breaking refactor, not a rewrite.
+BR-12 shipped in a single `feat(breakfast): BR-12` commit: shared types + helpers + schemas → server lib (assertions / audit / refund-liability writer) → the **6** server handlers + apiRouter wiring → the guest Manage Other Add-Ons page + the booking-drawer tab → tests → this spec + decision entry #245 (the per-step file map is there). The BR-13 refactor (when a second add-on **type** — seaport — lands) will extract the common patterns into a shared abstraction: a non-breaking refactor, not a rewrite.
 
 ---
 
@@ -348,13 +359,13 @@ The BR-13 refactor (when a second add-on **type** — seaport — lands) will ex
 
 ## Rejected Alternatives
 
-**(A)** Generic-add-on abstract base class with a `breakfast` / `seaport` discriminated union on the `Booking` interface — premature abstraction. The BR-13 refactor will pull the common patterns when a second add-on TYPE (seaport) lands, not before.
+**(A)** Generic-add-on abstract base class with a `breakfast` / `seaport` discriminated union on the `Booking` interface — premature abstraction. The BR-13 refactor pulls the common patterns when a second add-on TYPE lands, not before.
 
-**(B)** Hotel-wide `otherAddOnCutoffsEnabled` toggle for v1 — operationally redundant with the per-add-on `isEnabled` switch. The BR-13 refactor may add the toggle if operations asks for it.
+**(B)** Hotel-wide `otherAddOnCutoffsEnabled` toggle for v1 — operationally redundant with the per-add-on `isEnabled` switch; the BR-13 refactor may add it if operations asks.
 
-**(C)** "Other add-ons" sub-tab inside the existing Breakfast Settings tab — mixed-purpose UI. The new "Other Add-Ons" Settings tab mirrors the existing Breakfast tab exactly and gives the add-on catalog its own visual identity.
+**(C)** "Other add-ons" sub-tab inside the existing Breakfast Settings tab — mixed-purpose UI. The new tab mirrors the Breakfast tab exactly and gives the catalog its own visual identity.
 
-**(D)** Add-on email template dedicated to the `mark-refund-paid` action — the v1 piggy-back on the existing breakfast refund-paid email copy is operationally acceptable. A dedicated template is a follow-up.
+**(D)** Add-on email template dedicated to `mark-refund-paid` — v1 piggy-backs on the existing breakfast refund-paid email copy, which is operationally acceptable. A dedicated template is a follow-up.
 
 **(E)** Walk-in modal Step 2 mirror (`WalkinOtherAddOnGrid`) — out of scope for BR-12 v1 (the walk-in flow is staff-curated); BR-12.1 later shipped it in the walk-in + calendar-create modals.
 

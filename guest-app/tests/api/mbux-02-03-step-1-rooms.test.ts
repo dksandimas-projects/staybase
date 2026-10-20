@@ -27,6 +27,7 @@ function read(relativePath: string): string {
 const bookingPageSrc = read("guest-app/src/pages/BookingPage.tsx");
 const cartLinesSrc = read("guest-app/src/components/RoomCartLines.tsx");
 const cartTraySrc = read("guest-app/src/components/RoomCartTray.tsx");
+const stickyFooterSrc = read("guest-app/src/components/BookingStickyFooter.tsx");
 
 /**
  * Strip JS comments so an assertion about CODE cannot be tripped by prose
@@ -36,12 +37,21 @@ const cartTraySrc = read("guest-app/src/components/RoomCartTray.tsx");
  * the quotation and report a false failure.
  */
 function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  // LINE comments first, THEN block comments. The order matters.
+  //
+  // A `//` comment may contain `/*` — the booking page literally has
+  // one ("Guest clients cannot read `bookings/*` directly"). Stripping
+  // blocks FIRST treated that as a block opener and swallowed the next
+  // ~170 lines of REAL code, which made every source-text pin inside
+  // that window silently vacuous — and made a new pin fail for no
+  // visible reason.
+  return source.replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 const cartLinesCode = stripComments(cartLinesSrc);
 const cartTrayCode = stripComments(cartTraySrc);
 const bookingPageCode = stripComments(bookingPageSrc);
+const stickyFooterCode = stripComments(stickyFooterSrc);
 
 describe("MBUX-03 — RoomCartLines is the single grouped-cart read surface", () => {
   it("groups by room TYPE, never by positional room name (CHD-12)", () => {
@@ -77,12 +87,47 @@ describe("MBUX-03 — RoomCartLines is the single grouped-cart read surface", ()
 });
 
 describe("MBUX-03 — the mobile cart tray", () => {
-  it("mounts above the sticky footer, gated to below `lg:`", () => {
+  it("mounts INSIDE the sticky footer's action area, gated to below `lg:`", () => {
     // From `lg:` up the sticky sidebar already shows the full cart;
     // rendering both would duplicate every line on screen.
-    expect(bookingPageCode).toMatch(/<div className="mx-auto max-w-7xl px-4 pb-4 lg:hidden">\s*<RoomCartTray/);
+    //
+    // Per OCT-L1 (2026-10-20, decision #299): the tray used to be the
+    // LAST element of the Step 1 page body. The footer is `fixed`, so
+    // the tray scrolled away while the footer stayed pinned — on a
+    // phone with 4+ room types the guest tapped "+" and got no
+    // aggregate feedback near the thumb. MBUX-03 allows "above the
+    // footer **or as part of the action area**"; the tray now renders
+    // in the footer's `aboveAction` slot, so it is ALWAYS reachable.
+    expect(bookingPageCode).toMatch(
+      /aboveAction=\{\s*<div className="lg:hidden">\s*<RoomCartTray/
+    );
     expect(bookingPageCode).toMatch(/aggregateTotal=\{displayTotal\}/);
     expect(bookingPageCode).toMatch(/fitComplete=\{cartDistributionComplete\}/);
+
+    // The tray must NOT be back in the page body. This is the
+    // negative half of the OCT-L1 contract and the reason the test
+    // name says "INSIDE the sticky footer's action area" rather than
+    // "above the sticky footer" (the old name described a placement
+    // the code never had).
+    const trayMounts = bookingPageCode.match(/<RoomCartTray/g) || [];
+    expect(trayMounts.length).toBe(1);
+    expect(bookingPageCode).not.toMatch(/pb-4 lg:hidden">\s*<RoomCartTray/);
+  });
+
+  it("the footer renders `aboveAction` inside the fixed bar", () => {
+    // The slot is only useful if it is inside the `fixed` container —
+    // a slot rendered outside it would put the tray back in the flow.
+    expect(stickyFooterCode).toMatch(/fixed bottom-0 left-0 z-40/);
+    expect(stickyFooterCode).toMatch(/aboveAction \? \(/);
+    expect(stickyFooterCode).toMatch(/\{aboveAction\}/);
+  });
+
+  it("Step 1's bottom reserve grows to cover the taller footer", () => {
+    // The fixed bar hides whatever sits under it. Step 1's footer now
+    // carries the tray, so the reserve on `<main>` has to grow with it
+    // or the last room card hides behind the bar on a phone.
+    expect(bookingPageCode).toMatch(/isSelectRoomStep/);
+    expect(bookingPageCode).toMatch(/pb-\[calc\(13rem\+env\(safe-area-inset-bottom\)\)\]/);
   });
 
   it("carries the aggregate total from the same `displayTotal` the footer uses", () => {
@@ -107,7 +152,12 @@ describe("MBUX-03 — the mobile cart tray", () => {
     // `hidden` (not just visually clipped) keeps the grouped lines out
     // of the accessibility tree, so a screen reader is not read the
     // same cart twice per change.
-    expect(cartTrayCode).toMatch(/<div id="room-cart-tray-lines" hidden=\{!isExpanded\}>/);
+    //
+    // Per OCT-L1: the region also carries a `max-h-[40vh]` cap +
+    // internal scroll. Inside a FIXED bar an uncapped list grows the
+    // footer until it swallows the screen.
+    expect(cartTrayCode).toMatch(/id="room-cart-tray-lines"[\s\S]{0,120}hidden=\{!isExpanded\}/);
+    expect(cartTrayCode).toMatch(/max-h-\[40vh\] overflow-y-auto/);
   });
 
   it("the collapsed row names the fit state when the group is short", () => {

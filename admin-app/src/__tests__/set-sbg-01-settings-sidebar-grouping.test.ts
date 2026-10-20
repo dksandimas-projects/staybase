@@ -64,8 +64,8 @@ const EXPECTED_GROUP_TABS: Record<string, string[]> = {
  */
 function parseStringLiterals(body: string): string[] {
   const withoutComments = body
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
   const matches = withoutComments.match(/"([^"]*)"/g) || [];
   return matches.map((literal) => literal.slice(1, -1));
 }
@@ -101,8 +101,8 @@ function readFlatTabIds(): string[] {
   const block = settingsPageSrc.match(/const tabs = \[([\s\S]*?)\n  \];/);
   expect(block, "expected the flat tabs array literal in SettingsPage.tsx").toBeTruthy();
   const withoutComments = block![1]
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
   const ids: string[] = [];
   const idRe = /id:\s*"([^"]+)"/g;
   let match: RegExpExecArray | null;

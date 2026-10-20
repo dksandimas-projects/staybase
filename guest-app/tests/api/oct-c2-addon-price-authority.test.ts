@@ -44,10 +44,8 @@ const handlers: Array<[string, string]> = [
  */
 function codeOnly(src: string): string {
   return src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 describe("OCT-C2 — the other add-on price/name/unit/cutoff come from the catalog", () => {

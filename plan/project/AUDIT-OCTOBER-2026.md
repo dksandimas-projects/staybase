@@ -473,14 +473,49 @@ Worse, the notice `<p>` sits **inside the `dates.map` body**, so it renders once
 
 ---
 
-## LOW (6)
+## LOW (8) — 6 fixed, 1 re-classified, 2 added by the closeout
 
-- **OCT-L1 — The mobile cart tray is in the page body, not the action area.** `guest-app/src/pages/BookingPage.tsx:4985` renders it as the last element of the Step 1 flow while the footer is `fixed` (`BookingStickyFooter.tsx:58`). Both the call-site comment (`:4981-4984`) and the component docstring (`RoomCartTray.tsx:27-30`) describe a fixed placement the code does not implement. On a phone with 4+ room types, tapping "+" gives no aggregate feedback near the thumb — the MBUX-01 scroll regression re-introduced on Step 1, and MBUX-03's "above the footer **or as part of the action area**" is unmet.
-- **OCT-L2 — `setSearchParams` is called inside a `setRoomCart` state updater.** `guest-app/src/pages/BookingPage.tsx:1571` (and `:1602`) dispatches a router update from a React render-phase updater. React 19 warns; the app runs `<React.StrictMode>` (`guest-app/src/main.tsx:15`) so the updater is double-invoked in dev. No data corruption (the write is idempotent), but it sits on the hot quantity-change path.
-- **OCT-L3 — The other-add-on total rounds to whole pesos while every other money path uses 2dp.** `shared/utils/otherAddOnTotal.ts:43` → `Math.round(total)`, while breakfast uses `round2` (`shared/utils/breakfastTotal.ts:73`) and the refund-liability amount is computed unrounded (`addons-staff-update.ts:209`). A ₱499.99 add-on bills ₱500 but refunds ₱499.99.
-- **OCT-L4 — A guest remove-op on a missing add-on returns 500 instead of 400.** `guest-app/server/handlers/addons-manage-save.ts:257` — `assertSelectionForChange(next, op.selectionKey)` is not wrapped, so the throw escapes the transaction and the outer catch returns a generic 500. The staff handler wraps the same call and returns the correct 400.
-- **OCT-L5 — The guest's `breakfastConfig` type omits `imageUrl`.** `guest-app/src/pages/BookingPage.tsx:439` declares the meal shape without `imageUrl`, yet `BreakfastMenuStrip.tsx:9` reads it. It survives only via the `as any` cast at `:1330` — a typed/normalized read path would compile cleanly and silently drop the MBUX-04 thumbnails.
-- **OCT-L6 — The committed API bundle is one VERSION behind.** `guest-app/api/[...route].js` carries `VERSION2 = "2.17.0"` vs `shared/VERSION.ts` `"2.17.1"`. Rebuilt and diffed: the **only** difference is that constant, so no server fix is missing from production — but the artifact should be regenerated.
+**Closeout batch:** branch `fix/oct-audit-closeout` (off `dev` @ `a036063`), decision **#299**, 2026-10-20.
+
+- **OCT-L1 — The mobile cart tray is in the page body, not the action area.** `guest-app/src/pages/BookingPage.tsx:4985` rendered it as the last element of the Step 1 flow while the footer is `fixed` (`BookingStickyFooter.tsx:58`). Both the call-site comment (`:4981-4984`) and the component docstring (`RoomCartTray.tsx:27-30`) describe a fixed placement the code does not implement. On a phone with 4+ room types, tapping "+" gives no aggregate feedback near the thumb — the MBUX-01 scroll regression re-introduced on Step 1, and MBUX-03's "above the footer **or as part of the action area**" is unmet.
+
+  **Status: FIXED (2026-10-20, decision #299).** `BookingStickyFooter` gains an `aboveAction` slot that renders **inside** the fixed bar, above the summary/action row. The tray moved there, so it is pinned with the footer instead of scrolling past it. The expanded lines are capped at `40vh` with an internal scroll (inside a fixed bar an uncapped list grows the footer until it swallows the screen), and Step 1's `<main>` bottom reserve grew from `8rem` to `13rem` so the taller footer never covers the last room card. The tray's docstring — which had claimed a placement the code did not implement — is now true.
+- **OCT-L2 — `setSearchParams` is called inside a `setRoomCart` state updater.** `guest-app/src/pages/BookingPage.tsx:1571` (and `:1602`) dispatched a router update from a React render-phase updater. React 19 warns; the app runs `<React.StrictMode>` (`guest-app/src/main.tsx:15`) so the updater is double-invoked in dev. No data corruption (the write is idempotent), but it sat on the hot quantity-change path.
+
+  **Status: FIXED (2026-10-20, decision #299).** Both call sites (`updateRoomQuantity`, `updateExtraBedCount`) now derive the next cart from the current `roomCart` value and write the cart and the URL from the event handler, in that order. There is no `setRoomCart` updater left in the file.
+- **OCT-L3 — The other-add-on total rounds to whole pesos while every other money path uses 2dp.** `shared/utils/otherAddOnTotal.ts:43` → `Math.round(total)`, while breakfast uses 2dp (`shared/utils/breakfastTotal.ts`) and the refund-liability amount was computed unrounded. A ₱499.99 add-on billed ₱500 but refunded ₱499.99.
+
+  **Status: FIXED (2026-10-20, decision #299) — owner-approved.** The other-add-on money path now uses the same 2dp rule as breakfast and the folio. A new shared `roundToTwoDecimals` (`shared/utils/money.ts`) owns the rule; it is applied to the total, the per-date breakdown subtotal, the guest + staff refund amounts, the reschedule auto-cancel refund, and the refund-liability writer — so the bill and the refund can no longer disagree. **The display is unchanged:** both apps' `formatPrice` uses `maximumFractionDigits: 0`, so a ₱499.99 total has always rendered as "₱500" on screen; the repo rule is *store at 2dp, display at 0dp*. The one test that pinned the old whole-peso behaviour (`shared/__tests__/br-12-total-helper.test.ts`) was re-pointed, with the inversion spelled out in the test name so a future agent cannot restore `Math.round(total)` by "fixing" the assertion.
+- **OCT-L4 — A guest remove-op on a missing add-on returns 500 instead of 400.** `guest-app/server/handlers/addons-manage-save.ts:329` — `assertSelectionForChange(next, op.selectionKey)` was not wrapped, so the throw escaped the transaction and the outer catch returned a generic 500. The staff handler wraps the same call and returns the correct 400.
+
+  **Status: FIXED (2026-10-20, decision #299).** The guest remove op now wraps the call exactly like the guest change op and the staff handler: the throw becomes an op code and the handler answers **400** with the `SELECTION_NOT_ORDERED` message. The outer catch stays a 500 for genuine server faults — the fix does not launder real faults into client errors.
+- **OCT-L5 — The guest's `breakfastConfig` type omits `imageUrl`.** `guest-app/src/pages/BookingPage.tsx:439` declared the meal shape without `imageUrl`, yet `BreakfastMenuStrip.tsx:9` reads it. It survived only via the `as any` cast at `:1330` — a typed/normalized read path would compile cleanly and silently drop the MBUX-04 thumbnails.
+
+  **Status: FIXED (2026-10-20, decision #299).** A new `guest-app/src/utils/breakfastConfig.ts` owns the typed shape (`BookingBreakfastConfig` / `BookingBreakfastMeal`, with `imageUrl` declared) and a `normalizeBreakfastConfig` reader that replaces the `as any` cast. The normalizer is behaviour-preserving against the old raw read (`isEnabled` keeps truthiness semantics, `cutoffsEnabled` keeps its `!== false` default, the cut-off literals are unchanged) with one deliberate tightening: `price` is coerced to a finite number so an absent price can no longer render `₱NaN`.
+- **OCT-L6 — The committed API bundle is one VERSION behind.** `guest-app/api/[...route].js` carries `VERSION2 = "2.18.0"` vs `shared/VERSION.ts` `"2.18.1"`. Rebuilt and diffed: the **only** difference is that constant, so no server fix is missing from production — but the artifact should be regenerated.
+
+  **Status: RE-CLASSIFIED — NOT A DEFECT (2026-10-20, decision #299).** This is the **established commit pattern**, already documented as a standing condition in `plan/project/ROADMAP.md` (the MBUX-08 entry): git runs `pre-commit` (`check:api-bundle`) **before** `prepare-commit-msg` (`bump-version.mjs`), so the bundle is validated against the pre-bump version and the bump then commits a version the artifact cannot match. The impact is nil — `guest-app/server/` never imports the `VERSION` constant (verified: the only `VERSION*` identifiers in the bundle are firebase-admin's own), so `VERSION2` is dead code inside the artifact and the real UI version comes from `shared/VERSION.ts` at build time in both frontends. **Nothing was changed**, because "fixing" it would mean reordering the Husky hooks — and a self-amending hook was prototyped and reverted during MBUX-08 (its `run()` helper silently dropped the `env` argument, so `HUSKY=0` never reached the amend and the hook could recurse). The one operational consequence is already known and unchanged: the next commit that stages a `guest-app/server/` or `shared/` file must rebuild and stage the artifact (`npm run build:api -w guest-app`), which this batch does.
+- **OCT-L7 — Calendar-impossible dates were accepted by three date-accepting endpoints.** *(Added by the closeout batch — see the corrected spec-gap row below.)*
+
+  **Status: FIXED (2026-10-20, decision #299).** `new Date("2026-02-31T00:00:00Z")` **rolls over to Mar 3** rather than producing an Invalid Date, so an `isNaN(getTime())` guard never fires for a calendar-impossible date. The guest CREATE endpoint already used the shared `isValidIsoDate` and was never affected — but the **walk-in create**, the **reschedule** and the **corporate inquiry→booking conversion** all used the raw `new Date` + `isNaN` pattern, so the front desk could store a booking for a day nobody entered. All three now validate with `isValidIsoDate` before the date arithmetic.
+- **OCT-L8 — The comment-strip helpers could swallow real code, making source-text pins vacuous.** *(Added by the closeout batch — found twice, in two different files, while fixing OCT-L1 and OCT-L5.)* The repo's `stripComments` / `codeOnly` helpers removed BLOCK comments first and line comments second: `src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")`. A `//` comment may legitimately contain a block opener — the codebase writes `bookings/*` and `bookings/*/otherAddOnAudit/*` everywhere, because that is how Firestore subcollection paths are written — so the block-strip regex read it as a BLOCK OPENER and paired it with the next block terminator in the file, **swallowing the real code in between**. The failure is silent and poisonous: every source-text pin inside the swallowed window became **vacuous** (the test passed while asserting nothing), and a pin placed in that window **failed for a reason its author could not see**. It bit the booking page (`BookingPage.tsx:2135` — "Guest clients cannot read `bookings/*` directly." swallowed ~170 lines of real code, including the Step 1 bottom reserve this batch changed) and then bit the admin Settings page the same way.
+
+  **Status: FIXED (2026-10-20, decision #307).** Every helper now strips the LINE comments first, using the `[^:]`-guarded regex so a URL inside a string (`https://…`) is not read as the start of a comment — the guard matters because the unguarded order has its own trap (stripping lines first with an unguarded regex deletes a block comment's terminator when the block contains a URL, re-opening the phantom-block problem from the other side). 24 helpers across `admin-app/src/__tests__/`, `guest-app/tests/api/`, `guest-app/src/__tests__/` and `shared/__tests__/` were corrected. A new tripwire (`guest-app/tests/api/oct-l7-strip-comments-order.test.ts`) walks every test file, classifies each `.replace(/…/)` pattern as a block or a line strip, and asserts the ordering inside every helper that does both — with a guard that the tripwire is not itself vacuous, and a check that the codebase still really does write a block opener inside a line comment (if it ever stops, the ordering rule can be relaxed).
+
+### What the closeout fixes changed
+
+| ID | Fix | Regression test |
+|---|---|---|
+| OCT-L1 | The tray renders inside the sticky footer's `aboveAction` slot; the expanded list is capped at `40vh`; Step 1's bottom reserve grew to `13rem`. | `guest-app/tests/api/mbux-02-03-step-1-rooms.test.ts` — 3 pins re-pointed + 2 added (the footer's `aboveAction` renders inside the `fixed` bar; the reserve grows) |
+| OCT-L2 | Both cart mutations write the cart and the URL from the event handler — no router write inside a state updater. | `guest-app/tests/api/oct-l2-l5-booking-page-closeout.test.ts` — 4 pins (the negative pin walks every `setRoomCart(` site and is guarded against passing vacuously) |
+| OCT-L3 | One shared `roundToTwoDecimals` rule; the total, the breakdown, every refund amount and the liability writer use it. | `shared/__tests__/oct-l3-money-rounding.test.ts` — 9 behavioural cases; `shared/__tests__/br-12-total-helper.test.ts` — 2 cases re-pointed, 1 added (the breakdown subtotal must equal the total) |
+| OCT-L4 | The guest remove op wraps `assertSelectionForChange` → 400 with `SELECTION_NOT_ORDERED`. | `guest-app/tests/api/oct-l4-l7-server-closeout.test.ts` — 4 pins (every call site wrapped; the outer catch is still a 500) |
+| OCT-L5 | A typed, normalized `breakfastConfig` read path — the `as any` is gone and `imageUrl` is declared. | `guest-app/tests/api/oct-l2-l5-booking-page-closeout.test.ts` — 10 cases (7 behavioural on the normalizer, 3 source pins) |
+| OCT-L7 | Walk-in create + reschedule + corporate convert validate with `isValidIsoDate`. | `guest-app/tests/api/oct-l4-l7-server-closeout.test.ts` — 5 pins (the rollover is pinned directly: `new Date("2026-02-31T00:00:00Z")` → `2026-03-03`) |
+| OCT-L8 | Every comment-strip helper strips LINE comments first, with the `[^:]`-guarded regex. | `guest-app/tests/api/oct-l7-strip-comments-order.test.ts` — 4 guards (walks every test file, classifies each `.replace(/…/)` pattern, asserts the ordering; includes a guard that the tripwire is not vacuous) |
+
+**Every tripwire was verified by deliberately breaking the fix** — reverting the 2dp total, unwrapping the remove-op assert, dropping the walk-in `isValidIsoDate` guard, moving the router write back into an updater, restoring the `as any` cast and dropping `imageUrl` from the normalizer each fail the suite.
+
 
 ---
 
@@ -502,7 +537,7 @@ Worse, the notice `<p>` sits **inside the `dates.map` body**, so it renders once
 | `BOOKING-FLOW.md:72` / GOTCHAS 10(e) — every date handed to the calendar is a `TZDate` pinned to the hotel zone | `timeZone` is pinned on `<DayPicker>`, but `isoToTzDate` builds our values in the **browser's** zone, so the cells and our values still disagree — for every guest ahead of Manila. **OCT-C4** |
 | `BOOKING-FLOW.md:66` — each adjustment names the limit that actually bound ("horizon-capped" / "nights-clamped") | The reasons exist in the resolver, but the URL seed (`BookingPage.tsx:471-476`) discards them, so neither hint is reachable from a deep link — a >30-night link is silently truncated with no explanation. **OCT-M1 (adjacent)** |
 | `BOOKING-FLOW.md:69` (MSL-01) — the cap is admin-editable | Server side fully correct on all three write paths. **Admin side broken** — the editor does not round-trip and a save rewrites the stored policy. **OCT-H3** |
-| `BOOKING-FLOW.md:76` — the create endpoint returns 400 for a non-ISO date | Rejects malformed strings; accepts calendar-impossible ones — `new Date("2026-02-31T00:00:00Z")` rolls over to Mar 3, so a booking is stored for a date the caller never sent. `stayRange.ts:35-40` documents this exact trap and the server doesn't use the helper. **LOW** |
+| `BOOKING-FLOW.md:76` — the create endpoint returns 400 for a non-ISO date | **CORRECTED by the closeout batch (2026-10-20, decision #299) — the original row pointed at the wrong endpoint.** The guest CREATE endpoint was never affected: it validates with the shared `isValidIsoDate` (`bookings.ts:1636`), which rejects calendar-impossible dates. But **three other date-accepting endpoints** used the raw `new Date(...)` + `isNaN(getTime())` pattern — and `new Date("2026-02-31T00:00:00Z")` **rolls over to Mar 3** rather than producing an Invalid Date, so that guard never fired for a calendar-impossible date: the **walk-in create** (`:4797`), the **reschedule** (`:12535`) and the **corporate inquiry→booking conversion** (`corporate-inquiries.ts:144`) all stored a booking for a day nobody entered. All three now validate with `isValidIsoDate` before the date arithmetic. **OCT-L7** |
 | `BOOKING-MOBILE-UX.md` MBUX-03 — "a compact cart tray above the footer **or as part of the action area**" | Tray is the last element of the page flow. **OCT-L1** |
 | `BOOKING-MOBILE-UX.md` MBUX-05 — the copy confirmation is a transient `role="status"` message | Never cleared; rendered once per date card. **OCT-M8** |
 | `BOOKING-MOBILE-UX.md` MBUX-04 — upload/remove is a working round-trip | Remove produces a Firestore-unwritable payload; upload is local-state-only until a separate Save. **OCT-H5 + OCT-H10** |
@@ -515,45 +550,60 @@ Worse, the notice `<p>` sits **inside the `dates.map` body**, so it renders once
 
 ## Documentation & process gaps
 
-### Step numbers are stale after the BR-09 renumbering
+### Step numbers are stale after the BR-09 renumbering — FIXED (2026-10-20, decision #299)
 BR-09 turned the flow into 5 explicit steps (1 Rooms · 2 Add-ons · 3 Guest details · 4 Review · 5 Confirmation — `BookingPage.tsx:152-158`, `:2722`, `:2879`, `:3228`). The October feature MDs written before it were never renumbered:
 
-- `plan/features/SPECIAL-REQUESTS.md` — 7 references to "Step 2" for the special-requests block. In code the block lives in the **guest-details** branch (`BookingPage.tsx:2874` opens it; `SpecialRequestsBlock` at `:3004`) = **Step 3**.
+- `plan/features/SPECIAL-REQUESTS.md` — 7 references to "Step 2" for the special-requests block. In code the block lives in the **guest-details** branch (`BookingPage.tsx:3106` opens it; `SpecialRequestsBlock` at `:3236`) = **Step 3**.
 - `plan/features/BREAKFAST.md:299` — "**Step 4 (confirmation):** the confirmation page + email render the breakfast section." Confirmation is now **Step 5**.
 - `plan/features/BREAKFAST.md:474` — "Step 3 review + Step 4 confirmation". Review is now Step 4, confirmation Step 5.
 
 `plan/features/OTHER-ADD-ONS.md` is correct (it was written post-BR-09 and says "Step 2 of 5").
 
-### Other October doc defects
-- `plan/features/OTHER-ADD-ONS.md` — says "5 new route handlers" in two places; there are **6** (`apiRouter.ts:1353, 1368, 1387, 1411, 1435, 1460` and six `addons-*.ts` handler files).
-- `plan/docs/BACKEND.md:308` — a broken link pointing at the Spark Rewards audit report under `plan/project/`; the file actually lives in `plan/docs/`. (`npm run docs:audit` reports it as a broken reference.)
-- `plan/features/OTHER-ADD-ONS.md` — missing the `> Requires:` header the repo's MD convention requires.
-- `admin-app/src/pages/SettingsPage.tsx:2936-2939` — the comment claims "The Reports late-change metric reads the same collection (via collectionGroup on a top-level `targetCollection: "addOns"` filter)". There is **no** `auditLogs` read anywhere in the admin app; the Reports late-change metric actually reads `bookings/*/otherAddOnAudit/*` (`ReportsPage.tsx:1560-1562`). `auditLogs` is a write-only collection — and one the rules deny.
-- `admin-app/src/pages/SettingsPage.tsx:6838-6847` — the comment claims the add-ons toggle has "a localStorage mirror"; it has none.
+**Status: FIXED (2026-10-20, decision #299).** All of the above were renumbered: `SPECIAL-REQUESTS.md` now says Step 3 throughout (with a note recording the renumbering and the in-code anchor), `BREAKFAST.md`'s review/confirmation sections are Step 4 / Step 5, and its corporate-parity line — which also predated BR-09 — is corrected to "Step 2 + Step 4" (the corporate flow was renumbered to the same five steps: `CorporateBookingPage.tsx:125`). One further stale reference was caught while fixing these: `BREAKFAST.md`'s edge case #12 described the pre-BR-09 "Step 1 / Step 2 split", which now reads "Step 1 collects dates + rooms + occupancy; Step 2 collects add-ons; Step 3 collects guest details + extras".
 
-### 21 decision records are cited but missing from `DECISIONS-FEATURES.md`
-The repo's workflow requires every decision to be filed as a numbered entry. **21 decision numbers cited in the October feature docs and the ROADMAP have no entry** in `plan/docs/DECISIONS-FEATURES.md`:
+### Other October doc defects — 1 fixed, 3 verified already correct (2026-10-20, decision #299)
+- `plan/features/OTHER-ADD-ONS.md` — says "5 new route handlers" in two places; there are **6** (`apiRouter.ts:1353, 1368, 1387, 1411, 1435, 1460` and six `addons-*.ts` handler files). **Already corrected** in the medium batch — the header now says "the 6 new routes".
+- `plan/docs/BACKEND.md:308` — a broken link pointing at the Spark Rewards audit report under `plan/project/`; the file actually lives in `plan/docs/`. **VERIFIED CLEAN — the finding was stale.** The link at `BACKEND.md:386` already points at `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md`, no repo-wide reference to `project/AUDIT-SPARK-REWARDS` exists, and `npm run docs:audit` does not report it. The line number had shifted (the audit read `:308`; the link is at `:386`).
+- `plan/features/OTHER-ADD-ONS.md` — missing the `> Requires:` header the repo's MD convention requires. **VERIFIED PRESENT** — the header was already there before the medium batch (`git show c0e959b:plan/features/OTHER-ADD-ONS.md`), so this finding was wrong.
+- `admin-app/src/pages/SettingsPage.tsx:2936-2939` — the comment claims "The Reports late-change metric reads the same collection (via collectionGroup on a top-level `targetCollection: "addOns"` filter)". There is **no** `auditLogs` read anywhere in the admin app; the Reports late-change metric actually reads `bookings/*/otherAddOnAudit/*` (`ReportsPage.tsx:520`, `collectionGroup(db, "otherAddOnAudit")`). **FIXED (2026-10-20, decision #299)** — the comment now states what each trail actually is, and corrects the "rules deny" claim (the rules block allows admins to read `auditLogs`; it is the *product* that never reads it).
+- `admin-app/src/pages/SettingsPage.tsx:6838-6847` — the comment claims the add-ons toggle has "a localStorage mirror"; it has none. **VERIFIED ACCURATE AGAIN** — the comment describes the *pre-OCT-M1* state ("It used to be a bare `useState(true)` — no Firestore read, no write, no localStorage mirror"), and OCT-M1 made the switch persist to Firestore. Nothing to change.
+
+### Decision records cited but missing from `DECISIONS-FEATURES.md` — FIXED (2026-10-20, decision #306)
+The repo's workflow requires every decision to be filed as a numbered entry. The audit originally listed **21 decision numbers** cited in the October feature docs and the ROADMAP with no entry in `plan/docs/DECISIONS-FEATURES.md`:
 
 `#135 #175 #181 #199 #200 #201 #203 #204 #208 #211 #212 #221 #222 #223 #224 #225 #237 #252 #254 #256 #257 #262`
 
-(#199–#204 and #135 predate October but are cited from the October MDs; the rest are October's own.)
+**That list was wrong in both directions** (it was computed against an older snapshot of the decisions file). The closeout re-computed it mechanically — every `| NNN |` row in `DECISIONS-FEATURES.md` against every `#NNN` citation across the repo:
 
-### The doc system is 19–24× over its own ceilings
-`npm run docs:audit` → **20 errors, 1 warning**:
+- **14 of the 21 were already filed** (`#199 #200 #201 #203 #204 #208 #211 #212 #237 #252 #254 #256 #257 #262`) — they landed with the criticals / highs / mediums batches, after the audit was written.
+- **The audit MISSED 19 numbers** that are genuinely cited but unfiled: `#136 #140 #153 #154 #155 #156 #157 #158 #174 #176 #220 #227 #233 #234 #236 #251` — plus 4 of the ones it did list.
+
+**Status: FIXED (2026-10-20, decision #306).** All **26** cited-but-unfiled numbers now have a row in `DECISIONS-FEATURES.md`, inserted in numeric order:
+
+`#135 #136 #140 #153 #154 #155 #156 #157 #158 #173 #174 #175 #176 #220 #221 #222 #223 #224 #225 #227 #232 #233 #234 #235 #236 #251`
+
+**A mechanical re-check now passes: every `#NNN` cited anywhere in the repo has a matching row.** Twelve numbers remain unfiled — `#133 #134 #143 #152 #160 #161 #162 #163 #240 #241 #242 #243` — but they are **cited nowhere** (they are reserved slots, not lost decisions), so nothing references a missing row.
+
+**One mis-citation was found and corrected.** The ROADMAP's ETR-R/D entry claimed "decisions #232 + #233 + #234 + #235 + #236" for the Environment-Test-Reset implementation — but those numbers are the **BR-03..BR-07 breakfast block** (#232 = the public breakfast config route, #233 = Manage Breakfast, #234 = mark-served + mark-refund-paid, #235 = the shared refund-write helper, #236 = the kitchen list). The ETR-R/D decisions were never filed at all; the ROADMAP line now says so instead of pointing at the wrong block. The uncited reservations `#240–#243` are the plausible slots but are **not confirmed** — they are flagged as unverified rather than asserted.
+
+### The doc system is 19–25× over its own ceilings — OPEN (the ratchet itself)
+`npm run docs:audit` → **18 errors, 1 warning** (the error count is the long-standing baseline; the warning is the always-read bundle):
 
 | File | Tokens | Ceiling | Over |
 |---|---|---|---|
-| `plan/docs/DECISIONS-FEATURES.md` | ~194,378 | 10,000 | **19×** |
-| `plan/project/ROADMAP.md` | ~146,270 | 6,000 | **24×** |
-| `plan/features/BOOKING-FLOW.md` | ~72,553 | 8,000 | 9× |
+| `plan/docs/DECISIONS-FEATURES.md` | ~209,718 | 10,000 | **21×** |
+| `plan/project/ROADMAP.md` | ~150,357 | 6,000 | **25×** |
+| `plan/features/BOOKING-FLOW.md` | ~73,169 | 8,000 | 9× |
 | `plan/features/SPARK-REWARDS.md` | ~22,499 | 8,000 | 2.8× |
 | `plan/features/BOOKINGS-MANAGEMENT.md` | ~24,152 | 8,000 | 3× |
 | `plan/docs/TYPES.md` | ~12,989 | 10,000 | 1.3× |
-| `plan/features/BREAKFAST.md` | ~13,251 | 8,000 | 1.7× |
-| `plan/features/BOOKING-MOBILE-UX.md` | ~9,660 | 8,000 | 1.2× |
+| `plan/features/BREAKFAST.md` | ~15,011 | 8,000 | 1.9× |
+| `plan/features/BOOKING-MOBILE-UX.md` | ~11,074 | 8,000 | 1.4× |
 | always-read bundle (CLAUDE.md + GOTCHAS.md) | ~20,907 | 10,000 | 2.1× |
 
-The whole active MD system is ~775,925 tokens. Every agent task pays this at the always-read stage. October's verbose "Recently shipped" ROADMAP entries and 40+ new decision entries drove the growth.
+**The closeout made this slightly worse and that is a deliberate, recorded trade-off.** Filing the 26 missing decision records added ~15,300 tokens to `DECISIONS-FEATURES.md` (194,378 → 209,718) and ~4,100 to the ROADMAP. The alternative was leaving 26 `per decision #NNN` citations dangling — an agent reading one would have no way to find out what the decision was, in a repo whose entire workflow is doc-driven. **This is the one finding the closeout deliberately did NOT fix**, because the fix is not a matter of writing faster: `DECISIONS-FEATURES.md` needs to be SPLIT (historical vs. active, per the file's own section headers) and the ROADMAP's enormous single "Last updated" header line needs the same treatment the audit report already has (a shipped-log table instead of one paragraph). Both are structural rewrites of the two files every agent task loads, and they are worth doing as their own piece of work — not as a side effect of an audit closeout.
+
+The whole active MD system is ~803,436 tokens. Every agent task pays this at the always-read stage. October's verbose "Recently shipped" ROADMAP entries and 40+ new decision entries drove the growth.
 
 ---
 

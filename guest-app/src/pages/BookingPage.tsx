@@ -156,6 +156,13 @@ import { useGuestAuth } from "../context/GuestAuthContext";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
+// Per OCT-L5 (2026-10-20, decision #299): the typed + normalized
+// read path for the booking page's local `breakfastConfig` state.
+import {
+  DEFAULT_BOOKING_BREAKFAST_CONFIG,
+  normalizeBreakfastConfig,
+  type BookingBreakfastConfig
+} from "../utils/breakfastConfig";
 import {
   parseBookingRoomCart,
   rebalanceGuestDistribution,
@@ -391,6 +398,7 @@ export function BookingPage() {
   // `true` (BIR-compliant) when the snapshot is missing.
   const vatEnabled = isVatEnabled(vatConfig);
   const currentStepKey = normalizeStepKey(searchParams.get("step"));
+  const isSelectRoomStep = currentStepKey === STEP_KEYS.selectRoom;
   const isAddOnsStep = currentStepKey === STEP_KEYS.addOns;
   const isGuestDetailsStep = currentStepKey === STEP_KEYS.guestDetails;
   const isReviewStep = currentStepKey === STEP_KEYS.review;
@@ -472,29 +480,16 @@ export function BookingPage() {
   // `GET /api/bookings/breakfast/config` route returns).
   // Defaults are the "breakfast is off" shape so the Step 2
   // section renders nothing before the config loads.
-  const [breakfastConfig, setBreakfastConfig] = useState<{
-    isEnabled: boolean;
-    // Per BR-10 (decision #244 reserved, 2026-10-14 —
-    // Phase 14): the cut-off enforcement toggle is
-    // optional on the local state (the Firestore
-    // snapshot may pre-date BR-10), so a missing /
-    // `undefined` field defaults to `true` on every
-    // read site (`!== false` pattern). The setting is
-    // also forwarded to `computeBreakfastCutoffState`
-    // inside `renderBreakfastSection`.
-    cutoffsEnabled?: boolean;
-    cutoffTime?: string;
-    cutoffTimezone?: string;
-    defaultMealInstructions?: string;
-    meals?: Array<{ id: string; name: string; description?: string; price: number; displayOrder?: number; isActive?: boolean }>;
-  }>({
-    isEnabled: false,
-    cutoffsEnabled: true,
-    cutoffTime: "20:00",
-    cutoffTimezone: "Asia/Manila",
-    defaultMealInstructions: "",
-    meals: []
-  });
+  //
+  // Per OCT-L5 (2026-10-20, decision #299): the state is TYPED
+  // and the read path NORMALIZES instead of casting. The old
+  // inline shape omitted `imageUrl` (the MBUX-04 meal thumbnail
+  // `BreakfastMenuStrip` renders) and the field survived only
+  // through an `as any` cast on the Firestore snapshot — one type
+  // edit away from silently dropping every meal photo.
+  const [breakfastConfig, setBreakfastConfig] = useState<BookingBreakfastConfig>(
+    DEFAULT_BOOKING_BREAKFAST_CONFIG
+  );
   const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
   const seniorPwdOnlineEnabled = hotelConfig?.seniorPwdOnlineEnabled !== false;
@@ -1392,7 +1387,11 @@ export function BookingPage() {
       try {
         const bSnap = await getDoc(doc(db, "settings", "breakfastConfig"));
         if (bSnap.exists()) {
-          setBreakfastConfig(bSnap.data() as any);
+          // Per OCT-L5 (2026-10-20, decision #299): normalized, not
+          // cast. The typed shape carries `imageUrl`, so the MBUX-04
+          // meal thumbnails reach `BreakfastMenuStrip` on a typed
+          // path instead of surviving through an `as any`.
+          setBreakfastConfig(normalizeBreakfastConfig(bSnap.data()));
         }
         const rSnap = await getDoc(doc(db, "settings", "rewardsConfig"));
         if (rSnap.exists()) {
@@ -1608,34 +1607,47 @@ export function BookingPage() {
   function updateRoomQuantity(typeValue: string, nextQuantity: number, maxQuantity: number) {
     const safeQuantity = Math.min(Math.max(Math.floor(nextQuantity), 0), maxQuantity);
     setSelectedRoomType(typeValue);
-    setRoomCart((current) => {
-      const matching = current.filter((room) => room.roomType === typeValue);
-      const other = current.filter((room) => room.roomType !== typeValue);
-      const templateChoice = matching[0]?.rateChoice ?? rateChoice;
-      // Per EXB-12: preserve the extra-bed breakfast toggle
-      // from the first matching room (the user's pick applies
-      // to every room of this type — same per-type mirror
-      // pattern as `extraBedCount` and `rateChoice`).
-      const resized = Array.from({ length: safeQuantity }, (_, index) =>
-        matching[index] ?? {
-          bookingId: doc(collection(db, "bookings")).id,
-          roomType: typeValue,
-          rateChoice: templateChoice,
-          numAdults: 0,
-          numChildren: 0,
-          extraBedCount: 0
-          // Per BR-08: `extraBedBreakfast` removed from the
-          // cart shape (extra-bed occupants are ordinary meal
-          // slots in Step 2).
-        }
-      );
-      const next = [...other, ...resized];
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("rooms", serializeBookingRoomCart(next));
-      nextParams.set("roomType", typeValue);
-      setSearchParams(nextParams, { replace: true });
-      return next;
-    });
+    // Per OCT-L2 (2026-10-20, decision #299): the URL write moved
+    // OUT of the state updater.
+    //
+    // The previous shape called `setSearchParams` from inside the
+    // `setRoomCart` updater. A state updater runs during React's
+    // render phase, so dispatching a router update from one is a
+    // render-phase side effect: React 19 warns about it, and the
+    // app runs `<React.StrictMode>`, which double-invokes the
+    // updater in dev (the URL write is idempotent, so nothing
+    // corrupted — but the warning and the double-invocation sat on
+    // the hot quantity-change path).
+    //
+    // Both writes now happen in the event handler: the cart is
+    // derived from the current `roomCart` value, then the cart and
+    // the URL are written in that order.
+    const matching = roomCart.filter((room) => room.roomType === typeValue);
+    const other = roomCart.filter((room) => room.roomType !== typeValue);
+    const templateChoice = matching[0]?.rateChoice ?? rateChoice;
+    // Per EXB-12: preserve the extra-bed breakfast toggle
+    // from the first matching room (the user's pick applies
+    // to every room of this type — same per-type mirror
+    // pattern as `extraBedCount` and `rateChoice`).
+    const resized = Array.from({ length: safeQuantity }, (_, index) =>
+      matching[index] ?? {
+        bookingId: doc(collection(db, "bookings")).id,
+        roomType: typeValue,
+        rateChoice: templateChoice,
+        numAdults: 0,
+        numChildren: 0,
+        extraBedCount: 0
+        // Per BR-08: `extraBedBreakfast` removed from the
+        // cart shape (extra-bed occupants are ordinary meal
+        // slots in Step 2).
+      }
+    );
+    const next = [...other, ...resized];
+    setRoomCart(next);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("rooms", serializeBookingRoomCart(next));
+    nextParams.set("roomType", typeValue);
+    setSearchParams(nextParams, { replace: true });
   }
 
   // Per EXB-11 (2026-08-04, per decision #186): the per-type
@@ -1655,18 +1667,18 @@ export function BookingPage() {
   // is needed.
   function updateExtraBedCount(typeValue: string, nextCount: number, maxCount: number) {
     const safeCount = Math.min(Math.max(Math.floor(nextCount), 0), Math.max(0, Math.floor(maxCount)));
-    setRoomCart((current) => {
-      if (!current.some((room) => room.roomType === typeValue)) return current;
-      const next = current.map((room) =>
-        room.roomType === typeValue
-          ? { ...room, extraBedCount: safeCount }
-          : room
-      );
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("rooms", serializeBookingRoomCart(next));
-      setSearchParams(nextParams, { replace: true });
-      return next;
-    });
+    // Per OCT-L2 (2026-10-20, decision #299): the URL write moved
+    // OUT of the state updater — see `updateRoomQuantity` above.
+    if (!roomCart.some((room) => room.roomType === typeValue)) return;
+    const next = roomCart.map((room) =>
+      room.roomType === typeValue
+        ? { ...room, extraBedCount: safeCount }
+        : room
+    );
+    setRoomCart(next);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("rooms", serializeBookingRoomCart(next));
+    setSearchParams(nextParams, { replace: true });
   }
 
   // Per BR-08 (decision #238, 2026-10-14 — close-out): the
@@ -2269,8 +2281,20 @@ export function BookingPage() {
   // Per MBUX-01: the bottom reserve matches the sticky footer's
   // own safe-area padding, so the last interactive element is never
   // hidden behind the fixed bar on a notched iPhone.
+  //
+  // Per OCT-L1 (2026-10-20, decision #299): Step 1's footer carries
+  // the mobile cart tray, so it is ~5rem taller than the other steps'
+  // footers. The reserve has to grow with it — otherwise the fixed
+  // bar covers the last room card on a phone.
   const bookingShell = (content: React.ReactNode) => (
-    <main className="min-h-screen bg-gray-50 pb-[calc(8rem+env(safe-area-inset-bottom))] font-body text-gray-900">
+    <main
+      className={cn(
+        "min-h-screen bg-gray-50 font-body text-gray-900",
+        isSelectRoomStep
+          ? "pb-[calc(13rem+env(safe-area-inset-bottom))]"
+          : "pb-[calc(8rem+env(safe-area-inset-bottom))]"
+      )}
+    >
       <BookingHeader backTo={getBackToPath()} />
       {/* In-flow hold (Steps 2 + 3 countdown banner). Only
           renders when the user is past Step 1 and the URL
@@ -5189,24 +5213,32 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
         </div>
       </section>
 
-      {/* Per MBUX-03: the mobile multi-room cart tray. Gated to
-          `lg:hidden` because from `lg:` up the sticky sidebar already
-          renders the full cart — showing both would put the same lines
-          on screen twice. Sits directly above the sticky footer: it is
-          the only region a thumb reaches and the only region that does
-          not scroll away, which is what makes the MBUX-02 card-level
-          selection trustworthy on a phone. */}
-      <div className="mx-auto max-w-7xl px-4 pb-4 lg:hidden">
-        <RoomCartTray
-          rooms={distributedRoomCart}
-          roomTypes={roomTypes}
-          formatTotal={formatPrice}
-          aggregateTotal={displayTotal}
-          fitComplete={cartDistributionComplete}
-        />
-      </div>
+      {/* Per OCT-L1 (2026-10-20, decision #299): the mobile
+          multi-room cart tray (MBUX-03) now renders INSIDE the
+          fixed sticky footer, via the footer's `aboveAction` slot.
 
+          It used to be the last element of this page body. The
+          footer is `fixed`, so the tray scrolled away while the
+          footer stayed pinned — on a phone with 4+ room types the
+          guest tapped "+" and got no aggregate feedback near the
+          thumb. The tray's own docstring already claimed it lived
+          "above the sticky footer"; this makes that true.
+
+          It stays gated to `lg:hidden` because from `lg:` up the
+          sticky sidebar already renders the full cart — showing
+          both would put the same lines on screen twice. */}
       <BookingStickyFooter
+        aboveAction={
+          <div className="lg:hidden">
+            <RoomCartTray
+              rooms={distributedRoomCart}
+              roomTypes={roomTypes}
+              formatTotal={formatPrice}
+              aggregateTotal={displayTotal}
+              fitComplete={cartDistributionComplete}
+            />
+          </div>
+        }
         summary={
           <>
             <p className="text-sm text-gray-600">

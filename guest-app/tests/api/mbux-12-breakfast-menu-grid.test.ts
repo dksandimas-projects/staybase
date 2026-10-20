@@ -29,7 +29,15 @@ function read(relativePath: string): string {
 // tokens must not accidentally satisfy a negative regex. Same
 // pattern as `mbux-01-booking-shell.test.ts`.
 function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  // LINE comments first, THEN block comments. The order matters.
+  //
+  // A `//` comment may contain `/*` — the booking page literally has
+  // one ("Guest clients cannot read `bookings/*` directly"). Stripping
+  // blocks FIRST treated that as a block opener and swallowed the next
+  // ~170 lines of REAL code, which made every source-text pin inside
+  // that window silently vacuous — and made a new pin fail for no
+  // visible reason.
+  return source.replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 const stripSrc = read("guest-app/src/components/BreakfastMenuStrip.tsx");

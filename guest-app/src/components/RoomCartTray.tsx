@@ -24,10 +24,16 @@ interface RoomCartTrayProps {
  * phone. The desktop sidebar already answered this question; mobile
  * did not. The tray is that answer at phone widths.
  *
- * **Why it lives above the sticky footer.** That is the only region a
- * thumb reaches and the only region that is never scrolled away from.
- * Putting the tray in the page body would make it scroll off, which is
- * exactly the regression MBUX-01 just fixed elsewhere.
+ * **Why it lives in the sticky footer's action area.** That is the only
+ * region a thumb reaches and the only region that is never scrolled away
+ * from. Putting the tray in the page body would make it scroll off, which
+ * is exactly the regression MBUX-01 just fixed elsewhere.
+ *
+ * Per OCT-L1 (2026-10-20, decision #299): the tray renders inside
+ * `BookingStickyFooter`'s `aboveAction` slot, so it is pinned with the
+ * footer instead of scrolling past it. The expanded lines are capped at
+ * `40vh` and scroll internally — inside a fixed bar an uncapped list
+ * would grow the footer until it swallowed the screen.
  *
  * **Grouped, never positional.** The expanded lines are the same
  * `<RoomCartLines>` component the desktop sidebar renders, so the tray
@@ -78,7 +84,11 @@ export function RoomCartTray({ rooms, roomTypes, formatTotal, aggregateTotal, fi
           <ChevronDown size={18} className="shrink-0 text-gray-500" aria-hidden />
         )}
       </button>
-      <div id="room-cart-tray-lines" hidden={!isExpanded}>
+      <div
+        id="room-cart-tray-lines"
+        hidden={!isExpanded}
+        className="max-h-[40vh] overflow-y-auto"
+      >
         <RoomCartLines rooms={rooms} roomTypes={roomTypes} idPrefix="cart-tray-line" />
       </div>
     </div>

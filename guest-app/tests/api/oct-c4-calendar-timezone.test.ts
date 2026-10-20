@@ -101,10 +101,8 @@ describe("OCT-C4 — the calendar builds its dates in the hotel's timezone", () 
     // Strip comments so the pins match CODE only — the fix's
     // explanatory comment quotes the old construction verbatim.
     const code = pickerSrc
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .map((line) => line.replace(/\/\/.*$/, ""))
-      .join("\n");
+      .replace(/(^|[^:])\/\/.*$/gm, "$1")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
 
     it("does not build a TZDate from a date-time STRING", () => {
       // The string form is parsed in the browser's zone.
@@ -129,10 +127,8 @@ describe("OCT-H2 — the booking flow's breakfast dates use the UTC anchor", () 
     resolve(__dirname, "../../src/pages/BookingPage.tsx"),
     "utf8"
   )
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
 
   it("parses the stay dates with a `Z` anchor", () => {
     // A local-time parse + a UTC format shifts the list back one

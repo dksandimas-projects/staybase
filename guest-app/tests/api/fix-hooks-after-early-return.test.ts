@@ -29,8 +29,8 @@ const booking = readFileSync(
  *  defeated by a comment that documents a moved hook. */
 function codeOnly(src: string): string {
   return src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[ \t]*\/\/.*$/gm, "");
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 const code = codeOnly(booking);

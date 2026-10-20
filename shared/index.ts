@@ -96,6 +96,12 @@ export * from "./utils/otherAddOnTotal";
 export * from "./utils/otherAddOnDrafts";
 export * from "./utils/addOns";
 
+// Per OCT-L3 (2026-10-20, decision #299): the single shared
+// money-rounding rule (`roundToTwoDecimals`). Lives in its own module
+// so the other-add-on path, the refund liability and the breakfast
+// path can never drift onto different rounding rules again.
+export * from "./utils/money";
+
 // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
 // decision pending): Zod schema + inferred types for the
 // `settings/rewardsConfig` document + `LevelDef` row. Used by

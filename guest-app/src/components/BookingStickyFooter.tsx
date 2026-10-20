@@ -13,6 +13,19 @@ interface BookingStickyFooterProps {
    * squeezing the primary action.
    */
   detail?: ReactNode;
+  /**
+   * Optional full-width strip rendered ABOVE the summary/action row,
+   * INSIDE the fixed bar.
+   *
+   * Per OCT-L1 (2026-10-20, decision #299): this is the slot the
+   * mobile multi-room cart tray (MBUX-03) moved into. The tray used to
+   * be the last element of the Step 1 page body, so it scrolled away
+   * while the footer stayed pinned — on a phone with 4+ room types the
+   * guest tapped "+" and got no aggregate feedback near the thumb.
+   * MBUX-03 allows "above the footer **or as part of the action area**";
+   * this slot IS the action area, so the tray is now always reachable.
+   */
+  aboveAction?: ReactNode;
   className?: string;
 }
 
@@ -51,7 +64,7 @@ interface BookingStickyFooterProps {
  * context-aware action" is a behaviour change and belongs to its own
  * task, not to a layout extraction.
  */
-export function BookingStickyFooter({ summary, children, detail, className }: BookingStickyFooterProps) {
+export function BookingStickyFooter({ summary, children, detail, aboveAction, className }: BookingStickyFooterProps) {
   return (
     <div
       className={cn(
@@ -60,6 +73,9 @@ export function BookingStickyFooter({ summary, children, detail, className }: Bo
         className
       )}
     >
+      {aboveAction ? (
+        <div className="mx-auto w-full max-w-7xl pb-3">{aboveAction}</div>
+      ) : null}
       <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">{summary}</div>
         <div className="w-full sm:w-auto sm:min-w-56">{children}</div>

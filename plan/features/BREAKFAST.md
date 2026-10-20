@@ -305,13 +305,13 @@ The existing tab (`admin-app/src/pages/SettingsPage.tsx:2658+`) is extended. No 
 - Discounts apply per the **discount scope matrix** (`plan/features/SETTINGS.md §4`): if "Senior/PWD includes breakfast" is on (the default), the 20% off applies to the breakfast subtotal too; if off, only the room subtotal gets the discount. Same for voucher + member + corporate.
 - The "No meal — skip" choice is FREE and explicit in the dropdown (placeholder text), but the underlying data is "no entry" — not a ₱0 entry.
 
-**Step 3 (review):** the existing review page gains the breakfast section, rendered from `breakfastSelections`. Total matches the sidebar exactly. The cutoff countdown per date is also shown here.
+**Step 4 (review):** the existing review page gains the breakfast section, rendered from `breakfastSelections`. Total matches the sidebar exactly. The cutoff countdown per date is also shown here.
 
-**Step 4 (confirmation):** the confirmation page + email render the breakfast section. See `§Email / PDF / Receipt`.
+**Step 5 (confirmation):** the confirmation page + email render the breakfast section. See `§Email / PDF / Receipt`.
 
 **Walk-in flow parity:** the admin walk-in modal at `BookingsPage.tsx` (and `CalendarPage.tsx`'s create modal) gains the same breakfast section, populated from the same `meals` catalog. The staff entry is `addedBy: staffUid`, `actorRole: "front-desk"`, and never needs the "override" reason at creation time (it's not yet a cut-off violation at the moment of walk-in creation).
 
-**Corporate flow parity:** the corporate flow at `guest-app/src/pages/CorporateBookingPage.tsx` follows the same Step 2 + Step 3 shape. The corporate rate + access-code flow is unchanged; only the breakfast add-on is added.
+**Corporate flow parity:** the corporate flow at `guest-app/src/pages/CorporateBookingPage.tsx` follows the same Step 2 + Step 4 shape. The corporate rate + access-code flow is unchanged; only the breakfast add-on is added.
 
 ---
 
@@ -438,7 +438,7 @@ The 8 W4.4 audit-extension email templates (per `plan/features/EMAIL-AUDIT-EXTEN
 9. **Cutoff timezone change after a guest has ordered** — the guest's existing `cutoffForDate` was computed at order time using the THEN-current cut-off; the new timezone applies to all FUTURE cuts for the same booking. (No re-stamping of historical cut-offs.)
 10. **A booking that was `confirmed` but the payment is reversed (chargeback)** — the existing LOU flag at `booking.louReceived` is set; the breakfast order is not auto-cancelled (the kitchen still has to feed the guest); the refund liability from any prior remove is unchanged. If the operator wants to cancel the breakfast too, they remove the meals manually with an override reason.
 11. **Rate breakdown (`BookingRateBreakdown`)** — the existing rate breakdown helper in `guest-app/server/lib/rate-breakdown.ts` gains a `breakfast` sub-block carrying `{ selections: BreakfastSelectionEntry[], total: number }`. The per-room `rateBreakdown` mirrors this for display in the room's own line; the reservation aggregate uses the same.
-12. **The Step 1 / Step 2 split in production today** — Step 1 collects dates + rooms + occupancy; Step 2 collects guest details + extras. The breakfast section goes in Step 2 (per the design discussion). The Step 1 sidebar that previously showed a "Room + Breakfast" total now shows just the room total; the Step 2 sidebar shows the room total + breakfast + discounts.
+12. **The Step 1 / Step 2 split in production today** — Step 1 collects dates + rooms + occupancy; Step 2 collects add-ons (breakfast + other add-ons); Step 3 collects guest details + extras. The breakfast section goes in Step 2 (per the design discussion). The Step 1 sidebar that previously showed a "Room + Breakfast" total now shows just the room total; the Step 2 sidebar shows the room total + breakfast + discounts.
 
 ---
 
@@ -487,7 +487,7 @@ The 8 W4.4 audit-extension email templates (per `plan/features/EMAIL-AUDIT-EXTEN
   - New "Breakfast" section in Step 2 with per-date × per-guest meal grid
   - Live sidebar update with breakfast subtotal + per-date breakdown
   - Discount application per the scope matrix
-  - Step 3 review + Step 4 confirmation render the new shape
+  - Step 4 review + Step 5 confirmation render the new shape
   - Server-side `handleCreateBooking` writes the new `breakfastSelections` + `breakfastTotal`
 
 - **BR-04** — Guest Manage Breakfast page ✅ shipped 2026-10-13

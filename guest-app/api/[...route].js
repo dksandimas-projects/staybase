@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.0";
+    VERSION2 = "2.18.1";
   }
 });
 
@@ -224714,6 +224714,18 @@ var init_breakfastCutoff = __esm({
   }
 });
 
+// ../shared/utils/money.ts
+function roundToTwoDecimals(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+var init_money = __esm({
+  "../shared/utils/money.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/otherAddOnTotal.ts
 function recomputeOtherAddOnTotal(selections) {
   if (!selections) return 0;
@@ -224729,7 +224741,7 @@ function recomputeOtherAddOnTotal(selections) {
       total += price * qty;
     }
   }
-  return Math.round(total);
+  return roundToTwoDecimals(total);
 }
 function otherAddOnBreakdownByDate(selections) {
   if (!selections) return [];
@@ -224751,7 +224763,7 @@ function otherAddOnBreakdownByDate(selections) {
       }
     }
     if (n2 > 0) {
-      rows.push({ date, subtotal: Math.round(s4), itemCount: n2 });
+      rows.push({ date, subtotal: roundToTwoDecimals(s4), itemCount: n2 });
     }
   }
   return rows;
@@ -224785,6 +224797,7 @@ function parseOtherAddOnSelectionKey(key) {
 var init_otherAddOnTotal = __esm({
   "../shared/utils/otherAddOnTotal.ts"() {
     "use strict";
+    init_money();
   }
 });
 
@@ -224892,7 +224905,7 @@ function redateOtherAddOnSelections(input) {
         continue;
       }
       const quantity = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      const amount = Math.round(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
+      const amount = roundToTwoDecimals(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
       const wasPaid = amount > 0 && remainingPaid >= amount;
       if (wasPaid) remainingPaid -= amount;
       removed.push({
@@ -224925,6 +224938,7 @@ var init_bookingAddOnReschedule = __esm({
     "use strict";
     init_breakfastTotal();
     init_otherAddOnTotal();
+    init_money();
   }
 });
 
@@ -225529,6 +225543,7 @@ __export(shared_exports, {
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   resolveRangeSelection: () => resolveRangeSelection,
+  roundToTwoDecimals: () => roundToTwoDecimals,
   runBackfill: () => runBackfill,
   scaleIn: () => scaleIn,
   serviceDateFromSlotKey: () => serviceDateFromSlotKey,
@@ -225606,6 +225621,7 @@ var init_shared = __esm({
     init_otherAddOnTotal();
     init_otherAddOnDrafts();
     init_addOns();
+    init_money();
     init_rewardsConfig();
   }
 });
@@ -230655,7 +230671,7 @@ function createOtherAddOnRefundLiability(input) {
   const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
   const qty = Math.max(0, Math.floor(Number(addOnEntry.quantity) || 0));
   const unitPrice = Math.max(0, Number(addOnEntry.priceSnapshot) || 0);
-  const totalAmount = Math.abs(Number(amount || 0)) || unitPrice * qty;
+  const totalAmount = roundToTwoDecimals(Math.abs(Number(amount || 0)) || unitPrice * qty);
   const refundRecord = {
     id: refundId,
     bookingId: booking.id,
@@ -231799,6 +231815,9 @@ async function handleCreateBooking(req, res) {
   }
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -233663,6 +233682,9 @@ async function handleCreateWalkin(req, res) {
   const walkinRoomCount = walkinRoomLines.length;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -237904,6 +237926,9 @@ async function handleRescheduleBooking(req, res) {
   const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId, mode } = parsedReschedule.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -239690,6 +239715,9 @@ async function handleConvertInquiryToBooking(req, res) {
   } = parsed2.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -244346,13 +244374,18 @@ async function handleUpdateAddOns(req, res) {
           opCode = `SERVE_BLOCKED:${op.selectionKey}`;
           return;
         }
-        assertSelectionForChange(next, op.selectionKey);
+        try {
+          assertSelectionForChange(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+          return;
+        }
         const dateKey2 = parsedKey.date;
         const prior = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
         if (!prior) continue;
         const quantity = Math.max(0, Math.floor(Number(prior.quantity) || 0));
         const price = Math.max(0, Number(prior.priceSnapshot) || 0);
-        const totalAmt = price * quantity;
+        const totalAmt = roundToTwoDecimals(price * quantity);
         const marked = {
           ...prior,
           removedAt: nowIso,
@@ -244754,7 +244787,7 @@ async function handleStaffUpdateAddOns(req, res) {
           if (!prior2) return true;
           const price = Math.max(0, Number(prior2.priceSnapshot) || 0);
           const quantity = Math.max(0, Math.floor(Number(prior2.quantity) || 0));
-          const totalAmt = price * quantity;
+          const totalAmt = roundToTwoDecimals(price * quantity);
           const marked = {
             ...prior2,
             removedAt: nowIso,

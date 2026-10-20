@@ -35,10 +35,8 @@ const handlerSrc = readFileSync(
 
 function codeOnly(src: string): string {
   return src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 const code = codeOnly(handlerSrc);

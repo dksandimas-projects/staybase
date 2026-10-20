@@ -14,6 +14,7 @@
 // selection map.
 
 import type { OtherAddOnSelectionEntry } from "../types";
+import { roundToTwoDecimals } from "./money";
 
 /**
  * Recompute the booking's other-add-on total from the raw
@@ -23,6 +24,22 @@ import type { OtherAddOnSelectionEntry } from "../types";
  *
  * Returns `0` for `null` / `undefined` input (pre-BR-12
  * bookings).
+ *
+ * Per OCT-L3 (2026-10-20, decision #299): the result is rounded to 2
+ * decimal places via the shared `roundToTwoDecimals` rule — the same
+ * rule breakfast and the folio use.
+ *
+ * **What was wrong.** This used `Math.round(total)` — whole pesos —
+ * while the refund liability for the SAME selection is computed at
+ * full precision (`price * quantity`). A ₱499.99 add-on therefore
+ * billed ₱500 but refunded ₱499.99: the hotel asked for a peso it
+ * never charged, and the guest's refund and bill never reconciled.
+ *
+ * **Why this is safe.** The stored total moves by at most ₱0.50 per
+ * booking, and the DISPLAY is unaffected: both apps' `formatPrice`
+ * uses `maximumFractionDigits: 0`, so a ₱499.99 total has always
+ * rendered as "₱500" on screen. Breakfast already stores 2dp and
+ * displays 0dp — this makes the other add-ons behave the same way.
  */
 export function recomputeOtherAddOnTotal(
   selections: Record<string, OtherAddOnSelectionEntry[]> | null | undefined
@@ -40,7 +57,7 @@ export function recomputeOtherAddOnTotal(
       total += price * qty;
     }
   }
-  return Math.round(total);
+  return roundToTwoDecimals(total);
 }
 
 /**
@@ -80,7 +97,10 @@ export function otherAddOnBreakdownByDate(
       }
     }
     if (n > 0) {
-      rows.push({ date, subtotal: Math.round(s), itemCount: n });
+      // Per OCT-L3 (2026-10-20, decision #299): 2dp, matching
+      // `recomputeOtherAddOnTotal` — the breakdown rows must sum to the
+      // total, so they have to round identically.
+      rows.push({ date, subtotal: roundToTwoDecimals(s), itemCount: n });
     }
   }
   return rows;

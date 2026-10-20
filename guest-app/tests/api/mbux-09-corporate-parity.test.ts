@@ -44,7 +44,7 @@ const publicPage = readFileSync(
 /** Source with comments removed, so a comment naming a deleted
  *  control cannot satisfy (or trip) a code pin. */
 function codeOnly(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  return src.replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 const corporateCode = codeOnly(corporate);

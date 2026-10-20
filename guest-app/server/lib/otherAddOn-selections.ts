@@ -30,6 +30,7 @@ import {
   hasAnyOtherAddOns,
   buildOtherAddOnSelectionKey,
   parseOtherAddOnSelectionKey,
+  roundToTwoDecimals,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -285,7 +286,12 @@ export function createOtherAddOnRefundLiability(
 
   const qty = Math.max(0, Math.floor(Number(addOnEntry.quantity) || 0));
   const unitPrice = Math.max(0, Number(addOnEntry.priceSnapshot) || 0);
-  const totalAmount = Math.abs(Number(amount || 0)) || unitPrice * qty;
+  // Per OCT-L3 (2026-10-20, decision #299): the liability amount
+  // uses the same 2dp rule as the billed total. Before this, the
+  // liability was left at full precision while the total was rounded
+  // to whole pesos — so a ₱499.99 add-on billed ₱500 but refunded
+  // ₱499.99. The refund and the bill now reconcile exactly.
+  const totalAmount = roundToTwoDecimals(Math.abs(Number(amount || 0)) || unitPrice * qty);
 
   const refundRecord: Record<string, any> = {
     id: refundId,

@@ -76,6 +76,7 @@ import type {
 } from "../types/index";
 import { recomputeBreakfastTotal } from "./breakfastTotal";
 import { recomputeOtherAddOnTotal } from "./otherAddOnTotal";
+import { roundToTwoDecimals } from "./money";
 
 /**
  * A stay's window. `checkIn` is inclusive, `checkOut` is
@@ -355,7 +356,10 @@ export function redateOtherAddOnSelections(
         continue;
       }
       const quantity = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      const amount = Math.round(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
+      // Per OCT-L3 (2026-10-20, decision #299): the auto-cancel
+      // refund uses the shared 2dp money rule, so it matches the
+      // billed total exactly (it used `Math.round` — whole pesos).
+      const amount = roundToTwoDecimals(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
       const wasPaid = amount > 0 && remainingPaid >= amount;
       if (wasPaid) remainingPaid -= amount;
       removed.push({

@@ -628,8 +628,8 @@ describe("Hero text legibility — darker overlay + drop-shadow on all 4 heroes"
     // migration note in the new code (which mentions the old
     // value) doesn't trip the assertion.
     const heroSection = sources.homepage
+      .replace(/(^|[^:])\/\/.*$/gm, "$1")
       .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/[^\n]*/g, "")
       .match(/<section[\s\S]*?<\/section>/);
     expect(heroSection, "homepage must have a hero <section>").toBeTruthy();
     expect(heroSection![0]).not.toMatch(/bg-gray-950\/45/);

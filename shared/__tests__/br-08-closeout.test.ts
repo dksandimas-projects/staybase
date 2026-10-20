@@ -59,11 +59,20 @@ function readFileSafe(filePath: string): string {
 // toolchain, which is overkill for these tripwires.
 function stripComments(source: string): string {
   return source
+    // LINE comments FIRST, then block comments. The order matters.
+    //
+    // A `//` comment may contain `/*` — the booking page literally
+    // has one ("Guest clients cannot read `bookings/*` directly").
+    // Stripping blocks FIRST treated that as a block opener and
+    // swallowed the next ~170 lines of REAL code, which made every
+    // source-text pin inside that window silently vacuous.
+    //
+    // Line comments — `// ...` to the line end. The `[^:]` guard
+    // keeps a `//` inside a URL (`https://`) from eating the line.
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
     // Block comments — `/* ... */` (greedy enough for our
     // single-line JSDoc tags + any nested `*` lines).
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    // Line comments — `// ...` to the line end.
-    .replace(/^\s*\/\/.*$/gm, "");
+    .replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 describe("BR-08 — Close-out tripwires (shared)", () => {

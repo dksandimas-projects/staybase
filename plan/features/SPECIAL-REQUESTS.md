@@ -4,7 +4,7 @@
 
 ## Why
 
-The public booking Step 2 + the corporate Step 2 collected no in-flow preferences before this PR. The `Booking.specialRequests` free-text field was retired from the public form on `feat/special-requests-redirect` (2026-08-21) — the guest now sees a "Need something special? Reach out" redirect card pointing at the hotel email / phone. That worked for the staff-captured free-text path but left a real gap: guests have structured preferences (twin vs large bed, high-floor, quiet room, airport transfer) that the front desk cares about, and there's no booking-time surface to capture them. Owner-requested 2026-10-12 (concurrent with the dev cutover); implemented on `feature/special-requests-bed-setup`, v1.7.2 → v1.8.0.
+The public booking Step 3 + the corporate Step 3 collected no in-flow preferences before this PR. The `Booking.specialRequests` free-text field was retired from the public form on `feat/special-requests-redirect` (2026-08-21) — the guest now sees a "Need something special? Reach out" redirect card pointing at the hotel email / phone. That worked for the staff-captured free-text path but left a real gap: guests have structured preferences (twin vs large bed, high-floor, quiet room, airport transfer) that the front desk cares about, and there's no booking-time surface to capture them. Owner-requested 2026-10-12 (concurrent with the dev cutover); implemented on `feature/special-requests-bed-setup`, v1.7.2 → v1.8.0.
 
 ## Decisions
 
@@ -65,7 +65,9 @@ The create handler cross-references every field against the live `settings/hotel
 2. Every key in `additionalPreferences` must be in `bookingPreferences[].value`. Invalid → `400` with the offending keys listed.
 3. `expectedArrivalTime` must be one of the options `buildArrivalTimeOptions(hotelConfig.checkInTime)` produces (the same helper the guest dropdown uses — they can never drift apart). `null` is always accepted. Invalid → `400`.
 
-## Step 2 UI (guest + corporate)
+## Step 3 UI (guest + corporate)
+
+> **Step numbering (2026-10-20):** the block lives in the **guest-details** step. BR-09 turned the flow into five explicit steps (1 Rooms · 2 Add-ons · 3 Guest details · 4 Review · 5 Confirmation) — in both the public and the corporate flow — and this section was written before that renumbering, so its "Step 2" references were stale. In code the block renders inside the `isGuestDetailsStep` branch (`guest-app/src/pages/BookingPage.tsx:3106` opens it, `:3236` renders `<SpecialRequestsBlock />`), which is Step 3.
 
 A single shared `<SpecialRequestsBlock />` component renders:
 
@@ -83,7 +85,7 @@ A single shared `<SpecialRequestsBlock />` component renders:
 | Commit | Surface | Files |
 |---|---|---|
 | **SR-01** | Admin: Booking Preferences tab + Room Types bedSetupValues editor | `shared/constants/index.ts`, `shared/schemas/bookingPreferences.ts`, `admin-app/src/context/AdminContext.tsx`, `admin-app/src/pages/SettingsPage.tsx` |
-| **SR-02** | Guest + corporate Step 2 UI | `guest-app/src/components/SpecialRequestsBlock.tsx`, `guest-app/src/hooks/useRoomTypes.ts`, `guest-app/src/hooks/usePublicSiteContent.ts`, `shared/utils/bookingPreferences.ts`, `shared/index.ts`, `guest-app/src/pages/BookingPage.tsx`, `guest-app/src/pages/CorporateBookingPage.tsx` |
+| **SR-02** | Guest + corporate Step 3 UI | `guest-app/src/components/SpecialRequestsBlock.tsx`, `guest-app/src/hooks/useRoomTypes.ts`, `guest-app/src/hooks/usePublicSiteContent.ts`, `shared/utils/bookingPreferences.ts`, `shared/index.ts`, `guest-app/src/pages/BookingPage.tsx`, `guest-app/src/pages/CorporateBookingPage.tsx` |
 | **SR-03** | Wire + server validation + storage | `guest-app/server/handlers/bookings.ts` |
 | **SR-04** | Admin read surfaces | `admin-app/src/pages/CalendarPage.tsx`, `admin-app/src/pages/BookingsPage.tsx`, `admin-app/src/components/GuestSpecialRequestsBlock.tsx`, `admin-app/src/context/AdminContext.tsx`, `shared/types/index.ts`, `guest-app/server/handlers/email.ts` |
 | **SR-05** | Retire redirect card + Stripe fields cleanup | `guest-app/src/pages/BookingPage.tsx`, `guest-app/src/pages/BookingConfirmPage.tsx`, `guest-app/src/pages/CorporateBookingPage.tsx` |
@@ -95,8 +97,8 @@ A single shared `<SpecialRequestsBlock />` component renders:
 - **Admin deletes a bed-set-up option that was used by an existing reservation** — the booking's `Booking.bedSetup` still carries the old `value` (the snapshot is immutable). The drawer renders the value as-is; the catalog lookup falls back to `option?.label ?? booking.bedSetup` so the raw key is shown when no catalog match exists.
 - **Admin deletes a preference that was selected on an existing reservation** — the reservation's `additionalPreferences` is the immutable snapshot. The drawer chips render via the same `option?.label ?? key` fallback.
 - **Hotel-config `checkInTime` is empty** — the dropdown defaults to "2:00 PM" (the deploy-time fallback). Both client and server use `parseCheckInTimeToPair("2:00 PM")` so they agree.
-- **Step 1 → Step 2 transition** — the new Step 2 fields reset whenever the cart changes (the existing `bedSelections` / `additionalPreferences` / `additionalRequest` / `expectedArrivalTime` state is reset to its defaults on a fresh mount).
-- **In-flow hold expires** — the same SR fields are preserved in `state` while the hold is active, same as the existing `guestDetails` state. Re-clicking Step 2 after a hold expiry restores them from a `useEffect` keyed on the cart.
+- **Step 1 → Step 3 transition** — the new Step 3 fields reset whenever the cart changes (the existing `bedSelections` / `additionalPreferences` / `additionalRequest` / `expectedArrivalTime` state is reset to its defaults on a fresh mount).
+- **In-flow hold expires** — the same SR fields are preserved in `state` while the hold is active, same as the existing `guestDetails` state. Re-clicking Step 3 after a hold expiry restores them from a `useEffect` keyed on the cart.
 
 ## Out of scope
 

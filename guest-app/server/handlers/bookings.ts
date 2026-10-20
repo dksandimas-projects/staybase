@@ -1801,6 +1801,17 @@ export async function handleCreateBooking(req: any, res: any) {
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
 
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation
+  // here as well as at the top of the handler. `new Date("2026-02-31
+  // T00:00:00Z")` ROLLS OVER to Mar 3 instead of producing an Invalid
+  // Date, so the `isNaN(getTime())` guard never fires for a
+  // calendar-impossible date — the booking would be stored for a day
+  // the caller never sent. `isValidIsoDate` (the shared helper in
+  // `shared/utils/stayRange.ts`) rejects it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
+
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -4796,6 +4807,17 @@ export async function handleCreateWalkin(req: any, res: any) {
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
+
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation.
+  // `WalkinBookingSchema` validates the SHAPE (`^\d{4}-\d{2}-\d{2}$`)
+  // only, and `new Date("2026-02-31T00:00:00Z")` ROLLS OVER to Mar 3
+  // instead of producing an Invalid Date — so the `isNaN(getTime())`
+  // guard never fired for a calendar-impossible date and the walk-in
+  // was stored for a day the front desk never entered.
+  // `isValidIsoDate` (the shared helper) rejects it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
 
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
@@ -12534,6 +12556,16 @@ export async function handleRescheduleBooking(req: any, res: any) {
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation.
+  // `RescheduleBookingSchema` validates the SHAPE only, and
+  // `new Date("2026-02-31T00:00:00Z")` ROLLS OVER to Mar 3 rather
+  // than producing an Invalid Date — so the `isNaN(getTime())` guard
+  // never fired and the booking was RESCHEDULED onto a day the front
+  // desk never entered. `isValidIsoDate` (the shared helper) rejects
+  // it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }

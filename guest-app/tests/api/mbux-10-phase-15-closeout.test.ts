@@ -59,8 +59,12 @@ const sharedShellComponents = [
  *  thing that was removed. */
 function codeOnly(src: string): string {
   return src
+    // Per OCT-L7 (2026-10-20, decision #307): LINE comments are
+    // stripped FIRST. A `//` comment may contain `/*` (the codebase
+    // writes `bookings/*`), and a block-strip-first order reads that
+    // as a block opener and swallows the real code that follows.
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[ \t]*\/\/.*$/gm, "")
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');
 }

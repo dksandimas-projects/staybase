@@ -3050,10 +3050,23 @@ export function SettingsPage() {
   // `auditLogs/{auditId}` collection with the
   // BR-12.1 action set
   // (`addons.create` | `addons.update` | `addons.delete`).
-  // The Reports late-change metric reads the same
+  //
+  // Per the October 2026 audit closeout (2026-10-20): this comment
+  // previously claimed "The Reports late-change metric reads the same
   // collection (via collectionGroup on a top-level
-  // `targetCollection: "addOns"` filter) so the
-  // catalog changes are queryable.
+  // `targetCollection: "addOns"` filter)". That was wrong — there is
+  // NO `auditLogs` read anywhere in the admin app. The Reports →
+  // Sales → Add-Ons sub-tab's late-change metric reads the per-booking
+  // `otherAddOnAudit` subcollection (`collectionGroup(db,
+  // "otherAddOnAudit")`, `ReportsPage.tsx:520`), which is the
+  // PER-BOOKING op trail, not the catalog trail.
+  //
+  // So `auditLogs` is a write-only trail as far as the product is
+  // concerned: the rows are written (and are admin-readable per the
+  // rules), but no screen reads them. The catalog rows here are the
+  // source of truth for "who changed the catalog"; the per-booking
+  // audit trail is the source of truth for "who changed this
+  // booking's add-ons".
   const writeAddOnAuditLog = async (input: {
     action: "addons.create" | "addons.update" | "addons.delete";
     targetId: string;
