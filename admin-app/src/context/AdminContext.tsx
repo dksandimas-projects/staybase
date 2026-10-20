@@ -671,6 +671,13 @@ export interface IntercomMessage {
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
   currentStayId?: string;
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token of the session
+  // collection this message lives in, when it is a session-scoped
+  // message (`intercomSessions/{sessionToken}/messages/{id}`). The
+  // desk needs it to mark the message read in the SAME collection the
+  // guest's live listener is reading from — a legacy
+  // `intercoms/{room}/messages/{id}` message has no token.
+  sessionToken?: string;
   // Per `feat/call-history-messages`. Defined in the canonical
   // type at `@spark-inn/shared` (`shared/types/index.ts`) — these
   // fields are mirrored here only because the AdminContext uses a
@@ -698,6 +705,11 @@ export interface IntercomThread {
   resolved: boolean;
   updatedAt: string;
   currentStayId?: string;
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token the server
+  // issued for this room's current stay. The guest's chat thread and
+  // call session live under paths that contain this token, so the
+  // desk needs it to read the guest's thread and to reply into it.
+  currentStayToken?: string;
 }
 
 // Per decision #206 (2026-08-19): when two front-desk staff race to
@@ -720,6 +732,11 @@ export interface IncomingCall {
   status: "ringing" | "active" | "ended";
   offer?: RTCSessionDescriptionInit;
   acceptedBy?: CallAcceptedBy | null;
+  // Per PR-AUDIT-B4 (2026-10-20): the capability token that scopes
+  // the call session. The call document lives at
+  // `callSessions/{sessionToken}`, so the desk addresses the same
+  // document the guest wrote.
+  sessionToken?: string;
 }
 
 export interface StoreOrderItem {
@@ -4435,7 +4452,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             guestName: data.guestName || "",
             resolved: !!data.resolved,
             updatedAt: formatIntercomTimestamp(data.updatedAt),
-            currentStayId: data.currentStayId || undefined
+            currentStayId: data.currentStayId || undefined,
+            currentStayToken: data.currentStayToken || undefined
           };
         });
         setIntercomThreads(threads);
@@ -4453,24 +4471,47 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       setIntercoms({});
       return;
     }
-    const roomNumbers = rooms.map((room) => room.roomNumber).filter(Boolean);
-    if (roomNumbers.length === 0) {
-      setIntercoms({});
-      return;
-    }
+    // Per PR-AUDIT-B3 (2026-10-20): a guest's chat thread now lives
+    // under `intercomSessions/{sessionToken}/messages` (the path
+    // carries the capability token the server issued at verification),
+    // while the desk's existing history lives under the legacy
+    // `intercoms/{roomNumber}/messages`. A single COLLECTION-GROUP
+    // query spans both, so the desk sees the whole thread regardless
+    // of which path a given message was written to.
+    //
+    // No `orderBy` is applied on purpose: an ordered collection-group
+    // query needs a dedicated collection-group index, and the desk
+    // sorts a 14-room hotel's threads in memory without noticing.
+    // (The guest's own query is a single-collection query, which the
+    // automatic single-field index covers.)
+    const messagesQuery = query(collectionGroup(db, "messages"));
 
-    const unsubscribes = roomNumbers.map((roomNumber) => {
-      const messagesQuery = query(
-        collection(db, "intercoms", roomNumber, "messages"),
-        orderBy("timestamp", "asc")
-      );
-
-      return onSnapshot(
-        messagesQuery,
-        (snapshot) => {
-          const messages: IntercomMessage[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        // Group by room. Session-scoped documents carry `roomNumber`;
+        // legacy documents do not, so fall back to the path
+        // (`intercoms/{roomNumber}/messages/{messageId}`).
+        const grouped: Record<string, { raw: number; message: IntercomMessage }[]> = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          // Session-scoped documents carry `roomNumber`; legacy
+          // documents do not, so fall back to the path
+          // (`intercoms/{roomNumber}/messages/{messageId}`).
+          const legacyRoomId = docSnap.ref.parent?.parent?.id || "";
+          const roomNumber = String(data.roomNumber || legacyRoomId || "");
+          // Per PR-AUDIT-B3 (2026-10-20): a session-scoped message lives
+          // at `intercomSessions/{sessionToken}/messages/{id}`; the
+          // collection name is two levels up from the document. The desk
+          // needs the token to mark the message read in the same
+          // collection the guest is reading.
+          const isSessionScoped = docSnap.ref.parent?.parent?.parent?.id === "intercomSessions";
+          const sessionToken = isSessionScoped ? docSnap.ref.parent?.parent?.id || undefined : undefined;
+          if (!roomNumber) return;
+          const rawTimestamp = data.timestamp?.toMillis
+            ? data.timestamp.toMillis()
+            : (data.timestamp?.seconds ? data.timestamp.seconds * 1000 : 0);
+          const message: IntercomMessage = {
               id: docSnap.id,
               text: data.text || "",
               sender: data.sender || "guest",
@@ -4501,41 +4542,54 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                 ? new Date(data.callStartedAt.toMillis()).toISOString()
                 : undefined,
               callDuration: typeof data.callDuration === "number" ? data.callDuration : undefined,
-              callAnsweredByName: typeof data.callAnsweredByName === "string"
-                ? data.callAnsweredByName
-                : null
-            };
-          });
+            callAnsweredByName: typeof data.callAnsweredByName === "string"
+              ? data.callAnsweredByName
+              : null,
+            // Per PR-AUDIT-B3 (2026-10-20): carry the session token so
+            // `markChatAsRead` can update the SAME collection the guest
+            // is reading from.
+            sessionToken
+          };
+          (grouped[roomNumber] ||= []).push({ raw: rawTimestamp, message });
+        });
 
-          setIntercoms((prev) => {
-            if (isLoadedRef.current) {
-              const prevMsgs = prev[roomNumber] || [];
-              const prevIds = new Set(prevMsgs.map((m) => m.id));
-              const hasNewGuestMsg = messages.some((m) => 
-                m.sender === "guest" && !m.isRead && !prevIds.has(m.id)
+        const byRoom: Record<string, IntercomMessage[]> = {};
+        Object.entries(grouped).forEach(([roomNumber, entries]) => {
+          byRoom[roomNumber] = entries
+            .sort((a, b) => a.raw - b.raw)
+            .map((entry) => entry.message);
+        });
+
+        setIntercoms((prev) => {
+          if (isLoadedRef.current) {
+            const hasNewGuestMsg = Object.entries(byRoom).some(([roomNumber, messages]) => {
+              const prevIds = new Set((prev[roomNumber] || []).map((m) => m.id));
+              return messages.some(
+                (m) => m.sender === "guest" && !m.isRead && !prevIds.has(m.id)
               );
-              if (hasNewGuestMsg) {
-                playSynthNotification("message");
-              }
+            });
+            if (hasNewGuestMsg) {
+              playSynthNotification("message");
             }
+          }
 
-            if (messages.length === 0) {
-              const { [roomNumber]: _removed, ...rest } = prev;
-              return rest;
-            }
-            return { ...prev, [roomNumber]: messages };
+          const next = { ...prev };
+          Object.keys(next).forEach((roomNumber) => {
+            if (!byRoom[roomNumber]) delete next[roomNumber];
           });
-        },
-        (error) => {
-          console.error(`Error listening to intercom messages for room ${roomNumber}:`, error);
-        }
-      );
-    });
+          Object.entries(byRoom).forEach(([roomNumber, messages]) => {
+            next[roomNumber] = messages;
+          });
+          return next;
+        });
+      },
+      (error) => {
+        console.error("Error listening to intercom messages:", error);
+      }
+    );
 
-    return () => {
-      unsubscribes.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [rooms, currentUser]);
+    return unsubscribe;
+  }, [currentUser]);
 
   const sendIntercomMessage = async (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
     try {
@@ -4547,7 +4601,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         updatedAt: serverTimestamp()
       }, { merge: true });
 
-      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+      // Per PR-AUDIT-B3 (2026-10-20): the reply must land in the
+      // SESSION-scoped collection so the guest — who now reads only
+      // `intercomSessions/{sessionToken}/messages` — actually sees it.
+      // When no token exists (the guest has not verified since the
+      // capability rollout) the reply falls back to the legacy path:
+      // the desk keeps the history, and the guest cannot read it.
+      const sessionToken = intercomThreads[roomId]?.currentStayToken;
+      const messagesCollection = sessionToken
+        ? collection(db, "intercomSessions", sessionToken, "messages")
+        : collection(db, "intercoms", roomId, "messages");
+
+      await addDoc(messagesCollection, {
         text,
         sender,
         guestName: sender === "guest" ? "Guest" : "Front Desk",
@@ -4556,7 +4621,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         isQuickRequest: false,
         isStoreOrder: false,
         isEarlyCheckInRequest: false,
-        currentStayId: intercomThreads[roomId]?.currentStayId || null
+        currentStayId: intercomThreads[roomId]?.currentStayId || null,
+        roomNumber: roomId
       });
     } catch (error) {
       console.error("Error sending intercom message:", error);
@@ -4674,7 +4740,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         updatedAt: serverTimestamp()
       }, { merge: true });
 
-      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+      // Per PR-AUDIT-B3 (2026-10-20): same session-scoped target as
+      // the desk's normal reply — the guest reads only the session
+      // collection.
+      const sessionToken = intercomThreads[roomId]?.currentStayToken;
+      const messagesCollection = sessionToken
+        ? collection(db, "intercomSessions", sessionToken, "messages")
+        : collection(db, "intercoms", roomId, "messages");
+
+      await addDoc(messagesCollection, {
         text,
         sender: "system",
         guestName: "Front Desk",
@@ -4684,6 +4758,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         isStoreOrder: false,
         isEarlyCheckInRequest: false,
         currentStayId: intercomThreads[roomId]?.currentStayId ?? null,
+        roomNumber: roomId,
         messageType: outcome,
         callStartedAt: outcome === "call-answered"
           ? Timestamp.fromMillis(startedAtMs)
@@ -4736,9 +4811,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     try {
       await Promise.all(
         unreadGuestMessages.map((message) =>
-          updateDoc(doc(db, "intercoms", roomId, "messages", message.id), {
-            isRead: true
-          })
+          // Per PR-AUDIT-B3 (2026-10-20): a session-scoped message lives
+          // under `intercomSessions/{sessionToken}/messages/{id}`. Marking
+          // the legacy copy read would leave the desk's unread badge
+          // stuck, because the badge is computed from the collection-group
+          // listener that reads the SESSION copy.
+          updateDoc(
+            message.sessionToken
+              ? doc(db, "intercomSessions", message.sessionToken, "messages", message.id)
+              : doc(db, "intercoms", roomId, "messages", message.id),
+            { isRead: true }
+          )
         )
       );
     } catch (error) {
@@ -4846,6 +4929,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const adminIceUnsubscribeRef = useRef<(() => void) | null>(null);
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
   const adminPreviousCallRoomIdRef = useRef<string | null>(null);
+  // Per PR-AUDIT-B4 (2026-10-20): the capability token of the call
+  // session the desk is currently serving, so the "second call wins"
+  // supersede write addresses the right session document.
+  const adminPreviousCallSessionTokenRef = useRef<string | null>(null);
+  const adminCallSessionTokenRef = useRef<string | null>(null);
 
   // Per-call-history-messages telemetry. Three refs the call
   // dispatch helper reads at cleanup time to determine the
@@ -5171,7 +5259,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return;
     }
     const unsubscribe = onSnapshot(
-      collection(db, "calls"),
+      // Per PR-AUDIT-B4 (2026-10-20): call sessions live in their own
+      // top-level collection whose document id IS the capability token
+      // the server issued for the guest's stay. The legacy
+      // `calls/{roomId}` path is now staff-only, so the client SDK can
+      // no longer read or forge a call document. A collection-group
+      // query is used because the session document is a direct child
+      // of `callSessions`.
+      collectionGroup(db, "callSessions"),
       (snapshot) => {
         const activeCalls = snapshot.docs
           .map((docSnap): IncomingCall & { startedAt: number } => {
@@ -5195,7 +5290,10 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                   }
                 : null;
             return {
-              roomId: docSnap.id,
+              // The session document's id is the capability token; the
+              // room it belongs to is carried on the document.
+              roomId: data.roomNumber || docSnap.id,
+              sessionToken: docSnap.id,
               guestName: data.guestName || "Guest",
               status: data.status || "ended",
               offer: data.offer || undefined,
@@ -5216,7 +5314,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         // call is the only one shown in the inbox.
         const previousRoomId = adminPreviousCallRoomIdRef.current;
         if (nextCall && previousRoomId && nextCall.roomId !== previousRoomId) {
-          void updateDoc(doc(db, "calls", previousRoomId), {
+          void updateDoc(
+            adminPreviousCallSessionTokenRef.current
+              ? doc(db, "callSessions", adminPreviousCallSessionTokenRef.current)
+              : doc(db, "calls", previousRoomId),
+            {
             status: "ended",
             endedAt: serverTimestamp(),
             endedReason: "superseded-by-other-call"
@@ -5240,12 +5342,14 @@ if (nextCall && nextCall.roomId !== previousRoomId) {
   adminCallRingingStartedAtRef.current = Date.now();
 }
 adminCallRoomIdRef.current = nextCall?.roomId ?? null;
+        adminCallSessionTokenRef.current = nextCall?.sessionToken ?? null;
 // (When nextCall becomes null but the previous call had a
 // ringing start, the dispatcher's "Date.now() -
 // adminCallRingingStartedAtRef.current" math inside recordCallHistory
 // handles the duration naturally — no need to capture an explicit
 // "end" timestamp here.)
 adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
+        adminPreviousCallSessionTokenRef.current = nextCall?.sessionToken ?? null;
         setIncomingCall(nextCall);
         if (!nextCall) {
           cleanupAdminCall();
@@ -5265,10 +5369,19 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
 
   const triggerIncomingCall = async (roomId: string, guestName: string) => {
     if (!roomId) return;
-    await setDoc(doc(db, "calls", roomId), {
+    // Per PR-AUDIT-B4 (2026-10-20): the desk rings the guest on the
+    // session document when the guest has an active capability token
+    // (they have verified their stay). Without one there is no
+    // session to ring, so the legacy path is used.
+    const sessionToken = intercomThreads[roomId]?.currentStayToken;
+    const callRef = sessionToken
+      ? doc(db, "callSessions", sessionToken)
+      : doc(db, "calls", roomId);
+    await setDoc(callRef, {
       answer: null,
       status: "ringing",
       guestName,
+      roomNumber: roomId,
       startedAt: serverTimestamp(),
       endedAt: null
     }, { merge: true });
@@ -5277,7 +5390,14 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   const acceptCall = async () => {
     if (!incomingCall) return;
     const roomId = incomingCall.roomId;
-    const callRef = doc(db, "calls", roomId);
+    // Per PR-AUDIT-B4 (2026-10-20): the call document lives at
+    // `callSessions/{sessionToken}`; the legacy `calls/{roomId}` path
+    // is staff-only for the client SDK, and the desk still writes it
+    // directly when a call predates the capability rollout.
+    const sessionToken = incomingCall.sessionToken;
+    const callRef = sessionToken
+      ? doc(db, "callSessions", sessionToken)
+      : doc(db, "calls", roomId);
 
     // Per decision #206 (2026-08-19): the call claim is the FIRST step
     // of acceptCall. Two front-desk staff may both click Accept within
@@ -5406,9 +5526,17 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       adminCallAnsweredRef.current = true;
       adminCallStartedAtRef.current = Date.now();
 
+      // Per PR-AUDIT-B4 (2026-10-20): ICE candidates go to the session
+      // collection when the call has a capability token, and to the
+      // legacy path otherwise. The token is captured in a local const so
+      // the handler never builds a path with an empty segment.
+      const iceCollection = sessionToken
+        ? collection(db, "callSessions", sessionToken, "iceCandidates")
+        : collection(db, "calls", roomId, "iceCandidates");
+
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) return;
-        void addDoc(collection(db, "calls", roomId, "iceCandidates"), {
+        void addDoc(iceCollection, {
           candidate: event.candidate.toJSON(),
           from: "staff",
           createdAt: serverTimestamp()
@@ -5436,7 +5564,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       await peerConnection.setLocalDescription(answer);
 
       adminIceUnsubscribeRef.current = onSnapshot(
-        collection(db, "calls", roomId, "iceCandidates"),
+        iceCollection,
         (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type !== "added") return;
@@ -5512,10 +5640,15 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     adminCallExplicitDeclineRef.current = true;
     adminCallRoomIdRef.current = incomingCall.roomId;
     cleanupAdminCall();
-    await updateDoc(doc(db, "calls", incomingCall.roomId), {
-      status: "ended",
-      endedAt: serverTimestamp()
-    });
+    await updateDoc(
+      incomingCall.sessionToken
+        ? doc(db, "callSessions", incomingCall.sessionToken)
+        : doc(db, "calls", incomingCall.roomId),
+      {
+        status: "ended",
+        endedAt: serverTimestamp()
+      }
+    );
   };
 
   // ── Notification Center (Phase 12 — decision #120) ──────────

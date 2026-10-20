@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { adminDb } from "../lib/firebase-admin";
+import { generateLookupToken } from "@spark-inn/shared";
 
 const MAX_ROOM_NUMBER_LENGTH = 12;
 const MAX_LAST_NAME_LENGTH = 80;
@@ -14,6 +15,11 @@ const guestMessageSchema = z.object({
   roomNumber: z.string().trim().min(1).max(MAX_ROOM_NUMBER_LENGTH),
   guestName: z.string().trim().min(1).max(120),
   currentStayId: z.string().trim().min(1).max(128),
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token issued by
+  // `handleVerifyIntercomGuest`. It selects the session-scoped
+  // collection the message is written to, and the server re-validates
+  // it against the intercom document before writing.
+  sessionToken: z.string().trim().min(16).max(64),
   text: z.string().trim().min(1).max(1000),
   isQuickRequest: z.boolean().optional().default(false),
   isStoreOrder: z.boolean().optional().default(false),
@@ -102,6 +108,76 @@ function isGuestMessageRateLimited(key: string, limit: number, windowMs: number)
   return record.count > limit;
 }
 
+/**
+ * Resolve and validate the guest's stay for an intercom message.
+ *
+ * Per PR-AUDIT-B6 (2026-10-20): the send endpoint used to trust the
+ * request body completely — `roomNumber`, `guestName` and
+ * `currentStayId` were written straight to Firestore through the
+ * Admin SDK. The only check was "does the room have a checked-in
+ * booking", which the caller never proved: any anonymous caller could
+ * post into ANY room's thread as a spoofed guest name, and the desk
+ * is instructed to treat intercom messages as genuine guest requests.
+ *
+ * The server now resolves the booking itself and derives the guest's
+ * identity from it:
+ *   - the booking must exist,
+ *   - it must belong to the claimed room,
+ *   - it must be CHECKED IN (the same condition `getCurrentStay`
+ *     uses, so the two paths agree on what "in-house" means),
+ *   - the session token must match the one the server issued for that
+ *     room's current stay.
+ *
+ * `guestName` is taken from the BOOKING, not from the request body.
+ */
+async function resolveVerifiedStay(params: {
+  roomNumber: string;
+  currentStayId: string;
+  sessionToken: string;
+}) {
+  const { roomNumber, currentStayId, sessionToken } = params;
+
+  const bookingSnap = await adminDb.collection("bookings").doc(currentStayId).get();
+  if (!bookingSnap.exists) {
+    return { ok: false as const, error: "We could not verify this stay." };
+  }
+
+  const booking = bookingSnap.data() || {};
+  const bookingRoom = String(booking.roomNumber || "").trim();
+  if (!bookingRoom || bookingRoom !== roomNumber) {
+    return { ok: false as const, error: "We could not verify this stay." };
+  }
+  if (String(booking.status || "") !== "checked-in") {
+    return { ok: false as const, error: "This intercom is available only for checked-in guests." };
+  }
+
+  // The session token must be the one the server issued for THIS room.
+  const intercomSnap = await adminDb.collection("intercoms").doc(roomNumber).get();
+  const storedToken = String((intercomSnap.data() || {}).currentStayToken || "");
+  if (!storedToken || storedToken !== sessionToken) {
+    return { ok: false as const, error: "Please verify this stay again." };
+  }
+  if (String((intercomSnap.data() || {}).currentStayId || "") !== currentStayId) {
+    return { ok: false as const, error: "Please verify this stay again." };
+  }
+
+  // The guest's name comes from the booking — never from the request.
+  const guestDetails = (booking.guestDetails && typeof booking.guestDetails === "object")
+    ? (booking.guestDetails as Record<string, unknown>)
+    : {};
+  const bookingGuestName = String(
+    booking.guestName
+    || [guestDetails.firstName, guestDetails.lastName].filter(Boolean).join(" ")
+    || ""
+  ).trim();
+
+  return {
+    ok: true as const,
+    bookingId: bookingSnap.id,
+    guestName: bookingGuestName
+  };
+}
+
 // G-04 (E2E audit 2026-07-17): guest intercom messages are routed
 // through this server-side endpoint instead of direct Firestore
 // writes. Enforces ~30 messages per room per 10 minutes, with an
@@ -120,9 +196,19 @@ export async function handleSendGuestMessage(req: any, res: any) {
     });
   }
 
-  const { roomNumber, guestName, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
+  const { roomNumber, sessionToken, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
 
-  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  // Per PR-AUDIT-H6 (2026-10-20): `x-vercel-forwarded-for` is
+  // Vercel's own sanitized single-value client IP and stays correct
+  // even with a proxy in front of Vercel (the one case where
+  // `x-forwarded-for` could be overwritten). Vercel overwrites
+  // `x-forwarded-for` and does not forward external IPs.
+  const rawIp =
+    req.headers["x-vercel-forwarded-for"] ||
+    req.headers["x-forwarded-for"] ||
+    req.headers["x-real-ip"] ||
+    req.socket.remoteAddress ||
+    "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
 
   // Rate limit: 30 messages per room per 10 minutes, keyed by
@@ -135,16 +221,38 @@ export async function handleSendGuestMessage(req: any, res: any) {
   }
 
   try {
+    // Per PR-AUDIT-B6 (2026-10-20): the guest's identity is resolved
+    // from the booking on the server. The request body's `guestName` is
+    // IGNORED — the desk sees the name the guest booked under, not one
+    // a caller typed.
+    const verified = await resolveVerifiedStay({
+      roomNumber,
+      currentStayId: parsed.data.currentStayId,
+      sessionToken
+    });
+    if (!verified.ok) {
+      return res.status(403).json({ success: false, error: verified.error });
+    }
+    const guestName = verified.guestName || parsed.data.guestName;
+
+    // The intercom thread document is staff-only now (PR-AUDIT-B5), so
+    // the server is the only writer. It carries the capability token
+    // the desk uses to address the guest's session.
     await adminDb.collection("intercoms").doc(roomNumber).set({
       roomId: roomNumber,
       roomNumber,
       guestName,
-      currentStayId,
+      currentStayId: verified.bookingId,
+      currentStayToken: sessionToken,
       resolved: false,
       updatedAt: new Date()
     }, { merge: true });
 
-    await adminDb.collection("intercoms").doc(roomNumber).collection("messages").add({
+    // Per PR-AUDIT-B3 (2026-10-20): the message is written to the
+    // SESSION-SCOPED collection, whose path contains the unguessable
+    // capability token. The legacy room-scoped collection is
+    // staff-only, so the guest's thread is no longer world-readable.
+    await adminDb.collection("intercomSessions").doc(sessionToken).collection("messages").add({
       text,
       sender: "guest",
       guestName,
@@ -154,7 +262,8 @@ export async function handleSendGuestMessage(req: any, res: any) {
       isStoreOrder,
       orderRef: orderRef || "",
       isEarlyCheckInRequest,
-      currentStayId
+      currentStayId: verified.bookingId,
+      roomNumber
     });
 
     return res.status(200).json({ success: true });
@@ -193,17 +302,35 @@ export async function handleVerifyIntercomGuest(req: any, res: any) {
       return res.status(403).json({ success: false, error: "This intercom is available only for checked-in guests." });
     }
 
+    // Per PR-AUDIT-B3 (2026-10-20): issue (or reuse) the capability
+    // token for this room's current stay. The token is the guest's
+    // ONLY credential for reading their own thread, so it must be:
+    //   - stable for the duration of the stay (the guest's realtime
+    //     listener is bound to the path that contains it), and
+    //   - regenerated when the stay changes (so the previous guest's
+    //     token cannot read the next guest's messages).
+    const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
+    const intercomSnap = await intercomRef.get();
+    const intercomData = intercomSnap.data() || {};
+    const sameStay = String(intercomData.currentStayId || "") === currentStay.id;
+    const existingToken = String(intercomData.currentStayToken || "");
+    const sessionToken = sameStay && existingToken ? existingToken : generateLookupToken();
+
     if (bookingId) {
       if (currentStay.id !== bookingId) {
         return res.status(403).json({ success: false, error: "Please verify this stay again." });
       }
-      await adminDb.collection("intercoms").doc(roomNumber).set({
+      await intercomRef.set({
         roomId: roomNumber,
         roomNumber,
         currentStayId: currentStay.id,
+        currentStayToken: sessionToken,
         updatedAt: new Date()
       }, { merge: true });
-      return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+      return res.status(200).json({
+        success: true,
+        data: { ...getPublicBookingSummary(currentStay), sessionToken }
+      });
     }
 
     const expectedLastName = getBookingLastName(currentStay.data());
@@ -211,15 +338,18 @@ export async function handleVerifyIntercomGuest(req: any, res: any) {
       return res.status(403).json({ success: false, error: "We could not verify that last name for this room." });
     }
 
-    const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
     await intercomRef.set({
       roomId: roomNumber,
       roomNumber,
       currentStayId: currentStay.id,
+      currentStayToken: sessionToken,
       updatedAt: new Date()
     }, { merge: true });
 
-    return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+    return res.status(200).json({
+      success: true,
+      data: { ...getPublicBookingSummary(currentStay), sessionToken }
+    });
   } catch (error) {
     console.error("Intercom guest verification failed:", error);
     return res.status(500).json({ success: false, error: "Unable to verify this intercom session." });

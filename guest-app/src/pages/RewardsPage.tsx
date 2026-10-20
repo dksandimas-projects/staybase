@@ -200,12 +200,17 @@ export function RewardsPage() {
     // for the free-night trigger). The query filters by
     // `kind === "reward"` + `memberId === current uid` so the
     // portal sees only the vouchers it owns — no shared
-    // collection traversal. Firestore rules restrict the read
-    // to the doc owner (see plan/docs/SECURITY.md §vouchers),
-    // so a query for non-owned vouchers would 403 anyway. The
-    // listener survives mid-session edits (admin deactivates,
-    // member redeems) and reflects the new state on the next
-    // snapshot.
+    // collection traversal. Per PR-AUDIT-B2 (2026-10-20) the
+    // Firestore rule now carries an owner-scoped branch
+    // (`allow read: if isStaff() || (signedIn() &&
+    // resource.data.memberId == request.auth.uid)` —
+    // `firebase/firestore.rules`), which is what makes this query
+    // legal: Firestore proves the owner predicate from the
+    // `where("memberId","==",uid)` constraint. Before that fix the
+    // rule was staff-only, so this read was PERMISSION_DENIED and
+    // the portal silently rendered zero vouchers. The listener
+    // survives mid-session edits (admin deactivates, member
+    // redeems) and reflects the new state on the next snapshot.
     const unsubscribeVouchers = onSnapshot(
       query(
         collection(db, "vouchers"),

@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.1";
+    VERSION2 = "2.18.2";
   }
 });
 
@@ -241748,7 +241748,10 @@ async function handleCreateStoreOrder(req, res) {
   if (paymentProofPath && (!paymentProofPath.startsWith(expectedProofPrefix) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(proofFileName))) {
     return res.status(400).json({ success: false, error: "Invalid payment proof path." });
   }
-  if (isOnlinePaymentMethod && !paymentProofPath && !body.paymentProofUrl) {
+  const rawPaymentProofUrl = typeof body.paymentProofUrl === "string" ? body.paymentProofUrl.trim() : "";
+  const encodedProofPrefix = encodeURIComponent(expectedProofPrefix);
+  const paymentProofUrl = rawPaymentProofUrl.startsWith("https://firebasestorage.googleapis.com/") && rawPaymentProofUrl.includes(encodedProofPrefix) ? rawPaymentProofUrl : "";
+  if (isOnlinePaymentMethod && !paymentProofPath && !paymentProofUrl) {
     return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
   const normalizedItems = Array.from(
@@ -241828,7 +241831,7 @@ async function handleCreateStoreOrder(req, res) {
         items: orderItems,
         totalAmount,
         paymentMethod: body.paymentMethod,
-        paymentProofUrl: body.paymentProofUrl || "",
+        paymentProofUrl: paymentProofUrl || "",
         paymentProofPath: paymentProofPath || "",
         status: "placed",
         stockRestoredAt: null,
@@ -242192,6 +242195,7 @@ async function handleGetStoreOrderStatus(req, res) {
 // server/handlers/intercom.ts
 init_zod();
 init_firebase_admin();
+init_shared();
 var MAX_ROOM_NUMBER_LENGTH2 = 12;
 var MAX_LAST_NAME_LENGTH = 80;
 var MAX_BOOKING_ID_LENGTH = 128;
@@ -242199,6 +242203,11 @@ var guestMessageSchema = external_exports.object({
   roomNumber: external_exports.string().trim().min(1).max(MAX_ROOM_NUMBER_LENGTH2),
   guestName: external_exports.string().trim().min(1).max(120),
   currentStayId: external_exports.string().trim().min(1).max(128),
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token issued by
+  // `handleVerifyIntercomGuest`. It selects the session-scoped
+  // collection the message is written to, and the server re-validates
+  // it against the intercom document before writing.
+  sessionToken: external_exports.string().trim().min(16).max(64),
   text: external_exports.string().trim().min(1).max(1e3),
   isQuickRequest: external_exports.boolean().optional().default(false),
   isStoreOrder: external_exports.boolean().optional().default(false),
@@ -242239,6 +242248,38 @@ function isGuestMessageRateLimited(key, limit, windowMs) {
   record.count++;
   return record.count > limit;
 }
+async function resolveVerifiedStay(params) {
+  const { roomNumber, currentStayId, sessionToken } = params;
+  const bookingSnap = await adminDb.collection("bookings").doc(currentStayId).get();
+  if (!bookingSnap.exists) {
+    return { ok: false, error: "We could not verify this stay." };
+  }
+  const booking = bookingSnap.data() || {};
+  const bookingRoom = String(booking.roomNumber || "").trim();
+  if (!bookingRoom || bookingRoom !== roomNumber) {
+    return { ok: false, error: "We could not verify this stay." };
+  }
+  if (String(booking.status || "") !== "checked-in") {
+    return { ok: false, error: "This intercom is available only for checked-in guests." };
+  }
+  const intercomSnap = await adminDb.collection("intercoms").doc(roomNumber).get();
+  const storedToken = String((intercomSnap.data() || {}).currentStayToken || "");
+  if (!storedToken || storedToken !== sessionToken) {
+    return { ok: false, error: "Please verify this stay again." };
+  }
+  if (String((intercomSnap.data() || {}).currentStayId || "") !== currentStayId) {
+    return { ok: false, error: "Please verify this stay again." };
+  }
+  const guestDetails = booking.guestDetails && typeof booking.guestDetails === "object" ? booking.guestDetails : {};
+  const bookingGuestName = String(
+    booking.guestName || [guestDetails.firstName, guestDetails.lastName].filter(Boolean).join(" ") || ""
+  ).trim();
+  return {
+    ok: true,
+    bookingId: bookingSnap.id,
+    guestName: bookingGuestName
+  };
+}
 async function handleSendGuestMessage(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -242250,8 +242291,8 @@ async function handleSendGuestMessage(req, res) {
       error: "Please check your message and try again."
     });
   }
-  const { roomNumber, guestName: guestName2, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed2.data;
-  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  const { roomNumber, sessionToken, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed2.data;
+  const rawIp = req.headers["x-vercel-forwarded-for"] || req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (isGuestMessageRateLimited(`intercom-msg:${ip}:${roomNumber}`, 30, 10 * 60 * 1e3)) {
     return res.status(429).json({
@@ -242260,15 +242301,25 @@ async function handleSendGuestMessage(req, res) {
     });
   }
   try {
+    const verified = await resolveVerifiedStay({
+      roomNumber,
+      currentStayId: parsed2.data.currentStayId,
+      sessionToken
+    });
+    if (!verified.ok) {
+      return res.status(403).json({ success: false, error: verified.error });
+    }
+    const guestName2 = verified.guestName || parsed2.data.guestName;
     await adminDb.collection("intercoms").doc(roomNumber).set({
       roomId: roomNumber,
       roomNumber,
       guestName: guestName2,
-      currentStayId,
+      currentStayId: verified.bookingId,
+      currentStayToken: sessionToken,
       resolved: false,
       updatedAt: /* @__PURE__ */ new Date()
     }, { merge: true });
-    await adminDb.collection("intercoms").doc(roomNumber).collection("messages").add({
+    await adminDb.collection("intercomSessions").doc(sessionToken).collection("messages").add({
       text,
       sender: "guest",
       guestName: guestName2,
@@ -242278,7 +242329,8 @@ async function handleSendGuestMessage(req, res) {
       isStoreOrder,
       orderRef: orderRef || "",
       isEarlyCheckInRequest,
-      currentStayId
+      currentStayId: verified.bookingId,
+      roomNumber
     });
     return res.status(200).json({ success: true });
   } catch (error) {
@@ -242311,30 +242363,43 @@ async function handleVerifyIntercomGuest(req, res) {
     if (!currentStay) {
       return res.status(403).json({ success: false, error: "This intercom is available only for checked-in guests." });
     }
+    const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
+    const intercomSnap = await intercomRef.get();
+    const intercomData = intercomSnap.data() || {};
+    const sameStay = String(intercomData.currentStayId || "") === currentStay.id;
+    const existingToken = String(intercomData.currentStayToken || "");
+    const sessionToken = sameStay && existingToken ? existingToken : generateLookupToken();
     if (bookingId) {
       if (currentStay.id !== bookingId) {
         return res.status(403).json({ success: false, error: "Please verify this stay again." });
       }
-      await adminDb.collection("intercoms").doc(roomNumber).set({
+      await intercomRef.set({
         roomId: roomNumber,
         roomNumber,
         currentStayId: currentStay.id,
+        currentStayToken: sessionToken,
         updatedAt: /* @__PURE__ */ new Date()
       }, { merge: true });
-      return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+      return res.status(200).json({
+        success: true,
+        data: { ...getPublicBookingSummary(currentStay), sessionToken }
+      });
     }
     const expectedLastName = getBookingLastName(currentStay.data());
     if (!expectedLastName || normalizeName(lastName) !== expectedLastName) {
       return res.status(403).json({ success: false, error: "We could not verify that last name for this room." });
     }
-    const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
     await intercomRef.set({
       roomId: roomNumber,
       roomNumber,
       currentStayId: currentStay.id,
+      currentStayToken: sessionToken,
       updatedAt: /* @__PURE__ */ new Date()
     }, { merge: true });
-    return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+    return res.status(200).json({
+      success: true,
+      data: { ...getPublicBookingSummary(currentStay), sessionToken }
+    });
   } catch (error) {
     console.error("Intercom guest verification failed:", error);
     return res.status(500).json({ success: false, error: "Unable to verify this intercom session." });
@@ -246122,8 +246187,18 @@ async function authenticateUser(req) {
   }
 }
 var rateLimitCache = /* @__PURE__ */ new Map();
+var RATE_LIMIT_PRUNE_INTERVAL_MS = 6e4;
+var lastRateLimitPruneAt = 0;
+function pruneRateLimitCache(now) {
+  if (now - lastRateLimitPruneAt < RATE_LIMIT_PRUNE_INTERVAL_MS) return;
+  lastRateLimitPruneAt = now;
+  for (const [key, record] of rateLimitCache) {
+    if (now > record.resetTime) rateLimitCache.delete(key);
+  }
+}
 function isRateLimited(ip, limit, windowMs) {
   const now = Date.now();
+  pruneRateLimitCache(now);
   const record = rateLimitCache.get(ip);
   if (!record) {
     rateLimitCache.set(ip, { count: 1, resetTime: now + windowMs });
@@ -246232,7 +246307,7 @@ async function handler(req, res) {
   const routePath = Array.isArray(rewrittenRoute) ? rewrittenRoute.join("/") : typeof rewrittenRoute === "string" ? rewrittenRoute : parsedUrl.pathname.replace(/^\/api\//, "");
   const pathSegments = routePath.split("/").filter(Boolean);
   const [domain, action] = pathSegments;
-  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  const rawIp = req.headers["x-vercel-forwarded-for"] || req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (domain === "bookings" && action === "create" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-create:${ip}`, 5, 6e4)) {
@@ -246523,6 +246598,12 @@ async function handler(req, res) {
     return await handleCheckinBooking(req, res);
   }
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancel:${ip}`, 10, 6e4)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many cancellation requests. Please try again in a minute."
+      });
+    }
     let authResult = { success: false };
     if (req.headers.authorization) {
       const staffAuth = await authenticateStaff(req);
@@ -246880,6 +246961,12 @@ async function handler(req, res) {
     return await handleRedeemMemberPoints(req, res);
   }
   if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-redeem-points-self:${ip}`, 10, 6e4)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many redemption attempts. Please try again in a minute."
+      });
+    }
     return await handleRedeemPointsSelf(req, res);
   }
   if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
@@ -247087,8 +247174,11 @@ async function handler(req, res) {
   const isCronEmailMethod = action === "checkin-reminder" && req.method === "GET";
   const isKnownEmailAction = publicEmailActions.has(action) || staffOnlyEmailActions.has(action);
   if (domain === "email" && isKnownEmailAction && (req.method === "POST" || isCronEmailMethod)) {
-    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
-    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 36e5)) {
+    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || "";
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:ip:${ip}`, 20, 36e5)) {
+      return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
+    }
+    if (process.env.NODE_ENV !== "test" && rateLimitKey && isRateLimited(`email:${action}:ip:${ip}:target:${rateLimitKey}`, 3, 36e5)) {
       return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
     }
     const cronSecret = req.headers["x-cron-secret"];

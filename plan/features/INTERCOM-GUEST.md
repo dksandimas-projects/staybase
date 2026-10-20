@@ -139,6 +139,40 @@ A static, print-once QR code stays the room's permanent link (no reprinting/turn
 - [x] **Layer 2 — single last-name field, replacing the old free-text name prompt entirely.** The current "What is your name?" free-text field (§UI Checklist above) is removed. In its place, one field: **"Last name"**, with a hint directly under it — *"This should match the last name used when the room was booked."* — so guests understand upfront why it might not just be "whatever you'd like to be called," instead of hitting a confusing rejection with no context. `bookings/{bookingId}` is staff-only read (`allow read: if isStaff()` in `firebase/firestore.rules`), so this **cannot** be a client-side Firestore check — it needs a small new server endpoint, e.g. `POST /api/intercom/verify-guest` with `{ roomId, lastName }`, using the Admin SDK to look up the room's currently `checked-in` booking and compare against `guestDetails.lastName` using a **normalized comparison**, not a raw string match: lowercase both sides, trim leading/trailing whitespace, collapse internal whitespace, and strip punctuation/symbols (apostrophes, hyphens, periods) before comparing — so "de la cruz", "DE LA CRUZ", and "De La Cruz" all match the booking's "De la Cruz", and "O'Brien" matches "obrien" or "o brien". The endpoint returns only `{ verified: true|false }` — it never echoes the real name back to the client, so a wrong guess can't be used to fish for the correct answer. On a mismatch, show a plain message ("We couldn't verify that against this room's booking — please ask the front desk for help") with the front desk phone number as a fallback, since a non-booker companion staying in the same room may not share the booker's last name. On success: the verified last name becomes the guest's display name too (used in the "Mabuhay, {lastName}!" greeting and shown in the admin Inbox thread, replacing what the old free-text field used to provide) — store a verified flag + the last name together in `localStorage` scoped to the **booking ID**, not just the room number (e.g. `intercomVerified:{bookingId}`), so the guest isn't asked again for the rest of their stay, but a different guest/booking in the same room later gets a fresh prompt. This fully replaces `QA-17` rather than sitting alongside it — there's no longer a separate "remember the display name" step, since the last name now serves both purposes.
 - [x] **Layer 3 — scope message history per stay.** Layer 2 stops the *wrong person* from getting in, but doesn't by itself stop a newly-verified guest from seeing a *previous* guest's leftover conversation in the same `intercoms/{roomId}` thread (still keyed by bare room number today). Tag each check-in with a `stayId` (or reuse the `bookingId`) written onto `rooms/{roomId}.currentStayId`, stamp new intercom messages with it, and have the guest client only render/subscribe to messages matching the room's *current* `currentStayId`. Old messages stay in Firestore for staff/audit history (already visible in the admin Inbox regardless of resolved state) but never render for a new guest. Lower urgency than Layer 2 now that identity is verified, but still worth doing for a clean, uncluttered first-open experience and to keep prior guests' message content from lingering in view at all.
 
+### Per-stay session scope (supersedes the client-side Layer 3 filter — shipped 2026-10-20, PR-AUDIT-B3/B4/B5/B6)
+
+The Layer 3 client-side `currentStayId` filter above is **not** a security
+boundary: the message documents themselves lived in a room-scoped collection
+that any anonymous caller could read directly, so the filter was cosmetic.
+The shipped design replaces it with a **capability-scoped collection**:
+
+- On successful verification, `POST /api/intercom/verify-guest` issues a
+  random 32-hex `sessionToken` (128 bits of entropy) and returns it to the
+  guest. It is stored on the staff-only `intercoms/{roomId}` document as
+  `currentStayToken`, and is regenerated whenever the stay changes — so a
+  previous guest's token cannot read the next guest's thread.
+- The guest's messages live at `intercomSessions/{sessionToken}/messages`;
+  the WebRTC offer, SDP answer and ICE candidates live at
+  `callSessions/{sessionToken}`. Access is capability-based: a caller who
+  cannot construct the path cannot read or forge the session. The legacy
+  `intercoms/{roomId}/messages` and `calls/{roomId}/**` paths are now
+  staff-only.
+- `POST /api/intercom/send-message` requires the token, re-verifies the stay
+  server-side, and derives the guest's display name **from the booking**
+  rather than from the request body.
+- The desk is unaffected: the admin Inbox reads both the legacy thread and
+  the session threads with a single collection-group query over `messages`,
+  and the desk's replies are written into the guest's session thread using
+  the token from `intercoms/{roomId}.currentStayToken`.
+
+Rationale for the capability model: the guest intercom serves walk-in guests
+who are not signed in, and Firestore rules can only authorize a request
+against `request.auth` — an anonymous guest has none. There is therefore no
+way to keep a guest's realtime read on a room-scoped collection and make it
+non-public. Putting the credential in the path is the only correct option
+that preserves the live chat. See `plan/docs/SECURITY.md §intercomSessions`.
+
+
 ## Implementation Plan — Header & Tab UI Polish
 
 ### Problem (raised by owner, confirmed in code, 2026-07-09)

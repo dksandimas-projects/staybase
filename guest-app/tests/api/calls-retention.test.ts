@@ -33,7 +33,12 @@ describe("IntercomPage.tsx — calls/{roomId} retention (decision #98)", () => {
     expect(src).toMatch(/\}\s*,\s*30000\s*\)/);
   });
 
-  it("the deletion targets calls/{roomNumber}", () => {
-    expect(src).toMatch(/deleteDoc\(doc\(db\s*,\s*["']calls["']\s*,\s*roomNumber\s*\)\)/);
+  it("the deletion targets the call session document", () => {
+    // Per PR-AUDIT-B4 (2026-10-20): the call document moved from the
+    // room-scoped `calls/{roomNumber}` path to the capability-scoped
+    // `callSessions/{sessionToken}` path, so the legacy
+    // `calls/{roomNumber}` path is now staff-only for the client SDK
+    // and the guest deletes its own session document instead.
+    expect(src).toMatch(/deleteDoc\(doc\(db\s*,\s*["']callSessions["']\s*,\s*sessionToken\s*\)\)/);
   });
 });

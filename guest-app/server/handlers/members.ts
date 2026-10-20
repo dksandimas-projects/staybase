@@ -675,8 +675,11 @@ async function applyPointsRedemption(
 //
 // Auth: Firebase ID token from the booking-flow client
 // (`adminAuth.verifyIdToken`). NOT staff-authenticated. Rate limit
-// is applied at the Vercel API catch-all level via the existing
-// `withRateLimit` middleware on the guest-side redemption endpoints.
+// is applied by the API router on the `members/redeem-points-self`
+// route (10/min per IP) — per PR-AUDIT-H5 (2026-10-20). The
+// previous comment here claimed a `withRateLimit` middleware applied
+// "at the Vercel API catch-all level"; no such middleware exists
+// anywhere in the repo, so this endpoint was previously unthrottled.
 export async function handleRedeemPointsSelf(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });

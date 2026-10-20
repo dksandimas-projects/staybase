@@ -198,6 +198,33 @@ Both routes return the discount/rate details on success. Never expose full vouch
 | `/api/store/deliver-order` | POST | Staff | Atomically mark an out-for-delivery order delivered and append one deterministic direct-payment tender; Add to Bill creates no tender |
 
 Store order creation MUST use a Firestore transaction to prevent overselling.
+
+---
+
+### Intercom Routes (`/api/intercom/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/intercom/verify-guest` | POST | None (last name or booking ID must match the room's `checked-in` booking) | Verify the guest's stay and ISSUE the session capability token |
+| `/api/intercom/send-message` | POST | Session capability token | Send a guest chat message; the server re-verifies the stay and writes to the guest's session thread |
+
+Per PR-AUDIT-B3/B6 (2026-10-20), the intercom uses a **capability-token**
+model because walk-in guests are not signed in and Firestore rules can only
+authorize against `request.auth`:
+
+- `POST /api/intercom/verify-guest` returns
+  `{ bookingId, bookingRef, guestName, checkIn, checkOut, sessionToken }`.
+  `sessionToken` is a random 32-hex value (128 bits) that is also stored on
+  the staff-only `intercoms/{roomId}` document as `currentStayToken`. It is
+  stable for the duration of the stay and regenerated when the stay changes.
+- The guest's chat thread lives at `intercomSessions/{sessionToken}/messages`
+  and the call session at `callSessions/{sessionToken}`. A caller who cannot
+  construct the path cannot read or forge the session.
+- `POST /api/intercom/send-message` REQUIRES `sessionToken` in the body. The
+  server resolves the booking from `currentStayId`, verifies that it belongs
+  to the room, that it is `checked-in`, and that `sessionToken` matches the
+  one issued for that room's current stay. **The request body's `guestName` is
+  ignored** — the name the desk sees comes from the booking.
 Store order cancellation MUST only allow `placed` orders and MUST use a transaction so stock restore is idempotent.
 Store order status MUST return only guest-safe metadata (`status`, `updatedAt`) and never expose `paymentProofUrl`, internal notes, or full order records.
 Store order delivery MUST use the authenticated server route. Direct-paid tenders are written under the store order so collection-group reports and Daily Close include them without settling the linked booking folio.

@@ -28,11 +28,20 @@ describe("firebase/storage.rules — store-orders payment-proof path", () => {
     expect(matchBlock![0]).not.toMatch(/allow\s+get:\s+if\s+true/);
   });
 
-  it("allows guests to write to the path (unauthenticated upload)", () => {
+  it("allows guests to write to the path, bounded by size and content type", () => {
+    // Per PR-AUDIT-B7 (2026-10-20): the write was `if true`, so ANY
+    // anonymous caller could upload an arbitrarily large object of any
+    // type to any room's path. The write is now bound to the same
+    // contract the client enforces (`image/jpeg` | `image/png` |
+    // `image/webp`, ≤ 5 MB) and Firebase evaluates it server-side.
     const matchBlock = rules.match(
       /match\s+\/store-orders\/\{roomNumber\}\/payment-proof\/\{fileName\}\s*\{[^}]+\}/
     );
     expect(matchBlock, "store-orders match block not found").toBeTruthy();
-    expect(matchBlock![0]).toMatch(/allow\s+write:\s+if\s+true/);
+    expect(matchBlock![0]).not.toMatch(/allow\s+write:\s*if\s+true/);
+    expect(matchBlock![0]).toMatch(/request\.resource\.size\s*<\s*5 \* 1024 \* 1024/);
+    expect(matchBlock![0]).toMatch(
+      /request\.resource\.contentType\s+in\s+\[\s*"image\/jpeg"\s*,\s*"image\/png"\s*,\s*"image\/webp"\s*\]/
+    );
   });
 });

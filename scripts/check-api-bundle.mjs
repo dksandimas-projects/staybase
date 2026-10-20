@@ -12,8 +12,24 @@ const stagedFiles = execFileSync("git", ["diff", "--cached", "--name-only"], {
   cwd: repoRoot,
   encoding: "utf8"
 }).trim().split("\n").filter(Boolean);
+// Per PR-AUDIT-H10 (2026-10-20): `hotel.config.ts` lives at the
+// REPO ROOT and is imported directly by the API handlers
+// (`apiRouter.ts` → `import config from "../../hotel.config"`,
+// plus `server/lib/siteUrl.ts`, `server/handlers/email.ts`,
+// `server/handlers/bookings.ts`, `server/handlers/reference.ts`,
+// `server/handlers/breakfast-manage.ts`). It is therefore BUNDLED
+// INTO THE API — but it sits outside `guest-app/server/` and
+// `shared/`, so the pre-existing watch list missed it. A config
+// change could ship without regenerating the bundle, leaving
+// Vercel running an API on the OLD config (brand name, timezone,
+// domain allowlist, contact email) while the front-end — which
+// Vite compiles directly — ran the new one. Watch it explicitly.
+const bundleInputPaths = ["guest-app/server", "shared", "hotel.config.ts"];
+
 const bundleInputsChanged = stagedFiles.some((file) =>
-  file.startsWith("guest-app/server/") || file.startsWith("shared/")
+  file.startsWith("guest-app/server/") ||
+  file.startsWith("shared/") ||
+  file === "hotel.config.ts"
 );
 
 if (!forceCheck && !bundleInputsChanged) process.exit(0);
@@ -34,7 +50,7 @@ try {
   const bundleIsStaged = stagedFiles.includes("guest-app/api/[...route].js");
   const unstagedBundleInputs = forceCheck ? [] : execFileSync(
     "git",
-    ["diff", "--name-only", "--", "guest-app/server", "shared"],
+    ["diff", "--name-only", "--", ...bundleInputPaths],
     { cwd: repoRoot, encoding: "utf8" }
   ).trim().split("\n").filter(Boolean);
   const bundleToVerify = forceCheck

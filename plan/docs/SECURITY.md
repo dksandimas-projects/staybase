@@ -143,19 +143,71 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 - Write: staff/admin
 
 ### `vouchers`
-- Read: staff/admin only — same BI-08 tightening as
-  `corporateCodes`. The public booking flow never reads the
-  collection client-side; validation is via
-  `/api/validate/voucher` (returns only discount type/value).
+- Read: staff/admin only, PLUS an owner-scoped branch added per PR-AUDIT-B2
+  (2026-10-20). The Spark Rewards portal reads the member's OWN
+  free-night vouchers client-side (`RewardsPage.tsx` — `where("kind","==","reward")`
+  + `where("memberId","==",uid)`), so the rule carries
+  `|| (signedIn() && resource.data.memberId == request.auth.uid)`. Firestore
+  proves the owner predicate from the query's `memberId` equality constraint,
+  so the portal's query is allowed while every other member's vouchers stay
+  unreadable. Promo vouchers carry no `memberId` and are excluded by both the
+  `kind == "reward"` filter and the rule.
 - Write: staff/admin
+- Validation is via `/api/validate/voucher` (returns only discount type/value).
 
 ### `intercoms`
-- Read/Write: open (no auth — anonymous QR chat)
-- Mitigation: room ID required in URL (physical QR gate), no sensitive PII should be stored here
+- Read/Write: **staff only** (tightened per PR-AUDIT-B5, 2026-10-20). The
+  thread document carries `guestName`, `currentStayId`, `currentStayToken` and
+  the `resolved` flag the desk's inbox uses to decide whether a request is
+  still open — with the old `allow read, create, update: if true` any
+  anonymous caller could set `resolved: true` and silence a live guest
+  request. The guest app never touches this document client-side; the server
+  endpoint and the staff app are the only writers.
+
+### `intercoms/{roomId}/messages`
+- Read: **staff only** (PR-AUDIT-B3, 2026-10-20). The guest's live thread
+  lives under `intercomSessions/{sessionToken}/messages` (below); this legacy
+  path keeps the desk's existing history readable to staff only.
+
+### `intercomSessions/{sessionToken}` — the capability-scoped guest thread
+- **Why a capability model:** the guest intercom serves walk-in guests who are
+  not signed in, and Firestore rules can only authorize against `request.auth`
+  — which an anonymous guest does not have. So there is no way to keep a
+  guest's realtime read on a room-scoped collection and make it non-public;
+  the credential has to be IN THE PATH. Rationale and history:
+  `plan/features/INTERCOM-GUEST.md §Per-stay session scope`.
+- **How:** `POST /api/intercom/verify-guest` issues a random 32-hex
+  `sessionToken` (128 bits), stores it on the staff-only `intercoms/{roomId}`
+  as `currentStayToken`, and returns it to the guest. Messages live at
+  `intercomSessions/{sessionToken}/messages/{messageId}`. The token is
+  **regenerated whenever the stay changes**, so a previous guest's token
+  cannot read the next guest's messages.
+- Read: allowed (capability). Create: the guest cannot create message
+  documents — `POST /api/intercom/send-message` writes them through the Admin
+  SDK after verifying the stay server-side. Update: the guest may set
+  `isRead` in their own thread, nothing else. Delete: staff.
+- The desk's inbox reads BOTH paths with one collection-group query over
+  `messages` (`match /{path=**}/messages/{messageId}` grants staff read).
 
 ### `calls`
-- Read/Write: open (`allow read, write: if true;` — same trust model as `intercoms`; the guest's SDP offer + the staff's SDP answer + ICE candidates all need public write so the peer-to-peer handshake can complete without auth)
-- The `acceptedBy` field (decision #214, 2026-08-19) is staff-attribution data written by the `runTransaction` claim in `AdminContext.acceptCall` — currently any caller can write any `acceptedBy` payload. **Future hardening (filed in decision #214's "Security rule gap" paragraph):** narrow writes to `isStaff()` after the consent checkbox + per-room occupancy gate lands, while keeping reads public for the guest-side SDP handshake. Until then, the audit-trail value (knowing which staff took a call) is honoured by the chat thread's `call-answered` system message with `callAnsweredByName` — the rule layer is not the gate.
+- Read/Write: **staff only** (tightened per PR-AUDIT-B4, 2026-10-20). With
+  the old `allow read, write: if true` any anonymous caller could read a
+  room's call document (which carries `guestName`) and — far worse — write
+  one, pointing the guest's peer connection at an attacker-supplied SDP
+  answer. The legacy `calls/{roomId}/{document=**}` path is now staff-only
+  for the client SDK.
+- The `acceptedBy` field (decision #214, 2026-08-19) is staff-attribution data
+  written by the `runTransaction` claim in `AdminContext.acceptCall`. It now
+  lives on a staff-only path, so the rule layer IS the gate for it — the
+  "future hardening" note from decision #214 is closed for this field.
+
+### `callSessions/{sessionToken}` — the capability-scoped call session
+- Same capability model as `intercomSessions`: the WebRTC offer, the SDP
+  answer and the ICE candidates live under a path containing the guest's
+  32-hex session token, so an anonymous caller can neither read nor forge a
+  call session without holding it. The token is the same
+  `intercoms/{roomId}.currentStayToken` the desk already reads.
+- Read/Write: allowed (capability). Delete: staff.
 - Staff trained not to share PII (booking refs, payment details) via intercom chat
 
 ---
@@ -170,14 +222,26 @@ Full rules in `firebase/storage.rules`. Intent:
 
 ### Payment proof (`bookings/{bookingId}/payment-proof/{filename}`)
 - Read: authenticated staff/admin only — **never public**
-- Write: anyone (guests upload during booking flow — use a time-limited upload token approach or validate booking context)
+- Write: guests upload during the booking flow — **bounded** per PR-AUDIT-B7
+  (2026-10-20). The rule was `allow write: if true`, which let ANY anonymous
+  caller upload an arbitrarily large object of any type to any path (the
+  guest controls the `bookingId` segment). It is now bounded to the contract
+  the client already enforces: `request.resource.size < 5 * 1024 * 1024` and
+  `request.resource.contentType in ["image/jpeg", "image/png", "image/webp"]`,
+  evaluated server-side by Firebase.
+- **Still open:** the write is not scoped to the OWNING booking — closing that
+  needs a server-issued upload token in the upload metadata, which the rules
+  can compare against the booking document. Practical impact is low: the
+  admin resolves proofs from the URL stored ON THE BOOKING DOC, never by
+  listing the folder, so a planted object is never surfaced in the UI.
 - Randomized object paths are stored in `paymentProofPath`; anonymous clients use local blob previews and never mint permanent download URLs
 - Admin UI resolves the path through staff-authenticated `/api/storage/signed-url`, which returns a one-hour signed URL
 - `bookingId` is preallocated by the booking flow before upload, then passed to `/api/bookings/create`; the API creates the booking document at that exact ID inside the transaction
 
 ### Discount ID photos (`bookings/{bookingId}/discount-id/{filename}`)
 - Read: authenticated staff/admin only — **never public**
-- Write: anyone (guests upload during booking flow before booking creation)
+- Write: guests upload during the booking flow before booking creation — same
+  size + content-type bound as the payment-proof path (PR-AUDIT-B7)
 - Randomized object paths are stored in `discountIdPhotoPath` and use the same staff-authenticated signed-URL flow
 - `bookingId` follows the same preallocated-ID contract as payment proof uploads
 
@@ -330,14 +394,39 @@ Key directives:
 - `X-Frame-Options: DENY` — legacy browser support
 - `X-Content-Type-Options: nosniff` — prevents MIME-type sniffing
 - `Referrer-Policy: strict-origin-when-cross-origin`
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` — added per PR-AUDIT-M2 (2026-10-20) to all three `vercel.json` files (`/`, `guest-app/`, `admin-app/`).
 
-Note: Framer Motion and all app JS are bundled at build time — no external script tags needed beyond the allowlist above.
+### `'unsafe-eval'` is a DELIBERATE, DOCUMENTED exception — do not remove it casually
+
+`script-src` includes `'unsafe-eval'` in all three configs. Audited per
+PR-AUDIT-M1 (2026-10-20) and **kept on purpose**:
+
+- The **admin app provably needs it**: the HEIC decoder is an Emscripten
+  build whose dynamic-linking trampolines call `new Function(...)`
+  (`emval_*` / `methodCaller<...>` in `admin-app/dist/assets/heic-to-*.js`).
+  Removing it breaks HEIC conversion outright.
+- The **guest bundle does not need it** — a scan of every asset in
+  `guest-app/dist/assets/` found zero `eval(` and zero `new Function(` calls.
+  But the guest loads two third-party scripts at RUNTIME (Turnstile, Sentry)
+  whose contents are not in the bundle, so their need for `eval` could not be
+  verified offline.
+- Decision #262 records the precedent: tightening this CSP once already broke
+  production Google sign-in (`apis.google.com` was missing from `script-src`
+  and Firebase Auth's `signInWithPopup` injects it at runtime) while
+  email/password kept working.
+
+**To remove it safely (not done yet):** run a staging smoke test covering
+(1) Google sign-in via popup, (2) a Turnstile-protected booking submission
+and (3) a Sentry-captured error, then drop `'unsafe-eval'` from
+`guest-app/vercel.json` ONLY. The admin app needs it until the HEIC decoder
+is replaced with a non-Emscripten build.
 
 ---
 
 ## HTTPS & Infrastructure
 
 - **Vercel** handles HTTPS for all deployments automatically — no configuration needed
+- **`Strict-Transport-Security`** is now set explicitly (see the CSP section above) so browsers are told to upgrade to HTTPS for the whole domain
 - **Firebase** connections are TLS-encrypted by default
 - **Environment variables** containing secrets never committed to git — see `plan/docs/ENV-SETUP.md`
 - **Firebase API keys** in `guest-app` and `admin-app` are client-safe (Firestore rules are the real security layer) — but restrict API key usage in Firebase Console to specific domains

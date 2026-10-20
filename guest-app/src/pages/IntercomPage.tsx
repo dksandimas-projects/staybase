@@ -139,6 +139,12 @@ export function IntercomPage() {
   const [showNamePrompt, setShowNamePrompt] = useState<boolean>(true);
   const [nameInput, setNameInput] = useState<string>("");
   const [currentStayId, setCurrentStayId] = useState<string>("");
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token issued by
+  // `/api/intercom/verify-guest`. It is part of the Firestore path
+  // the guest's thread lives at (`intercomSessions/{sessionToken}`),
+  // so it is the guest's only credential for reading their own
+  // conversation. The server issues it; the guest never chooses it.
+  const [sessionToken, setSessionToken] = useState<string>("");
   const [isVerifyingGuest, setIsVerifyingGuest] = useState<boolean>(false);
   const [verificationError, setVerificationError] = useState<string>("");
 
@@ -450,6 +456,7 @@ export function IntercomPage() {
               const result = await response.json();
               if (response.ok && result.success && result.data?.bookingId && isMounted) {
                 setCurrentStayId(result.data.bookingId);
+                setSessionToken(result.data.sessionToken || "");
                 setGuestName(parsed.guestName || "Guest");
                 setShowNamePrompt(false);
               }
@@ -478,10 +485,16 @@ export function IntercomPage() {
   }, [roomId]);
 
   useEffect(() => {
-    if (!isValidRoom || !roomNumber || !currentStayId || showNamePrompt) return;
+    if (!isValidRoom || !roomNumber || !currentStayId || !sessionToken || showNamePrompt) return;
 
+    // Per PR-AUDIT-B3 (2026-10-20): the thread now lives in the
+    // SESSION-SCOPED collection whose path carries the capability
+    // token the server issued at verification. The legacy
+    // room-scoped collection is staff-only, so this path is the
+    // guest's only route to their own conversation — and it is not
+    // reachable without the token.
     const messagesQuery = query(
-      collection(db, "intercoms", roomNumber, "messages"),
+      collection(db, "intercomSessions", sessionToken, "messages"),
       orderBy("timestamp", "asc"),
       limit(messageLimit)
     );
@@ -517,7 +530,7 @@ export function IntercomPage() {
             (message) => message.sender === "front-desk" && !message.isRead
           );
           unreadFrontDeskMessages.forEach((message) => {
-            void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
+            void updateDoc(doc(db, "intercomSessions", sessionToken, "messages", message.id), { isRead: true });
           });
           setUnreadFromFrontDesk(0);
         } else {
@@ -535,18 +548,18 @@ export function IntercomPage() {
     );
 
     return unsubscribe;
-  }, [isValidRoom, roomNumber, currentStayId, showNamePrompt, messageLimit, activeTab]);
+  }, [isValidRoom, roomNumber, currentStayId, sessionToken, showNamePrompt, messageLimit, activeTab]);
 
   // Mark unread FD messages as read when guest switches to Chat tab
   useEffect(() => {
-    if (activeTab !== "chat" || !roomNumber || !isValidRoom || !currentStayId) return;
+    if (activeTab !== "chat" || !roomNumber || !isValidRoom || !currentStayId || !sessionToken) return;
     const unreadOnChat = messages.filter((m) => m.sender === "front-desk" && !m.isRead);
     if (unreadOnChat.length === 0) return;
     unreadOnChat.forEach((message) => {
-      void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
+      void updateDoc(doc(db, "intercomSessions", sessionToken, "messages", message.id), { isRead: true });
     });
     setUnreadFromFrontDesk(0);
-  }, [activeTab, messages, roomNumber, isValidRoom, currentStayId]);
+  }, [activeTab, messages, roomNumber, isValidRoom, currentStayId, sessionToken]);
 
   const handleLoadMore = () => {
     setMessageLimit((prev) => prev + LOAD_MORE_STEP);
@@ -737,6 +750,7 @@ export function IntercomPage() {
 
       const verifiedGuestName = result.data.guestName || lastName;
       setCurrentStayId(result.data.bookingId);
+      setSessionToken(result.data.sessionToken || "");
       setGuestName(verifiedGuestName);
       localStorage.setItem(`intercomVerified:${roomNumber}`, JSON.stringify({
         bookingId: result.data.bookingId,
@@ -752,7 +766,7 @@ export function IntercomPage() {
 
   // Text message sending
   const sendGuestMessage = async (text: string, options?: { isQuickRequest?: boolean; isStoreOrder?: boolean; orderRef?: string; isEarlyCheckInRequest?: boolean; isCancelledOrder?: boolean }) => {
-    if (!roomNumber || !guestName.trim() || !currentStayId) return;
+    if (!roomNumber || !guestName.trim() || !currentStayId || !sessionToken) return;
     setMessageError("");
     if (!canSendGuestMessage()) {
       setMessageError("Too many messages sent from this room. Please wait a few minutes or call the front desk.");
@@ -770,6 +784,10 @@ export function IntercomPage() {
           roomNumber,
           guestName,
           currentStayId,
+          // Per PR-AUDIT-B3 (2026-10-20): the capability token the
+          // server issued at verification. The server re-validates it
+          // against the stay before writing.
+          sessionToken,
           text,
           isQuickRequest: !!options?.isQuickRequest,
           isStoreOrder: !!options?.isStoreOrder,
@@ -804,13 +822,19 @@ export function IntercomPage() {
 
   // Voice Call Signaling Actions
   const handleStartCall = async () => {
-    if (!roomNumber || !currentStayId || callState !== "idle") return;
+    if (!roomNumber || !currentStayId || !sessionToken || callState !== "idle") return;
 
     setCallError("");
     setCallState("requesting");
 
     try {
-      const callRef = doc(db, "calls", roomNumber);
+      // Per PR-AUDIT-B4 (2026-10-20): the WebRTC signalling path moved
+      // to the SESSION-SCOPED collection, whose path carries the
+      // capability token. The legacy `calls/{room}` path is staff-only,
+      // so an anonymous caller can no longer read a call document or
+      // inject an SDP offer that would point the guest's peer
+      // connection at an attacker.
+      const callRef = doc(db, "callSessions", sessionToken);
       const existingCall = await getDoc(callRef);
       const existingStatus = existingCall.exists() ? existingCall.data().status : "";
       if (existingStatus === "ringing" || existingStatus === "active") {
@@ -830,7 +854,7 @@ export function IntercomPage() {
 
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) return;
-        void addDoc(collection(db, "calls", roomNumber, "iceCandidates"), {
+        void addDoc(collection(db, "callSessions", sessionToken, "iceCandidates"), {
           candidate: event.candidate.toJSON(),
           from: "guest",
           createdAt: serverTimestamp()
@@ -859,6 +883,10 @@ export function IntercomPage() {
         answer: null,
         status: "ringing",
         guestName,
+        // The desk maps a session document back to a room using these
+        // fields (the session path itself carries only the token).
+        roomNumber,
+        currentStayId,
         startedAt: serverTimestamp(),
         endedAt: null
       });
@@ -897,7 +925,7 @@ export function IntercomPage() {
       });
 
       iceUnsubscribeRef.current = onSnapshot(
-        collection(db, "calls", roomNumber, "iceCandidates"),
+        collection(db, "callSessions", sessionToken, "iceCandidates"),
         (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type !== "added") return;
@@ -946,7 +974,7 @@ export function IntercomPage() {
   const handleEndCall = async () => {
     if (roomNumber) {
       try {
-        await updateDoc(doc(db, "calls", roomNumber), {
+        await updateDoc(doc(db, "callSessions", sessionToken), {
           status: "ended",
           endedAt: serverTimestamp()
         });
@@ -955,7 +983,7 @@ export function IntercomPage() {
         // Prevents the calls collection from growing unboundedly.
         setTimeout(() => {
           if (roomNumber) {
-            deleteDoc(doc(db, "calls", roomNumber)).catch((err) => {
+            deleteDoc(doc(db, "callSessions", sessionToken)).catch((err) => {
               console.error("Error deleting call doc:", err);
             });
           }

@@ -279,8 +279,27 @@ function emailClaimGuardResponse(user: { email?: string; email_verified?: boolea
 // Simple in-memory IP cache for rate limiting
 const rateLimitCache = new Map<string, { count: number; resetTime: number }>();
 
+// Per PR-AUDIT-H6 (2026-10-20): the cache was never pruned, so every
+// distinct key (IP × route × window) stayed in the Map for the life of
+// the instance. On Vercel the instance is short-lived, so the leak is
+// bounded in practice — but a long-lived warm instance (or a local
+// `vercel dev` session) accumulated keys indefinitely. Sweep expired
+// entries opportunistically. The sweep is amortized: at most one pass
+// per `PRUNE_INTERVAL_MS`.
+const RATE_LIMIT_PRUNE_INTERVAL_MS = 60_000;
+let lastRateLimitPruneAt = 0;
+
+function pruneRateLimitCache(now: number) {
+  if (now - lastRateLimitPruneAt < RATE_LIMIT_PRUNE_INTERVAL_MS) return;
+  lastRateLimitPruneAt = now;
+  for (const [key, record] of rateLimitCache) {
+    if (now > record.resetTime) rateLimitCache.delete(key);
+  }
+}
+
 function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
+  pruneRateLimitCache(now);
   const record = rateLimitCache.get(ip);
 
   if (!record) {
@@ -464,7 +483,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const [domain, action] = pathSegments;
 
   // 3. Rate Limiting based on IP
-  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  //
+  // Per PR-AUDIT-H6 (2026-10-20): the header order now prefers
+  // `x-vercel-forwarded-for`. Vercel OVERWRITES `x-forwarded-for`
+  // and does not forward external IPs (per Vercel's request-headers
+  // documentation), so the previous first-hop read was NOT spoofable
+  // on Vercel — this is a robustness improvement, not a fix for a
+  // live bypass. `x-vercel-forwarded-for` is Vercel's own sanitized
+  // single-value client IP and stays correct even when a proxy sits
+  // in front of Vercel (which is the one configuration where
+  // `x-forwarded-for` could be overwritten).
+  const rawIp =
+    req.headers["x-vercel-forwarded-for"] ||
+    req.headers["x-forwarded-for"] ||
+    req.headers["x-real-ip"] ||
+    req.socket.remoteAddress ||
+    "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
 
   // Route Dispatch and Middlewares
@@ -902,6 +936,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
+    // Per PR-AUDIT-H5 (2026-10-20): the cancel path had NO IP rate
+    // limit — Turnstile was the only throttle, and Turnstile is a
+    // per-request human-verification challenge, not a throughput
+    // cap. Its read-only sibling `cancel-preview` already had
+    // 10/min; the cancel endpoint now matches it, so a caller cannot
+    // drive unbounded cancellation attempts at the booking lookup.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancel:${ip}`, 10, 60000)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many cancellation requests. Please try again in a minute."
+      });
+    }
     let authResult: { success: boolean; uid?: string; email?: string } = { success: false };
     if (req.headers.authorization) {
       const staffAuth = await authenticateStaff(req);
@@ -1626,6 +1672,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Firebase ID token verification + the toggle check +
     // ownership guard (booking.memberId === authUser.uid) inside
     // `applyPointsRedemption`.
+    //
+    // Per PR-AUDIT-H5 (2026-10-20): this endpoint had NO rate limit
+    // of any kind. The handler's own comment claimed a
+    // `withRateLimit` middleware applied "at the Vercel API catch-all
+    // level" — no such middleware exists anywhere in the repo. A
+    // redemption mutates points and writes to the points ledger, so
+    // an unbounded retry loop is a real risk, not a theoretical one.
+    // 10/min per IP is generous for a human redeeming a voucher.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-redeem-points-self:${ip}`, 10, 60000)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many redemption attempts. Please try again in a minute."
+      });
+    }
     return await handleRedeemPointsSelf(req, res);
   }
 
@@ -1909,8 +1969,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const isKnownEmailAction = publicEmailActions.has(action) || staffOnlyEmailActions.has(action);
   if (domain === "email" && isKnownEmailAction && (req.method === "POST" || isCronEmailMethod)) {
-    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
-    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 3600000)) {
+    // Per PR-AUDIT-H5 (2026-10-20): the limit was keyed ONLY on a
+    // CLIENT-SUPPLIED value (`bookingRef` / `bookingId` /
+    // `inquiry.email` / `email`), falling back to the IP only when
+    // none of those were present. Varying that value handed the
+    // caller a fresh bucket every request, so the "3 per hour"
+    // ceiling was not a ceiling at all.
+    //
+    // The fix is TWO limits:
+    //   1. per-IP-per-action (20/hour) — the anti-spam ceiling. It
+    //      is keyed on the platform-sanitized client IP, so it
+    //      cannot be varied by the caller.
+    //   2. per-IP-per-action-per-target (3/hour) — the original
+    //      intent, so one specific booking can still not have its
+    //      guest spammed with repeated triggers.
+    //
+    // The per-IP ceiling is deliberately looser than the per-target
+    // one: every guest of the hotel shares one NAT address on the
+    // hotel wifi, so a tight per-IP limit would block legitimate
+    // confirmation emails for unrelated guests.
+    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || "";
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:ip:${ip}`, 20, 3600000)) {
+      return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
+    }
+    if (
+      process.env.NODE_ENV !== "test" &&
+      rateLimitKey &&
+      isRateLimited(`email:${action}:ip:${ip}:target:${rateLimitKey}`, 3, 3600000)
+    ) {
       return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
     }
 

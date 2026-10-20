@@ -337,6 +337,23 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Per PR-AUDIT-B1 (2026-10-20): the breakfast-config change
+    // log lives in a SUBCOLLECTION of `settings/breakfastConfig`
+    // (`SettingsPage.tsx` — `collection(db, "settings",
+    // "breakfastConfig", "breakfastConfigChangeLog")`).
+    // The `match /settings/{documentId}` block above matches ONLY
+    // the two-segment document — Firestore rules do NOT cascade
+    // into subcollections — so every `addDoc` to the change log
+    // was PERMISSION_DENIED for every role, admin included. The
+    // client swallowed the rejection with a `console.warn`, so the
+    // audit trail was silently lost behind a successful save toast.
+    // This block closes the gap. Read is staff (the admin reports
+    // surface it); write is admin, mirroring the parent doc.
+    match /settings/{documentId}/breakfastConfigChangeLog/{auditId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
     match /corporateInquiries/{inquiryId} {
       allow read, update, delete: if isStaff();
       allow create: if isStaff();
@@ -404,20 +421,45 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
+    // Per PR-AUDIT-B2 (2026-10-20): the Spark Rewards portal reads
+    // the member's OWN free-night vouchers client-side
+    // (`RewardsPage.tsx` — `where("kind","==","reward")` +
+    // `where("memberId","==",uid)`). The pre-existing rule was
+    // `isStaff()` only, so a signed-in member's read was
+    // PERMISSION_DENIED and the portal silently rendered an empty
+    // voucher list (the error handler set `rewardVouchers` to `[]`,
+    // and the code comment claimed an owner-scoped rule that never
+    // existed). The fix adds an owner-scoped branch: Firestore can
+    // prove `resource.data.memberId == request.auth.uid` from the
+    // query's `where("memberId","==",uid)` constraint, so the
+    // portal's query is allowed while every other member's vouchers
+    // stay unreadable. Promo vouchers carry no `memberId` and are
+    // excluded by both the `kind == "reward"` filter and this rule.
     match /vouchers/{voucherId} {
-      allow read: if isStaff();
+      allow read: if isStaff()
+        || (signedIn() && resource.data.memberId == request.auth.uid);
       allow write: if isStaff();
     }
 
+    // Per PR-AUDIT-B5 (2026-10-20): the intercom thread document was
+    // `allow read, create, update: if true`. `resolved` is the flag the
+    // desk's inbox uses to decide whether a request is still open, so
+    // ANY anonymous caller could set `resolved: true` and silence a
+    // real guest's live request to the front desk. The guest app never
+    // reads or writes this document client-side (it uses the
+    // server endpoints), so staff-only is safe here.
     match /intercoms/{roomId} {
-      allow read, create, update: if true;
-      allow delete: if isStaff();
+      allow read: if isStaff();
+      allow write: if isStaff();
 
-      // G-04 (E2E audit 2026-07-17): guest messages are routed through
-      // the rate-limited API endpoint. Only staff can create messages
-      // directly (replies). Guest reads and staff full CRUD are preserved.
+      // Per PR-AUDIT-B3 (2026-10-20): the message documents used to be
+      // `allow read: if true`, so any anonymous caller could read every
+      // room's guest↔desk conversation (guest name, message text,
+      // `currentStayId`, `orderRef`). The guest's own thread now lives
+      // under `intercomSessions/{sessionToken}` — see that block. This
+      // legacy path keeps the desk's history visible to staff only.
       match /messages/{messageId} {
-        allow read: if true;
+        allow read: if isStaff();
         allow create: if isStaff()
           && request.resource.data.keys().hasOnly([
             "text",
@@ -478,8 +520,90 @@ service cloud.firestore {
       }
     }
 
+    // Per PR-AUDIT-B4 (2026-10-20): the WebRTC signalling path was
+    // `allow read, write: if true` — ANY anonymous caller could read
+    // every room's call document (which carries `guestName`) and, far
+    // worse, WRITE one: setting `status: "active"` with an attacker
+    // supplied SDP would point the guest's peer connection at the
+    // attacker. The legacy path is now staff-only.
     match /calls/{roomId}/{document=**} {
+      allow read, write: if isStaff();
+    }
+
+    // ── Capability-scoped guest sessions ─────────────────────────────
+    //
+    // Per PR-AUDIT-B3 / B4 (2026-10-20).
+    //
+    // The guest intercom is used by WALK-IN guests who are not signed
+    // in, so Firestore rules cannot authorize them per-user: a rule
+    // can only compare against `request.auth`, and an anonymous guest
+    // has no `request.auth`. There is therefore no way to keep a
+    // guest's realtime read on a room-scoped collection while making
+    // it non-public.
+    //
+    // The fix is a CAPABILITY model. When a guest verifies their stay,
+    // the server issues a random 32-hex `sessionToken` and returns it
+    // to that guest. The token is stored on the (now staff-only)
+    // `intercoms/{roomId}` document and is NOT enumerable from the
+    // client. The guest's documents live under a path that CONTAINS
+    // the token:
+    //
+    //     intercomSessions/{sessionToken}/messages/{messageId}
+    //     callSessions/{sessionToken}
+    //     callSessions/{sessionToken}/iceCandidates/{candidateId}
+    //
+    // A caller who cannot construct the path cannot read the
+    // documents. This is the same "unguessable share link" model the
+    // booking-lookup token already uses. Because the rules below are
+    // unconditional, Firestore can evaluate them for both single-doc
+    // reads and list queries (an unconditional rule needs no
+    // "query is provably safe" analysis).
+    //
+    // The token is 32 hex characters from `crypto.randomBytes(16)` —
+    // 128 bits of entropy. It is regenerated whenever the stay
+    // changes, so a previous guest's token cannot read the next
+    // guest's thread.
+    match /intercomSessions/{sessionToken} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+
+      match /messages/{messageId} {
+        // Capability read — see the block comment above.
+        allow read: if true;
+        // Guest messages are written by the server endpoint only
+        // (it verifies the stay and stamps the guest's identity).
+        allow create: if false;
+        // The guest marks the desk's messages as read in their own
+        // thread; no other field may be touched.
+        allow update: if isStaff()
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead"]);
+        allow delete: if isStaff();
+      }
+    }
+
+    match /callSessions/{sessionToken} {
+      // Capability read/write — see the block comment above. The
+      // guest writes the WebRTC offer and ICE candidates; the desk
+      // writes the answer. Both sides hold the same token.
       allow read, write: if true;
+      allow delete: if isStaff();
+
+      match /iceCandidates/{candidateId} {
+        allow read, write: if true;
+        allow delete: if isStaff();
+      }
+    }
+
+    // Per PR-AUDIT-B3 (2026-10-20): the desk's inbox reads BOTH the
+    // legacy `intercoms/{room}/messages` thread and the guest's
+    // `intercomSessions/{token}/messages` thread with a single
+    // collection-group query over "messages". This block makes that
+    // query explicit for staff. It grants the desk NOTHING new — both
+    // concrete message paths were already staff-readable — and it does
+    // not widen the guest's access, which still comes from the
+    // capability block above.
+    match /{path=**}/messages/{messageId} {
+      allow read: if isStaff();
     }
 
     match /storeItems/{itemId} {
