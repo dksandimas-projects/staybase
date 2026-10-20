@@ -92,11 +92,14 @@
 | 14 — Breakfast Redesign (BR) | ✅ BR-01..BR-12 shipped 2026-10-14 | VER `2.3.0` (BR-01..08 → 2.0.0 MAJOR; BR-09 → 2.1.0 MINOR 5-step flow; BR-10 → 2.2.0 MINOR `cutoffsEnabled` toggle + Skip add-ons button; BR-12 → 2.3.0 MINOR Other Add-Ons airport transfer v1) |
 | 15 — Guest Booking Mobile UX (MBUX) | ✅ Shipped (10/10, close-out pending browser matrix) | Owner-approved 2026-10-15; full five-step mobile refresh + optional admin-uploaded breakfast meal photos. MBUX-01–09 shipped 2026-10-15, decisions #254–#261; MBUX-10 close-out shipped 2026-10-16 with two production bugs fixed in the close-out pass (React #310 on `/book` from a hook-after-early-return; Google auth iframe CSP block) and the cross-surface contract test in place, decision #262. The 320/375/390/430/tablet/desktop browser matrix is the one item this slice did NOT close — owner to confirm which Firebase env to drive the pass against. Spec: `plan/features/BOOKING-MOBILE-UX.md`. |
 | Plan Audits (FIN, FR, FL, PF, QA, NC, AUD, SA, FLR, PC, INC) | ✅ Closed / In Prod | 0 — details in archive |
+| Production Readiness Audit (2026-10-20) | 🔄 7 blockers closed · rules verified | 5 open items (§Production Readiness Audit below) — H1 DOM tests, H3/H4 pricing posture, H7 email retry, H8 nightly reconciliation, H9 launch QA |
 
 ---
 
 ## Phase 8 — Intercom: remaining manual QA
 > Run on staging before launch — sign off in client training session. Everything else in Phase 8 is shipped (see archive).
+
+> ⚠️ **These items now cover a changed data path.** The 2026-10-20 production-readiness audit (decision #306) moved the guest's thread from `intercoms/{roomId}/messages` to the capability-scoped `intercomSessions/{sessionToken}/messages`, and call signalling to `callSessions/{sessionToken}`. The guest now verifies the stay first (`POST /api/intercom/verify-guest`) and the server re-verifies it on every send. **This list is the first end-to-end exercise of that refactor** — it has not been run against a real guest + desk + WebRTC session. Do not treat the QA matrix below as a formality.
 
 - [ ] Desktop Chrome — scan QR from `/intercom/{roomId}` → enter guest name → quick request lands in admin Inbox → admin reply reaches guest within 2s
 - [ ] Desktop Chrome — guest voice call → admin ringing banner + ring sound → accept → bidirectional audio → hang up from both sides
@@ -118,6 +121,20 @@
 - ⬜ Cross-browser QA — Chrome, Safari, Firefox
 - ⬜ Mobile QA — iOS Safari, Android Chrome (375px)
 - ⬜ Accessibility QA — WCAG 2.1 AA checklist (`plan/docs/FRONTEND.md §Accessibility`) across guest-facing screens
+
+---
+
+## Production Readiness Audit — 2026-10-20
+
+> **Full report: [`plan/project/AUDIT-PRODUCTION-READINESS-2026-10-20.md`](plan/project/AUDIT-PRODUCTION-READINESS-2026-10-20.md)** — 7 blockers, 10 highs, 10 mediums. Verdict at the time: *feature-complete, NOT production-ready*. Decisions #306–#308.
+
+- ✅ **7 blockers (B1–B7) closed** — shipped on `fix/prod-readiness-blockers` (2.18.2 → 2.18.3), decision **#306**. The breakfast-config change log had no rule block (audit trail silently lost); `vouchers` was staff-only (members saw zero vouchers); the intercom thread was world-readable; call signalling was publicly readable *and* writable; any guest could mark a thread resolved; `send-message` trusted the body's guest name; the guest upload paths accepted anonymous writes of any size or type. The intercom + call fixes move the guest's thread and signalling to capability-scoped session paths (`intercomSessions/{token}/messages`, `callSessions/{token}`) with the server re-verifying the stay on every send — see decision #306. **Guardrail:** `admin-app/src/__tests__/firestore-rules-coverage.test.ts` now fails any commit that touches a Firestore path with no covering rule block (this defect class has now appeared three times). `docs:audit` and `spec:audit` unchanged.
+- ✅ **The Firestore rules are finally verified** — shipped 2026-10-20 (`fix/prod-readiness-blockers`, 2.18.3 → 2.18.4), decision **#308**. `npm run test:rules` had **never been run in this repo's lifetime** (no Java runtime on the dev machine). With a JDK in place it runs and found four defects no other gate could see — including a rule that never enforced the audit stamp it claimed to. **74 tests, 74 passed, 8 files** (from 31 passed / 9 failed / 1 unloadable file). `scripts/resolve-jdk.mjs` now resolves the JDK automatically and **fails loudly** when none is found, so the gate can never be silently skipped. Decision #307 records the `hasOnly()`-is-a-subset-check lesson.
+- ⬜ **H1 — zero DOM tests** — no jsdom / React Testing Library / `render()` anywhere in the repo. ~99% of assertions are regex matches against source text. The October audit proved empirically that this suite misses real bugs (30 defects, 5 Critical, survived a fully green run). **The single largest remaining gap.**
+- ⬜ **H3 / H4 — public `rooms` + `settings` expose negotiated corporate rates** — needs a deliberate pricing-posture decision from the owner, not a unilateral fix.
+- ⬜ **H7 — failed emails have no retry path** — the DLQ exists and is correctly admin-read-only, but there is no retry route and no retry button; `retryCount` is always 0.
+- ⬜ **H8 — no recurring finance reconciliation** — `scripts/finance-integrity-scan.ts` is a manual one-off CLI; nothing reconciles the ledger against bookings nightly.
+- ⬜ **H9 — the launch QA gates below are untouched** (Phase 8 intercom QA · Phase 10 security · Phase 11 staging + cutover · Phase 11.7 admin mobile matrix · BDUX). **The intercom refactor in decision #306 has never been exercised end-to-end** — no guest + desk + WebRTC pass has been run against the new session paths, which makes the Phase 8 QA list above a hard prerequisite, not a formality.
 
 ---
 
