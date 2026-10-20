@@ -47,7 +47,7 @@ function readJson(path) {
 section("1. Tests");
 try {
   execSync("npm test", { cwd: repoRoot, stdio: "pipe" });
-  ok("All tests pass (shared + guest-app)");
+  ok("All tests pass (shared + guest-app API + admin-app + infra + Firestore rules)");
 } catch (err) {
   fail("Tests failed. Run `npm test` to see errors.");
 }

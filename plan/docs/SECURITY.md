@@ -113,7 +113,7 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 ### `guests`
 - Read: owner (matching UID) or staff/admin
 - Write: owner or admin only
-- **Self-write allowlist (per `features/INTERCOM-AUDIO-ROUTING.md`):** the owner's `update` branch may only touch `fullName`, `displayName`, `phone`, `photoUrl`, `address`, `dateOfBirth`, `emergencyContact`, `preferences`, `audioRouting`, `audioRoutingUpdatedAt`, and `updatedAt`. `role`, `isActive`, `email`, and the staff-audit fields are reserved for admin / server. A non-admin user writing a missing `audioRouting` field is permitted; writing to anything else in the same call fails.
+- **Self-write allowlist (per `features/INTERCOM-AUDIO-ROUTING.md`):** the owner's `update` branch may only touch `fullName`, `displayName`, `phone`, `photoUrl`, `address`, `dateOfBirth`, `emergencyContact`, `preferences`, `audioRouting`, `audioRoutingUpdatedAt`, and `updatedAt`. `role`, `isActive`, `email`, and the staff-audit fields are reserved for admin / server. A non-admin user writing a missing `audioRouting` field is permitted; writing to anything else in the same call fails. A write that **changes** `audioRouting` must also change the companion `audioRoutingUpdatedAt` audit stamp (enforced by the `audioRoutingStamped()` rule function — `hasOnly()` is a subset check and cannot express the pairing on its own); a write that leaves `audioRouting` alone is unaffected.
 
 ### `settings/hotelConfig` + `settings/websiteContent`
 - Read: public (needed for guest site content)

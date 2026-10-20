@@ -14,6 +14,22 @@ service cloud.firestore {
       return signedIn() && 'role' in request.auth.token && request.auth.token.role == "admin";
     }
 
+    // PR-AUDIT (2026-10-20): the audio-routing audit stamp.
+    //
+    // `affectedKeys().hasOnly([...])` is a SUBSET check — it restricts
+    // WHICH keys a write may touch, it does NOT require that a listed
+    // key is present. The `audioRouting` contract
+    // (`plan/features/INTERCOM-AUDIO-ROUTING.md` §D&L 46) requires the
+    // companion `audioRoutingUpdatedAt` stamp on EVERY write that
+    // changes `audioRouting`, so that pairing is enforced explicitly
+    // here. A write that leaves `audioRouting` alone (e.g. the member
+    // editing their own `fullName`) is unaffected.
+    function audioRoutingStamped() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny(["audioRouting"])
+        || changed.hasAll(["audioRoutingUpdatedAt"]);
+    }
+
     match /rooms/{roomId} {
       allow read: if true;
       // Per W3.4 / `plan/features/ROOM-MANAGEMENT.md §Delete`: only
@@ -258,6 +274,10 @@ service cloud.firestore {
     // and staff-audit fields are reserved for admin/server writes.
     // Admin SDK staff provisioning and valid Spark Rewards profile
     // editing (fullName, phone, photoUrl) are preserved.
+    //
+    // PR-AUDIT (2026-10-20): the `audioRoutingStamped()` conjunct
+    // enforces the §D&L 46 audit-stamp pairing that `hasOnly()` alone
+    // could not express. See the function's comment above.
     match /guests/{userId} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
       allow create: if isAdmin();
@@ -278,6 +298,7 @@ service cloud.firestore {
             "audioRoutingUpdatedAt",
             "updatedAt"
           ])
+          && audioRoutingStamped()
         );
       allow delete: if isAdmin();
     }

@@ -24,6 +24,24 @@ export default defineConfig({
       "firebase/tests/**/*.rules.test.ts",
       "firebase/tests/**/*.emulator.test.ts",
     ],
+    // Per PR-AUDIT (2026-10-20): the emulator test files MUST run
+    // SERIALLY. Every file boots the SAME Firestore emulator on the
+    // SAME port and uses the SAME `projectId`
+    // ("spark-inn-rules-test"), and most of them call
+    // `testEnv.clearFirestore()` in a `beforeEach` to seed their own
+    // fixture. With the default parallel file execution, one file's
+    // `clearFirestore()` wipes another file's seed mid-test, which
+    // surfaces as an unrelated-looking failure ("Cannot read
+    // properties of undefined") in a test that passes perfectly well
+    // on its own.
+    //
+    // This was invisible for as long as the emulator could not be
+    // started (no Java runtime on the dev machine), so `npm run
+    // test:rules` had never actually been run here. It surfaced the
+    // moment a JVM became available: 9 failures, all of them
+    // cross-file interference, and all of them green when the file
+    // was run alone.
+    fileParallelism: false,
     environment: "node",
     testTimeout: 20000,
     hookTimeout: 30000,

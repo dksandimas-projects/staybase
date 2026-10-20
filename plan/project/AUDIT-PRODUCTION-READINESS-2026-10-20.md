@@ -12,7 +12,9 @@
 
 **Seven blockers (B1–B7) are genuine security defects**, and they are the *same failure class* the October audit already caught once (OCT-C3: a collection ships with no rule block, the admin surface dies silently behind a misleading empty state). Two more collections have it. The class was fixed for `addOns` + `auditLogs`; it was not generalized into a guardrail, so it recurred twice.
 
-**The test suite cannot support a production sign-off.** 5,473 tests pass and **zero of them execute React**. There is no jsdom, no React Testing Library, and no `render()` call anywhere in the repository. ~99% of assertions are regex matches against source text. The October audit demonstrated empirically that this suite does not catch real defects — 30 of them (5 Critical) survived a fully green run.
+**The test suite cannot support a production sign-off.** 5,514 tests pass and **zero of them execute React**. There is no jsdom, no React Testing Library, and no `render()` call anywhere in the repository. ~99% of assertions are regex matches against source text. The October audit demonstrated empirically that this suite does not catch real defects — 30 of them (5 Critical) survived a fully green run.
+
+*(A second gate was worse: the Firestore rules suite had never been executed at all, because this machine had no Java runtime. It is now running — 74/74 green — and the first run found four real defects, including a rule that never enforced the audit stamp it claimed to. See §Rules verification.)*
 
 **The launch gates are untouched.** Phase 10 Security & Polish (5 items), Phase 8 Intercom manual QA (10 items), Phase 11 staging + cutover (14 items), BDUX verification (8 items), and the Phase 11.7 admin mobile matrix are all still unchecked. These are the actual definition of "ready for production" and none of them have been started.
 
@@ -21,8 +23,8 @@
 | Axis | Score | Basis |
 |---|---|---|
 | Feature completeness | **~95%** | 19 guest pages, 15 admin pages, 116 API routes, 42 rule blocks — all present and wired |
-| Correctness confidence | **~55%** | Typecheck + builds clean, but 0 DOM tests; the Oct 2026 audit proved the suite misses real bugs |
-| Security posture | **~60%** | Strong server-side auth model and no client-asserted privilege; 7 blockers in rules/storage/authorization |
+| Correctness confidence | **~60%** | Typecheck + builds clean, rules now emulator-verified; still 0 DOM tests and the Oct 2026 audit proved the suite misses real bugs |
+| Security posture | **~80%** | The 7 blockers are fixed and the rules are now verified against the emulator; the public `rooms` / `settings` collections still expose negotiated corporate rates, and the intercom/call refactor has had no end-to-end browser exercise |
 | Money-path integrity | **~85%** | Oct 2026 Criticals fixed, catalog-price authority enforced, server-side code validation; no recurring reconciliation |
 | Operational readiness | **~35%** | Launch QA gates untouched, no failed-email retry, no nightly reconciliation, placeholder public config |
 | Documentation | **functional, 3.5× over budget** | 803k tokens vs a 230k ceiling; 18 `docs:audit` errors |
@@ -30,7 +32,7 @@
 ### What is solidly in place (verified, not assumed)
 
 - **Typecheck clean** on both apps; **both production builds succeed**; `check:api-bundle` passes.
-- **5,473 tests green** — shared 863 · guest-api 2,686 · admin 1,918 · infra 6.
+- **5,514 tests green** — shared 863 · guest-api 2,686 · admin 1,959 · infra 6 — plus **74 Firestore-rules emulator assertions** (8 files) that had never been executed before this pass.
 - **2 serverless functions** against a hard Hobby cap of 12 — comfortable headroom.
 - **No secrets in git.** Only empty `.env.example` files are tracked; every real `.env*` is gitignored.
 - **Server-side price authority holds** (OCT-C1/C2): the catalog snapshots breakfast and add-on prices on every path; the client's wire price is accepted and ignored.
@@ -55,7 +57,7 @@ Branch: `fix/prod-readiness-blockers` (off `fix/oct-audit-closeout`, which conta
 | **B6** send-message trusts the body | **FIXED** | The server resolves the booking, checks room + checked-in + token, and derives the guest name from the booking |
 | **B7** anonymous storage writes | **FIXED** | Size + content-type bound on the three guest upload paths; the store-order `paymentProofUrl` is now prefix-validated instead of stored verbatim |
 | **H1** zero DOM tests | **NOT FIXED** | Needs a harness — tracked as the biggest remaining gap |
-| **H2** rules emulator coverage | **PARTIAL** | A static rules-coverage guardrail now runs on every commit (see below) |
+| **H2** rules emulator coverage | **FIXED** | The static guardrail gates every commit, AND the emulator suite now runs: 74/74 green (see §Rules verification) |
 | **H3/H4** public rates + settings | **NOT FIXED** | Needs a deliberate pricing-posture decision from the owner |
 | **H5** rate-limit gaps | **FIXED** | `members/redeem-points-self` (10/min), `bookings/cancel` (10/min), and the email limiter re-keyed on the client IP |
 | **H6** client-controllable rate-limit key | **CORRECTED, not a bug** | Vercel overwrites `x-forwarded-for` and does not forward external IPs, so the old first-hop read was NOT spoofable. The code now prefers `x-vercel-forwarded-for` anyway (robustness against a proxy in front of Vercel) |
@@ -82,14 +84,64 @@ removing the B1 rule block makes it fail with the exact call site
 ### Verification after the fixes
 
 `typecheck` clean on both apps · `npm run test:fast` green (863 shared ·
-2,686 guest-api · 1,938 admin · 6 infra = **5,493**) · both production builds
+2,686 guest-api · 1,959 admin · 6 infra = **5,514**) · both production builds
 succeed · `check:api-bundle` passes · `spec:audit` OK.
 
-**Not verified:** `npm run test:rules` still cannot run (no Java runtime on
-this machine), so the new capability-path rules have not been exercised
-against the Firestore emulator. The rules are correct by construction and
-pinned by source-level regression tests, but the first emulator run should
-confirm them.
+**The Firestore rules are now verified against the emulator.** The
+"not verified" caveat below applied until a JVM was made available — this
+machine had no Java at all, so `npm run test:rules` had *never* been run in
+this repo's lifetime. With a JDK installed the suite runs, and it found
+real defects. See §Rules verification (second pass) below.
+
+---
+
+## Rules verification (second pass) — the gate that had never run
+
+Installing a JDK (Temurin 21) and running `npm run test:rules` for the first
+time in this repo's history turned up four defects that no other gate could
+see. All four are fixed.
+
+| # | Defect | Why it survived | Fix |
+|---|---|---|---|
+| R1 | The emulator test files **shared one emulator, one port and one `projectId`**, and each called `clearFirestore()` in `beforeEach` — so parallel files wiped each other's seeds | The suite had never been executed | `fileParallelism: false` in `vitest.rules.config.ts` (9 failures → 1) |
+| R2 | `crl-09-lifecycle-state-machine.emulator.test.ts` had a **duplicate `const liability`** in one scope → esbuild transform error → the whole file's 11 tests never ran, ever | Same | Renamed the shadowed binding; the file now executes |
+| R3 | That same file's `adminCtx()` was `testEnv.unauthenticatedContext()` with a comment claiming it "bypasses rules" like the Admin SDK. It does not — `rules-unit-testing` has no Admin context, so every seed write was `PERMISSION_DENIED` | The file never loaded, so its failures were invisible | Replaced with a real rules-bypassing client (`connectFirestoreEmulator(..., { mockUserToken: "owner" })`) |
+| R4 | `guests/{userId}` used `affectedKeys().hasOnly([...])` to enforce the `audioRouting` audit stamp. `hasOnly()` is a **subset** check — it restricts which keys may change, it does not require a listed key to be *present*. The §D&L 46 "audit stamp on every write" contract was therefore **not enforced** | The emulator test asserting it had been failing since it was written, but R1 masked it as cross-file interference | Added the `audioRoutingStamped()` rule function: changing `audioRouting` now requires changing `audioRoutingUpdatedAt` in the same write |
+
+**Suite status: 74 tests, 74 passed, 8 files, exit 0** (from 40 tests / 31
+passed / 9 failed / 1 unloadable file).
+
+New emulator coverage: `firebase/tests/pr-audit-rules-hardening.emulator.test.ts`
+(23 tests) exercises B1–B5 against the real rules — the admin can write the
+breakfast change log while front-desk and unauthenticated cannot; a member
+reads exactly their own voucher while another member's is denied and promo
+codes stay staff-only; unauthenticated cannot read the intercom thread or
+messages, cannot set `resolved: true`, and cannot read or write
+`calls/{room}` or ICE candidates; the session path is readable (the
+capability model) but the guest cannot create message documents directly.
+
+Two notes recorded honestly rather than smoothed over:
+
+- **The capability model is what it is.** Under `intercomSessions/{token}`,
+  *any* constructible path is readable — that is the price of guest realtime
+  read without guest auth. The test states this as a capability, not as a
+  per-booking authorization. The per-stay binding lives in the API handler,
+  which re-verifies the stay on every send.
+- **`Date` vs `Timestamp`.** `shared/types` declares `snapshottedAt` and
+  `approvedAt` as `Date`, but Firestore returns `Timestamp` on read. No
+  production code does date arithmetic on those fields today (the state
+  helper and the Dashboard's pending-refund count read only amounts), so
+  this is a representation hazard rather than a live bug. The emulator test
+  now normalises the wire shape before comparing.
+
+### The JDK is no longer a manual prerequisite
+
+`npm run test:rules` now runs through `scripts/resolve-jdk.mjs`, which
+locates a JDK (JAVA_HOME → macOS `java_home` → `~/.local/jdk/*` → the
+standard `JavaVirtualMachines` locations → `java` on PATH) and, if none is
+found, **fails loudly with an actionable message** instead of letting the
+gate be skipped. A missing JVM must never look like a passing gate.
+
 
 ---
 
@@ -205,8 +257,18 @@ The October 2026 audit is the proof, not a theory: 30 defects (5 Critical — fr
 
 ### H2 — Firestore rules are emulator-tested at 24%
 **Anchor:** `firebase/tests/` — 7 rules/emulator files against **42** rule blocks (10 evaluated = 24%); 40 further test files grep the rules file as text
+**Status: FIXED** — see §Rules verification (second pass).
 
 Zero rule assertion for `corporateInquiries`, `storeItems`, `financeIntegrityRepairs`, and the four `janitor/*` blocks. B1 and B2 both sit in exactly this gap.
+
+The coverage gap is now closed in two layers. A static guardrail
+(`admin-app/src/__tests__/firestore-rules-coverage.test.ts`) enumerates every
+client-touched Firestore path and fails if it has no covering rule block — it
+runs in `test:fast`, so it gates every commit without Java. On top of that,
+the emulator suite now runs (it never had, on this machine) and carries
+**74 passing assertions across 8 files**, including a new
+`pr-audit-rules-hardening.emulator.test.ts` (23 tests) that evaluates B1–B5
+against the real rules.
 
 ### H3 — The public `rooms` collection exposes negotiated corporate rates
 **Anchor:** `firebase/firestore.rules:17-18` (`allow read: if true`) · room docs carry `corporateRate`, `pricePerNight`, `weekendRate` (seed at `scripts/seed-firestore.ts:344-347`)
